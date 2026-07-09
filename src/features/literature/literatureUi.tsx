@@ -89,6 +89,6 @@ export function paperAuthors(paper: LiteraturePaper, locale: UiLanguage = 'zh-CN
   return paper.authors.map((author) => author.name).join(', ');
 }
 
-export function paperPdfPath(paper: LiteraturePaper): string | null {
-  return resolveLibraryPaperPdfPath(paper);
+export function paperPdfPath(paper: LiteraturePaper, storageDir?: string | null): string | null {
+  return resolveLibraryPaperPdfPath(paper, { storageDir });
 }

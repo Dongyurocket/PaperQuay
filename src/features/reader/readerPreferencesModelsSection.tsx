@@ -34,6 +34,7 @@ type ModelPresetSettingKey =
   | 'translationModelPresetId'
   | 'selectionTranslationModelPresetId'
   | 'summaryModelPresetId'
+  | 'reviewModelPresetId'
   | 'agentModelPresetId'
   | 'qaActivePresetId';
 
@@ -83,6 +84,16 @@ function buildModelRoleBindings(l: ReaderPreferencesLocalizer): ModelRoleBinding
       settingKey: 'summaryModelPresetId',
       title: l('论文概览', 'Paper Overview'),
       description: l('Paper overview, library preview overview, and batch overview generation.', 'Paper overview, library preview overview, and batch overview generation.',
+      ),
+    },
+    {
+      key: 'review',
+      runtimeRole: 'review',
+      settingKey: 'reviewModelPresetId',
+      title: l('综述写作', 'Review Writing'),
+      description: l(
+        '用于论文综述蓝图规划、分段写作和 Word 导出数据生成。',
+        'Used for review blueprint planning, paragraph drafting, and Word export data generation.',
       ),
     },
     {
@@ -473,7 +484,7 @@ export function ReaderPreferencesModelsSection({
 
       <SettingsField
         label={l('功能角色绑定', 'Feature Role Binding')}
-        description={l('Choose default presets for document translation, selection translation, overview, QA, and Agent tool use.', 'Choose default presets for document translation, selection translation, overview, QA, and Agent tool use.',
+        description={l('Choose default presets for document translation, selection translation, overview, review writing, QA, and Agent tool use.', 'Choose default presets for document translation, selection translation, overview, review writing, QA, and Agent tool use.',
         )}
       >
         <div className="space-y-3">

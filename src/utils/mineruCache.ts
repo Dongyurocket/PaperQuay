@@ -4,6 +4,7 @@ export interface MineruCachePaths {
   directory: string;
   manifestPath: string;
   contentJsonPath: string;
+  contentListJsonPath: string;
   middleJsonPath: string;
   markdownPath: string;
   translationsDir: string;
@@ -16,6 +17,18 @@ export function guessSiblingJsonPath(pdfPath: string): string {
   const directory = lastSeparatorIndex >= 0 ? pdfPath.slice(0, lastSeparatorIndex) : '.';
 
   return `${directory}${separator}content_list_v2.json`;
+}
+
+export function guessSiblingJsonPaths(pdfPath: string): string[] {
+  const separator = pdfPath.includes('\\') ? '\\' : '/';
+  const lastSeparatorIndex = Math.max(pdfPath.lastIndexOf('/'), pdfPath.lastIndexOf('\\'));
+  const directory = lastSeparatorIndex >= 0 ? pdfPath.slice(0, lastSeparatorIndex) : '.';
+
+  return [
+    `${directory}${separator}content_list_v2.json`,
+    `${directory}${separator}content_list.json`,
+    `${directory}${separator}middle.json`,
+  ];
 }
 
 export function guessSiblingMarkdownPath(path: string): string {
@@ -72,6 +85,7 @@ function buildCachePaths(rootDir: string, directoryName: string): MineruCachePat
     directory,
     manifestPath: joinPath(directory, 'paper_reader_manifest.json'),
     contentJsonPath: joinPath(directory, 'content_list_v2.json'),
+    contentListJsonPath: joinPath(directory, 'content_list.json'),
     middleJsonPath: joinPath(directory, 'middle.json'),
     markdownPath: joinPath(directory, 'full.md'),
     translationsDir,
@@ -99,6 +113,14 @@ export function buildLegacyMineruCachePaths(rootDir: string, item: WorkspaceItem
   const directoryName = `${sanitizePathSegment(item.title)}-${hashString(item.itemKey)}`;
 
   return buildCachePaths(rootDir, directoryName);
+}
+
+export function getMineruJsonPathCandidates(cachePaths: MineruCachePaths): string[] {
+  return [
+    cachePaths.contentJsonPath,
+    cachePaths.contentListJsonPath,
+    cachePaths.middleJsonPath,
+  ];
 }
 
 export function buildMineruCachePathCandidates(rootDir: string, item: WorkspaceItem): MineruCachePaths[] {

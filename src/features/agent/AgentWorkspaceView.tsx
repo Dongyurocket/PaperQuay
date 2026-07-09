@@ -827,6 +827,7 @@ export default function AgentWorkspaceView({
                     onChange={composerInput.onChange}
                     onCompositionStart={composerInput.onCompositionStart}
                     onCompositionEnd={composerInput.onCompositionEnd}
+                    onBlur={composerInput.onBlur}
                     onKeyDown={(event) => {
                       if (event.key === 'Enter' && !event.shiftKey) {
                         if (isImeComposing(event) || composerInput.isComposingRef.current) {

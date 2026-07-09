@@ -13,6 +13,10 @@ import type { ReaderPreferencesWindowProps } from './readerPreferencesTypes';
 
 export type { ReaderPreferencesWindowProps } from './readerPreferencesTypes';
 
+function normalizePreferencesSection(section: PreferencesSectionKey | undefined): PreferencesSectionKey | undefined {
+  return section === 'embedding' ? 'models' : section;
+}
+
 export default function ReaderPreferencesWindow({
   open,
   onClose,
@@ -34,8 +38,10 @@ export default function ReaderPreferencesWindow({
       return undefined;
     }
 
-    if (preferredSection) {
-      setActiveSection(preferredSection);
+    const normalizedSection = normalizePreferencesSection(preferredSection);
+
+    if (normalizedSection) {
+      setActiveSection(normalizedSection);
     }
 
     const handleKeyDown = (event: KeyboardEvent) => {

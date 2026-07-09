@@ -44,15 +44,18 @@ export function ModelPresetPicker({
     const rect = button.getBoundingClientRect();
     const viewportPadding = 12;
     const availableWidth = window.innerWidth - viewportPadding * 2;
-    const width = Math.min(availableWidth, Math.max(Math.round(rect.width), compact ? 180 : 190));
+    const width = Math.min(availableWidth, Math.max(Math.round(rect.width), compact ? 200 : 220));
     const left = Math.max(12, Math.min(rect.left, window.innerWidth - width - 12));
+    const top = rect.bottom + 6;
+    const maxHeight = Math.max(180, window.innerHeight - top - 12);
 
     setMenuStyle({
-      bottom: Math.max(12, window.innerHeight - rect.top + 8),
+      top,
       left,
       width,
+      maxHeight,
     });
-  }, []);
+  }, [compact]);
 
   useEffect(() => {
     if (!open) {
@@ -88,18 +91,21 @@ export function ModelPresetPicker({
   const menu = open ? (
     <div
       ref={menuRef}
-      className="pq-card fixed z-[9999] overflow-hidden p-0 shadow-[0_18px_48px_rgba(15,23,42,0.18)]"
+      className="pq-card pq-model-menu fixed z-[9999] flex origin-top flex-col overflow-hidden p-0 shadow-[0_18px_48px_rgba(15,23,42,0.18)]"
       style={menuStyle}
     >
-      <div className="border-b border-[var(--pq-border-subtle)] px-3 py-2.5">
-        <div className="truncate text-xs font-semibold text-[var(--pq-text)]">{title}</div>
+      <div className="shrink-0 border-b border-[var(--pq-border-subtle)] px-3 py-2.5">
+        <div className="flex items-center gap-1.5">
+          <Sparkles className="h-3.5 w-3.5 shrink-0 text-[var(--pq-accent)]" strokeWidth={1.9} />
+          <div className="truncate text-xs font-semibold text-[var(--pq-text)]">{title}</div>
+        </div>
         <div className="mt-0.5 truncate text-[10px] text-[var(--pq-text-faint)]">
           {l('选择一个已配置的模型', 'Choose a configured model')}
         </div>
       </div>
-      <div className="max-h-64 overflow-y-auto p-1.5">
+      <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
         {presets.length === 0 ? (
-          <div className="px-2.5 py-2 text-xs text-[var(--pq-text-muted)]">
+          <div className="px-2.5 py-3 text-xs text-[var(--pq-text-muted)]">
             {l('还没有可用模型，请先到设置中添加。', 'No models yet. Add one in Settings first.')}
           </div>
         ) : (
@@ -115,19 +121,29 @@ export function ModelPresetPicker({
                   setOpen(false);
                 }}
                 className={cn(
-                  'flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs transition',
+                  'flex w-full items-center gap-2.5 rounded-[var(--pq-radius-sm)] px-2 py-1.5 text-left text-xs transition',
                   selected
                     ? 'bg-[var(--pq-accent-soft)] text-[var(--pq-accent)]'
                     : 'text-[var(--pq-text)] hover:bg-[var(--pq-surface-2)]',
                 )}
               >
+                <span
+                  className={cn(
+                    'flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition',
+                    selected
+                      ? 'bg-[var(--pq-accent)] text-white'
+                      : 'bg-[var(--pq-surface-2)] text-[var(--pq-text-faint)]',
+                  )}
+                >
+                  <Bot className="h-3.5 w-3.5" strokeWidth={1.9} />
+                </span>
                 <span className="min-w-0 flex-1">
                   <span className="block truncate font-medium">{preset.label || preset.model}</span>
                   <span className="mt-0.5 block truncate text-[10px] text-[var(--pq-text-faint)]">
                     {preset.model}
                   </span>
                 </span>
-                {selected ? <Check className="h-3.5 w-3.5 shrink-0" strokeWidth={2.2} /> : null}
+                {selected ? <Check className="h-3.5 w-3.5 shrink-0" strokeWidth={2.4} /> : null}
               </button>
             );
           })
@@ -177,8 +193,8 @@ export function ModelPresetPicker({
         {compact ? null : (
           <ChevronDown
             className={cn(
-              'h-3.5 w-3.5 shrink-0 transition group-hover:text-[var(--pq-accent)]',
-              pill ? 'text-[var(--pq-text-faint)]' : 'text-[var(--pq-text-faint)]',
+              'h-3.5 w-3.5 shrink-0 text-[var(--pq-text-faint)] transition-transform duration-200 group-hover:text-[var(--pq-accent)]',
+              open && 'rotate-180',
             )}
             strokeWidth={1.9}
           />

@@ -18,13 +18,14 @@ function createMineruCommands(context) {
     async run_mineru_cloud_parse({ options }) {
       const token = cleanString(options.apiToken);
       if (!token) throw new Error('MinerU API Token cannot be empty');
+      const apiBaseUrl = cleanString(options.apiBaseUrl).replace(/\/+$/, '') || MINERU_API_BASE;
 
       const pdfPath = options.pdfPath;
       await ensureFile(pdfPath);
 
       const fileName = fileNameFromPath(pdfPath);
       const dataId = `paper_reader_${now()}`;
-      const uploadUrlEndpoint = `${MINERU_API_BASE}/file-urls/batch?enable_formula=${options.enableFormula !== false}&enable_table=${options.enableTable !== false}&language=${encodeURIComponent(options.language || 'ch')}`;
+      const uploadUrlEndpoint = `${apiBaseUrl}/file-urls/batch?enable_formula=${options.enableFormula !== false}&enable_table=${options.enableTable !== false}&language=${encodeURIComponent(options.language || 'ch')}`;
       const uploadEnvelope = await readRequestJson(await fetch(uploadUrlEndpoint, {
         method: 'POST',
         headers: {
@@ -55,7 +56,7 @@ function createMineruCommands(context) {
 
       while (Date.now() < timeoutAt) {
         await new Promise((resolve) => setTimeout(resolve, intervalMs));
-        const statusEnvelope = await readRequestJson(await fetch(`${MINERU_API_BASE}/extract-results/batch/${batchId}`, {
+        const statusEnvelope = await readRequestJson(await fetch(`${apiBaseUrl}/extract-results/batch/${batchId}`, {
           headers: { Authorization: `Bearer ${token}`, Accept: '*/*' },
         }), 'MinerU status');
 

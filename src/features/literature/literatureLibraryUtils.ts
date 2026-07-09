@@ -10,7 +10,8 @@ import type { MetadataLookupResult } from '../../types/metadata';
 import type { WorkspaceItem, ZoteroLibraryItem } from '../../types/reader';
 import {
   buildMineruCachePathCandidates,
-  guessSiblingJsonPath,
+  getMineruJsonPathCandidates,
+  guessSiblingJsonPaths,
   guessSiblingMarkdownPath,
 } from '../../utils/mineruCache.ts';
 import { paperPdfPath, resolvePaperPdfAttachment } from '../../utils/libraryPaper.ts';
@@ -37,6 +38,10 @@ export const DETAILS_PANEL_WIDTH_STORAGE_KEY = 'paperquay-literature-details-wid
 export const DETAILS_PANEL_DEFAULT_WIDTH = 420;
 const DETAILS_PANEL_MIN_WIDTH = 320;
 const DETAILS_PANEL_MAX_WIDTH = 760;
+export const CATEGORY_SIDEBAR_WIDTH_STORAGE_KEY = 'paperquay-literature-category-sidebar-width-v1';
+export const CATEGORY_SIDEBAR_DEFAULT_WIDTH = 248;
+const CATEGORY_SIDEBAR_MIN_WIDTH = 200;
+const CATEGORY_SIDEBAR_MAX_WIDTH = 420;
 
 export function filterDemoPapers(
   demoLibrary: LiteratureLibraryDemoState,
@@ -110,6 +115,25 @@ export function loadDetailsPanelWidth(): number {
       : DETAILS_PANEL_DEFAULT_WIDTH;
   } catch {
     return DETAILS_PANEL_DEFAULT_WIDTH;
+  }
+}
+
+export function clampCategorySidebarWidth(width: number): number {
+  return Math.max(
+    CATEGORY_SIDEBAR_MIN_WIDTH,
+    Math.min(CATEGORY_SIDEBAR_MAX_WIDTH, Math.round(width)),
+  );
+}
+
+export function loadCategorySidebarWidth(): number {
+  try {
+    const rawValue = Number(localStorage.getItem(CATEGORY_SIDEBAR_WIDTH_STORAGE_KEY));
+
+    return Number.isFinite(rawValue)
+      ? clampCategorySidebarWidth(rawValue)
+      : CATEGORY_SIDEBAR_DEFAULT_WIDTH;
+  } catch {
+    return CATEGORY_SIDEBAR_DEFAULT_WIDTH;
   }
 }
 
@@ -381,8 +405,11 @@ export function metadataUpdateForPaper(
   return changed ? request : null;
 }
 
-export function createNativeWorkspaceItemForPaper(paper: LiteraturePaper): WorkspaceItem | null {
-  const resolvedAttachment = resolvePaperPdfAttachment(paper);
+export function createNativeWorkspaceItemForPaper(
+  paper: LiteraturePaper,
+  storageDir?: string | null,
+): WorkspaceItem | null {
+  const resolvedAttachment = resolvePaperPdfAttachment(paper, { storageDir });
 
   if (!resolvedAttachment) {
     return null;
@@ -411,23 +438,27 @@ export function mineruOutputPathCandidatesForPaper(
   paper: LiteraturePaper,
   mineruCacheDir: string,
   autoLoadSiblingJson: boolean,
+  storageDir?: string | null,
 ): string[] {
   const candidates = new Set<string>();
-  const workspaceItem = createNativeWorkspaceItemForPaper(paper);
+  const workspaceItem = createNativeWorkspaceItemForPaper(paper, storageDir);
   const cacheRoot = mineruCacheDir.trim();
 
   if (workspaceItem && cacheRoot) {
     for (const cachePaths of buildMineruCachePathCandidates(cacheRoot, workspaceItem)) {
-      candidates.add(cachePaths.contentJsonPath);
-      candidates.add(cachePaths.middleJsonPath);
+      for (const candidatePath of getMineruJsonPathCandidates(cachePaths)) {
+        candidates.add(candidatePath);
+      }
       candidates.add(cachePaths.markdownPath);
     }
   }
 
-  const pdfPath = paperPdfPath(paper);
+  const pdfPath = paperPdfPath(paper, { storageDir });
 
   if (pdfPath && autoLoadSiblingJson) {
-    candidates.add(guessSiblingJsonPath(pdfPath));
+    for (const candidatePath of guessSiblingJsonPaths(pdfPath)) {
+      candidates.add(candidatePath);
+    }
     candidates.add(guessSiblingMarkdownPath(pdfPath));
   }
 
@@ -439,11 +470,13 @@ export async function hasMineruOutputForPaper(
   mineruCacheDir: string,
   autoLoadSiblingJson: boolean,
   pathExists: PathExists,
+  storageDir?: string | null,
 ): Promise<boolean> {
   for (const candidate of mineruOutputPathCandidatesForPaper(
     paper,
     mineruCacheDir,
     autoLoadSiblingJson,
+    storageDir,
   )) {
     if (await pathExists(candidate)) {
       return true;

@@ -14,6 +14,7 @@ import type {
   NoteAnchorInsertRequest,
   UpdateNoteRequest,
 } from '../../types/notes';
+import type { LiteraturePaper } from '../../types/library';
 import type {
   AssistantPanelKey,
   DocumentChatAttachment,
@@ -49,6 +50,7 @@ export interface AssistantSidebarCoreProps {
   aiConfigured: boolean;
   notes: Note[];
   activeNoteId: string | null;
+  notePaperCandidates?: LiteraturePaper[];
   notesLoading: boolean;
   notesSaving: boolean;
   notesError: string;
@@ -88,9 +90,10 @@ export interface AssistantSidebarCoreProps {
   onCitationClick: (citation: DocumentChatCitation) => void;
   onCreateStandaloneNote: () => void;
   onSelectNote: (note: Note) => void;
-  onUpdateNote: (noteId: string, patch: UpdateNoteRequest, options?: { sourceId?: string }) => void;
+  onUpdateNote: (noteId: string, patch: UpdateNoteRequest, options?: { sourceId?: string }) => Note | void | Promise<Note | void>;
   onDeleteNote: (noteId: string) => void;
   onJumpToNoteAnchor: (note: Note, anchor: NoteAnchor) => void;
+  onNotePaperClick?: (paperId: string) => void;
   onAddSelectionToNote: () => void;
   onSaveAssistantMessageAsNote: (message: DocumentChatMessage) => void;
   selectedExcerpt: SelectedExcerpt | null;
@@ -128,6 +131,7 @@ function AssistantSidebar({
   aiConfigured,
   notes,
   activeNoteId,
+  notePaperCandidates = [],
   notesLoading,
   notesSaving,
   notesError,
@@ -170,6 +174,7 @@ function AssistantSidebar({
   onUpdateNote,
   onDeleteNote,
   onJumpToNoteAnchor,
+  onNotePaperClick,
   onAddSelectionToNote,
   onSaveAssistantMessageAsNote,
   selectedExcerpt,
@@ -300,6 +305,7 @@ function AssistantSidebar({
               <NotesSidebar
                 notes={notes}
                 activeNoteId={activeNoteId}
+                papers={notePaperCandidates}
                 documentTitle={documentTitle}
                 loading={notesLoading}
                 saving={notesSaving}
@@ -316,6 +322,7 @@ function AssistantSidebar({
                 onUpdateNote={onUpdateNote}
                 onDeleteNote={onDeleteNote}
                 onJumpToNoteAnchor={onJumpToNoteAnchor}
+                onPaperClick={onNotePaperClick}
                 onCollapse={() => onActivePanelChange(null)}
               />
             </div>

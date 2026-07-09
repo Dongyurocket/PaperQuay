@@ -18,6 +18,7 @@ export interface BuildReaderAssistantSidebarInput {
   aiConfigured: boolean;
   notes: AssistantSidebarCoreProps['notes'];
   activeNoteId: AssistantSidebarCoreProps['activeNoteId'];
+  notePaperCandidates?: AssistantSidebarCoreProps['notePaperCandidates'];
   notesLoading: AssistantSidebarCoreProps['notesLoading'];
   notesSaving: AssistantSidebarCoreProps['notesSaving'];
   notesError: AssistantSidebarCoreProps['notesError'];
@@ -59,6 +60,7 @@ export interface BuildReaderAssistantSidebarInput {
   onUpdateNote: AssistantSidebarCoreProps['onUpdateNote'];
   onDeleteNote: AssistantSidebarCoreProps['onDeleteNote'];
   onJumpToNoteAnchor: AssistantSidebarCoreProps['onJumpToNoteAnchor'];
+  onNotePaperClick?: AssistantSidebarCoreProps['onNotePaperClick'];
   onAddSelectionToNote: AssistantSidebarCoreProps['onAddSelectionToNote'];
   onSaveAssistantMessageAsNote: AssistantSidebarCoreProps['onSaveAssistantMessageAsNote'];
   selectedExcerpt: AssistantSidebarCoreProps['selectedExcerpt'];
@@ -89,6 +91,7 @@ export function buildReaderAssistantSidebarProps(
     aiConfigured: input.aiConfigured,
     notes: input.notes,
     activeNoteId: input.activeNoteId,
+    notePaperCandidates: input.notePaperCandidates,
     notesLoading: input.notesLoading,
     notesSaving: input.notesSaving,
     notesError: input.notesError,
@@ -130,6 +133,7 @@ export function buildReaderAssistantSidebarProps(
     onUpdateNote: input.onUpdateNote,
     onDeleteNote: input.onDeleteNote,
     onJumpToNoteAnchor: input.onJumpToNoteAnchor,
+    onNotePaperClick: input.onNotePaperClick,
     onAddSelectionToNote: input.onAddSelectionToNote,
     onSaveAssistantMessageAsNote: input.onSaveAssistantMessageAsNote,
     selectedExcerpt: input.selectedExcerpt,

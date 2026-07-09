@@ -232,6 +232,7 @@ export function useReaderLibraryBatchActions({
                 : null;
               const result = await runMineruCloudParse({
                 apiToken: mineruApiToken.trim(),
+                apiBaseUrl: settings.mineruApiBaseUrl,
                 pdfPath,
                 extractDir: cachePaths?.directory,
                 language: 'ch',
@@ -360,6 +361,7 @@ export function useReaderLibraryBatchActions({
       setStatusMessage,
       settings.libraryBatchConcurrency,
       settings.mineruCacheDir,
+      settings.mineruApiBaseUrl,
       syncLibraryParsedState,
     ],
   );
@@ -713,6 +715,7 @@ export function useReaderLibraryBatchActions({
     autoMineruAttemptedRef.current.clear();
   }, [
     mineruApiToken,
+    settings.mineruApiBaseUrl,
     settings.autoLoadSiblingJson,
     settings.autoMineruParse,
     settings.mineruCacheDir,

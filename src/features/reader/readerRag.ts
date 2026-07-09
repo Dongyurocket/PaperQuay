@@ -35,6 +35,21 @@ const MAX_HEADING_SECTION_CHARS = 2_400;
 const MAX_HEADING_LENGTH = 140;
 const MIN_SOFT_BREAK_RATIO = 0.58;
 
+// Page decorations (page numbers, headers/footers, page footnotes) are not real
+// content. They must not become RAG chunks or citation anchors, otherwise a
+// citation can point at a page-number block and clicking it highlights the page
+// number instead of the cited paragraph.
+const PAGE_DECORATION_BLOCK_TYPES = new Set([
+  'page_header',
+  'page_footer',
+  'page_number',
+  'page_footnote',
+]);
+
+function isPageDecorationBlock(block: PositionedMineruBlock): boolean {
+  return typeof block.type === 'string' && PAGE_DECORATION_BLOCK_TYPES.has(block.type);
+}
+
 function normalizeChunkText(value: string): string {
   return value
     .replace(/\r\n/g, '\n')
@@ -156,6 +171,7 @@ export function buildMineruRagChunks(
   blocks: PositionedMineruBlock[],
 ): RagChunkInput[] {
   return blocks
+    .filter((block) => !isPageDecorationBlock(block))
     .flatMap((block) => {
       const prefix = `mineru:${block.blockId}`;
       const pageIndex = Number.isFinite(block.pageIndex) ? block.pageIndex : null;
@@ -445,6 +461,19 @@ function buildContextSection(
   return `# Source [${index + 1}]\n${anchorHint}\n${body}`;
 }
 
+function isPageDecorationResult(
+  result: RagRetrievalResult,
+  blockById: Map<string, PositionedMineruBlock>,
+): boolean {
+  if (!result.blockId) {
+    return false;
+  }
+
+  const block = blockById.get(result.blockId);
+
+  return Boolean(block && isPageDecorationBlock(block));
+}
+
 function selectCitationAnchor(
   results: RagRetrievalResult[],
   blockById: Map<string, PositionedMineruBlock>,
@@ -453,9 +482,20 @@ function selectCitationAnchor(
     return null;
   }
 
-  const nonHeading = results.find((result) => !isHeadingResult(result, blockById));
+  // Prefer a body result: not a heading and not a page decoration.
+  const bodyResult = results.find(
+    (result) =>
+      !isHeadingResult(result, blockById) && !isPageDecorationResult(result, blockById),
+  );
 
-  return nonHeading ?? results[0] ?? null;
+  if (bodyResult) {
+    return bodyResult;
+  }
+
+  // Otherwise allow a heading, but never anchor on a page decoration.
+  const nonDecoration = results.find((result) => !isPageDecorationResult(result, blockById));
+
+  return nonDecoration ?? results[0] ?? null;
 }
 
 function buildCitation(

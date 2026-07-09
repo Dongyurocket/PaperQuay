@@ -1,7 +1,9 @@
 import { Component, useEffect, useMemo, useState, type ErrorInfo, type ReactNode } from 'react';
 import {
   Bot,
+  BookOpenCheck,
   FilePlus2,
+  GitBranch,
   Library,
   Minus,
   Moon,
@@ -15,11 +17,14 @@ import {
 import Reader from '../features/reader/Reader';
 import AgentWorkspace from '../features/agent/AgentWorkspace';
 import NotesWorkspace from '../features/notes/NotesWorkspace';
+import ReviewWritingWorkspace from '../features/review/ReviewWritingWorkspace';
+import KnowledgeGraphWorkspace from '../features/graph/KnowledgeGraphWorkspace';
 import TabBar from '../components/tabs/TabBar';
 import {
   emitOpenPreferences,
   emitOpenStandalonePdf,
   JUMP_TO_NOTE_ANCHOR_EVENT,
+  OPEN_LIBRARY_PAPER_EVENT,
   UI_LANGUAGE_CHANGED_EVENT,
 } from './appEvents';
 import { PAPERQUAY_ICON_URL } from './appIcon';
@@ -28,7 +33,7 @@ import { getCurrentWindow } from '../platform/electron/window';
 import { useThemeStore } from '../stores/useThemeStore';
 import { HOME_TAB_ID, useTabsStore } from '../stores/useTabsStore';
 
-type AppWorkspaceKey = 'library' | 'agent' | 'notes';
+type AppWorkspaceKey = 'library' | 'agent' | 'notes' | 'review' | 'graph';
 type UiLanguage = 'zh-CN' | 'en-US';
 
 interface AppWorkspaceItem {
@@ -44,6 +49,8 @@ const SETTINGS_STORAGE_KEY = 'paper-reader-settings-v3';
 const workspaces: AppWorkspaceItem[] = [
   { key: 'library', icon: Library, labelZh: '\u6587\u5e93', labelEn: 'Library' },
   { key: 'agent', icon: Bot, labelZh: 'Agent', labelEn: 'Agent' },
+  { key: 'review', icon: BookOpenCheck, labelZh: '综述', labelEn: 'Review' },
+  { key: 'graph', icon: GitBranch, labelZh: '图谱', labelEn: 'Graph' },
   { key: 'notes', icon: NotebookText, labelZh: '\u7b14\u8bb0', labelEn: 'Notes' },
 ];
 
@@ -113,7 +120,7 @@ function loadUiLanguage(): UiLanguage {
 
 function loadInitialWorkspace(): AppWorkspaceKey {
   const stored = window.localStorage.getItem(ACTIVE_WORKSPACE_STORAGE_KEY);
-  return stored === 'agent' || stored === 'notes' ? stored : 'library';
+  return stored === 'agent' || stored === 'notes' || stored === 'review' || stored === 'graph' ? stored : 'library';
 }
 
 function isMacPlatform() {
@@ -136,6 +143,8 @@ function App() {
   const setActiveTab = useTabsStore((state) => state.setActiveTab);
   const openAgentTab = useTabsStore((state) => state.openAgentTab);
   const openNotesTab = useTabsStore((state) => state.openNotesTab);
+  const openReviewTab = useTabsStore((state) => state.openReviewTab);
+  const openGraphTab = useTabsStore((state) => state.openGraphTab);
   const [uiLanguage, setUiLanguage] = useState<UiLanguage>(loadUiLanguage);
   const { mode: themeMode, setMode: setThemeMode } = useThemeStore();
   const isEnglish = uiLanguage === 'en-US';
@@ -146,6 +155,10 @@ function App() {
   const activeWorkspace: AppWorkspaceKey =
     activeTab?.type === 'agent'
       ? 'agent'
+      : activeTab?.type === 'review'
+        ? 'review'
+      : activeTab?.type === 'graph'
+        ? 'graph'
       : activeTab?.type === 'notes' || activeTab?.type === 'note'
         ? 'notes'
         : 'library';
@@ -166,8 +179,18 @@ function App() {
 
     if (initialWorkspace === 'notes') {
       openNotesTab();
+      return;
     }
-  }, [openAgentTab, openNotesTab]);
+
+    if (initialWorkspace === 'review') {
+      openReviewTab();
+      return;
+    }
+
+    if (initialWorkspace === 'graph') {
+      openGraphTab();
+    }
+  }, [openAgentTab, openGraphTab, openNotesTab, openReviewTab]);
 
   useEffect(() => {
     const handleLanguageChanged = (event: Event) => {
@@ -196,15 +219,17 @@ function App() {
         const { activeTabId: nextActiveTabId, tabs: nextTabs } = useTabsStore.getState();
         const nextActiveTab = nextTabs.find((tab) => tab.id === nextActiveTabId);
 
-        if (!nextActiveTab || nextActiveTab.type === 'agent' || nextActiveTab.type === 'notes' || nextActiveTab.type === 'note') {
+        if (!nextActiveTab || nextActiveTab.type === 'agent' || nextActiveTab.type === 'notes' || nextActiveTab.type === 'note' || nextActiveTab.type === 'review' || nextActiveTab.type === 'graph') {
           setActiveTab(HOME_TAB_ID);
         }
       }, 0);
     };
 
     window.addEventListener(JUMP_TO_NOTE_ANCHOR_EVENT, handleJumpToReader);
+    window.addEventListener(OPEN_LIBRARY_PAPER_EVENT, handleJumpToReader);
     return () => {
       window.removeEventListener(JUMP_TO_NOTE_ANCHOR_EVENT, handleJumpToReader);
+      window.removeEventListener(OPEN_LIBRARY_PAPER_EVENT, handleJumpToReader);
     };
   }, [setActiveTab]);
 
@@ -384,6 +409,16 @@ function App() {
                         return;
                       }
 
+                      if (workspace.key === 'review') {
+                        openReviewTab();
+                        return;
+                      }
+
+                      if (workspace.key === 'graph') {
+                        openGraphTab();
+                        return;
+                      }
+
                       openNotesTab();
                     }}
                     title={label}
@@ -419,6 +454,18 @@ function App() {
             <div className="h-full min-h-0 overflow-hidden rounded-[var(--pq-radius-md)]" hidden={activeWorkspace !== 'notes'}>
               <WorkspaceErrorBoundary name="Notes" resetKey={activeWorkspace}>
                 <NotesWorkspace />
+              </WorkspaceErrorBoundary>
+            </div>
+
+            <div className="h-full min-h-0 overflow-hidden rounded-[var(--pq-radius-md)]" hidden={activeWorkspace !== 'review'}>
+              <WorkspaceErrorBoundary name="Review" resetKey={activeWorkspace}>
+                <ReviewWritingWorkspace />
+              </WorkspaceErrorBoundary>
+            </div>
+
+            <div className="h-full min-h-0 overflow-hidden rounded-[var(--pq-radius-md)]" hidden={activeWorkspace !== 'graph'}>
+              <WorkspaceErrorBoundary name="Graph" resetKey={activeWorkspace}>
+                <KnowledgeGraphWorkspace />
               </WorkspaceErrorBoundary>
             </div>
           </main>

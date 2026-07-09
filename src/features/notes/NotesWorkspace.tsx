@@ -42,6 +42,7 @@ import { extractOutline, noteContentToTiptap } from './notesTiptap';
 const NOTE_FOLDERS_STORAGE_KEY = 'paperquay:note-folders:v1';
 const UNCATEGORIZED_FOLDER_ID = '__uncategorized__';
 const NOTE_DRAG_MIME = 'application/x-paperquay-note-id';
+const NOTES_WORKSPACE_EDITOR_SOURCE_ID = 'paperquay:notes-workspace-editor';
 
 interface NoteFolder {
   id: string;
@@ -864,12 +865,13 @@ export function NotesWorkspace() {
     const handleNoteChanged = (event: Event) => {
       const detail = (event as CustomEvent<NoteChangedEventDetail>).detail;
       if (!detail?.noteId) return;
+      const fromThisWorkspaceEditor = detail.sourceId === NOTES_WORKSPACE_EDITOR_SOURCE_ID;
 
       if (detail.action === 'updated') {
         if (isNoteEventRecord(detail.note)) {
           updateNoteTabTitle(detail.note.id, detail.note.title || '未命名笔记');
         }
-        setNoteTabExternalUpdate(detail.noteId, true);
+        setNoteTabExternalUpdate(detail.noteId, !fromThisWorkspaceEditor);
       }
 
       if (detail.action === 'deleted') {
@@ -1419,10 +1421,15 @@ export function NotesWorkspace() {
           tags={tags}
           papers={papers}
           onUpdate={async (noteId, patch, options) => {
-            const updated = await updateWorkspaceNote(noteId, patch, options);
+            const updated = await updateWorkspaceNote(noteId, patch, {
+              ...options,
+              sourceId: options?.sourceId ?? NOTES_WORKSPACE_EDITOR_SOURCE_ID,
+            });
             updateNoteTabTitle(updated.id, updated.title || '未命名笔记');
             setNoteTabExternalUpdate(updated.id, false);
+            return updated;
           }}
+          editorSourceId={NOTES_WORKSPACE_EDITOR_SOURCE_ID}
           onExternalUpdateChange={setNoteTabExternalUpdate}
           onOpenNote={openNote}
           onTagClick={setTag}

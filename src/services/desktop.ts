@@ -22,6 +22,20 @@ export interface CapturedScreenshot {
   size: number;
 }
 
+export interface MineruCacheDirectoryPreparation {
+  directory: string;
+  created: boolean;
+  markerPath: string;
+  entryCount: number;
+  migratedCount: number;
+  skippedCount: number;
+  looseOutputFilesIgnored: boolean;
+  errors: Array<{
+    name: string;
+    message: string;
+  }>;
+}
+
 function toErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message) {
     return error.message;
@@ -123,6 +137,20 @@ export async function selectDirectory(title?: string): Promise<string | null> {
     return await invoke<string | null>('select_directory', { title });
   } catch (error) {
     throw new Error(toErrorMessage(error, '选择目录失败'));
+  }
+}
+
+export async function prepareMineruCacheDir(
+  directory: string,
+  previousDirectory?: string,
+): Promise<MineruCacheDirectoryPreparation> {
+  try {
+    return await invoke<MineruCacheDirectoryPreparation>('prepare_mineru_cache_dir', {
+      directory,
+      previousDirectory: previousDirectory ?? '',
+    });
+  } catch (error) {
+    throw new Error(toErrorMessage(error, `准备 MinerU 缓存目录失败: ${directory}`));
   }
 }
 
@@ -268,6 +296,7 @@ export async function loadPdfBinary(source: PdfSource): Promise<Uint8Array | nul
 
 export interface MineruCloudParseOptions {
   apiToken: string;
+  apiBaseUrl?: string;
   pdfPath: string;
   extractDir?: string;
   language?: string;

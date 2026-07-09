@@ -1,7 +1,7 @@
 {
   "name": "paperquay",
   "private": true,
-  "version": "0.1.23",
+  "version": "0.1.24",
   "description": "AI-assisted desktop literature reader and library manager.",
   "author": {
     "name": "PaperQuay Developers",
@@ -39,11 +39,16 @@
     "@tiptap/starter-kit": "^3.23.6",
     "@tiptap/suggestion": "^3.23.6",
     "adm-zip": "^0.5.16",
+    "cytoscape": "^3.34.0",
+    "docxtemplater": "^3.68.7",
     "electron-updater": "^6.8.9",
     "eventsource-parser": "^3.1.0",
     "lowlight": "^3.3.0",
+    "mathml2omml": "^0.5.0",
+    "pizzip": "^3.2.0",
     "sql.js": "^1.13.0",
-    "sqlite-vec": "^0.1.9"
+    "sqlite-vec": "^0.1.9",
+    "temml": "^0.13.3"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
@@ -114,9 +119,15 @@
       "node_modules/universalify/**/*",
       "node_modules/js-yaml/**/*",
       "node_modules/argparse/**/*",
+      "node_modules/docxtemplater/**/*",
+      "node_modules/docxtemplater/node_modules/@xmldom/xmldom/**/*",
       "node_modules/lazy-val/**/*",
       "node_modules/lodash.escaperegexp/**/*",
       "node_modules/lodash.isequal/**/*",
+      "node_modules/mathml2omml/**/*",
+      "node_modules/pizzip/**/*",
+      "node_modules/temml/**/*",
+      "node_modules/@xmldom/xmldom/**/*",
       "node_modules/tiny-typed-emitter/**/*",
       "node_modules/debug/**/*",
       "node_modules/ms/**/*",
@@ -124,6 +135,7 @@
       "node_modules/sql.js/**/*",
       "node_modules/sqlite-vec/**/*",
       "node_modules/sqlite-vec-*/*",
+      "node_modules/xmlbuilder/**/*",
       "!node_modules/canvas/**/*"
     ],
     "mac": {

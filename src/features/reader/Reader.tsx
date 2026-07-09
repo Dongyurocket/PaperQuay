@@ -9,9 +9,11 @@ import { getCurrentWindow } from '../../platform/electron/window';
 
 import {
   JUMP_TO_NOTE_ANCHOR_EVENT,
+  OPEN_LIBRARY_PAPER_EVENT,
   OPEN_PREFERENCES_EVENT,
   OPEN_STANDALONE_PDF_EVENT,
   type JumpToNoteAnchorEventDetail,
+  type OpenLibraryPaperEventDetail,
   type OpenPreferencesEventDetail,
 } from '../../app/appEvents';
 import { selectDirectory } from '../../services/desktop';
@@ -23,6 +25,7 @@ import {
   type ReaderTabBridgeState,
 } from './documentReaderShared';
 import type {
+  LiteraturePaper,
   LiteraturePaperTaskKind,
   LiteraturePaperTaskState,
 } from '../../types/library';
@@ -192,6 +195,7 @@ function Reader({ workspaceActive = true }: ReaderProps) {
   const [readerNotesLoading, setReaderNotesLoading] = useState(false);
   const [readerNotesSaving, setReaderNotesSaving] = useState(false);
   const [readerNotesError, setReaderNotesError] = useState('');
+  const [notePaperCandidates, setNotePaperCandidates] = useState<LiteraturePaper[]>([]);
   const [pendingNoteAnchorJump, setPendingNoteAnchorJump] =
     useState<JumpToNoteAnchorEventDetail | null>(null);
 
@@ -456,6 +460,7 @@ function Reader({ workspaceActive = true }: ReaderProps) {
     itemParseStatusMap,
     l,
     libraryPreviewStates,
+    librarySettings,
     loadLibraryPreviewBlocks,
     libraryTranslationSnapshots,
     mineruApiToken,
@@ -507,6 +512,30 @@ function Reader({ workspaceActive = true }: ReaderProps) {
       !requestId || current?.requestId === requestId ? null : current,
     );
   }, []);
+
+  useEffect(() => {
+    if (!configHydrated || !workspaceActive) {
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    void listLibraryPapers({ limit: 1000, sortBy: 'updatedAt', sortDirection: 'desc' })
+      .then((papers) => {
+        if (!cancelled) {
+          setNotePaperCandidates(papers);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setNotePaperCandidates([]);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [configHydrated, workspaceActive]);
 
   const {
     handleDetectLocalZotero,
@@ -596,8 +625,11 @@ function Reader({ workspaceActive = true }: ReaderProps) {
 
       try {
         const papers = await listLibraryPapers({ limit: 1000, sortBy: 'updatedAt', sortDirection: 'desc' });
+        setNotePaperCandidates(papers);
         const paper = papers.find((item) => item.id === paperId);
-        const workspaceItem = paper ? createNativeLibraryWorkspaceItem(paper) : null;
+        const workspaceItem = paper
+          ? createNativeLibraryWorkspaceItem(paper, librarySettings?.storageDir)
+          : null;
 
         if (!workspaceItem) {
           const message = l('没有找到该引用对应的可打开 PDF', 'No openable PDF was found for this reference.');
@@ -622,7 +654,71 @@ function Reader({ workspaceActive = true }: ReaderProps) {
         setStatusMessage(message);
       }
     },
-    [l, openTab, setError, setNativeLibraryItems, setSelectedLibraryItemId, setStatusMessage, workspaceItemMap],
+    [l, librarySettings?.storageDir, openTab, setError, setNativeLibraryItems, setSelectedLibraryItemId, setStatusMessage, workspaceItemMap],
+  );
+
+  const handleNotePaperClick = useCallback(
+    async (paperId: string) => {
+      const normalizedPaperId = paperId.trim();
+
+      if (!normalizedPaperId) {
+        return;
+      }
+
+      const openPaper = (paper: LiteraturePaper) => {
+        const workspaceItem = createNativeLibraryWorkspaceItem(paper, librarySettings?.storageDir);
+
+        if (!workspaceItem) {
+          const message = l('这篇文献缺少可打开的 PDF 附件', 'This paper has no openable PDF attachment');
+          setError(message);
+          setStatusMessage(message);
+          return false;
+        }
+
+        setNativeLibraryItems((current) => [
+          workspaceItem,
+          ...current.filter((item) => item.workspaceId !== workspaceItem.workspaceId),
+        ]);
+        setSelectedLibraryItemId(workspaceItem.workspaceId);
+        openTab(workspaceItem.workspaceId, workspaceItem.title);
+        return true;
+      };
+
+      const cachedPaper = notePaperCandidates.find((paper) => paper.id === normalizedPaperId);
+      if (cachedPaper && openPaper(cachedPaper)) {
+        return;
+      }
+
+      try {
+        const papers = await listLibraryPapers({ limit: 1000, sortBy: 'updatedAt', sortDirection: 'desc' });
+        setNotePaperCandidates(papers);
+
+        const paper = papers.find((item) => item.id === normalizedPaperId);
+
+        if (!paper || !openPaper(paper)) {
+          const message = l('没有找到该引用对应的文献', 'No paper was found for this reference.');
+          setError(message);
+          setStatusMessage(message);
+        }
+      } catch (nextError) {
+        const message =
+          nextError instanceof Error
+            ? nextError.message
+            : l('打开引用文献失败', 'Failed to open the referenced paper.');
+        setError(message);
+        setStatusMessage(message);
+      }
+    },
+    [
+      l,
+      librarySettings?.storageDir,
+      notePaperCandidates,
+      openTab,
+      setError,
+      setNativeLibraryItems,
+      setSelectedLibraryItemId,
+      setStatusMessage,
+    ],
   );
 
   useEffect(() => {
@@ -643,6 +739,14 @@ function Reader({ workspaceActive = true }: ReaderProps) {
     const handleOpenStandalonePdfEvent = () => {
       void handleOpenStandalonePdf();
     };
+    const handleOpenLibraryPaperEvent = (event: Event) => {
+      const detail = (event as CustomEvent<OpenLibraryPaperEventDetail>).detail;
+      if (!detail?.paperId) {
+        return;
+      }
+
+      void handleNotePaperClick(detail.paperId);
+    };
     const handleJumpToNoteAnchorEvent = (event: Event) => {
       const detail = (event as CustomEvent<JumpToNoteAnchorEventDetail>).detail;
       if (!detail?.noteId || !detail.anchorId) {
@@ -653,13 +757,15 @@ function Reader({ workspaceActive = true }: ReaderProps) {
     };
 
     window.addEventListener(OPEN_STANDALONE_PDF_EVENT, handleOpenStandalonePdfEvent);
+    window.addEventListener(OPEN_LIBRARY_PAPER_EVENT, handleOpenLibraryPaperEvent);
     window.addEventListener(JUMP_TO_NOTE_ANCHOR_EVENT, handleJumpToNoteAnchorEvent);
 
     return () => {
       window.removeEventListener(OPEN_STANDALONE_PDF_EVENT, handleOpenStandalonePdfEvent);
+      window.removeEventListener(OPEN_LIBRARY_PAPER_EVENT, handleOpenLibraryPaperEvent);
       window.removeEventListener(JUMP_TO_NOTE_ANCHOR_EVENT, handleJumpToNoteAnchorEvent);
     };
-  }, [handleOpenStandalonePdf, openNoteAnchorJump]);
+  }, [handleNotePaperClick, handleOpenStandalonePdf, openNoteAnchorJump]);
 
   useEffect(() => {
     if (!workspaceActive) {
@@ -764,6 +870,8 @@ function Reader({ workspaceActive = true }: ReaderProps) {
                     setNotesSaving={setReaderNotesSaving}
                     notesError={readerNotesError}
                     setNotesError={setReaderNotesError}
+                    notePaperCandidates={notePaperCandidates}
+                    onNotePaperClick={handleNotePaperClick}
                     pendingNoteAnchorJump={
                       isNoteAnchorJumpForWorkspace(pendingNoteAnchorJump, item.workspaceId)
                         ? pendingNoteAnchorJump

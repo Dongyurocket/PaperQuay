@@ -275,6 +275,10 @@ export function useReaderSettings({
         current.summaryModelPresetId === presetId
           ? fallbackPresetId
           : current.summaryModelPresetId,
+      reviewModelPresetId:
+        current.reviewModelPresetId === presetId
+          ? fallbackPresetId
+          : current.reviewModelPresetId,
       agentModelPresetId:
         current.agentModelPresetId === presetId
           ? fallbackPresetId
@@ -460,6 +464,8 @@ export function useReaderSettings({
       nextTranslationPresetId;
     const nextSummaryPresetId =
       resolveModelPreset(nextPresets, settings.summaryModelPresetId)?.id ?? fallbackPresetId;
+    const nextReviewPresetId =
+      resolveModelPreset(nextPresets, settings.reviewModelPresetId)?.id ?? nextSummaryPresetId;
     const nextAgentPresetId =
       resolveModelPreset(nextPresets, settings.agentModelPresetId)?.id ?? fallbackPresetId;
     const nextQaPresetId =
@@ -496,6 +502,7 @@ export function useReaderSettings({
       settings.translationModelPresetId !== nextTranslationPresetId ||
       settings.selectionTranslationModelPresetId !== nextSelectionTranslationPresetId ||
       settings.summaryModelPresetId !== nextSummaryPresetId ||
+      settings.reviewModelPresetId !== nextReviewPresetId ||
       settings.agentModelPresetId !== nextAgentPresetId ||
       settings.qaActivePresetId !== nextQaPresetId ||
       settings.translationBaseUrl !== nextTranslationPreset.baseUrl ||
@@ -510,6 +517,7 @@ export function useReaderSettings({
         translationModelPresetId: nextTranslationPresetId,
         selectionTranslationModelPresetId: nextSelectionTranslationPresetId,
         summaryModelPresetId: nextSummaryPresetId,
+        reviewModelPresetId: nextReviewPresetId,
         agentModelPresetId: nextAgentPresetId,
         qaActivePresetId: nextQaPresetId,
         translationBaseUrl: nextTranslationPreset.baseUrl,
@@ -535,6 +543,8 @@ export function useReaderSettings({
       nextTranslationPresetId;
     const nextSummaryPresetId =
       resolveModelPreset(qaModelPresets, settings.summaryModelPresetId)?.id ?? fallbackPresetId;
+    const nextReviewPresetId =
+      resolveModelPreset(qaModelPresets, settings.reviewModelPresetId)?.id ?? nextSummaryPresetId;
     const nextAgentPresetId =
       resolveModelPreset(qaModelPresets, settings.agentModelPresetId)?.id ?? fallbackPresetId;
     const nextQaPresetId =
@@ -548,6 +558,7 @@ export function useReaderSettings({
       settings.translationModelPresetId !== nextTranslationPresetId ||
       settings.selectionTranslationModelPresetId !== nextSelectionTranslationPresetId ||
       settings.summaryModelPresetId !== nextSummaryPresetId ||
+      settings.reviewModelPresetId !== nextReviewPresetId ||
       settings.agentModelPresetId !== nextAgentPresetId ||
       settings.qaActivePresetId !== nextQaPresetId ||
       settings.translationBaseUrl !== nextTranslationPreset.baseUrl ||
@@ -560,6 +571,7 @@ export function useReaderSettings({
         translationModelPresetId: nextTranslationPresetId,
         selectionTranslationModelPresetId: nextSelectionTranslationPresetId,
         summaryModelPresetId: nextSummaryPresetId,
+        reviewModelPresetId: nextReviewPresetId,
         agentModelPresetId: nextAgentPresetId,
         qaActivePresetId: nextQaPresetId,
         translationBaseUrl: nextTranslationPreset.baseUrl,
@@ -585,6 +597,7 @@ export function useReaderSettings({
     readerSecrets.translationApiKey,
     settings.agentModelPresetId,
     settings.qaActivePresetId,
+    settings.reviewModelPresetId,
     settings.selectionTranslationModelPresetId,
     settings.summaryBaseUrl,
     settings.summaryModel,

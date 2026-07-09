@@ -56,6 +56,15 @@ export function buildNoteAnchorJumpDetail(note: Note, anchor: NoteAnchor): JumpT
     anchorId: anchor.id,
     anchorPaperId: anchor.paperId,
     anchorLabel: anchor.label,
+    blockId: anchor.blockId ?? null,
+    pageIndex:
+      typeof anchor.pageIndex === 'number'
+        ? anchor.pageIndex
+        : typeof anchor.pdfLocation?.pageNumber === 'number'
+          ? Math.max(0, anchor.pdfLocation.pageNumber - 1)
+          : null,
+    sourceType: anchor.source ?? null,
+    previewText: anchor.excerpt || null,
     pdfLocation: anchor.pdfLocation ?? null,
   };
 }
@@ -132,7 +141,7 @@ export function buildSelectedExcerptNoteCreateRequest({
 }): CreateNoteRequest {
   return {
     paperId,
-    type: selectedExcerpt.source === 'pdf' ? 'highlight' : 'standalone',
+    type: selectedExcerpt.source === 'pdf' || selectedExcerpt.blockId ? 'highlight' : 'standalone',
     title,
     content: '',
     tags: [],

@@ -8,7 +8,11 @@ import type {
   RenderableMineruBlock,
 } from '../types/reader';
 import { isValidBBox } from '../utils/bbox.ts';
-import { normalizeLatexExpression, normalizeRawLatexExpression } from '../utils/markdown.ts';
+import {
+  normalizeLatexExpression,
+  normalizeMarkdownMath,
+  normalizeRawLatexExpression,
+} from '../utils/markdown.ts';
 import { joinReadableText } from '../utils/text.ts';
 
 function collectTextParts(input: unknown): string[] {
@@ -678,6 +682,279 @@ export function parseMineruPages(payload: string | unknown): MineruPage[] {
   throw new Error('MinerU JSON 必须是 content_list_v2、content_list 或 middle JSON');
 }
 
+function isMarkdownTableBlock(value: string): boolean {
+  const lines = value
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  return (
+    lines.length >= 2 &&
+    lines.every((line) => line.startsWith('|') && line.endsWith('|')) &&
+    lines.some((line) => /^\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?$/.test(line))
+  );
+}
+
+function isMarkdownListLine(line: string): boolean {
+  return /^(\s*)([-*+]|\d+[.)])\s+\S/.test(line);
+}
+
+function isMarkdownListContinuation(line: string): boolean {
+  return /^\s{2,}\S/.test(line);
+}
+
+function stripMarkdownHeading(value: string): string {
+  return value.replace(/^#{1,6}\s+/, '').trim();
+}
+
+function stripMathFence(value: string): string {
+  const trimmed = value.trim();
+  const displayMathMatch = trimmed.match(/^\$\$\s*([\s\S]*?)\s*\$\$$/);
+  const bracketMathMatch = trimmed.match(/^\\\[\s*([\s\S]*?)\s*\\\]$/);
+
+  return (displayMathMatch?.[1] ?? bracketMathMatch?.[1] ?? trimmed).trim();
+}
+
+function extractMarkdownImage(value: string): { alt: string; path: string } | null {
+  const match = value.match(/!\[([^\]]*)\]\(([^)]+)\)/);
+
+  if (!match) {
+    return null;
+  }
+
+  return {
+    alt: match[1]?.trim() ?? '',
+    path: match[2]?.trim().replace(/^<|>$/g, '') ?? '',
+  };
+}
+
+function inferMarkdownBlockType(markdown: string): MineruBlockBase['type'] {
+  const trimmed = markdown.trim();
+
+  if (/^#{1,6}\s+\S/.test(trimmed)) {
+    return 'title';
+  }
+
+  if (
+    /^\$\$[\s\S]*\$\$$/.test(trimmed) ||
+    /^\\\[[\s\S]*\\\]$/.test(trimmed) ||
+    /^```(?:latex|tex|math|katex)\s*[\s\S]*```$/i.test(trimmed)
+  ) {
+    return 'equation';
+  }
+
+  if (isMarkdownTableBlock(trimmed) || /^<table[\s\S]*<\/table>$/i.test(trimmed)) {
+    return 'table';
+  }
+
+  if (extractMarkdownImage(trimmed)) {
+    return 'image';
+  }
+
+  const nonEmptyLines = trimmed.split('\n').filter((line) => line.trim());
+  if (
+    nonEmptyLines.length > 0 &&
+    nonEmptyLines.every((line, index) =>
+      isMarkdownListLine(line) || (index > 0 && isMarkdownListContinuation(line))
+    )
+  ) {
+    return 'list';
+  }
+
+  return 'paragraph';
+}
+
+function createMarkdownMineruBlock(markdown: string): MineruBlockBase | null {
+  const normalizedMarkdown = normalizeMarkdownMath(markdown.trim());
+
+  if (!normalizedMarkdown) {
+    return null;
+  }
+
+  const type = inferMarkdownBlockType(normalizedMarkdown);
+
+  if (type === 'title') {
+    return {
+      type,
+      content: {
+        markdown: normalizedMarkdown,
+        title_content: stripMarkdownHeading(normalizedMarkdown),
+      },
+    };
+  }
+
+  if (type === 'equation') {
+    return {
+      type,
+      content: {
+        markdown: normalizedMarkdown,
+        math_content: stripMathFence(normalizedMarkdown),
+      },
+    };
+  }
+
+  if (type === 'image') {
+    const image = extractMarkdownImage(normalizedMarkdown);
+
+    return {
+      type,
+      content: {
+        markdown: normalizedMarkdown,
+        image_caption: image?.alt ?? '',
+        image_path: image?.path ?? '',
+      },
+    };
+  }
+
+  if (type === 'table') {
+    return {
+      type,
+      content: {
+        markdown: normalizedMarkdown,
+        table_body: /^<table/i.test(normalizedMarkdown) ? normalizedMarkdown : undefined,
+      },
+    };
+  }
+
+  return {
+    type,
+    content: {
+      markdown: normalizedMarkdown,
+    },
+  };
+}
+
+function flushMarkdownBlock(buffer: string[], blocks: MineruBlockBase[]): void {
+  const block = createMarkdownMineruBlock(buffer.join('\n'));
+
+  if (block) {
+    blocks.push(block);
+  }
+
+  buffer.length = 0;
+}
+
+export function parseMineruMarkdownPages(markdownText: string): MineruPage[] {
+  const text = markdownText.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n').trim();
+
+  if (!text) {
+    return [];
+  }
+
+  const blocks: MineruBlockBase[] = [];
+  const buffer: string[] = [];
+  const lines = text.split('\n');
+  let fencedBlock: { marker: string; isMath: boolean } | null = null;
+
+  const flush = () => flushMarkdownBlock(buffer, blocks);
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const fenceMatch = trimmed.match(/^(```+|~~~+)(.*)$/);
+
+    if (fencedBlock) {
+      buffer.push(line);
+
+      if (trimmed.startsWith(fencedBlock.marker)) {
+        flush();
+        fencedBlock = null;
+      }
+
+      continue;
+    }
+
+    if (!trimmed) {
+      flush();
+      continue;
+    }
+
+    if (fenceMatch) {
+      flush();
+      buffer.push(line);
+      fencedBlock = {
+        marker: fenceMatch[1],
+        isMath: /(?:latex|tex|math|katex)/i.test(fenceMatch[2] ?? ''),
+      };
+      continue;
+    }
+
+    if (trimmed.startsWith('$$')) {
+      flush();
+      buffer.push(line);
+
+      if (!/^\$\$[\s\S]+\$\$$/.test(trimmed)) {
+        fencedBlock = {
+          marker: '$$',
+          isMath: true,
+        };
+      } else {
+        flush();
+      }
+
+      continue;
+    }
+
+    if (/^#{1,6}\s+\S/.test(trimmed)) {
+      flush();
+      buffer.push(line);
+      flush();
+      continue;
+    }
+
+    if (isMarkdownTableBlock(line)) {
+      flush();
+      buffer.push(line);
+      flush();
+      continue;
+    }
+
+    const currentIsTable = buffer.length > 0 && buffer.every((entry) => entry.trim().startsWith('|'));
+    const lineIsTable = trimmed.startsWith('|') && trimmed.endsWith('|');
+
+    if (lineIsTable) {
+      if (!currentIsTable) {
+        flush();
+      }
+
+      buffer.push(line);
+      continue;
+    }
+
+    if (currentIsTable) {
+      flush();
+    }
+
+    const currentIsList = buffer.length > 0 && isMarkdownListLine(buffer[0] ?? '');
+    const lineIsList = isMarkdownListLine(line) || (currentIsList && isMarkdownListContinuation(line));
+
+    if (lineIsList) {
+      if (!currentIsList && buffer.length > 0) {
+        flush();
+      }
+
+      buffer.push(line);
+      continue;
+    }
+
+    if (currentIsList) {
+      flush();
+    }
+
+    if (extractMarkdownImage(trimmed)) {
+      flush();
+      buffer.push(line);
+      flush();
+      continue;
+    }
+
+    buffer.push(line);
+  }
+
+  flush();
+
+  return blocks.length > 0 ? [blocks] : [];
+}
+
 export function flattenMineruPages(pages: MineruPage[]): PositionedMineruBlock[] {
   const blocks = pages.flatMap((page, pageIndex) =>
     page.map((block, blockIndex) => ({
@@ -695,8 +972,7 @@ export function flattenMineruPages(pages: MineruPage[]): PositionedMineruBlock[]
       block.type === 'paragraph' &&
       Boolean(block.bbox) &&
       !blockText &&
-      lastTextParagraph != null &&
-      block.pageIndex > lastTextParagraph.pageIndex;
+      lastTextParagraph != null;
 
     if (isEmptyParagraphContinuation && lastTextParagraph) {
       return {

@@ -36,12 +36,15 @@ import {
 } from '../../services/summarySource';
 import {
   buildLibraryPreviewSummaryRequest,
+  hasExistingMineruOutput,
   loadReaderLibraryPreviewBlocks,
   readExistingMineruJson,
   readSavedPreviewSummary,
   writeMineruParseCache,
   writePreviewSummaryCache,
 } from './readerLibraryPreview';
+import { countTranslatedBlocks } from './readerTranslation';
+import { readTranslationCache } from './readerTranslationCache';
 import type {
   LibraryPreviewSyncPayload,
   ReaderDocumentTranslationSnapshot,
@@ -276,7 +279,13 @@ export function useReaderLibraryPreview({
 
     void (async () => {
       const nextEntries = await Promise.all(
-        allKnownItems.map(async (item) => [item.workspaceId, Boolean(await findExistingMineruJson(item))] as const),
+        allKnownItems.map(async (item) => [
+          item.workspaceId,
+          await hasExistingMineruOutput(item, {
+            autoLoadSiblingJson: settings.autoLoadSiblingJson,
+            mineruCacheDir: settings.mineruCacheDir,
+          }),
+        ] as const),
       );
 
       if (cancelled) {
@@ -292,7 +301,132 @@ export function useReaderLibraryPreview({
     return () => {
       cancelled = true;
     };
-  }, [allKnownItems, findExistingMineruJson]);
+  }, [allKnownItems, settings.autoLoadSiblingJson, settings.mineruCacheDir]);
+
+  useEffect(() => {
+    if (allKnownItems.length === 0 || !settings.mineruCacheDir.trim()) {
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    void (async () => {
+      const restoredEntries = (
+        await Promise.all(
+          allKnownItems.map(async (item) => {
+            const cachedTranslation = await readTranslationCache({
+              item,
+              mineruCacheDir: settings.mineruCacheDir,
+              targetLanguage: settings.translationTargetLanguage,
+            }).catch(() => null);
+
+            if (!cachedTranslation) {
+              return null;
+            }
+
+            const count = countTranslatedBlocks(cachedTranslation.translations);
+
+            if (count === 0) {
+              return null;
+            }
+
+            return {
+              item,
+              count,
+              translations: cachedTranslation.translations,
+            };
+          }),
+        )
+      ).filter((entry): entry is {
+        item: WorkspaceItem;
+        count: number;
+        translations: ReaderDocumentTranslationSnapshot['translations'];
+      } => Boolean(entry));
+
+      if (cancelled || restoredEntries.length === 0) {
+        return;
+      }
+
+      const restoredAt = Date.now();
+
+      setLibraryTranslationSnapshots((current) => {
+        let changed = false;
+        const next = { ...current };
+
+        for (const entry of restoredEntries) {
+          const previousSnapshot = current[entry.item.workspaceId] ?? null;
+          const previousCount =
+            previousSnapshot?.targetLanguage === settings.translationTargetLanguage
+              ? countTranslatedBlocks(previousSnapshot.translations)
+              : 0;
+
+          if (previousCount >= entry.count) {
+            continue;
+          }
+
+          next[entry.item.workspaceId] = {
+            targetLanguage: settings.translationTargetLanguage,
+            translations: entry.translations,
+            updatedAt: restoredAt,
+          };
+          changed = true;
+        }
+
+        return changed ? next : current;
+      });
+
+      setLibraryPreviewStates((current) => {
+        let changed = false;
+        const next = { ...current };
+
+        for (const entry of restoredEntries) {
+          const previousState = current[entry.item.workspaceId] ?? EMPTY_LIBRARY_PREVIEW_STATE;
+
+          if (previousState.operation?.status === 'running') {
+            continue;
+          }
+
+          const message = l(
+            `已加载缓存全文翻译 ${entry.count} 条`,
+            `Loaded ${entry.count} cached full-document translations`,
+          );
+
+          next[entry.item.workspaceId] = {
+            ...previousState,
+            loading: false,
+            error: '',
+            operation: createPaperTaskState(
+              'translation',
+              'success',
+              message,
+              entry.count,
+              null,
+            ),
+            currentPdfName:
+              previousState.currentPdfName ||
+              (entry.item.localPdfPath ? getFileNameFromPath(entry.item.localPdfPath) : noPdfLoadedText),
+            currentJsonName: previousState.currentJsonName || notLoadedText,
+            statusMessage: previousState.statusMessage || message,
+          };
+          changed = true;
+        }
+
+        return changed ? next : current;
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    allKnownItems,
+    createPaperTaskState,
+    l,
+    noPdfLoadedText,
+    notLoadedText,
+    settings.mineruCacheDir,
+    settings.translationTargetLanguage,
+  ]);
 
   const saveLibraryMineruParseCache = useCallback(
     async (options: {

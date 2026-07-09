@@ -19,11 +19,15 @@ import {
 } from './summarySource';
 import {
   flattenMineruPages,
+  extractCaptionFromMineruBlock,
+  extractMineruAssetPathFromBlock,
   parseMineruPages,
+  resolveMineruAssetPath,
 } from './mineru';
 import {
   buildMineruCachePathCandidates,
-  guessSiblingJsonPath,
+  getMineruJsonPathCandidates,
+  guessSiblingJsonPaths,
   guessSiblingMarkdownPath,
 } from '../utils/mineruCache';
 import type { LiteratureCategory, LiteraturePaper, UpdatePaperRequest } from '../types/library';
@@ -211,6 +215,26 @@ export interface LibraryAgentRagCitation extends DocumentChatCitation {
   paperTitle: string;
 }
 
+export interface LibraryPaperReviewContext {
+  paperId: string;
+  source: string;
+  text: string;
+  citations?: LibraryAgentRagCitation[];
+  figures?: LibraryPaperReviewFigure[];
+}
+
+export interface LibraryPaperReviewFigure {
+  id: string;
+  sourceId?: string;
+  title?: string;
+  sourceTitle?: string;
+  caption: string;
+  path: string;
+  pageIndex?: number;
+  blockId?: string;
+  kind: 'image' | 'table' | string;
+}
+
 export type LibraryAgentRunResult =
   | {
     kind: 'answer';
@@ -257,6 +281,7 @@ interface PaperContextPayload {
   source: string;
   text: string;
   citations?: LibraryAgentRagCitation[];
+  figures?: LibraryPaperReviewFigure[];
 }
 
 function escapeRegExp(value: string): string {
@@ -614,6 +639,48 @@ interface MineruAgentContext {
   source: string;
   text: string;
   blocks: PositionedMineruBlock[];
+  figures: LibraryPaperReviewFigure[];
+}
+
+function isLocalReviewFigureAssetPath(value: string): boolean {
+  return Boolean(value.trim()) && !/^(?:https?|cloud):/i.test(value);
+}
+
+function collectMineruReviewFigures(
+  blocks: PositionedMineruBlock[],
+  mineruPath: string,
+): LibraryPaperReviewFigure[] {
+  const figures: LibraryPaperReviewFigure[] = [];
+
+  for (const block of blocks) {
+    if (block.type !== 'image' && block.type !== 'table') {
+      continue;
+    }
+
+    const relativeAssetPath = extractMineruAssetPathFromBlock(block);
+    const assetPath = relativeAssetPath
+      ? resolveMineruAssetPath(mineruPath, relativeAssetPath)
+      : undefined;
+
+    if (!assetPath || !isLocalReviewFigureAssetPath(assetPath)) {
+      continue;
+    }
+
+    const caption = extractCaptionFromMineruBlock(block).trim();
+    const kindLabel = block.type === 'table' ? 'Table' : 'Figure';
+    const pageLabel = block.pageIndex >= 0 ? `page ${block.pageIndex + 1}` : 'source document';
+
+    figures.push({
+      id: `F${figures.length + 1}`,
+      caption: caption || `${kindLabel} from ${pageLabel}`,
+      path: assetPath,
+      pageIndex: block.pageIndex,
+      blockId: block.blockId,
+      kind: block.type,
+    });
+  }
+
+  return figures;
 }
 
 function normalizeAgentDocumentContextSettings(settings: Partial<ReaderSettings>): AgentDocumentContextSettings {
@@ -664,13 +731,16 @@ function mineruJsonCandidatePaths(item: WorkspaceItem, settings: AgentDocumentCo
 
   if (settings.mineruCacheDir) {
     for (const cachePaths of buildMineruCachePathCandidates(settings.mineruCacheDir, item)) {
-      candidates.add(cachePaths.contentJsonPath);
-      candidates.add(cachePaths.middleJsonPath);
+      for (const candidatePath of getMineruJsonPathCandidates(cachePaths)) {
+        candidates.add(candidatePath);
+      }
     }
   }
 
   if (item.localPdfPath && settings.autoLoadSiblingJson) {
-    candidates.add(guessSiblingJsonPath(item.localPdfPath));
+    for (const candidatePath of guessSiblingJsonPaths(item.localPdfPath)) {
+      candidates.add(candidatePath);
+    }
   }
 
   return [...candidates];
@@ -680,16 +750,20 @@ async function loadMineruAgentContext(
   item: WorkspaceItem,
   settings: AgentDocumentContextSettings,
 ): Promise<MineruAgentContext | null> {
+  let markdownContext: MineruAgentContext | null = null;
+
   for (const candidatePath of mineruMarkdownCandidatePaths(item, settings)) {
     try {
       const text = await readLocalTextFileIfExists(candidatePath);
 
       if (text?.trim()) {
-        return {
+        markdownContext = {
           source: 'mineru-markdown',
           text: normalizeAgentContext(text),
           blocks: [],
+          figures: [],
         };
+        break;
       }
     } catch {
       continue;
@@ -706,12 +780,14 @@ async function loadMineruAgentContext(
 
       const blocks = flattenMineruPages(parseMineruPages(jsonText));
       const markdown = buildMineruMarkdownDocument(blocks, candidatePath);
+      const figures = collectMineruReviewFigures(blocks, candidatePath);
 
-      if (markdown.trim()) {
+      if (markdown.trim() || figures.length > 0) {
         return {
           source: 'mineru-json',
           text: normalizeAgentContext(markdown),
           blocks,
+          figures,
         };
       }
     } catch {
@@ -719,14 +795,13 @@ async function loadMineruAgentContext(
     }
   }
 
-  return null;
+  return markdownContext;
 }
 
 async function loadPaperContext(
   paper: LiteraturePaper,
   mode: LibraryAgentContextRequest['mode'],
   requestReason: string,
-  preset: LibraryAgentModelPreset,
   options?: {
     ragEnabled?: boolean;
   },
@@ -801,6 +876,7 @@ async function loadPaperContext(
             source: `${mineruContext?.source ?? 'pdf-text'}-rag`,
             text: normalizeAgentContext(ragResolution.documentText),
             citations: buildAgentRagCitations(paper, ragResolution.citations),
+            figures: mineruContext?.figures ?? [],
           };
         }
       } catch (error) {
@@ -812,6 +888,7 @@ async function loadPaperContext(
       return {
         source: mineruContext.source,
         text: mineruContext.text,
+        figures: mineruContext.figures,
       };
     }
 
@@ -819,6 +896,7 @@ async function loadPaperContext(
       return {
         source: 'pdf-text',
         text: normalizedPdfText,
+        figures: mineruContext?.figures ?? [],
       };
     }
   } catch (error) {
@@ -833,10 +911,34 @@ async function loadPaperContext(
   };
 }
 
+export async function loadLibraryPaperReviewContext({
+  paper,
+  intent,
+  ragEnabled = true,
+}: {
+  paper: LiteraturePaper;
+  intent: string;
+  ragEnabled?: boolean;
+}): Promise<LibraryPaperReviewContext> {
+  const context = await loadPaperContext(
+    paper,
+    'pdf-text',
+    intent.trim() || 'Literature review context retrieval.',
+    { ragEnabled },
+  );
+
+  return {
+    paperId: paper.id,
+    source: context.source,
+    text: context.text,
+    citations: context.citations,
+    figures: context.figures,
+  };
+}
+
 async function buildPapersWithRequestedContext(
   papers: LiteraturePaper[],
   request: LibraryAgentContextRequest,
-  preset: LibraryAgentModelPreset,
   options?: {
     ragEnabled?: boolean;
     categoryPathById?: Map<string, string>;
@@ -857,7 +959,7 @@ async function buildPapersWithRequestedContext(
   for (const paper of targetPapers) {
     contextByPaperId.set(
       paper.id,
-      await loadPaperContext(paper, contextMode, requestReason, preset, options),
+      await loadPaperContext(paper, contextMode, requestReason, options),
     );
   }
 
@@ -2179,7 +2281,7 @@ export async function runConversationalLibraryAgent({
       return paperSelectionResultFromContextRequest(effectiveContextRequest, normalizedInstruction, thinking);
     }
 
-    const enrichedContext = await buildPapersWithRequestedContext(contextPapers, effectiveContextRequest, preset, {
+    const enrichedContext = await buildPapersWithRequestedContext(contextPapers, effectiveContextRequest, {
       ragEnabled,
       categoryPathById: categoryPayload.categoryPathById,
     });

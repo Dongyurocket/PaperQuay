@@ -1,0 +1,2626 @@
+const fsp = require('node:fs/promises');
+const path = require('node:path');
+const { BrowserWindow, dialog, nativeImage, shell } = require('electron');
+const Docxtemplater = require('docxtemplater');
+const temml = require('temml');
+const mathml2omml = require('mathml2omml');
+const PizZip = require('pizzip');
+const {
+  cleanString,
+  openAiChat,
+  parseJsonObject,
+  pickChatText,
+  safeFileName,
+} = require('./utils.cjs');
+
+const REVIEW_CONTEXT_SUMMARY_CHAR_LIMIT = 700;
+const REVIEW_TASK_CONTEXT_CHAR_LIMIT = 1400;
+const REVIEW_MAX_SECTION_COUNT = 6;
+const REVIEW_MAX_CONTEXT_PER_TASK = 4;
+const REVIEW_MAX_PARAGRAPHS_PER_SECTION = 4;
+const REVIEW_MAX_FIGURES_PER_REVIEW = 6;
+const REVIEW_MAX_FIGURES_PER_SOURCE = 6;
+const REVIEW_WRITING_CONCURRENCY = 3;
+const REVIEW_MAX_WRITING_CONCURRENCY = 8;
+const REVIEW_FIGURE_MARKER_PREFIX = '__PAPERQUAY_REVIEW_FIGURE_';
+const REVIEW_FIGURE_ANCHOR_PATTERN = /\[\s*(?:Image|Figure|Fig\.?|图|图片|插图)\s*(?::|#|编号|ID)?\s*([A-Za-z0-9_-]+)\s*]/gi;
+const REVIEW_GENERATION_PROGRESS_EVENT = 'paperquay://review-generation-progress';
+const WORD_EMU_PER_INCH = 914400;
+const WORD_ASSUMED_IMAGE_DPI = 96;
+const WORD_EMU_PER_PIXEL = Math.round(WORD_EMU_PER_INCH / WORD_ASSUMED_IMAGE_DPI);
+
+const REVIEW_SECTION_TITLES = {
+  zh: {
+    abstract: '摘要',
+    keywordsLabel: '关键词：',
+    intent: '写作意图',
+    thesis: '核心观点',
+    introduction: '引言',
+    body: '正文综述',
+    figures: '图表',
+    figureLabel: '图',
+    figureMissing: '图片加载失败',
+    comparison: '比较分析',
+    gaps: '研究不足',
+    future: '未来方向',
+    conclusion: '结论',
+    references: '参考文献',
+  },
+  en: {
+    abstract: 'Abstract',
+    keywordsLabel: 'Keywords: ',
+    intent: 'Writing Intent',
+    thesis: 'Core Thesis',
+    introduction: 'Introduction',
+    body: 'Literature Review',
+    figures: 'Figures',
+    figureLabel: 'Figure',
+    figureMissing: 'Figure unavailable',
+    comparison: 'Comparative Analysis',
+    gaps: 'Research Gaps',
+    future: 'Future Directions',
+    conclusion: 'Conclusion',
+    references: 'References',
+  },
+};
+
+function isEnglishReviewOutput(outputLanguage) {
+  return /english|^en\b|^en[-_]/i.test(cleanString(outputLanguage));
+}
+
+function reviewSectionTitles(outputLanguage) {
+  return isEnglishReviewOutput(outputLanguage) ? REVIEW_SECTION_TITLES.en : REVIEW_SECTION_TITLES.zh;
+}
+
+function normalizeReviewJsonDraft(value) {
+  const draft = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const stringArray = (items) =>
+    Array.isArray(items) ? items.map((item) => cleanString(item)).filter(Boolean) : [];
+  const sourceIds = new Set(
+    Array.isArray(draft.sources)
+      ? draft.sources.map((source) => cleanString(source?.id)).filter(Boolean)
+      : [],
+  );
+
+  return {
+    title: cleanString(draft.title),
+    abstract: stripReviewImagePlaceholders(draft.abstract),
+    keywords: stringArray(draft.keywords),
+    intentSummary: stripReviewImagePlaceholders(draft.intentSummary),
+    thesis: stripReviewImagePlaceholders(draft.thesis),
+    introduction: stripReviewImagePlaceholders(draft.introduction),
+    sections: Array.isArray(draft.sections)
+      ? draft.sections.map((section, index) => ({
+          id: cleanString(section?.id) || `section-${index + 1}`,
+          heading: cleanString(section?.heading) || `Section ${index + 1}`,
+          content: stripReviewImagePlaceholders(section?.content),
+          citations: stringArray(section?.citations).filter((id) => sourceIds.size === 0 || sourceIds.has(id)),
+        })).filter((section) => section.heading || section.content)
+      : [],
+    comparisonTable: Array.isArray(draft.comparisonTable)
+      ? draft.comparisonTable.map((row) => ({
+          theme: cleanString(row?.theme),
+          papers: stringArray(row?.papers).filter((id) => sourceIds.size === 0 || sourceIds.has(id)),
+          conclusion: stripReviewImagePlaceholders(row?.conclusion),
+        })).filter((row) => row.theme || row.conclusion || row.papers.length > 0)
+      : [],
+    researchGaps: stringArray(draft.researchGaps).map(stripReviewImagePlaceholders).filter(Boolean),
+    futureDirections: stringArray(draft.futureDirections).map(stripReviewImagePlaceholders).filter(Boolean),
+    conclusion: stripReviewImagePlaceholders(draft.conclusion),
+    references: Array.isArray(draft.references)
+      ? draft.references.map((reference) => ({
+          id: cleanString(reference?.id),
+          title: cleanString(reference?.title),
+          authors: cleanString(reference?.authors),
+          year: cleanString(reference?.year),
+          journal: cleanString(reference?.journal || reference?.publication || reference?.venue),
+          pages: cleanString(reference?.pages),
+          doi: cleanString(reference?.doi),
+        })).filter((reference) => reference.id || reference.title)
+      : [],
+    sources: Array.isArray(draft.sources)
+      ? draft.sources.map((source) => ({
+          id: cleanString(source?.id),
+          title: cleanString(source?.title),
+          sourceType: cleanString(source?.sourceType),
+          relevance: cleanString(source?.relevance),
+        })).filter((source) => source.id || source.title)
+      : [],
+    figures: normalizeReviewFigures(draft.figures || draft.selectedFigures, '').slice(0, REVIEW_MAX_FIGURES_PER_REVIEW),
+  };
+}
+
+function truncateReviewText(value, maxLength) {
+  const text = cleanString(value).replace(/\n{3,}/g, '\n\n').trim();
+  return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text;
+}
+
+function stringArrayValue(items) {
+  if (Array.isArray(items)) {
+    return items.map((item) => cleanString(item)).filter(Boolean);
+  }
+
+  const text = cleanString(items);
+  return text ? [text] : [];
+}
+
+function stripReviewImagePlaceholders(value) {
+  return cleanString(value)
+    .replace(/!\[[^\]]*]\([^)]*\)/g, '')
+    .replace(/(?:^|\n)\s*(?:Image|Figure)\s*#?\s*\d+\s*:\s*(?=\n|$)/gi, '\n')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function normalizeOptionalNumber(value) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? Math.max(0, Math.floor(numeric)) : undefined;
+}
+
+function normalizeReviewFigures(items, defaultSourceId = '') {
+  const defaultId = normalizeReferenceId(defaultSourceId);
+
+  return (Array.isArray(items) ? items : [])
+    .map((item, index) => {
+      const sourceId = normalizeReferenceId(
+        item?.sourceId ||
+        item?.paperSourceId ||
+        item?.source ||
+        defaultId,
+      );
+      const id = cleanString(item?.id) || (sourceId ? `${sourceId}-F${index + 1}` : `F${index + 1}`);
+
+      return {
+        id,
+        sourceId,
+        title: cleanString(item?.title),
+        sourceTitle: cleanString(item?.sourceTitle),
+        caption: cleanString(item?.caption || item?.captionText || item?.description),
+        path: cleanString(item?.path || item?.assetPath || item?.localPath),
+        pageIndex: normalizeOptionalNumber(item?.pageIndex),
+        blockId: cleanString(item?.blockId),
+        kind: cleanString(item?.kind || item?.type) || 'image',
+        placement: cleanString(item?.placement),
+        reason: cleanString(item?.reason),
+      };
+    })
+    .filter((figure) => figure.id && (figure.caption || figure.path || figure.title));
+}
+
+function normalizeReviewContextItems(items) {
+  return (Array.isArray(items) ? items : [])
+    .map((item, index) => {
+      const id = cleanString(item?.id) || `S${index + 1}`;
+      return {
+        id,
+        sourceType: cleanString(item?.sourceType) || 'paper',
+        title: cleanString(item?.title) || id,
+        authors: cleanString(item?.authors),
+        year: cleanString(item?.year),
+        journal: cleanString(item?.journal || item?.publication || item?.venue),
+        pages: cleanString(item?.pages),
+        doi: cleanString(item?.doi),
+        text: cleanString(item?.text),
+        paperId: cleanString(item?.paperId),
+        noteId: cleanString(item?.noteId),
+        score: Number.isFinite(item?.score) ? item.score : 0,
+        figures: normalizeReviewFigures(item?.figures, id).slice(0, REVIEW_MAX_FIGURES_PER_SOURCE),
+      };
+    })
+    .filter((item) => item.id && (item.title || item.text));
+}
+
+function reviewContextForPrompt(item, maxLength) {
+  return {
+    id: item.id,
+    sourceType: item.sourceType,
+    title: item.title,
+    authors: item.authors,
+    year: item.year,
+    doi: item.doi,
+    text: truncateReviewText(item.text, maxLength),
+    figures: (item.figures || []).map((figure) => ({
+      id: figure.id,
+      sourceId: figure.sourceId || item.id,
+      kind: figure.kind,
+      page: typeof figure.pageIndex === 'number' ? figure.pageIndex + 1 : undefined,
+      caption: truncateReviewText(figure.caption || figure.title, 220),
+    })),
+  };
+}
+
+function normalizeEvidenceIds(value, validIds, fallbackIds = []) {
+  const rawItems = Array.isArray(value)
+    ? value
+    : cleanString(value)
+      ? cleanString(value).split(/[\s,;，；]+/)
+      : [];
+  const normalized = [];
+  const seen = new Set();
+
+  for (const rawItem of rawItems) {
+    const id = normalizeReferenceId(rawItem);
+    if (!id || !validIds.has(id) || seen.has(id)) {
+      continue;
+    }
+
+    seen.add(id);
+    normalized.push(id);
+  }
+
+  if (normalized.length > 0) {
+    return normalized.slice(0, REVIEW_MAX_CONTEXT_PER_TASK);
+  }
+
+  return fallbackIds.filter((id) => validIds.has(id)).slice(0, REVIEW_MAX_CONTEXT_PER_TASK);
+}
+
+function defaultReviewEvidenceIds(contextItems, maxCount = REVIEW_MAX_CONTEXT_PER_TASK) {
+  return contextItems
+    .map((item) => normalizeReferenceId(item.id))
+    .filter(Boolean)
+    .slice(0, maxCount);
+}
+
+function normalizeReviewSectionHeading(section, index) {
+  const rawHeading = cleanString(section?.heading) || cleanString(section?.title);
+  return rawHeading || `Section ${index + 1}`;
+}
+
+function normalizeBlueprintTask(value, fallbackTask, validIds, fallbackIds) {
+  const item = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const task =
+    cleanString(item.task) ||
+    cleanString(item.instruction) ||
+    cleanString(item.writingTask) ||
+    cleanString(item.description) ||
+    cleanString(value) ||
+    fallbackTask;
+
+  return {
+    task,
+    evidenceIds: normalizeEvidenceIds(
+      item.evidenceIds || item.sourceIds || item.citations || item.papers,
+      validIds,
+      fallbackIds,
+    ),
+    retrievalNotes:
+      cleanString(item.retrievalNotes) ||
+      cleanString(item.sourceFocus) ||
+      cleanString(item.query) ||
+      '',
+    keyEvidence: stringArrayValue(item.keyEvidence || item.claims || item.mustUse).slice(0, 8),
+    target: cleanString(item.target || item.targetLength || item.expectedLength),
+  };
+}
+
+function normalizeSectionParagraphTasks(section, sectionTask, validIds, fallbackIds) {
+  const taskFallbackIds = Array.isArray(sectionTask.evidenceIds) && sectionTask.evidenceIds.length > 0
+    ? sectionTask.evidenceIds
+    : fallbackIds;
+  const rawTasks = Array.isArray(section?.paragraphTasks)
+    ? section.paragraphTasks
+    : Array.isArray(section?.paragraphs)
+      ? section.paragraphs
+      : Array.isArray(section?.tasks)
+        ? section.tasks
+        : [];
+  const normalizedTasks = rawTasks
+    .map((item, index) => ({
+      id: cleanString(item?.id) || `paragraph-${index + 1}`,
+      ...normalizeBlueprintTask(
+        item,
+        `${sectionTask.task} Write paragraph ${index + 1} for this section.`,
+        validIds,
+        taskFallbackIds,
+      ),
+    }))
+    .filter((item) => item.task)
+    .slice(0, REVIEW_MAX_PARAGRAPHS_PER_SECTION);
+
+  if (normalizedTasks.length > 0) {
+    return normalizedTasks;
+  }
+
+  return [{
+    id: 'paragraph-1',
+    ...normalizeBlueprintTask(
+      {},
+      sectionTask.task,
+      validIds,
+      taskFallbackIds,
+    ),
+  }];
+}
+
+function referenceFromContextItem(item) {
+  return {
+    id: item.id,
+    title: item.title,
+    authors: item.authors,
+    year: item.year,
+    journal: item.journal,
+    pages: item.pages,
+    doi: item.doi,
+  };
+}
+
+function sourceFromContextItem(item, relevance = '') {
+  return {
+    id: item.id,
+    title: item.title,
+    sourceType: item.sourceType,
+    relevance: cleanString(relevance) || truncateReviewText(item.text, 180),
+  };
+}
+
+function collectReviewFiguresFromContext(contextItems) {
+  const figures = [];
+  const seenIds = new Set();
+
+  for (const item of contextItems || []) {
+    const sourceId = normalizeReferenceId(item.id);
+
+    for (const figure of item.figures || []) {
+      const id = cleanString(figure.id);
+      const normalizedFigureId = id.toUpperCase();
+
+      if (!id || seenIds.has(normalizedFigureId)) {
+        continue;
+      }
+
+      seenIds.add(normalizedFigureId);
+      figures.push({
+        ...figure,
+        id,
+        sourceId: normalizeReferenceId(figure.sourceId) || sourceId,
+        sourceTitle: cleanString(figure.sourceTitle) || item.title,
+      });
+    }
+  }
+
+  return figures;
+}
+
+function normalizeSelectedReviewFigures(value, contextItems) {
+  const available = collectReviewFiguresFromContext(contextItems);
+  const byId = new Map(available.map((figure) => [figure.id.toUpperCase(), figure]));
+  const rawFigures = Array.isArray(value) ? value : [];
+  const selected = [];
+  const seenIds = new Set();
+
+  for (const rawFigure of rawFigures) {
+    const requestedId = cleanString(
+      rawFigure?.id ||
+      rawFigure?.figureId ||
+      rawFigure?.assetId,
+    ).toUpperCase();
+    const figure = byId.get(requestedId);
+
+    if (!figure || seenIds.has(figure.id.toUpperCase())) {
+      continue;
+    }
+
+    seenIds.add(figure.id.toUpperCase());
+    selected.push({
+      ...figure,
+      title: cleanString(rawFigure?.title) || figure.title,
+      caption: cleanString(rawFigure?.caption || rawFigure?.captionText) || figure.caption,
+      placement: cleanString(rawFigure?.placement || rawFigure?.sectionId),
+      reason: cleanString(rawFigure?.reason || rawFigure?.rationale),
+    });
+  }
+
+  return selected.slice(0, REVIEW_MAX_FIGURES_PER_REVIEW);
+}
+
+function defaultReviewFiguresFromContext(contextItems, preferredSourceIds = []) {
+  const available = collectReviewFiguresFromContext(contextItems);
+  if (available.length === 0) {
+    return [];
+  }
+
+  const preferred = new Set(preferredSourceIds.map(normalizeReferenceId).filter(Boolean));
+  const ordered = [
+    ...available.filter((figure) => preferred.has(normalizeReferenceId(figure.sourceId))),
+    ...available.filter((figure) => !preferred.has(normalizeReferenceId(figure.sourceId))),
+  ];
+  const selected = [];
+  const seenIds = new Set();
+
+  for (const figure of ordered) {
+    const id = cleanString(figure.id);
+    const normalizedId = id.toUpperCase();
+    if (!id || seenIds.has(normalizedId)) {
+      continue;
+    }
+
+    seenIds.add(normalizedId);
+    selected.push({
+      ...figure,
+      placement: cleanString(figure.placement),
+      reason: cleanString(figure.reason) || 'Automatically included from retrieved visual evidence.',
+    });
+
+    if (selected.length >= REVIEW_MAX_FIGURES_PER_REVIEW) {
+      break;
+    }
+  }
+
+  return selected;
+}
+
+function reviewFiguresForPrompt(contextItems) {
+  return collectReviewFiguresFromContext(contextItems)
+    .slice(0, REVIEW_MAX_FIGURES_PER_REVIEW * REVIEW_MAX_CONTEXT_PER_TASK)
+    .map((figure) => ({
+      id: figure.id,
+      sourceId: figure.sourceId,
+      sourceTitle: figure.sourceTitle,
+      kind: figure.kind,
+      page: typeof figure.pageIndex === 'number' ? figure.pageIndex + 1 : undefined,
+      caption: truncateReviewText(figure.caption || figure.title, 260),
+    }));
+}
+
+function isReviewPolicyBlockError(error) {
+  const message = error instanceof Error && error.message ? error.message : String(error ?? 'Unknown error');
+  const cause = error instanceof Error && error.cause
+    ? error.cause instanceof Error
+      ? error.cause.message
+      : String(error.cause)
+    : '';
+  const combined = [message, cause].filter(Boolean).join(': ');
+
+  return /HTTP\s+403|content_policy_violation|风控|禁止行为|policy/i.test(combined);
+}
+
+function extractReviewServiceError(error) {
+  const message = error instanceof Error && error.message ? error.message : String(error ?? 'Unknown error');
+  const statusMatch = message.match(/HTTP\s+(\d+)/i);
+  const jsonStart = message.indexOf('{');
+  let parsed = null;
+
+  if (jsonStart >= 0) {
+    try {
+      parsed = JSON.parse(message.slice(jsonStart));
+    } catch {
+      parsed = null;
+    }
+  }
+
+  return {
+    status: statusMatch?.[1] || '',
+    type: cleanString(parsed?.error?.type),
+    code: cleanString(parsed?.error?.code),
+    message: cleanString(parsed?.error?.message),
+  };
+}
+
+function isLikelyMojibakeText(value) {
+  const text = cleanString(value);
+  return /妯″瀷|缁艰堪|璇锋眰|鎷掔粷|椋庢帶|鍐欎綔|妫€娴嬪埌|绂佹|鍙兘|鎻愰棶|鍘熷閿欒/.test(text);
+}
+
+function reviewErrorMessage(error) {
+  const message = error instanceof Error && error.message ? error.message : String(error ?? 'Unknown error');
+  const cause = error instanceof Error && error.cause
+    ? error.cause instanceof Error
+      ? error.cause.message
+      : String(error.cause)
+    : '';
+  const combined = [message, cause].filter(Boolean).join(': ');
+
+  if (/fetch failed|ECONNREFUSED|ENOTFOUND|ETIMEDOUT|ECONNRESET|network/i.test(combined)) {
+    return [
+      'REVIEW_NETWORK_ERROR: Failed to connect to the model service.',
+      'Check the model Base URL, API key, network connection, or proxy settings, then try again.',
+      cause ? `Cause: ${cause}` : '',
+    ].filter(Boolean).join(' ');
+  }
+
+  if (isReviewPolicyBlockError(error)) {
+    const serviceError = extractReviewServiceError(error);
+    const serviceParts = [
+      serviceError.status ? `HTTP ${serviceError.status}` : '',
+      serviceError.type,
+      serviceError.code,
+    ].filter(Boolean).join(' / ');
+    const readableServiceMessage =
+      serviceError.message && !isLikelyMojibakeText(serviceError.message)
+        ? serviceError.message
+        : '';
+
+    return [
+      'REVIEW_POLICY_BLOCKED: The model provider blocked this literature-review request.',
+      'This is usually provider-side moderation, the selected API mode, or one retrieved paper/note excerpt.',
+      'Try Settings > Models > Review Writing: switch to a model suitable for long-form academic writing, or set this preset to Chat Completions.',
+      serviceParts ? `服务返回：${serviceParts}` : '',
+      readableServiceMessage ? `Service message: ${readableServiceMessage}` : '',
+    ].filter(Boolean).join(' ');
+  }
+
+  return message;
+}
+
+function emitReviewGenerationProgress(sender, requestId, payload) {
+  const id = cleanString(requestId);
+
+  if (!sender || !id || typeof sender.send !== 'function') {
+    return;
+  }
+
+  sender.send('paperquay:event', REVIEW_GENERATION_PROGRESS_EVENT, {
+    requestId: id,
+    updatedAt: Date.now(),
+    ...payload,
+  });
+}
+
+function normalizeReviewBlueprint(value, options = {}) {
+  const raw = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const contextItems = normalizeReviewContextItems(options.contextItems);
+  const validIds = new Set(contextItems.map((item) => normalizeReferenceId(item.id)));
+  const fallbackIds = defaultReviewEvidenceIds(contextItems, 4);
+  const title =
+    cleanString(raw.title) ||
+    cleanString(options.intent).split(/\r?\n/)[0] ||
+    'Literature Review';
+  const fallbackSectionTask =
+    'Draft one evidence-grounded body section for a research synthesis note. Follow the planned analytical flow, compare methods where supported, and cite internal source IDs.';
+
+  let sections = (Array.isArray(raw.sections) ? raw.sections : [])
+    .map((section, index) => {
+      const normalizedTask = normalizeBlueprintTask(
+        section,
+        fallbackSectionTask,
+        validIds,
+        fallbackIds,
+      );
+
+      return {
+        id: cleanString(section?.id) || `section-${index + 1}`,
+        heading: normalizeReviewSectionHeading(section, index),
+        ...normalizedTask,
+        paragraphTasks: normalizeSectionParagraphTasks(section, normalizedTask, validIds, fallbackIds),
+      };
+    })
+    .filter((section) => section.heading || section.task)
+    .slice(0, REVIEW_MAX_SECTION_COUNT);
+
+  if (sections.length === 0) {
+    sections = [{
+      id: 'section-1',
+      heading: 'Section 1',
+      ...(() => {
+        const task = normalizeBlueprintTask({}, fallbackSectionTask, validIds, fallbackIds);
+        return {
+          ...task,
+          paragraphTasks: normalizeSectionParagraphTasks({}, task, validIds, fallbackIds),
+        };
+      })(),
+    }];
+  }
+
+  const comparisonTable = (Array.isArray(raw.comparisonTable) ? raw.comparisonTable : [])
+    .map((row, index) => ({
+      id: cleanString(row?.id) || `comparison-${index + 1}`,
+      theme: cleanString(row?.theme) || cleanString(row?.heading) || `Comparison ${index + 1}`,
+      ...normalizeBlueprintTask(
+        row,
+        'Compare the selected sources and write a concise synthesis for this comparison theme.',
+        validIds,
+        fallbackIds,
+      ),
+    }))
+    .filter((row) => row.theme || row.task)
+    .slice(0, 4);
+  const researchGaps = (Array.isArray(raw.researchGaps) ? raw.researchGaps : [])
+    .map((item, index) => ({
+      id: `gap-${index + 1}`,
+      ...normalizeBlueprintTask(
+        item,
+        'Identify an evidence-grounded research gap without inventing unsupported claims.',
+        validIds,
+        fallbackIds,
+      ),
+    }))
+    .slice(0, 5);
+  const futureDirections = (Array.isArray(raw.futureDirections) ? raw.futureDirections : [])
+    .map((item, index) => ({
+      id: `future-${index + 1}`,
+      ...normalizeBlueprintTask(
+        item,
+        'Propose an evidence-grounded future research direction.',
+        validIds,
+        fallbackIds,
+      ),
+    }))
+    .slice(0, 5);
+  const selectedFigures = normalizeSelectedReviewFigures(
+    raw.figures || raw.selectedFigures || raw.figureSelections,
+    contextItems,
+  );
+  const preferredFigureSourceIds = [
+    ...sections.flatMap((section) => section.evidenceIds || []),
+    ...comparisonTable.flatMap((row) => row.evidenceIds || []),
+    ...researchGaps.flatMap((gap) => gap.evidenceIds || []),
+    ...futureDirections.flatMap((direction) => direction.evidenceIds || []),
+  ];
+
+  return {
+    title,
+    keywords: stringArrayValue(raw.keywords).slice(0, 8),
+    intentSummary: cleanString(raw.intentSummary) || cleanString(options.intent),
+    thesis: cleanString(raw.thesis) || 'The review should synthesize retrieved evidence into a coherent research narrative.',
+    abstractTask: normalizeBlueprintTask(
+      raw.abstractTask || raw.abstract,
+      'Draft a concise abstract-style summary after all sections are generated.',
+      validIds,
+      fallbackIds,
+    ),
+    introductionTask: normalizeBlueprintTask(
+      raw.introductionTask || raw.introduction,
+      'Draft the opening context by defining the topic boundary, research background, and synthesis logic.',
+      validIds,
+      fallbackIds,
+    ),
+    sections,
+    comparisonTable,
+    researchGaps,
+    futureDirections,
+    conclusionTask: normalizeBlueprintTask(
+      raw.conclusionTask || raw.conclusion,
+      'Draft the closing synthesis by summarizing the major evidence-backed findings and implications.',
+      validIds,
+      fallbackIds,
+    ),
+    references: (Array.isArray(raw.references) ? raw.references : [])
+      .map((reference) => ({
+        id: normalizeReferenceId(reference?.id),
+        title: cleanString(reference?.title),
+        authors: cleanString(reference?.authors),
+        year: cleanString(reference?.year),
+        journal: cleanString(reference?.journal || reference?.publication || reference?.venue),
+        pages: cleanString(reference?.pages),
+        doi: cleanString(reference?.doi),
+      }))
+      .filter((reference) => reference.id),
+    sources: (Array.isArray(raw.sources) ? raw.sources : [])
+      .map((source) => ({
+        id: normalizeReferenceId(source?.id),
+        title: cleanString(source?.title),
+        sourceType: cleanString(source?.sourceType),
+        relevance: cleanString(source?.relevance),
+      }))
+      .filter((source) => source.id),
+    figures: selectedFigures.length > 0
+      ? selectedFigures
+      : defaultReviewFiguresFromContext(contextItems, preferredFigureSourceIds),
+  };
+}
+
+function normalizeReviewWritingConcurrency(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return REVIEW_WRITING_CONCURRENCY;
+  }
+
+  return Math.max(1, Math.min(REVIEW_MAX_WRITING_CONCURRENCY, Math.trunc(numeric)));
+}
+
+function reviewWritingTaskCount(blueprint) {
+  return (
+    3 +
+    blueprint.sections.reduce((count, section) => count + Math.max(1, (section.paragraphTasks || []).length), 0) +
+    blueprint.comparisonTable.length +
+    blueprint.researchGaps.length +
+    blueprint.futureDirections.length
+  );
+}
+
+function buildReviewBlueprintPrompt(options) {
+  const outputLanguage = cleanString(options.outputLanguage) || 'the same language as the user intent';
+  const contextItems = normalizeReviewContextItems(options.contextItems);
+  const blueprintExample = {
+    title: 'Retrieval-Augmented Scholarly Reading: Foundations, Workflows, and Research Agenda',
+    keywords: ['retrieval-augmented generation', 'scholarly reading', 'literature review'],
+    intentSummary: 'The user asks for a rigorous academic review that synthesizes retrieved papers and notes into a coherent research narrative.',
+    thesis: 'Retrieval-augmented scholarly reading should be analyzed as an evidence-grounded workflow that connects document parsing, semantic retrieval, interactive annotation, and synthesis support.',
+    abstractTask: {
+      task: 'Write a concise abstract after the body sections are generated, summarizing the research scope, organizing framework, major synthesis points, and open problems.',
+      evidenceIds: ['P1', 'P2'],
+      retrievalNotes: 'Use P1 for the research background and P2 for the workflow comparison.',
+      keyEvidence: ['P1 motivates retrieval-grounded reading.', 'P2 compares annotation and retrieval workflows.'],
+      target: 'one paragraph',
+    },
+    introductionTask: {
+      task: 'Introduce the research problem, define the review boundary, explain why synthesis is needed, and preview the analytical structure.',
+      evidenceIds: ['P1'],
+      retrievalNotes: 'Use P1 for the problem setting and cite it when stating the need for retrieval-grounded reading.',
+      keyEvidence: ['P1 frames scholarly reading as a multi-step evidence use problem.'],
+      target: '2-3 paragraphs',
+    },
+    sections: [
+      {
+        id: 'section-1',
+        heading: 'Conceptual Foundations and Review Scope',
+        task: 'Define the core concepts, delimit the review scope, and explain how this section establishes the conceptual basis for later taxonomy and comparison.',
+        evidenceIds: ['P1', 'P2'],
+        retrievalNotes: 'Use selected evidence to define concepts, establish boundaries, and prepare the reader for later taxonomy and comparison sections.',
+        keyEvidence: ['Evidence point from P1.', 'Evidence point from P2.'],
+        target: '2-4 academic paragraphs',
+        paragraphTasks: [
+          {
+            id: 'paragraph-1',
+            task: 'Write the first paragraph: define key concepts, delimit the review scope, and cite the most relevant source.',
+            evidenceIds: ['P1'],
+            retrievalNotes: 'Use P1 for the background claim and cite it if used.',
+            keyEvidence: ['Background claim from P1.'],
+            target: 'one academic paragraph',
+          },
+          {
+            id: 'paragraph-2',
+            task: 'Write the second paragraph: synthesize why this scope leads to the following analytical framework or taxonomy.',
+            evidenceIds: ['P1', 'P2'],
+            retrievalNotes: 'Use P1 and P2 to connect scope, conceptual categories, and the rest of the review structure.',
+            keyEvidence: ['Conceptual cue from P1.', 'Scope cue from P2.'],
+            target: 'one academic paragraph',
+          },
+        ],
+      },
+    ],
+    comparisonTable: [
+      {
+        id: 'comparison-1',
+        theme: 'Comparison theme',
+        task: 'Compare the selected sources on this analytical theme, emphasizing similarities, differences, and implications for the review argument.',
+        evidenceIds: ['P1', 'P2'],
+        retrievalNotes: 'Focus on method differences and limitations.',
+        keyEvidence: ['Comparison cue.'],
+        target: 'one concise comparison paragraph',
+      },
+    ],
+    researchGaps: [
+      {
+        task: 'Identify one evidence-grounded research gap and explain why the retrieved sources leave it unresolved.',
+        evidenceIds: ['P1'],
+        retrievalNotes: 'Use explicit limitations only.',
+        keyEvidence: ['Limitation from P1.'],
+        target: 'one sentence',
+      },
+    ],
+    futureDirections: [
+      {
+        task: 'Propose one evidence-grounded future direction that logically follows from the identified gap.',
+        evidenceIds: ['P2'],
+        retrievalNotes: 'Base the direction on retrieved limitations.',
+        keyEvidence: ['Future cue from P2.'],
+        target: 'one sentence',
+      },
+    ],
+    conclusionTask: {
+      task: 'Conclude the review by synthesizing the major findings, clarifying the contribution of the review, and restating the future agenda.',
+      evidenceIds: ['P1', 'P2'],
+      retrievalNotes: 'Use the strongest evidence from all sections.',
+      keyEvidence: ['Overall conclusion cue.'],
+      target: 'one paragraph',
+    },
+    references: [
+      {
+        id: 'P1',
+        title: 'Paper title',
+        authors: 'Author A; Author B',
+        year: '2025',
+        doi: '10.xxxx/example',
+      },
+    ],
+    sources: [
+      {
+        id: 'P1',
+        title: 'Paper title',
+        sourceType: 'paper',
+        relevance: 'Why this source should be used.',
+      },
+    ],
+    figures: [
+      {
+        id: 'P1-F1',
+        caption: 'Concise caption adapted from the source figure.',
+        placement: 'section-1',
+        reason: 'This figure helps compare the core taxonomy or evidence pattern.',
+      },
+    ],
+  };
+
+  const systemPrompt = [
+    'You are PaperQuay research synthesis planning assistant.',
+    'Your job is to create a rigorous academic writing plan for the user\'s own research-reading notes. This is an intermediate planning step, not final prose.',
+    'Infer the user intent, topic boundary, target audience, review type, and evidence plan from the retrieved context.',
+    `Write every user-visible planning value in ${outputLanguage}.`,
+    'Return strict JSON only. Do not return Markdown fences, comments, or prose outside JSON.',
+    'Do not write full body paragraphs in this planning call. Instead, create detailed next-step section tasks.',
+    'The plan should follow the standards of high-quality scholarly literature reviews: clear problem framing, explicit scope, conceptual definitions, method or theme taxonomy, comparative synthesis, limitations, research gaps, and future agenda.',
+    'Make every body-section heading analytically meaningful and journal-style. Prefer field-specific noun phrases over generic labels.',
+    'Each section must contribute a distinct role in the argument. Avoid overlapping sections and avoid repeating the same evidence plan.',
+    'Treat abstract, introduction, and conclusion as separate fields. Body sections must not duplicate Introduction, Conclusion, References, or Appendix.',
+    'Design the body-section flow as a formal research synthesis: conceptual foundations and scope -> theoretical or analytical framework -> taxonomy of methods or research streams -> comparative evidence and evaluation -> limitations, open challenges, and research gaps -> future research agenda.',
+    'Adapt that flow to the user intent and available evidence; omit or merge a step only when evidence is insufficient or the requested review type demands it.',
+    'Section headings must be concise academic noun phrases suitable for a journal review article. Avoid vague labels such as Section 1, Theme, Findings, Methods, Discussion, Background, Related Work, Research Gaps, Future Work, Introduction, or Conclusion.',
+    'Do not number section headings. Do not write headings as questions, full sentences, or commands.',
+    'Good English heading examples: "Retrieval-Centric Architectures for Scholarly Reading", "Evidence Alignment and Citation-Grounded Synthesis", "Evaluation Protocols and Reproducibility Constraints".',
+    'Good Chinese heading examples: "面向学术阅读的检索增强架构", "证据对齐与引文约束的综合生成", "评价协议与可复现性约束".',
+    'Bad heading examples: "Methods", "Discussion", "Future Work", "Section 2", "What are the challenges?".',
+    'The exact heading string you put in sections[].heading will be preserved in the editable outline and the exported Word document, so choose final publication-quality headings now.',
+    'Each section must include paragraphTasks. A paragraphTask is a task object for exactly one downstream model call to write exactly one paragraph.',
+    'Each task must include evidenceIds, retrievalNotes, keyEvidence, and target length so a second model call can write that part independently.',
+    'For each section, create 2 to 4 paragraphTasks unless the user intent clearly requires a shorter section. Paragraph tasks should move from definition/context to comparison/synthesis to implications or limitations.',
+    'Use only contextItems IDs such as P1 or N1. Do not invent papers, notes, facts, citations, experiments, metrics, or references.',
+    'If availableFigures contains source figures relevant to the review, select up to 4 figures by ID in figures. Prefer figures that support taxonomy, workflow, method comparison, or evaluation evidence. Do not invent figure IDs, file paths, or captions.',
+    'Figure captions should be concise academic-style captions. The local image file path is handled by PaperQuay and must not be generated by the model.',
+    'Prefer 4 to 6 coherent body sections unless the user asks for a different structure. Use at most 6 body sections.',
+    'Do not invent numeric references such as [1]. PaperQuay converts internal IDs like [P1] into formal Word citations during export.',
+    'The required JSON shape is shown in requiredBlueprintShape. Follow the same keys exactly, with values adapted to the retrieved sources.',
+  ].join('\n');
+
+  const sectionArchitecture = {
+    rule: 'Create formal body sections only; introduction and conclusion are separate fields.',
+    preferredFlow: [
+      'Conceptual foundations and review scope',
+      'Theoretical perspectives or analytical framework',
+      'Methodological taxonomy or research-stream classification',
+      'Comparative evidence and evaluation',
+      'Limitations, open challenges, and research gaps',
+      'Future research agenda',
+    ],
+    headingRules: [
+      'Concise journal-style academic noun phrase',
+      'No numbering',
+      'No questions',
+      'No generic labels such as Methods, Findings, Discussion, Background, Related Work, Introduction, Conclusion',
+      'The chosen heading is final and must be preserved exactly in the Word export',
+    ],
+    goodHeadingExamples: [
+      'Retrieval-Centric Architectures for Scholarly Reading',
+      'Evidence Alignment and Citation-Grounded Synthesis',
+      '面向学术阅读的检索增强架构',
+      '证据对齐与引文约束的综合生成',
+    ],
+    badHeadingExamples: ['Methods', 'Discussion', 'Future Work', 'Section 2'],
+  };
+  const userPayload = {
+    intent: cleanString(options.intent),
+    reviewType: cleanString(options.reviewType),
+    sourceScope: cleanString(options.sourceScope),
+    targetAudience: cleanString(options.targetAudience),
+    outputLanguage,
+    sectionArchitecture,
+    requiredBlueprintShape: blueprintExample,
+    contextItems: contextItems.map((item) => reviewContextForPrompt(item, REVIEW_CONTEXT_SUMMARY_CHAR_LIMIT)),
+    availableFigures: reviewFiguresForPrompt(contextItems),
+  };
+
+  return [
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: JSON.stringify(userPayload, null, 2) },
+  ];
+}
+
+function contextItemsForTask(task, contextItems) {
+  const byId = new Map(contextItems.map((item) => [normalizeReferenceId(item.id), item]));
+  const selected = [];
+
+  for (const id of task.evidenceIds || []) {
+    const item = byId.get(normalizeReferenceId(id));
+    if (item) selected.push(item);
+  }
+
+  const fallback = selected.length > 0 ? selected : contextItems.slice(0, REVIEW_MAX_CONTEXT_PER_TASK);
+  return fallback
+    .slice(0, REVIEW_MAX_CONTEXT_PER_TASK)
+    .map((item) => reviewContextForPrompt(item, REVIEW_TASK_CONTEXT_CHAR_LIMIT));
+}
+
+function buildReviewPartPrompt({ options, blueprint, kind, heading, task, contextItems }) {
+  const outputLanguage = cleanString(options.outputLanguage) || 'the same language as the user intent';
+  const partExample = {
+    content: 'Retrieval-augmented scholarly reading reframes reading as an evidence-navigation workflow rather than a linear consumption process [P1]. This perspective helps connect document parsing, semantic retrieval, and annotation into a unified analytical pipeline [P2].',
+    citations: ['P1', 'P2'],
+  };
+  const systemPrompt = [
+    'You are PaperQuay research synthesis drafting assistant.',
+    'Write only the requested part of the user\'s academic literature review. Do not rewrite the whole document.',
+    `Write every user-visible value in ${outputLanguage}.`,
+    'Use only the selected context evidence. Do not invent papers, notes, facts, citations, experiments, metrics, or references.',
+    'Use internal evidence IDs such as [P1] or [N1] in the content when making evidence-backed claims.',
+    'Do not use numeric citations such as [1]. PaperQuay will convert internal IDs into formal numeric references during Word export.',
+    'Return strict JSON only with keys: content, citations.',
+    'content must be polished academic prose: analytical, concise, coherent, and suitable for a research review.',
+    'Use topic sentences, synthesis language, and explicit relationships such as contrast, convergence, limitation, implication, and research gap when evidence supports them.',
+    'If selectedFigures contains a figure that directly supports this part, place it with a short anchor such as [Figure: P1-F1] near the relevant sentence or paragraph. Use only selected figure IDs. PaperQuay will replace the anchor with the actual image in the Word export.',
+    'Avoid bullet lists, Markdown headings, code fences, casual language, unsupported claims, and source-by-source summaries without synthesis.',
+    'Do not write Markdown image syntax or long image placeholders. Prefer a single concise figure anchor only when the figure is genuinely useful.',
+    'citations must be an array of context item IDs actually used in content.',
+  ].join('\n');
+  const userPayload = {
+    kind,
+    heading: cleanString(heading),
+    task: {
+      instruction: cleanString(task.task),
+      retrievalNotes: cleanString(task.retrievalNotes),
+      keyEvidence: stringArrayValue(task.keyEvidence),
+      target: cleanString(task.target),
+      evidenceIds: task.evidenceIds || [],
+    },
+    reviewBlueprint: {
+      title: blueprint.title,
+      intentSummary: blueprint.intentSummary,
+      thesis: blueprint.thesis,
+      sectionOutline: blueprint.sections.map((section) => ({
+        id: section.id,
+        heading: section.heading,
+        evidenceIds: section.evidenceIds,
+        paragraphTasks: (section.paragraphTasks || []).map((paragraphTask) => ({
+          id: paragraphTask.id,
+          task: paragraphTask.task,
+          evidenceIds: paragraphTask.evidenceIds,
+          target: paragraphTask.target,
+        })),
+      })),
+    },
+    selectedContext: contextItemsForTask(task, contextItems),
+    selectedFigures: (blueprint.figures || []).map((figure) => ({
+      id: figure.id,
+      sourceId: figure.sourceId,
+      caption: truncateReviewText(figure.caption || figure.title, 220),
+      placement: figure.placement,
+    })),
+    outputShape: {
+      content: 'Drafted prose for this single part only, with internal citations like [P1] and optional concise figure anchors like [Figure: P1-F1].',
+      citations: ['P1'],
+    },
+    outputExample: partExample,
+  };
+
+  return [
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: JSON.stringify(userPayload, null, 2) },
+  ];
+}
+
+async function callReviewJsonModel(options, messages) {
+  try {
+    const data = await openAiChat(
+      options,
+      messages,
+      { responseFormat: { type: 'json_object' } },
+    );
+    return parseJsonObject(pickChatText(data));
+  } catch (error) {
+    throw new Error(reviewErrorMessage(error));
+  }
+}
+
+function normalizeGeneratedReviewPart(value, task, validIds) {
+  const raw = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const content =
+    cleanString(raw.content) ||
+    cleanString(raw.text) ||
+    cleanString(raw.paragraph) ||
+    cleanString(raw.conclusion);
+
+  if (!content) {
+    throw new Error(`Model returned empty review content for task: ${task.task}`);
+  }
+
+  return {
+    content,
+    citations: normalizeEvidenceIds(
+      raw.citations || raw.evidenceIds || raw.sourceIds,
+      validIds,
+      task.evidenceIds || [],
+    ),
+  };
+}
+
+function mergeGeneratedParagraphParts(paragraphs) {
+  const citations = [];
+  const seenIds = new Set();
+
+  for (const paragraph of paragraphs || []) {
+    for (const id of paragraph?.citations || []) {
+      const normalizedId = normalizeReferenceId(id);
+      if (!normalizedId || seenIds.has(normalizedId)) continue;
+      seenIds.add(normalizedId);
+      citations.push(normalizedId);
+    }
+  }
+
+  return {
+    content: (paragraphs || [])
+      .map((paragraph) => cleanString(paragraph?.content))
+      .filter(Boolean)
+      .join('\n\n'),
+    citations,
+    paragraphs,
+  };
+}
+
+function emptyReviewGeneratedPartsForBlueprint(blueprint) {
+  return {
+    abstract: null,
+    introduction: null,
+    sectionParagraphs: blueprint.sections.map((section) => {
+      const paragraphTasks = section.paragraphTasks || [section];
+      return new Array(paragraphTasks.length).fill(null);
+    }),
+    comparisonTable: new Array(blueprint.comparisonTable.length).fill(null),
+    researchGaps: new Array(blueprint.researchGaps.length).fill(null),
+    futureDirections: new Array(blueprint.futureDirections.length).fill(null),
+    conclusion: null,
+  };
+}
+
+function normalizeGeneratedReviewPartCheckpoint(value, validIds) {
+  const raw = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const content =
+    cleanString(raw.content) ||
+    cleanString(raw.text) ||
+    cleanString(raw.paragraph) ||
+    cleanString(raw.conclusion);
+
+  if (!content) {
+    return null;
+  }
+
+  return {
+    content,
+    citations: normalizeEvidenceIds(raw.citations || raw.evidenceIds || raw.sourceIds, validIds, []),
+  };
+}
+
+function normalizeReviewGeneratedParts(value, blueprint, validIds) {
+  const raw = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const parts = emptyReviewGeneratedPartsForBlueprint(blueprint);
+
+  parts.abstract = normalizeGeneratedReviewPartCheckpoint(raw.abstract, validIds);
+  parts.introduction = normalizeGeneratedReviewPartCheckpoint(raw.introduction, validIds);
+  parts.conclusion = normalizeGeneratedReviewPartCheckpoint(raw.conclusion, validIds);
+
+  if (Array.isArray(raw.sectionParagraphs)) {
+    for (const [sectionIndex, section] of parts.sectionParagraphs.entries()) {
+      const rawSection = Array.isArray(raw.sectionParagraphs[sectionIndex])
+        ? raw.sectionParagraphs[sectionIndex]
+        : [];
+      for (const [paragraphIndex] of section.entries()) {
+        section[paragraphIndex] = normalizeGeneratedReviewPartCheckpoint(rawSection[paragraphIndex], validIds);
+      }
+    }
+  }
+
+  for (const key of ['comparisonTable', 'researchGaps', 'futureDirections']) {
+    if (!Array.isArray(raw[key])) {
+      continue;
+    }
+
+    for (const [index] of parts[key].entries()) {
+      parts[key][index] = normalizeGeneratedReviewPartCheckpoint(raw[key][index], validIds);
+    }
+  }
+
+  return parts;
+}
+
+function countCompletedReviewGeneratedParts(parts) {
+  let count = 0;
+  if (parts.abstract) count += 1;
+  if (parts.introduction) count += 1;
+  if (parts.conclusion) count += 1;
+  for (const section of parts.sectionParagraphs || []) {
+    for (const paragraph of section || []) {
+      if (paragraph) count += 1;
+    }
+  }
+  for (const key of ['comparisonTable', 'researchGaps', 'futureDirections']) {
+    for (const part of parts[key] || []) {
+      if (part) count += 1;
+    }
+  }
+  return count;
+}
+
+function mergeReferencesFromBlueprintAndContext(blueprint, contextItems, usedIds) {
+  const contextById = new Map(contextItems.map((item) => [normalizeReferenceId(item.id), item]));
+  const referenceById = new Map((blueprint.references || []).map((item) => [normalizeReferenceId(item.id), item]));
+  const sourceById = new Map((blueprint.sources || []).map((item) => [normalizeReferenceId(item.id), item]));
+  const references = [];
+  const sources = [];
+
+  for (const id of usedIds) {
+    const normalizedId = normalizeReferenceId(id);
+    const contextItem = contextById.get(normalizedId);
+    const reference = referenceById.get(normalizedId) || (contextItem ? referenceFromContextItem(contextItem) : null);
+    const source = sourceById.get(normalizedId) || (contextItem ? sourceFromContextItem(contextItem) : null);
+
+    if (reference) {
+      references.push({ ...reference, id: normalizedId });
+    }
+
+    if (source) {
+      sources.push({ ...source, id: normalizedId });
+    }
+  }
+
+  return { references, sources };
+}
+
+function composeReviewDraftFromGeneratedParts({ blueprint, contextItems, parts }) {
+  const usedIds = [];
+  const seenIds = new Set();
+  const addUsedIds = (ids) => {
+    for (const id of ids || []) {
+      const normalizedId = normalizeReferenceId(id);
+      if (!normalizedId || seenIds.has(normalizedId)) continue;
+      seenIds.add(normalizedId);
+      usedIds.push(normalizedId);
+    }
+  };
+
+  addUsedIds(parts.abstract?.citations);
+  addUsedIds(parts.introduction?.citations);
+  for (const item of parts.sections || []) addUsedIds(item.citations);
+  for (const item of parts.comparisonTable || []) addUsedIds(item.citations);
+  for (const item of parts.researchGaps || []) addUsedIds(item.citations);
+  for (const item of parts.futureDirections || []) addUsedIds(item.citations);
+  addUsedIds(parts.conclusion?.citations);
+
+  if (usedIds.length === 0) {
+    addUsedIds(defaultReviewEvidenceIds(contextItems, 4));
+  }
+
+  const { references, sources } = mergeReferencesFromBlueprintAndContext(blueprint, contextItems, usedIds);
+
+  return normalizeReviewJsonDraft({
+    title: blueprint.title,
+    abstract: parts.abstract?.content || '',
+    keywords: blueprint.keywords,
+    intentSummary: blueprint.intentSummary,
+    thesis: blueprint.thesis,
+    introduction: parts.introduction?.content || '',
+    sections: blueprint.sections.map((section, index) => ({
+      heading: section.heading,
+      content: parts.sections?.[index]?.content || '',
+      citations: parts.sections?.[index]?.citations || section.evidenceIds || [],
+    })),
+    comparisonTable: blueprint.comparisonTable.map((row, index) => ({
+      theme: row.theme,
+      papers: parts.comparisonTable?.[index]?.citations || row.evidenceIds || [],
+      conclusion: parts.comparisonTable?.[index]?.content || '',
+    })),
+    researchGaps: (parts.researchGaps || []).map((item) => item.content),
+    futureDirections: (parts.futureDirections || []).map((item) => item.content),
+    conclusion: parts.conclusion?.content || '',
+    references,
+    sources,
+    figures: blueprint.figures || [],
+  });
+}
+
+async function runReviewWritingTasks(tasks, concurrency = REVIEW_WRITING_CONCURRENCY) {
+  const workerCount = Math.max(1, Math.min(normalizeReviewWritingConcurrency(concurrency), tasks.length));
+  let nextIndex = 0;
+  const errors = [];
+
+  // Run every task to completion so already-finished parts are emitted and
+  // checkpointed even when sibling tasks fail; aggregate errors afterwards.
+  const workers = Array.from({ length: workerCount }, async () => {
+    while (nextIndex < tasks.length) {
+      const taskIndex = nextIndex;
+      nextIndex += 1;
+
+      try {
+        await tasks[taskIndex]();
+      } catch (error) {
+        errors.push(error);
+      }
+    }
+  });
+
+  await Promise.all(workers);
+
+  if (errors.length > 0) {
+    const firstMessage = errors[0] instanceof Error ? errors[0].message : String(errors[0]);
+    throw new Error(
+      errors.length === 1
+        ? firstMessage
+        : `${errors.length} writing tasks failed (completed parts are kept for resume). First error: ${firstMessage}`,
+    );
+  }
+}
+
+async function generateReviewBlueprint(options, sender) {
+  const contextItems = normalizeReviewContextItems(options.contextItems);
+  const requestId = cleanString(options.requestId);
+  const emitProgress = (payload) => emitReviewGenerationProgress(sender, requestId, payload);
+
+  emitProgress({
+    phase: 'blueprint',
+    taskKind: 'blueprint',
+    status: 'running',
+    current: 0,
+    total: 1,
+  });
+
+  const blueprintRaw = await callReviewJsonModel(options, buildReviewBlueprintPrompt(options));
+  const blueprint = normalizeReviewBlueprint(blueprintRaw, { ...options, contextItems });
+  const writingTaskCount = reviewWritingTaskCount(blueprint);
+  const totalTasks = 1 + writingTaskCount + 1;
+
+  emitProgress({
+    phase: 'blueprint',
+    taskKind: 'blueprint',
+    status: 'done',
+    current: 1,
+    total: totalTasks,
+    sectionTotal: blueprint.sections.length,
+  });
+
+  return blueprint;
+}
+
+async function generateReviewJsonDraftFromBlueprint(options, sender) {
+  const contextItems = normalizeReviewContextItems(options.contextItems);
+  const blueprint = normalizeReviewBlueprint(options.blueprint, { ...options, contextItems });
+  const validIds = new Set(contextItems.map((item) => normalizeReferenceId(item.id)));
+  const requestId = cleanString(options.requestId);
+  const emitProgress = (payload) => emitReviewGenerationProgress(sender, requestId, payload);
+  const writingTaskCount = reviewWritingTaskCount(blueprint);
+  const totalTasks = 1 + writingTaskCount + 1;
+  const generatedParts = normalizeReviewGeneratedParts(options.resumeParts, blueprint, validIds);
+  let completedTasks = 1 + countCompletedReviewGeneratedParts(generatedParts);
+
+  emitProgress({
+    phase: 'writing',
+    taskKind: 'abstract',
+    status: 'running',
+    current: completedTasks,
+    total: totalTasks,
+  });
+
+  const generatePart = async (kind, heading, task) => normalizeGeneratedReviewPart(
+    await callReviewJsonModel(
+      options,
+      buildReviewPartPrompt({ options, blueprint, kind, heading, task, contextItems }),
+    ),
+    task,
+    validIds,
+  );
+  const generateProgressPart = async (taskKey, progress, kind, heading, task) => {
+    emitProgress({
+      phase: 'writing',
+      taskKind: kind,
+      status: 'running',
+      taskKey,
+      heading: cleanString(heading),
+      current: completedTasks,
+      total: totalTasks,
+      ...progress,
+    });
+
+    const part = await generatePart(kind, heading, task);
+    completedTasks += 1;
+
+    emitProgress({
+      phase: 'writing',
+      taskKind: kind,
+      status: 'done',
+      taskKey,
+      heading: cleanString(heading),
+      current: completedTasks,
+      total: totalTasks,
+      generatedPart: part,
+      ...progress,
+    });
+
+    return part;
+  };
+  const parts = {
+    abstract: generatedParts.abstract,
+    introduction: generatedParts.introduction,
+    sections: [],
+    comparisonTable: generatedParts.comparisonTable,
+    researchGaps: generatedParts.researchGaps,
+    futureDirections: generatedParts.futureDirections,
+    conclusion: generatedParts.conclusion,
+  };
+  const writingTasks = [];
+  const sectionParagraphResults = generatedParts.sectionParagraphs.map((section) => [...section]);
+
+  const enqueueWritingTask = (existingPart, assign, taskKey, progress, kind, heading, task) => {
+    if (existingPart) {
+      return;
+    }
+
+    writingTasks.push(async () => {
+      try {
+        assign(await generateProgressPart(taskKey, progress, kind, heading, task));
+      } catch (error) {
+        emitProgress({
+          phase: 'writing',
+          taskKind: kind,
+          status: 'error',
+          taskKey,
+          heading: cleanString(heading),
+          current: completedTasks,
+          total: totalTasks,
+          message: error instanceof Error ? error.message : String(error),
+          ...progress,
+        });
+        throw error;
+      }
+    });
+  };
+
+  enqueueWritingTask(
+    parts.abstract,
+    (part) => {
+      parts.abstract = part;
+    },
+    'abstract',
+    {},
+    'abstract',
+    'Abstract',
+    blueprint.abstractTask,
+  );
+  enqueueWritingTask(
+    parts.introduction,
+    (part) => {
+      parts.introduction = part;
+    },
+    'introduction',
+    {},
+    'introduction',
+    'Introduction',
+    blueprint.introductionTask,
+  );
+
+  for (const [sectionIndex, section] of blueprint.sections.entries()) {
+    const paragraphTasks = section.paragraphTasks || [section];
+
+    for (const [paragraphIndex, paragraphTask] of paragraphTasks.entries()) {
+      enqueueWritingTask(
+        sectionParagraphResults[sectionIndex][paragraphIndex],
+        (part) => {
+          sectionParagraphResults[sectionIndex][paragraphIndex] = part;
+        },
+        `section:${sectionIndex}:paragraph:${paragraphIndex}`,
+        {
+          sectionIndex: sectionIndex + 1,
+          sectionTotal: blueprint.sections.length,
+          paragraphIndex: paragraphIndex + 1,
+          paragraphTotal: paragraphTasks.length,
+        },
+        'section_paragraph',
+        section.heading,
+        paragraphTask,
+      );
+    }
+  }
+
+  for (const [index, row] of blueprint.comparisonTable.entries()) {
+    enqueueWritingTask(
+      parts.comparisonTable[index],
+      (part) => {
+        parts.comparisonTable[index] = part;
+      },
+      `comparison:${index}`,
+      {
+        itemIndex: index + 1,
+        itemTotal: blueprint.comparisonTable.length,
+      },
+      'comparison',
+      row.theme,
+      row,
+    );
+  }
+
+  for (const [index, gap] of blueprint.researchGaps.entries()) {
+    enqueueWritingTask(
+      parts.researchGaps[index],
+      (part) => {
+        parts.researchGaps[index] = part;
+      },
+      `researchGap:${index}`,
+      {
+        itemIndex: index + 1,
+        itemTotal: blueprint.researchGaps.length,
+      },
+      'research_gap',
+      'Research Gap',
+      gap,
+    );
+  }
+
+  for (const [index, direction] of blueprint.futureDirections.entries()) {
+    enqueueWritingTask(
+      parts.futureDirections[index],
+      (part) => {
+        parts.futureDirections[index] = part;
+      },
+      `futureDirection:${index}`,
+      {
+        itemIndex: index + 1,
+        itemTotal: blueprint.futureDirections.length,
+      },
+      'future_direction',
+      'Future Direction',
+      direction,
+    );
+  }
+
+  enqueueWritingTask(
+    parts.conclusion,
+    (part) => {
+      parts.conclusion = part;
+    },
+    'conclusion',
+    {},
+    'conclusion',
+    'Conclusion',
+    blueprint.conclusionTask,
+  );
+
+  if (writingTasks.length > 0) {
+    await runReviewWritingTasks(writingTasks, options.writingConcurrency);
+  }
+  parts.sections = sectionParagraphResults.map((paragraphs) => mergeGeneratedParagraphParts(paragraphs));
+
+  emitProgress({
+    phase: 'merge',
+    taskKind: 'merge',
+    status: 'running',
+    current: completedTasks,
+    total: totalTasks,
+  });
+
+  const draft = composeReviewDraftFromGeneratedParts({ blueprint, contextItems, parts });
+
+  emitProgress({
+    phase: 'done',
+    taskKind: 'done',
+    status: 'done',
+    current: totalTasks,
+    total: totalTasks,
+  });
+
+  return draft;
+}
+
+async function generateReviewJsonDraftLayered(options, sender) {
+  const blueprint = await generateReviewBlueprint(options, sender);
+  return generateReviewJsonDraftFromBlueprint({ ...options, blueprint }, sender);
+}
+
+function normalizeReferenceId(value) {
+  return cleanString(value).toUpperCase();
+}
+
+function collectInternalCitationIds(text) {
+  const ids = [];
+  const value = cleanString(text);
+  const pattern = /\[([A-Za-z]\d+)\]/g;
+  let match = pattern.exec(value);
+
+  while (match) {
+    ids.push(normalizeReferenceId(match[1]));
+    match = pattern.exec(value);
+  }
+
+  return ids;
+}
+
+function referencePart(value) {
+  return cleanString(value).replace(/[.。;；,\s]+$/g, '');
+}
+
+function formatReferenceText(reference, source) {
+  const authors = referencePart(reference?.authors);
+  const title = referencePart(reference?.title || source?.title);
+  const journal = referencePart(reference?.journal || source?.publication || source?.journal);
+  const year = referencePart(reference?.year);
+  const pages = referencePart(reference?.pages);
+  const doi = referencePart(reference?.doi);
+  const parts = [authors, title, journal, year].filter(Boolean);
+
+  if (pages) {
+    parts.push(/^\d/.test(pages) ? `pp. ${pages}` : pages);
+  }
+
+  if (doi) {
+    parts.push(`DOI: ${doi.replace(/^doi:\s*/i, '')}`);
+  }
+
+  if (parts.length === 0) {
+    parts.push(referencePart(source?.title) || referencePart(source?.relevance) || 'PaperQuay source');
+  }
+
+  return parts.map((part) => (/[.!?。！？]$/.test(part) ? part : `${part}.`)).join(' ');
+}
+
+function splitReviewParagraphs(value) {
+  return cleanString(value)
+    .split(/\n\s*\n+/)
+    .map((item) => item.replace(/\s*\n\s*/g, ' ').replace(/\s{2,}/g, ' ').trim())
+    .filter(Boolean);
+}
+
+function cleanReviewTextAfterFigureAnchorRemoval(value) {
+  return cleanString(value)
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\s+([,.;:!?，。；：！？])/g, '$1')
+    .replace(/([（(])\s+/g, '$1')
+    .replace(/\s+([）)])/g, '$1')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function normalizeReviewFigureAnchorKey(value) {
+  return cleanString(value)
+    .replace(/^#/, '')
+    .replace(/^FIG(?:URE)?[-_\s#]*/i, 'F')
+    .toUpperCase();
+}
+
+function figureAnchorKeys(figure, index) {
+  const keys = new Set();
+  const number = cleanString(figure?.number) || String(index + 1);
+  const id = cleanString(figure?.id);
+  const sourceId = normalizeReferenceId(figure?.sourceId);
+
+  for (const key of [
+    id,
+    number,
+    `F${number}`,
+    `FIG${number}`,
+    `FIGURE${number}`,
+    sourceId && `${sourceId}-F${number}`,
+  ]) {
+    const normalizedKey = normalizeReviewFigureAnchorKey(key);
+    if (normalizedKey) {
+      keys.add(normalizedKey);
+    }
+  }
+
+  return keys;
+}
+
+function buildReviewFigureAnchorMap(figures) {
+  const byAnchor = new Map();
+
+  for (const [index, figure] of figures.entries()) {
+    for (const key of figureAnchorKeys(figure, index)) {
+      if (!byAnchor.has(key)) {
+        byAnchor.set(key, figure);
+      }
+    }
+  }
+
+  return byAnchor;
+}
+
+function extractInlineReviewFigures(paragraph, figureByAnchor, usedFigureNumbers, figureLabel = 'Figure') {
+  const inlineFigures = [];
+  const anchorLabels = [];
+  const textWithAnchorLabels = cleanString(paragraph).replace(REVIEW_FIGURE_ANCHOR_PATTERN, (_match, rawAnchor) => {
+    const figure = figureByAnchor.get(normalizeReviewFigureAnchorKey(rawAnchor));
+    const figureNumber = cleanString(figure?.number);
+
+    if (figure && figureNumber && !usedFigureNumbers.has(figureNumber)) {
+      usedFigureNumbers.add(figureNumber);
+      inlineFigures.push(figure);
+      const token = `__PAPERQUAY_FIGURE_REF_${anchorLabels.length}__`;
+      anchorLabels.push([token, `${figureLabel} ${figureNumber}`]);
+      return token;
+    }
+
+    return '';
+  });
+  const textWithoutAnchors = cleanReviewTextAfterFigureAnchorRemoval(
+    anchorLabels.reduce((text, [token]) => text.replaceAll(token, ''), textWithAnchorLabels),
+  );
+  const text = textWithoutAnchors
+    ? cleanReviewTextAfterFigureAnchorRemoval(
+      anchorLabels.reduce((nextText, [token, label]) => nextText.replaceAll(token, label), textWithAnchorLabels),
+    )
+    : '';
+
+  return {
+    text,
+    inlineFigures,
+  };
+}
+
+function figurePlacementMatchesSection(figure, section, sectionIndex) {
+  const placement = cleanString(figure?.placement).toUpperCase();
+  if (!placement) {
+    return false;
+  }
+
+  const sectionId = cleanString(section?.id || `section-${sectionIndex + 1}`).toUpperCase();
+  const heading = cleanString(section?.heading).toUpperCase();
+  const number = String(sectionIndex + 1);
+
+  return (
+    placement === sectionId ||
+    placement === `SECTION-${number}` ||
+    placement === `SECTION ${number}` ||
+    placement === number ||
+    (heading && (placement === heading || placement.includes(heading) || heading.includes(placement)))
+  );
+}
+
+function stripReviewFigureAnchors(value) {
+  return cleanReviewTextAfterFigureAnchorRemoval(
+    cleanString(value).replace(REVIEW_FIGURE_ANCHOR_PATTERN, ''),
+  );
+}
+
+function reviewTextParagraphs(value) {
+  const paragraphs = splitReviewParagraphs(value);
+  return (paragraphs.length > 0 ? paragraphs : [cleanString(value)])
+    .map((text) => ({ text }))
+    .filter((paragraph) => paragraph.text);
+}
+
+function prepareReviewDocxData(value, outputLanguage = '') {
+  const draft = normalizeReviewJsonDraft(value);
+  const t = reviewSectionTitles(outputLanguage || value?.outputLanguage);
+  const referenceById = new Map();
+  const sourceById = new Map();
+
+  for (const reference of draft.references) {
+    const id = normalizeReferenceId(reference.id);
+    if (id && !referenceById.has(id)) {
+      referenceById.set(id, reference);
+    }
+  }
+
+  for (const source of draft.sources) {
+    const id = normalizeReferenceId(source.id);
+    if (id && !sourceById.has(id)) {
+      sourceById.set(id, source);
+    }
+  }
+
+  const orderedIds = [];
+  const seenIds = new Set();
+  const addId = (id) => {
+    const normalizedId = normalizeReferenceId(id);
+    if (!/^[A-Z]\d+$/.test(normalizedId) || seenIds.has(normalizedId)) {
+      return;
+    }
+
+    seenIds.add(normalizedId);
+    orderedIds.push(normalizedId);
+  };
+
+  for (const text of [draft.abstract, draft.intentSummary, draft.thesis, draft.introduction]) {
+    for (const id of collectInternalCitationIds(text)) addId(id);
+  }
+  for (const section of draft.sections) {
+    for (const id of collectInternalCitationIds(section.content)) addId(id);
+    for (const id of section.citations) addId(id);
+  }
+  for (const row of draft.comparisonTable) {
+    for (const id of row.papers) addId(id);
+    for (const id of collectInternalCitationIds(row.conclusion)) addId(id);
+  }
+  for (const text of [...draft.researchGaps, ...draft.futureDirections, draft.conclusion]) {
+    for (const id of collectInternalCitationIds(text)) addId(id);
+  }
+  for (const figure of draft.figures) addId(figure.sourceId);
+  for (const reference of draft.references) addId(reference.id);
+  for (const source of draft.sources) addId(source.id);
+
+  const citationLabelById = new Map();
+  const references = orderedIds.map((id, index) => {
+    const number = String(index + 1);
+    const label = `[${number}]`;
+    const reference = referenceById.get(id) || {};
+    const source = sourceById.get(id) || {};
+    citationLabelById.set(id, label);
+
+    return {
+      id,
+      number,
+      label,
+      title: cleanString(reference.title || source.title),
+      authors: cleanString(reference.authors),
+      year: cleanString(reference.year),
+      journal: cleanString(reference.journal || source.publication || source.journal),
+      pages: cleanString(reference.pages),
+      doi: cleanString(reference.doi),
+      sourceType: cleanString(source.sourceType),
+      formattedText: formatReferenceText(reference, source),
+    };
+  });
+
+  const replaceInternalCitations = (text) =>
+    cleanString(text).replace(/\[([A-Za-z]\d+)\]/g, (match, id) => citationLabelById.get(normalizeReferenceId(id)) || match);
+  const citationLabels = (ids) =>
+    Array.from(new Set(ids.map((id) => citationLabelById.get(normalizeReferenceId(id))).filter(Boolean)));
+  const figures = draft.figures.map((figure, index) => {
+    const sourceId = normalizeReferenceId(figure.sourceId);
+    const source = sourceById.get(sourceId) || {};
+    const label = citationLabelById.get(sourceId) || '';
+    const number = String(index + 1);
+    const caption = replaceInternalCitations(figure.caption || figure.title || `Figure ${number}`);
+
+    return {
+      ...figure,
+      number,
+      marker: `${REVIEW_FIGURE_MARKER_PREFIX}${number}__`,
+      sourceId,
+      sourceLabel: label,
+      sourceTitle: cleanString(figure.sourceTitle || source.title),
+      caption,
+      captionText: `${t.figureLabel} ${number}. ${caption}${label && !caption.includes(label) ? ` ${label}` : ''}`,
+    };
+  });
+  const figureByAnchor = buildReviewFigureAnchorMap(figures);
+  const usedFigureNumbers = new Set();
+  const sections = draft.sections.map((section, sectionIndex) => {
+    const rawContent = replaceInternalCitations(section.content);
+    const content = stripReviewFigureAnchors(rawContent);
+    const labels = citationLabels(section.citations);
+    const missingCitationText = labels.filter((label) => !content.includes(label)).join(' ');
+    const contentParagraphs = splitReviewParagraphs(rawContent);
+    const rawParagraphs = contentParagraphs.length > 0 ? contentParagraphs : [rawContent];
+    const paragraphs = rawParagraphs
+      .map((paragraph) => {
+        const parsed = extractInlineReviewFigures(paragraph, figureByAnchor, usedFigureNumbers, t.figureLabel);
+        return {
+          text: parsed.text,
+          hasText: Boolean(parsed.text),
+          citationText: '',
+          inlineFigures: parsed.inlineFigures,
+          hasInlineFigures: parsed.inlineFigures.length > 0,
+        };
+      })
+      .filter((paragraph) => paragraph.hasText || paragraph.hasInlineFigures);
+    const lastTextParagraphIndex = paragraphs.reduce(
+      (lastIndex, paragraph, index) => (paragraph.hasText ? index : lastIndex),
+      -1,
+    );
+
+    if (lastTextParagraphIndex >= 0) {
+      paragraphs[lastTextParagraphIndex].citationText = missingCitationText;
+    }
+
+    const placedFigureNumbers = new Set();
+    for (const paragraph of paragraphs) {
+      for (const figure of paragraph.inlineFigures) {
+        placedFigureNumbers.add(cleanString(figure.number));
+      }
+    }
+
+    const placementFigures = figures.filter((figure) => {
+      const figureNumber = cleanString(figure.number);
+      return (
+        figureNumber &&
+        !usedFigureNumbers.has(figureNumber) &&
+        !placedFigureNumbers.has(figureNumber) &&
+        figurePlacementMatchesSection(figure, section, sectionIndex)
+      );
+    });
+
+    if (placementFigures.length > 0) {
+      for (const figure of placementFigures) {
+        usedFigureNumbers.add(cleanString(figure.number));
+      }
+
+      if (paragraphs.length > 0) {
+        const targetIndex = paragraphs.reduce(
+          (lastIndex, paragraph, index) => (paragraph.hasText ? index : lastIndex),
+          paragraphs.length - 1,
+        );
+        paragraphs[targetIndex].inlineFigures.push(...placementFigures);
+        paragraphs[targetIndex].hasInlineFigures = true;
+      } else {
+        paragraphs.push({
+          text: '',
+          hasText: false,
+          citationText: '',
+          inlineFigures: placementFigures,
+          hasInlineFigures: true,
+        });
+      }
+    }
+
+    return {
+      ...section,
+      content,
+      citationLabels: labels,
+      citationText: missingCitationText,
+      paragraphs,
+    };
+  });
+  const remainingFigures = figures.filter((figure) => !usedFigureNumbers.has(cleanString(figure.number)));
+  const abstract = stripReviewFigureAnchors(replaceInternalCitations(draft.abstract));
+  const intentSummary = stripReviewFigureAnchors(replaceInternalCitations(draft.intentSummary));
+  const thesis = stripReviewFigureAnchors(replaceInternalCitations(draft.thesis));
+  const introduction = stripReviewFigureAnchors(replaceInternalCitations(draft.introduction));
+  const conclusion = stripReviewFigureAnchors(replaceInternalCitations(draft.conclusion));
+
+  return {
+    ...draft,
+    abstract,
+    abstractParagraphs: reviewTextParagraphs(abstract),
+    intentSummary,
+    intentSummaryParagraphs: reviewTextParagraphs(intentSummary),
+    thesis,
+    thesisParagraphs: reviewTextParagraphs(thesis),
+    introduction,
+    introductionParagraphs: reviewTextParagraphs(introduction),
+    sections,
+    comparisonTable: draft.comparisonTable.map((row) => {
+      const conclusion = stripReviewFigureAnchors(replaceInternalCitations(row.conclusion));
+      const labels = citationLabels(row.papers);
+      return {
+        ...row,
+        conclusion,
+        paperLabels: labels,
+        paperLabelsText: labels.filter((label) => !conclusion.includes(label)).join(' '),
+      };
+    }),
+    researchGaps: draft.researchGaps.map((item) => stripReviewFigureAnchors(replaceInternalCitations(item))),
+    futureDirections: draft.futureDirections.map((item) => stripReviewFigureAnchors(replaceInternalCitations(item))),
+    conclusion,
+    conclusionParagraphs: reviewTextParagraphs(conclusion),
+    references,
+    hasFigures: remainingFigures.length > 0,
+    hasRemainingFigures: remainingFigures.length > 0,
+    figures,
+    remainingFigures,
+    sources: draft.sources.map((source) => {
+      const id = normalizeReferenceId(source.id);
+      const label = citationLabelById.get(id) || '';
+      return {
+        ...source,
+        id,
+        label,
+        number: label.replace(/[\[\]]/g, ''),
+      };
+    }),
+  };
+}
+
+function formatDocxtemplaterError(error) {
+  const properties = error?.properties;
+  const errors = Array.isArray(properties?.errors)
+    ? properties.errors.map((item) => item.properties?.explanation || item.message).filter(Boolean)
+    : [];
+  const message = error instanceof Error ? error.message : String(error);
+
+  if (/corrupt|zip|end of data|central directory/i.test(message)) {
+    return 'Selected template is not a valid .docx Word file. Choose an existing Word .docx template, or leave the template empty to use PaperQuay built-in template.';
+  }
+
+  return errors.length > 0
+    ? errors.join('\n')
+    : message;
+}
+
+function xmlEscape(value) {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+function xmlUnescape(value) {
+  return String(value)
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, '&');
+}
+
+function regexEscape(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function wordText(text, options = {}) {
+  const runProperties = [];
+
+  if (options.bold) {
+    runProperties.push('<w:b/>');
+  }
+
+  if (options.size) {
+    runProperties.push(`<w:sz w:val="${options.size}"/>`);
+  }
+
+  const properties = runProperties.length > 0 ? `<w:rPr>${runProperties.join('')}</w:rPr>` : '';
+  return `<w:r>${properties}<w:t xml:space="preserve">${xmlEscape(text)}</w:t></w:r>`;
+}
+
+function wordParagraph(text, options = {}) {
+  const properties = [];
+
+  if (options.style) {
+    properties.push(`<w:pStyle w:val="${options.style}"/>`);
+  }
+
+  if (options.align) {
+    properties.push(`<w:jc w:val="${options.align}"/>`);
+  }
+
+  if (options.firstLine) {
+    properties.push(`<w:ind w:firstLine="${options.firstLine}"/>`);
+  }
+
+  if (options.spacing) {
+    properties.push(`<w:spacing w:before="${options.spacing.before ?? 0}" w:after="${options.spacing.after ?? 120}" w:line="${options.spacing.line ?? 360}" w:lineRule="auto"/>`);
+  }
+
+  const paragraphProperties = properties.length > 0 ? `<w:pPr>${properties.join('')}</w:pPr>` : '';
+  return `<w:p>${paragraphProperties}${wordText(text, options)}</w:p>`;
+}
+
+function latexToOmml(latex, displayMode = false) {
+  try {
+    const value = cleanString(latex);
+    if (!value) return null;
+
+    const mathml = temml.renderToString(value, {
+      displayMode,
+      throwOnError: false,
+    });
+    const omml = mathml2omml.mml2omml(mathml);
+
+    return cleanString(omml).startsWith('<m:oMath') ? omml : null;
+  } catch (error) {
+    console.warn(`[PaperQuay] Failed to convert LaTeX to OMML: ${error instanceof Error ? error.message : String(error)}`);
+    return null;
+  }
+}
+
+function ensureDocxMathNamespace(documentXml) {
+  if (/<w:document\b[^>]*\sxmlns:m=/.test(documentXml)) {
+    return documentXml;
+  }
+
+  return documentXml.replace(
+    /<w:document\b([^>]*)>/,
+    '<w:document$1 xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math">',
+  );
+}
+
+function wordRunWithText(text, runProperties = '') {
+  if (!text) return '';
+  return `<w:r>${runProperties}<w:t xml:space="preserve">${xmlEscape(text)}</w:t></w:r>`;
+}
+
+function splitParagraphTextSegments(paragraphBody) {
+  const segments = [''];
+  const tokenPattern = /<w:t\b[^>]*>([\s\S]*?)<\/w:t>|<w:tab\b[^>]*(?:\/>|><\/w:tab>)|<w:br\b[^>]*(?:\/>|><\/w:br>)/g;
+  let match = tokenPattern.exec(paragraphBody);
+
+  while (match) {
+    const token = match[0];
+    if (token.startsWith('<w:t')) {
+      segments[segments.length - 1] += xmlUnescape(match[1] || '');
+    } else if (token.startsWith('<w:tab')) {
+      segments[segments.length - 1] += '\t';
+    } else {
+      segments.push('');
+    }
+
+    match = tokenPattern.exec(paragraphBody);
+  }
+
+  return segments;
+}
+
+function inlineOmmlRunsFromText(text, runProperties = '') {
+  const formulaPattern = /\$\$([^$\n]+)\$\$|\$([^$\n]+)\$/g;
+  let cursor = 0;
+  let changed = false;
+  let xml = '';
+  let match = formulaPattern.exec(text);
+
+  while (match) {
+    if (match.index > cursor) {
+      xml += wordRunWithText(text.slice(cursor, match.index), runProperties);
+    }
+
+    const latex = match[1] || match[2] || '';
+    const omml = latexToOmml(latex, Boolean(match[1]));
+    if (omml) {
+      xml += omml;
+      changed = true;
+    } else {
+      xml += wordRunWithText(match[0], runProperties);
+    }
+
+    cursor = match.index + match[0].length;
+    match = formulaPattern.exec(text);
+  }
+
+  if (cursor < text.length) {
+    xml += wordRunWithText(text.slice(cursor), runProperties);
+  }
+
+  return { changed, xml };
+}
+
+function injectOmmlIntoParagraph(paragraphXml) {
+  if (!paragraphXml.includes('$')) {
+    return paragraphXml;
+  }
+
+  const openMatch = paragraphXml.match(/^<w:p\b[^>]*>/);
+  if (!openMatch) {
+    return paragraphXml;
+  }
+
+  const openTag = openMatch[0];
+  const closeTag = '</w:p>';
+  const inner = paragraphXml.slice(openTag.length, paragraphXml.length - closeTag.length);
+  const paragraphPropertiesMatch = inner.match(/^\s*(<w:pPr\b[\s\S]*?<\/w:pPr>)/);
+  const paragraphProperties = paragraphPropertiesMatch?.[1] || '';
+  const body = paragraphProperties ? inner.slice(paragraphPropertiesMatch[0].length) : inner;
+  const runProperties = body.match(/<w:rPr\b[\s\S]*?<\/w:rPr>/)?.[0] || '';
+  const segments = splitParagraphTextSegments(body);
+
+  if (!segments.some((segment) => segment.includes('$'))) {
+    return paragraphXml;
+  }
+
+  if (segments.length === 1) {
+    const blockMatch = segments[0].trim().match(/^\$\$([\s\S]+)\$\$$/);
+    if (blockMatch) {
+      const omml = latexToOmml(blockMatch[1], true);
+      return omml
+        ? `${openTag}${paragraphProperties}<m:oMathPara>${omml}</m:oMathPara>${closeTag}`
+        : paragraphXml;
+    }
+  }
+
+  let changed = false;
+  const nextBody = segments.map((segment, index) => {
+    const converted = inlineOmmlRunsFromText(segment, runProperties);
+    changed = changed || converted.changed;
+    const lineBreak = index < segments.length - 1 ? `<w:r>${runProperties}<w:br/></w:r>` : '';
+    return `${converted.xml}${lineBreak}`;
+  }).join('');
+
+  return changed ? `${openTag}${paragraphProperties}${nextBody}${closeTag}` : paragraphXml;
+}
+
+function injectOmmlInDocx(zip) {
+  const documentFile = zip.file('word/document.xml');
+  if (!documentFile) {
+    return { convertedParagraphs: 0 };
+  }
+
+  const originalXml = documentFile.asText();
+  if (!originalXml.includes('$')) {
+    return { convertedParagraphs: 0 };
+  }
+
+  let convertedParagraphs = 0;
+  const nextXml = ensureDocxMathNamespace(originalXml).replace(/<w:p\b[^>]*>[\s\S]*?<\/w:p>/g, (paragraphXml) => {
+    const nextParagraphXml = injectOmmlIntoParagraph(paragraphXml);
+    if (nextParagraphXml !== paragraphXml) {
+      convertedParagraphs += 1;
+    }
+    return nextParagraphXml;
+  });
+
+  if (nextXml !== originalXml) {
+    zip.file('word/document.xml', nextXml);
+  }
+
+  return { convertedParagraphs };
+}
+
+function imageExtensionForDocx(filePath) {
+  const extension = path.extname(cleanString(filePath)).replace(/^\./, '').toLowerCase();
+
+  if (extension === 'jpg' || extension === 'jpeg') {
+    return 'jpeg';
+  }
+
+  if (extension === 'png' || extension === 'gif') {
+    return extension;
+  }
+
+  return '';
+}
+
+function imageExtensionFromBuffer(buffer) {
+  if (!Buffer.isBuffer(buffer) || buffer.length < 4) {
+    return '';
+  }
+
+  if (buffer.length >= 8 && buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) {
+    return 'png';
+  }
+
+  if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
+    return 'jpeg';
+  }
+
+  if (buffer.subarray(0, 4).toString('ascii') === 'GIF8') {
+    return 'gif';
+  }
+
+  return '';
+}
+
+function convertImageToPngForDocx(filePath) {
+  if (!nativeImage || typeof nativeImage.createFromPath !== 'function') {
+    return null;
+  }
+
+  const image = nativeImage.createFromPath(filePath);
+  if (!image || image.isEmpty()) {
+    return null;
+  }
+
+  const buffer = image.toPNG();
+  return buffer?.length ? buffer : null;
+}
+
+async function readReviewFigureImageForDocx(figure, index) {
+  const imagePath = cleanString(figure.path);
+  const label = cleanString(figure.id) || `figure ${index + 1}`;
+
+  if (!imagePath) {
+    throw new Error(`Review figure ${label} has no local image path.`);
+  }
+
+  let stat = null;
+  try {
+    stat = await fsp.stat(imagePath);
+  } catch (error) {
+    throw new Error(`Review figure ${label} image file cannot be found: ${imagePath}. ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  if (!stat.isFile()) {
+    throw new Error(`Review figure ${label} image path is not a file: ${imagePath}`);
+  }
+
+  let fileBuffer;
+  try {
+    fileBuffer = await fsp.readFile(imagePath);
+  } catch (error) {
+    throw new Error(`Review figure ${label} image file cannot be read: ${imagePath}. ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  let extension = imageExtensionFromBuffer(fileBuffer);
+  let imageBuffer = extension ? fileBuffer : null;
+
+  if (!imageBuffer) {
+    imageBuffer = convertImageToPngForDocx(imagePath);
+    extension = imageBuffer ? 'png' : '';
+  }
+
+  if (!imageBuffer || !extension) {
+    const pathExtension = path.extname(imagePath).replace(/^\./, '') || 'none';
+    throw new Error(`Review figure ${label} image format is not supported by Word export: ${imagePath}. File extension: ${pathExtension}; bytes: ${fileBuffer.length}.`);
+  }
+
+  return { imageBuffer, extension, imagePath };
+}
+
+function readImagePixelSize(buffer, extension) {
+  if (extension === 'png' && buffer.length >= 24) {
+    return {
+      width: buffer.readUInt32BE(16),
+      height: buffer.readUInt32BE(20),
+    };
+  }
+
+  if (extension === 'gif' && buffer.length >= 10) {
+    return {
+      width: buffer.readUInt16LE(6),
+      height: buffer.readUInt16LE(8),
+    };
+  }
+
+  if (extension === 'jpeg') {
+    let offset = 2;
+
+    while (offset + 9 < buffer.length) {
+      if (buffer[offset] !== 0xff) {
+        offset += 1;
+        continue;
+      }
+
+      const marker = buffer[offset + 1];
+      const segmentLength = buffer.readUInt16BE(offset + 2);
+
+      if (marker >= 0xc0 && marker <= 0xc3 && offset + 8 < buffer.length) {
+        return {
+          height: buffer.readUInt16BE(offset + 5),
+          width: buffer.readUInt16BE(offset + 7),
+        };
+      }
+
+      if (!segmentLength || segmentLength < 2) {
+        break;
+      }
+
+      offset += 2 + segmentLength;
+    }
+  }
+
+  return { width: 1200, height: 720 };
+}
+
+function imageSizeEmu(buffer, extension) {
+  const size = readImagePixelSize(buffer, extension);
+  const maxWidth = Math.round(5.8 * WORD_EMU_PER_INCH);
+  const maxHeight = Math.round(3.8 * WORD_EMU_PER_INCH);
+  const width = Math.max(1, size.width) * WORD_EMU_PER_PIXEL;
+  const height = Math.max(1, size.height) * WORD_EMU_PER_PIXEL;
+  const scale = Math.min(maxWidth / width, maxHeight / height, 1);
+
+  return {
+    cx: Math.round(width * scale),
+    cy: Math.round(height * scale),
+  };
+}
+
+function wordImageParagraph({ relationshipId, docPrId, name, cx, cy }) {
+  return `<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:before="120" w:after="80" w:line="320" w:lineRule="auto"/></w:pPr><w:r><w:drawing><wp:inline xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${cx}" cy="${cy}"/><wp:effectExtent l="0" t="0" r="0" b="0"/><wp:docPr id="${docPrId}" name="${xmlEscape(name)}"/><wp:cNvGraphicFramePr><a:graphicFrameLocks xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" noChangeAspect="1"/></wp:cNvGraphicFramePr><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="${docPrId}" name="${xmlEscape(name)}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:embed="${relationshipId}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>`;
+}
+
+function ensureDocxImageContentTypes(zip) {
+  const fileName = '[Content_Types].xml';
+  const xml = zip.file(fileName)?.asText();
+
+  if (!xml) {
+    return;
+  }
+
+  let nextXml = xml;
+  const defaults = [
+    ['png', 'image/png'],
+    ['jpeg', 'image/jpeg'],
+    ['jpg', 'image/jpeg'],
+    ['gif', 'image/gif'],
+  ];
+
+  for (const [extension, contentType] of defaults) {
+    if (!new RegExp(`<Default\\s+Extension="${extension}"`, 'i').test(nextXml)) {
+      nextXml = nextXml.replace(
+        '</Types>',
+        `  <Default Extension="${extension}" ContentType="${contentType}"/>\n</Types>`,
+      );
+    }
+  }
+
+  if (nextXml !== xml) {
+    zip.file(fileName, nextXml);
+  }
+}
+
+function documentRelationshipsXml(zip) {
+  const fileName = 'word/_rels/document.xml.rels';
+  const xml = zip.file(fileName)?.asText();
+
+  return xml?.trim()
+    ? xml
+    : `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+</Relationships>`;
+}
+
+async function embedReviewFiguresInDocx(zip, data, outputLanguage = '') {
+  const figures = Array.isArray(data?.figures) ? data.figures : [];
+  const documentFile = zip.file('word/document.xml');
+  const skippedFigures = [];
+
+  if (!documentFile || figures.length === 0) {
+    return { skippedFigures };
+  }
+
+  ensureDocxImageContentTypes(zip);
+
+  const t = reviewSectionTitles(outputLanguage);
+  let documentXml = documentFile.asText();
+  let relsXml = documentRelationshipsXml(zip);
+  let changed = false;
+
+  for (const [index, figure] of figures.entries()) {
+    const marker = `${REVIEW_FIGURE_MARKER_PREFIX}${index + 1}__`;
+    const markerParagraphPattern = new RegExp(`<w:p\\b(?:(?!<\\/w:p>)[\\s\\S])*?${regexEscape(marker)}(?:(?!<\\/w:p>)[\\s\\S])*?<\\/w:p>`, 'g');
+    const matches = documentXml.match(markerParagraphPattern);
+    const figureLabel = cleanString(figure.id) || `${t.figureLabel} ${index + 1}`;
+
+    if (!matches || matches.length === 0) {
+      skippedFigures.push({ index, id: figureLabel, reason: `Placeholder ${marker} not found in template.` });
+      continue;
+    }
+
+    let replacement;
+    try {
+      const { imageBuffer, extension } = await readReviewFigureImageForDocx(figure, index);
+      const mediaName = `paperquay-review-figure-${index + 1}.${extension === 'jpeg' ? 'jpg' : extension}`;
+      const relationshipId = `rIdPaperQuayFigure${index + 1}`;
+      const { cx, cy } = imageSizeEmu(imageBuffer, extension);
+
+      zip.file(`word/media/${mediaName}`, imageBuffer);
+
+      if (!relsXml.includes(`Id="${relationshipId}"`)) {
+        relsXml = relsXml.replace(
+          '</Relationships>',
+          `  <Relationship Id="${relationshipId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/${mediaName}"/>\n</Relationships>`,
+        );
+      }
+
+      replacement = wordImageParagraph({
+        relationshipId,
+        docPrId: 1000 + index + 1,
+        name: `PaperQuay Figure ${index + 1}`,
+        cx,
+        cy,
+      });
+    } catch (figureError) {
+      // Skip the broken figure and keep exporting instead of failing the whole document.
+      const reason = figureError instanceof Error ? figureError.message : String(figureError);
+      skippedFigures.push({ index, id: figureLabel, reason });
+      replacement = wordParagraph(`[${t.figureMissing}: ${figureLabel}]`, {
+        size: 21,
+        align: 'center',
+        spacing: { before: 80, after: 80, line: 320 },
+      });
+      console.warn(`[PaperQuay] Review figure skipped during Word export: ${reason}`);
+    }
+
+    documentXml = documentXml.replace(markerParagraphPattern, replacement);
+    changed = true;
+  }
+
+  if (changed) {
+    zip.file('word/document.xml', documentXml);
+    zip.file('word/_rels/document.xml.rels', relsXml);
+  }
+
+  return { skippedFigures };
+}
+
+function defaultReviewTemplateBuffer(outputLanguage = '') {
+  const zip = new PizZip();
+  const t = reviewSectionTitles(outputLanguage);
+  const documentBody = [
+    wordParagraph('{title}', { align: 'center', bold: true, size: 32, spacing: { before: 0, after: 240, line: 360 } }),
+    wordParagraph(t.abstract, { bold: true, size: 28, spacing: { before: 240, after: 120, line: 320 } }),
+    wordParagraph('{#abstractParagraphs}'),
+    wordParagraph('{text}', { size: 24, firstLine: 480, spacing: { before: 0, after: 160, line: 360 } }),
+    wordParagraph('{/abstractParagraphs}'),
+    wordParagraph(`${t.keywordsLabel}{#keywords}{.}; {/keywords}`, { size: 24, spacing: { before: 0, after: 200, line: 320 } }),
+    wordParagraph(t.intent, { bold: true, size: 28, spacing: { before: 240, after: 120, line: 320 } }),
+    wordParagraph('{#intentSummaryParagraphs}'),
+    wordParagraph('{text}', { size: 24, firstLine: 480, spacing: { before: 0, after: 160, line: 360 } }),
+    wordParagraph('{/intentSummaryParagraphs}'),
+    wordParagraph(t.thesis, { bold: true, size: 28, spacing: { before: 240, after: 120, line: 320 } }),
+    wordParagraph('{#thesisParagraphs}'),
+    wordParagraph('{text}', { size: 24, firstLine: 480, spacing: { before: 0, after: 160, line: 360 } }),
+    wordParagraph('{/thesisParagraphs}'),
+    wordParagraph(t.introduction, { bold: true, size: 28, spacing: { before: 240, after: 120, line: 320 } }),
+    wordParagraph('{#introductionParagraphs}'),
+    wordParagraph('{text}', { size: 24, firstLine: 480, spacing: { before: 0, after: 160, line: 360 } }),
+    wordParagraph('{/introductionParagraphs}'),
+    wordParagraph(t.body, { bold: true, size: 28, spacing: { before: 240, after: 120, line: 320 } }),
+    wordParagraph('{#sections}'),
+    wordParagraph('{heading}', { bold: true, size: 26, spacing: { before: 160, after: 80, line: 320 } }),
+    wordParagraph('{#paragraphs}'),
+    wordParagraph('{#hasText}'),
+    wordParagraph('{text} {citationText}', { size: 24, firstLine: 480, spacing: { before: 0, after: 160, line: 360 } }),
+    wordParagraph('{/hasText}'),
+    wordParagraph('{#inlineFigures}'),
+    wordParagraph('{marker}', { align: 'center', spacing: { before: 80, after: 80, line: 320 } }),
+    wordParagraph('{captionText}', { size: 21, align: 'center', spacing: { before: 0, after: 160, line: 300 } }),
+    wordParagraph('{/inlineFigures}'),
+    wordParagraph('{/paragraphs}'),
+    wordParagraph('{/sections}'),
+    wordParagraph('{#hasRemainingFigures}'),
+    wordParagraph(t.figures, { bold: true, size: 28, spacing: { before: 240, after: 120, line: 320 } }),
+    wordParagraph('{#remainingFigures}'),
+    wordParagraph(`${REVIEW_FIGURE_MARKER_PREFIX}{number}__`, { align: 'center', spacing: { before: 80, after: 80, line: 320 } }),
+    wordParagraph('{captionText}', { size: 21, align: 'center', spacing: { before: 0, after: 160, line: 300 } }),
+    wordParagraph('{/remainingFigures}'),
+    wordParagraph('{/hasRemainingFigures}'),
+    wordParagraph(t.comparison, { bold: true, size: 28, spacing: { before: 240, after: 120, line: 320 } }),
+    wordParagraph('{#comparisonTable}'),
+    wordParagraph('{theme}：{conclusion} {paperLabelsText}', { size: 24, firstLine: 480, spacing: { before: 0, after: 120, line: 360 } }),
+    wordParagraph('{/comparisonTable}'),
+    wordParagraph(t.gaps, { bold: true, size: 28, spacing: { before: 240, after: 120, line: 320 } }),
+    wordParagraph('{#researchGaps}'),
+    wordParagraph('{.}', { size: 24, firstLine: 480, spacing: { before: 0, after: 120, line: 360 } }),
+    wordParagraph('{/researchGaps}'),
+    wordParagraph(t.future, { bold: true, size: 28, spacing: { before: 240, after: 120, line: 320 } }),
+    wordParagraph('{#futureDirections}'),
+    wordParagraph('{.}', { size: 24, firstLine: 480, spacing: { before: 0, after: 120, line: 360 } }),
+    wordParagraph('{/futureDirections}'),
+    wordParagraph(t.conclusion, { bold: true, size: 28, spacing: { before: 240, after: 120, line: 320 } }),
+    wordParagraph('{#conclusionParagraphs}'),
+    wordParagraph('{text}', { size: 24, firstLine: 480, spacing: { before: 0, after: 160, line: 360 } }),
+    wordParagraph('{/conclusionParagraphs}'),
+    wordParagraph(t.references, { bold: true, size: 28, spacing: { before: 240, after: 120, line: 320 } }),
+    wordParagraph('{#references}'),
+    wordParagraph('{label} {formattedText}', { size: 22, spacing: { before: 0, after: 120, line: 320 } }),
+    wordParagraph('{/references}'),
+  ].join('\n');
+
+  zip.file('[Content_Types].xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Default Extension="png" ContentType="image/png"/>
+  <Default Extension="jpg" ContentType="image/jpeg"/>
+  <Default Extension="jpeg" ContentType="image/jpeg"/>
+  <Default Extension="gif" ContentType="image/gif"/>
+  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+</Types>`);
+  zip.file('_rels/.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>`);
+  zip.file('word/_rels/document.xml.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+</Relationships>`);
+  zip.file('word/document.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <w:body>
+    ${documentBody}
+    <w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/></w:sectPr>
+  </w:body>
+</w:document>`);
+
+  return zip.generate({
+    type: 'nodebuffer',
+    compression: 'DEFLATE',
+  });
+}
+
+async function renderReviewDocxTemplate({ templatePath, outputPath, data }) {
+  try {
+    const outputLanguage = cleanString(data?.outputLanguage);
+    const templateBuffer = cleanString(templatePath)
+      ? await fsp.readFile(templatePath)
+      : defaultReviewTemplateBuffer(outputLanguage);
+    const zip = new PizZip(templateBuffer);
+    const doc = new Docxtemplater(zip, {
+      paragraphLoop: true,
+      linebreaks: true,
+    });
+    const docxData = prepareReviewDocxData(data, outputLanguage);
+    doc.render(docxData);
+    const { skippedFigures } = await embedReviewFiguresInDocx(doc.getZip(), docxData, outputLanguage);
+    injectOmmlInDocx(doc.getZip());
+    const buffer = doc.getZip().generate({
+      type: 'nodebuffer',
+      compression: 'DEFLATE',
+    });
+
+    await fsp.mkdir(path.dirname(outputPath), { recursive: true });
+    await fsp.writeFile(outputPath, buffer);
+
+    return {
+      outputPath,
+      byteSize: buffer.byteLength,
+      skippedFigures,
+    };
+  } catch (error) {
+    throw new Error(`Word template export failed: ${formatDocxtemplaterError(error)}`);
+  }
+}
+
+function createReviewCommands(context) {
+  const { approvedWritePaths } = context;
+
+  return {
+    async review_select_docx_template(_args, event) {
+      const win = BrowserWindow.fromWebContents(event.sender);
+      const result = await dialog.showOpenDialog(win, {
+        title: 'Select Word review template',
+        properties: ['openFile'],
+        filters: [{ name: 'Word Template', extensions: ['docx'] }],
+      });
+
+      return result.canceled ? null : result.filePaths[0] ?? null;
+    },
+
+    async review_select_docx_output_path({ suggestedFileName }, event) {
+      const win = BrowserWindow.fromWebContents(event.sender);
+      const normalizedFileName = safeFileName(cleanString(suggestedFileName) || 'PaperQuay-literature-review.docx', 'PaperQuay-literature-review.docx')
+        .replace(/\.(?!docx$)[^.]+$/i, '');
+      const finalName = normalizedFileName.toLowerCase().endsWith('.docx')
+        ? normalizedFileName
+        : `${normalizedFileName}.docx`;
+      const result = await dialog.showSaveDialog(win, {
+        title: 'Export literature review',
+        defaultPath: finalName,
+        filters: [{ name: 'Word Document', extensions: ['docx'] }],
+      });
+
+      if (result.canceled || !result.filePath) {
+        return null;
+      }
+
+      approvedWritePaths.add(path.resolve(result.filePath));
+      return result.filePath;
+    },
+
+    async review_generate_structured_json_openai_compatible({ options }, event) {
+      return generateReviewJsonDraftLayered(options, event?.sender);
+    },
+
+    async review_generate_blueprint_openai_compatible({ options }, event) {
+      return generateReviewBlueprint(options, event?.sender);
+    },
+
+    async review_generate_structured_json_from_blueprint_openai_compatible({ options }, event) {
+      return generateReviewJsonDraftFromBlueprint(options, event?.sender);
+    },
+
+    async review_export_docx({ templatePath, outputPath, data }) {
+      const template = cleanString(templatePath);
+      const output = cleanString(outputPath);
+
+      if (template && !template.toLowerCase().endsWith('.docx')) {
+        throw new Error('Template must be a .docx file');
+      }
+
+      if (!output.toLowerCase().endsWith('.docx')) {
+        throw new Error('Output path must be a .docx file');
+      }
+
+      const resolvedOutput = path.resolve(output);
+      if (!approvedWritePaths.has(resolvedOutput)) {
+        throw new Error(`Writing to this path is not allowed until approved: ${output}`);
+      }
+
+      return renderReviewDocxTemplate({
+        templatePath: template,
+        outputPath: resolvedOutput,
+        data,
+      });
+    },
+
+    async review_open_output({ path: outputPath }) {
+      const target = cleanString(outputPath);
+      if (!target) return;
+      await shell.openPath(target);
+    },
+  };
+}
+
+module.exports = {
+  buildReviewBlueprintPrompt,
+  buildReviewPartPrompt,
+  composeReviewDraftFromGeneratedParts,
+  createReviewCommands,
+  defaultReviewTemplateBuffer,
+  generateReviewBlueprint,
+  generateReviewJsonDraftLayered,
+  generateReviewJsonDraftFromBlueprint,
+  injectOmmlInDocx,
+  latexToOmml,
+  countCompletedReviewGeneratedParts,
+  normalizeReviewGeneratedParts,
+  normalizeReviewJsonDraft,
+  normalizeReviewBlueprint,
+  prepareReviewDocxData,
+  renderReviewDocxTemplate,
+};

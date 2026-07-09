@@ -580,7 +580,7 @@ interface NoteEditorProps {
     noteId: string,
     patch: UpdateNoteRequest,
     options?: { sourceId?: string },
-  ) => void | Promise<void>;
+  ) => Note | void | Promise<Note | void>;
   notes?: Note[];
   tags?: NoteTagSummary[];
   papers?: LiteraturePaper[];
@@ -662,6 +662,12 @@ export function NoteEditor({
   const pendingAnchorsRef = useRef(new Map<string, NoteAnchor>());
 
   useEffect(() => {
+    if (editorSourceId && editorSourceIdRef.current !== editorSourceId) {
+      editorSourceIdRef.current = editorSourceId;
+    }
+  }, [editorSourceId]);
+
+  useEffect(() => {
     latestCandidatesRef.current = { notes, tags, papers };
   }, [notes, papers, tags]);
 
@@ -686,6 +692,17 @@ export function NoteEditor({
       }
     }
   }, [note]);
+
+  const jumpToAnchorId = useCallback((anchorId: string) => {
+    const currentNote = latestNoteRef.current;
+    const anchor =
+      currentNote?.anchors.find((item) => item.id === anchorId) ??
+      pendingAnchorsRef.current.get(anchorId);
+
+    if (currentNote && anchor) {
+      onJumpToNoteAnchor?.(currentNote, anchor);
+    }
+  }, [onJumpToNoteAnchor]);
 
   const extensions = useMemo(() => [
     StarterKit.configure({
@@ -714,14 +731,7 @@ export function NoteEditor({
     Mathematics.configure({ katexOptions: { throwOnError: false } }),
     NoteComponentBlock,
     NoteAnchorBlock.configure({
-      onClick: (anchorId) => {
-        const currentNote = latestNoteRef.current;
-        const anchor = currentNote?.anchors.find((item) => item.id === anchorId);
-
-        if (currentNote && anchor) {
-          onJumpToNoteAnchor?.(currentNote, anchor);
-        }
-      },
+      onClick: jumpToAnchorId,
     }),
     SlashCommand.configure({
       items: slashCommandItems,
@@ -729,14 +739,7 @@ export function NoteEditor({
     }),
     NoteAnchorLink.configure({
       HTMLAttributes: { class: 'pq-tiptap-token pq-tiptap-note-anchor' },
-      onClick: (anchorId) => {
-        const currentNote = latestNoteRef.current;
-        const anchor = currentNote?.anchors.find((item) => item.id === anchorId);
-
-        if (currentNote && anchor) {
-          onJumpToNoteAnchor?.(currentNote, anchor);
-        }
-      },
+      onClick: jumpToAnchorId,
     }),
     WikiLink.configure({
       HTMLAttributes: { class: 'pq-tiptap-token pq-tiptap-wiki-link' },
@@ -793,7 +796,7 @@ export function NoteEditor({
       },
       onClick: (paperId) => onPaperClick?.(paperId),
     }),
-  ], [note?.id, onJumpToNoteAnchor, onOpenNote, onPaperClick, onTagClick]);
+  ], [jumpToAnchorId, note?.id, onOpenNote, onPaperClick, onTagClick]);
 
   const editor = useEditor({
     extensions,
@@ -1409,7 +1412,7 @@ export function NoteEditor({
       contentAnchorIds.has(anchor.id),
     );
 
-    await onUpdate(
+    const updatedNote = await onUpdate(
       note.id,
       {
         title: nextTitle,
@@ -1431,7 +1434,7 @@ export function NoteEditor({
     for (const anchorId of Array.from(pendingAnchorsRef.current.keys())) {
       if (!contentAnchorIds.has(anchorId)) pendingAnchorsRef.current.delete(anchorId);
     }
-    appliedUpdatedAtRef.current = Date.now();
+    appliedUpdatedAtRef.current = updatedNote?.updatedAt ?? note.updatedAt ?? Date.now();
     setExternalUpdateState(false, note.id);
     lastSavedSignatureRef.current = signature({ title: nextTitle, tagText, color, snapshot });
     clearNoteEditorDraft(editorSourceIdRef.current, note.id);

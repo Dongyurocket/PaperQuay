@@ -69,7 +69,8 @@ export function createSelectionNoteDraft(
   selectedExcerpt: SelectedExcerpt,
   sourceTitle?: string,
 ) {
-  const type: NoteType = selectedExcerpt.source === 'pdf' ? 'highlight' : 'standalone';
+  const type: NoteType =
+    selectedExcerpt.source === 'pdf' || selectedExcerpt.blockId ? 'highlight' : 'standalone';
   const excerpt = selectedExcerpt.text.trim();
   const anchor = createNoteAnchorFromSelection(selectedExcerpt, paperId, sourceTitle);
   const contentJson = appendAnchorToNoteContent(null, anchor);
@@ -107,13 +108,23 @@ export function createNoteAnchorFromSelection(
     sourceTitle: sourceTitle?.replace(/\s+/g, ' ').trim() || undefined,
     excerpt,
     source: selectedExcerpt.source,
+    blockId: selectedExcerpt.blockId ?? null,
+    pageIndex:
+      typeof selectedExcerpt.pdfLocation?.pageNumber === 'number'
+        ? Math.max(0, selectedExcerpt.pdfLocation.pageNumber - 1)
+        : null,
     pdfLocation: selectedExcerpt.pdfLocation,
     createdAt: now,
   };
 }
 
 export function noteAnchorBlockFromAnchor(anchor: NoteAnchor): JSONContent {
-  const label = anchor.pdfLocation?.pageNumber ? `P${anchor.pdfLocation.pageNumber}` : '定位';
+  const label =
+    anchor.pdfLocation?.pageNumber
+      ? `P${anchor.pdfLocation.pageNumber}`
+      : typeof anchor.pageIndex === 'number'
+        ? `P${anchor.pageIndex + 1}`
+        : '定位';
   const sourceTitle = anchor.sourceTitle?.replace(/\s+/g, ' ').trim() || '文献';
 
   return {

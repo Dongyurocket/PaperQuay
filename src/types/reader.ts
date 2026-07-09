@@ -83,6 +83,7 @@ export interface PdfBlockSelectContext {
   anchorClientY: number;
   anchorClientRect?: ClientAnchorRect;
   placement?: TextSelectionPlacement;
+  pdfLocation?: TextSelectionPayload["pdfLocation"];
 }
 
 export interface RenderableMineruBlock {
@@ -266,6 +267,7 @@ export type ModelRuntimeRole =
   | "translation"
   | "selectionTranslation"
   | "summary"
+  | "review"
   | "agent"
   | "qa";
 
@@ -411,6 +413,7 @@ export type SelectedExcerptOrigin = "text-selection" | "pdf-block";
 
 export interface TextSelectionPayload {
   text: string;
+  blockId?: string;
   anchorClientX: number;
   anchorClientY: number;
   anchorClientRect?: ClientAnchorRect;
@@ -525,6 +528,7 @@ export interface ReaderSettings {
   showLibraryReadingHeatmap: boolean;
   enablePdfReadingHeatmap: boolean;
   enableSelectionTranslation: boolean;
+  highlightSelectionTranslation: boolean;
   enablePdfParagraphTranslationPopover: boolean;
   autoTranslateSelection: boolean;
   smoothScroll: boolean;
@@ -532,6 +536,7 @@ export interface ReaderSettings {
   showBlockMeta: boolean;
   hidePageDecorationsInBlockView: boolean;
   softPageShadow: boolean;
+  mineruApiBaseUrl: string;
   mineruCacheDir: string;
   remotePdfDownloadDir: string;
   translationBatchSize: number;
@@ -544,6 +549,7 @@ export interface ReaderSettings {
   translationModelPresetId: string;
   selectionTranslationModelPresetId: string;
   summaryModelPresetId: string;
+  reviewModelPresetId: string;
   agentModelPresetId: string;
   embeddingBaseUrl: string;
   embeddingModel: string;

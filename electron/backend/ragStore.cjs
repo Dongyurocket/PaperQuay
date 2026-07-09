@@ -103,6 +103,40 @@ function toFloat32Array(vector) {
   return output;
 }
 
+function cosineSimilarity(left, right) {
+  const length = Math.min(left.length, right.length);
+  let dot = 0;
+  let leftNorm = 0;
+  let rightNorm = 0;
+
+  for (let index = 0; index < length; index += 1) {
+    const leftValue = Number(left[index]) || 0;
+    const rightValue = Number(right[index]) || 0;
+
+    dot += leftValue * rightValue;
+    leftNorm += leftValue * leftValue;
+    rightNorm += rightValue * rightValue;
+  }
+
+  if (leftNorm === 0 || rightNorm === 0) {
+    return 0;
+  }
+
+  return dot / (Math.sqrt(leftNorm) * Math.sqrt(rightNorm));
+}
+
+function averageVectors(vectors, dimension) {
+  const output = new Array(dimension).fill(0);
+
+  for (const vector of vectors) {
+    for (let index = 0; index < dimension; index += 1) {
+      output[index] += Number(vector[index]) || 0;
+    }
+  }
+
+  return output.map((value) => value / Math.max(1, vectors.length));
+}
+
 function normalizeChunk(chunk, dimension) {
   const chunkId = cleanString(chunk?.chunkId) || `chunk-${normalizeNonNegativeInteger(chunk?.chunkIndex)}`;
   const chunkIndex = normalizeNonNegativeInteger(chunk?.chunkIndex);
@@ -571,6 +605,107 @@ function createRagStore(appPaths) {
       .slice(0, topK);
   }
 
+  function listDocumentSimilarities(request = {}) {
+    const limit = Math.max(0, normalizeNonNegativeInteger(request.limit, 80));
+    const minSimilarity = Number.isFinite(Number(request.minSimilarity))
+      ? Math.max(-1, Math.min(1, Number(request.minSimilarity)))
+      : 0.82;
+    const allowedDocumentKeys = Array.isArray(request.documentKeys)
+      ? new Set(request.documentKeys.map((key) => cleanString(key)).filter(Boolean))
+      : null;
+
+    if (limit === 0) {
+      return [];
+    }
+
+    const documents = [];
+
+    for (const dimension of knownVectorDimensions(db)) {
+      const table = vectorTableName(dimension);
+      const rows = db.prepare(`
+        SELECT
+          c.document_key,
+          c.source_type,
+          v.embedding
+        FROM ${table} v
+        JOIN rag_chunks c ON c.id = v.rowid
+        JOIN rag_indexes i
+          ON i.document_key = c.document_key
+         AND i.source_type = c.source_type
+         AND i.status = 'ready'
+         AND i.embedding_dimension = ?
+        ORDER BY c.document_key, c.source_type, c.chunk_index
+      `).all(dimension);
+      const grouped = new Map();
+
+      for (const row of rows) {
+        const documentKey = cleanString(row.document_key);
+
+        if (!documentKey || (allowedDocumentKeys && !allowedDocumentKeys.has(documentKey))) {
+          continue;
+        }
+
+        const key = `${documentKey}::${dimension}`;
+        const entry = grouped.get(key) ?? {
+          documentKey,
+          dimension,
+          sourceTypes: new Set(),
+          vectors: [],
+        };
+        const embedding = Array.from(row.embedding ?? []);
+
+        if (embedding.length === dimension) {
+          entry.vectors.push(embedding);
+          entry.sourceTypes.add(cleanString(row.source_type));
+          grouped.set(key, entry);
+        }
+      }
+
+      for (const entry of grouped.values()) {
+        if (entry.vectors.length === 0) {
+          continue;
+        }
+
+        documents.push({
+          documentKey: entry.documentKey,
+          dimension,
+          sourceTypes: Array.from(entry.sourceTypes).sort(),
+          vector: averageVectors(entry.vectors, dimension),
+        });
+      }
+    }
+
+    const edges = [];
+
+    for (let leftIndex = 0; leftIndex < documents.length; leftIndex += 1) {
+      for (let rightIndex = leftIndex + 1; rightIndex < documents.length; rightIndex += 1) {
+        const left = documents[leftIndex];
+        const right = documents[rightIndex];
+
+        if (left.dimension !== right.dimension) {
+          continue;
+        }
+
+        const similarity = cosineSimilarity(left.vector, right.vector);
+
+        if (similarity < minSimilarity) {
+          continue;
+        }
+
+        edges.push({
+          sourceDocumentKey: left.documentKey,
+          targetDocumentKey: right.documentKey,
+          similarity,
+          sourceTypes: Array.from(new Set([...left.sourceTypes, ...right.sourceTypes])).sort(),
+        });
+      }
+    }
+
+    return edges
+      .sort((left, right) => right.similarity - left.similarity)
+      .slice(0, limit);
+  }
+
   function migrateFromLibraryRagIndexes(ragIndexes) {
     const entries = Object.entries(ragIndexes && typeof ragIndexes === 'object' ? ragIndexes : {});
     const summary = {
@@ -638,6 +773,7 @@ function createRagStore(appPaths) {
     close,
     getDocumentIndexStatus,
     indexDocument,
+    listDocumentSimilarities,
     migrateFromLibraryRagIndexes,
     reportFailure,
     retrieveDocumentChunks,

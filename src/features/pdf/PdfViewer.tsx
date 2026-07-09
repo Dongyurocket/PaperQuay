@@ -7,6 +7,7 @@ import {
   useState,
 } from 'react';
 import { createPortal } from 'react-dom';
+import { FilePlus2 } from 'lucide-react';
 import {
   AnnotationEditorType,
   AnnotationMode,
@@ -15,8 +16,14 @@ import {
 } from 'pdfjs-dist';
 import 'pdfjs-dist/web/pdf_viewer.css';
 import EmptyState from '../../components/EmptyState';
+import { ContextMenu, type ContextMenuEntry } from '../../components/ContextMenu';
 import { useWheelScrollDelegate } from '../../hooks/useWheelScrollDelegate';
 import { approveWritePath, selectSavePdfPath, writeLocalBinaryFile } from '../../services/desktop';
+import {
+  extractTranslatableMarkdownFromMineruBlock,
+  extractTextFromMineruBlock,
+  resolveMineruBlockContentSource,
+} from '../../services/mineru';
 import type {
   PaperAnnotation,
   PdfHighlightTarget,
@@ -64,8 +71,7 @@ import {
   isAnnotationUiTarget,
   isEditableTarget,
   resolveBlockClientRect,
-  resolveHitBlockByPoint,
-  resolveNearestBlockByPoint,
+  resolvePdfBlockHitByPoint,
   resolveScrollAnchorPage,
   selectionBelongsToContainer,
   type PageHostState,
@@ -137,6 +143,7 @@ interface PdfViewerProps {
   softPageShadow: boolean;
   onBlockHover: (block: PositionedMineruBlock | null) => void;
   onBlockSelect: (block: PositionedMineruBlock, context?: PdfBlockSelectContext) => void;
+  onAddBlockToNote?: (block: PositionedMineruBlock, selection: TextSelectionPayload) => void;
   blockClickOpensQuickActions?: boolean;
   onAnnotationSelect?: (annotationId: string) => void;
   onTextSelect?: (selection: TextSelectionPayload) => void;
@@ -223,6 +230,7 @@ function PdfViewer({
   softPageShadow,
   onBlockHover,
   onBlockSelect,
+  onAddBlockToNote,
   blockClickOpensQuickActions = false,
   onAnnotationSelect,
   onTextSelect,
@@ -290,6 +298,12 @@ function PdfViewer({
   );
   const [pageThumbnails, setPageThumbnails] = useState<Record<number, string>>({});
   const [thumbnailFocusPage, setThumbnailFocusPage] = useState(1);
+  const [blockContextMenu, setBlockContextMenu] = useState<{
+    block: PositionedMineruBlock;
+    x: number;
+    y: number;
+    anchorClientRect?: TextSelectionPayload['anchorClientRect'];
+  } | null>(null);
   const handleThumbnailWheelCapture = useWheelScrollDelegate({ rootRef: thumbnailSidebarRef });
 
   useEffect(() => {
@@ -368,6 +382,16 @@ function PdfViewer({
 
     return map;
   }, [blocks]);
+
+  const resolveBlockContentSource = useCallback(
+    (block: PositionedMineruBlock) => resolveMineruBlockContentSource(block, blockById),
+    [blockById],
+  );
+
+  const hasTranslatableBlockText = useCallback(
+    (block: PositionedMineruBlock) => Boolean(extractTextFromMineruBlock(block).trim()),
+    [],
+  );
 
   const blocksByPage = useMemo(() => {
     const map = new Map<number, PositionedMineruBlock[]>();
@@ -928,6 +952,75 @@ function PdfViewer({
     [emitScrollPosition, pageCount, pageHosts, scrollToPage, smoothScroll],
   );
 
+  const buildBlockPdfLocation = useCallback(
+    (block: PositionedMineruBlock): TextSelectionPayload['pdfLocation'] =>
+      block.bbox
+        ? {
+            pageNumber: block.pageIndex + 1,
+            bbox: block.bbox,
+            bboxCoordinateSystem: block.bboxCoordinateSystem,
+            bboxPageSize: block.bboxPageSize,
+          }
+        : undefined,
+    [],
+  );
+
+  const buildBlockSelectionPayload = useCallback(
+    (
+      block: PositionedMineruBlock,
+      options: {
+        x: number;
+        y: number;
+        anchorClientRect?: TextSelectionPayload['anchorClientRect'];
+      },
+    ): TextSelectionPayload | null => {
+      const contentBlock = resolveBlockContentSource(block);
+      const text = extractTranslatableMarkdownFromMineruBlock(contentBlock).trim();
+
+      if (!text) {
+        return null;
+      }
+
+      return {
+        text,
+        blockId: contentBlock.blockId,
+        anchorClientX: options.x,
+        anchorClientY: options.y,
+        anchorClientRect: options.anchorClientRect,
+        placement: 'bottom',
+        pdfLocation: buildBlockPdfLocation(block),
+      };
+    },
+    [buildBlockPdfLocation, resolveBlockContentSource],
+  );
+
+  const blockContextMenuEntries = useMemo<ContextMenuEntry[]>(() => {
+    if (!blockContextMenu || !onAddBlockToNote) {
+      return [];
+    }
+
+    const selection = buildBlockSelectionPayload(blockContextMenu.block, {
+      x: blockContextMenu.x,
+      y: blockContextMenu.y,
+      anchorClientRect: blockContextMenu.anchorClientRect,
+    });
+
+    return [
+      {
+        id: 'add-block-to-note',
+        label: l('整块加入笔记', 'Add Whole Block to Note'),
+        icon: <FilePlus2 className="h-4 w-4" strokeWidth={1.9} />,
+        tone: 'accent',
+        disabled: !selection,
+        onSelect: () => {
+          if (selection) {
+            onAddBlockToNote(blockContextMenu.block, selection);
+          }
+        },
+      },
+    ];
+  }, [blockContextMenu, buildBlockSelectionPayload, l, onAddBlockToNote]);
+
   const { heatmap: localReadingHeatmap, maxBinMs: maxReadingHeatmapBinMs } =
     usePdfReadingHeatmap({
       sourceKey: sourceSignature,
@@ -947,12 +1040,23 @@ function PdfViewer({
   }, [pageCount, sourceSignature]);
 
   const scrollToHighlight = useCallback(
-    (highlight: PdfHighlightTarget) => {
+    (highlight: PdfHighlightTarget, options?: { retry?: boolean }) => {
+      const retry = () => {
+        if (options?.retry === false) {
+          return;
+        }
+
+        window.setTimeout(() => {
+          syncPageHosts();
+          scrollToHighlight(highlight, { retry: false });
+        }, 120);
+      };
       const container = containerRef.current;
       const viewer = viewerRef.current;
 
       if (!container) {
         scrollToPage(highlight.pageIndex);
+        retry();
         return;
       }
 
@@ -971,6 +1075,7 @@ function PdfViewer({
 
       if (!pageElement || !renderedPage) {
         scrollToPage(highlight.pageIndex);
+        retry();
         return;
       }
 
@@ -983,6 +1088,7 @@ function PdfViewer({
 
       if (!originalPage) {
         scrollToPage(highlight.pageIndex);
+        retry();
         return;
       }
 
@@ -2096,6 +2202,58 @@ function PdfViewer({
       return pageHosts[pageTarget.pageIndex] ?? getRenderedPageSize(pageTarget.pageElement);
     };
 
+    const resolvePointerBlockHit = (event: MouseEvent | PointerEvent) => {
+      const pageTarget = getPointerPageTarget(event);
+
+      if (!pageTarget) {
+        return null;
+      }
+
+      const renderedPage = getPointerRenderedPage(pageTarget);
+
+      if (!renderedPage) {
+        return null;
+      }
+
+      const pageBlocks = blocksByPage.get(pageTarget.pageIndex) ?? [];
+      const originalPage = resolveOriginalPageForSources(
+        pageTarget.pageIndex,
+        renderedPage,
+        pageBlocks,
+      );
+
+      if (!originalPage) {
+        return null;
+      }
+
+      const hit = resolvePdfBlockHitByPoint(
+        event.clientX,
+        event.clientY,
+        pageTarget.pageElement,
+        pageBlocks,
+        originalPage,
+        renderedPage,
+        resolveBlockContentSource,
+        hasTranslatableBlockText,
+      );
+
+      if (!hit) {
+        return null;
+      }
+
+      return {
+        block: hit.block,
+        anchorBlock: hit.anchorBlock,
+        anchorClientRect: resolveBlockClientRect(
+          pageTarget.pageElement,
+          hit.anchorBlock,
+          originalPage,
+          renderedPage,
+        ),
+        pdfLocation: buildBlockPdfLocation(hit.anchorBlock),
+      };
+    };
+
     const handlePointerDown = (event: PointerEvent) => {
       clearPendingBlockSelect();
 
@@ -2158,25 +2316,18 @@ function PdfViewer({
         return;
       }
 
-      const hitBlock =
-        resolveHitBlockByPoint(
-          event.clientX,
-          event.clientY,
-          pageTarget.pageElement,
-          pageBlocks,
-          originalPage,
-          renderedPage,
-        ) ??
-        resolveNearestBlockByPoint(
-          event.clientX,
-          event.clientY,
-          pageTarget.pageElement,
-          pageBlocks,
-          originalPage,
-          renderedPage,
-        );
+      const hit = resolvePdfBlockHitByPoint(
+        event.clientX,
+        event.clientY,
+        pageTarget.pageElement,
+        pageBlocks,
+        originalPage,
+        renderedPage,
+        resolveBlockContentSource,
+        hasTranslatableBlockText,
+      );
 
-      emitBlockHover(hitBlock);
+      emitBlockHover(hit?.block ?? null);
     };
 
     const handlePointerUp = (event: PointerEvent) => {
@@ -2230,28 +2381,21 @@ function PdfViewer({
         return;
       }
 
-      const hitBlock =
-        resolveHitBlockByPoint(
-          event.clientX,
-          event.clientY,
-          pageTarget.pageElement,
-          pageBlocks,
-          originalPage,
-          renderedPage,
-        ) ??
-        resolveNearestBlockByPoint(
-          event.clientX,
-          event.clientY,
-          pageTarget.pageElement,
-          pageBlocks,
-          originalPage,
-          renderedPage,
-        );
+      const hit = resolvePdfBlockHitByPoint(
+        event.clientX,
+        event.clientY,
+        pageTarget.pageElement,
+        pageBlocks,
+        originalPage,
+        renderedPage,
+        resolveBlockContentSource,
+        hasTranslatableBlockText,
+      );
 
-      if (hitBlock) {
+      if (hit) {
         const anchorClientRect = resolveBlockClientRect(
           pageTarget.pageElement,
-          hitBlock,
+          hit.anchorBlock,
           originalPage,
           renderedPage,
         );
@@ -2264,11 +2408,12 @@ function PdfViewer({
             return;
           }
 
-          onBlockSelect(hitBlock, {
+          onBlockSelect(hit.block, {
             anchorClientX: event.clientX,
             anchorClientY: event.clientY,
             anchorClientRect,
             placement: 'bottom',
+            pdfLocation: buildBlockPdfLocation(hit.anchorBlock),
           });
         }, 48);
       }
@@ -2306,25 +2451,18 @@ function PdfViewer({
         return;
       }
 
-      const hitBlock =
-        resolveHitBlockByPoint(
-          event.clientX,
-          event.clientY,
-          pageTarget.pageElement,
-          pageBlocks,
-          originalPage,
-          renderedPage,
-        ) ??
-        resolveNearestBlockByPoint(
-          event.clientX,
-          event.clientY,
-          pageTarget.pageElement,
-          pageBlocks,
-          originalPage,
-          renderedPage,
-        );
+      const hit = resolvePdfBlockHitByPoint(
+        event.clientX,
+        event.clientY,
+        pageTarget.pageElement,
+        pageBlocks,
+        originalPage,
+        renderedPage,
+        resolveBlockContentSource,
+        hasTranslatableBlockText,
+      );
 
-      if (!hitBlock) {
+      if (!hit) {
         return;
       }
 
@@ -2332,16 +2470,43 @@ function PdfViewer({
       if (blockClickOpensQuickActions) {
         (event as MouseEvent & { paperQuayPdfBlockSelectClick?: boolean }).paperQuayPdfBlockSelectClick = true;
       }
-      onBlockSelect(hitBlock, {
+      onBlockSelect(hit.block, {
         anchorClientX: event.clientX,
         anchorClientY: event.clientY,
         anchorClientRect: resolveBlockClientRect(
           pageTarget.pageElement,
-          hitBlock,
+          hit.anchorBlock,
           originalPage,
           renderedPage,
         ),
         placement: 'bottom',
+        pdfLocation: buildBlockPdfLocation(hit.anchorBlock),
+      });
+    };
+
+    const handleContextMenu = (event: MouseEvent) => {
+      if (!onAddBlockToNote || editorToolRef.current !== 'none') {
+        return;
+      }
+
+      if (isAnnotationUiTarget(event.target) || hasActiveTextSelection()) {
+        return;
+      }
+
+      const result = resolvePointerBlockHit(event);
+
+      if (!result) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      clearPendingBlockSelect();
+      setBlockContextMenu({
+        block: result.anchorBlock,
+        x: event.clientX,
+        y: event.clientY,
+        anchorClientRect: result.anchorClientRect,
       });
     };
 
@@ -2360,6 +2525,7 @@ function PdfViewer({
     viewer.addEventListener('pointerup', handlePointerUp);
     viewer.addEventListener('pointerleave', handlePointerLeave);
     viewer.addEventListener('click', handleClick, true);
+    viewer.addEventListener('contextmenu', handleContextMenu, true);
 
     return () => {
       if (hoverAnimationFrame !== null) {
@@ -2377,6 +2543,7 @@ function PdfViewer({
       viewer.removeEventListener('pointerup', handlePointerUp);
       viewer.removeEventListener('pointerleave', handlePointerLeave);
       viewer.removeEventListener('click', handleClick, true);
+      viewer.removeEventListener('contextmenu', handleContextMenu, true);
     };
   }, [
     active,
@@ -2385,7 +2552,11 @@ function PdfViewer({
     clearPendingBlockSelect,
     onBlockHover,
     onBlockSelect,
+    onAddBlockToNote,
     pageHosts,
+    buildBlockPdfLocation,
+    hasTranslatableBlockText,
+    resolveBlockContentSource,
     resolveOriginalPageForSources,
   ]);
 
@@ -2589,6 +2760,19 @@ function PdfViewer({
         ) : null}
         </div>
       </div>
+
+      {blockContextMenu ? (
+        <ContextMenu
+          x={blockContextMenu.x}
+          y={blockContextMenu.y}
+          title={l(
+            `第 ${blockContextMenu.block.pageIndex + 1} 页 · 块 ${blockContextMenu.block.blockIndex + 1}`,
+            `Page ${blockContextMenu.block.pageIndex + 1} · Block ${blockContextMenu.block.blockIndex + 1}`,
+          )}
+          entries={blockContextMenuEntries}
+          onClose={() => setBlockContextMenu(null)}
+        />
+      ) : null}
     </div>
   );
 }

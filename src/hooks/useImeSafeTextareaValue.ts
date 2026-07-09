@@ -5,6 +5,7 @@ import {
   useState,
   type ChangeEvent,
   type CompositionEvent,
+  type FocusEvent,
   type KeyboardEvent,
 } from 'react';
 
@@ -22,9 +23,11 @@ export function useImeSafeTextareaValue(
 ) {
   const [draftValue, setDraftValue] = useState(value);
   const isComposingRef = useRef(false);
+  const draftValueRef = useRef(value);
 
   useEffect(() => {
     if (!isComposingRef.current) {
+      draftValueRef.current = value;
       setDraftValue(value);
     }
   }, [value]);
@@ -32,9 +35,13 @@ export function useImeSafeTextareaValue(
   const handleChange = useCallback(
     (event: ChangeEvent<HTMLTextAreaElement>) => {
       const nextValue = event.target.value;
+      const previousValue = draftValueRef.current;
+      const isDeleting = nextValue.length < previousValue.length;
+
+      draftValueRef.current = nextValue;
       setDraftValue(nextValue);
 
-      if (!isComposingRef.current) {
+      if (!isComposingRef.current || isDeleting) {
         onValueChange(nextValue);
       }
     },
@@ -49,6 +56,18 @@ export function useImeSafeTextareaValue(
     (event: CompositionEvent<HTMLTextAreaElement>) => {
       const nextValue = event.currentTarget.value;
       isComposingRef.current = false;
+      draftValueRef.current = nextValue;
+      setDraftValue(nextValue);
+      onValueChange(nextValue);
+    },
+    [onValueChange],
+  );
+
+  const handleBlur = useCallback(
+    (event: FocusEvent<HTMLTextAreaElement>) => {
+      const nextValue = event.currentTarget.value;
+      isComposingRef.current = false;
+      draftValueRef.current = nextValue;
       setDraftValue(nextValue);
       onValueChange(nextValue);
     },
@@ -61,5 +80,6 @@ export function useImeSafeTextareaValue(
     onChange: handleChange,
     onCompositionStart: handleCompositionStart,
     onCompositionEnd: handleCompositionEnd,
+    onBlur: handleBlur,
   };
 }

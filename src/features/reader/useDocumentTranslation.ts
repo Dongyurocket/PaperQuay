@@ -251,11 +251,22 @@ export function useDocumentTranslation({
 
       setBlockTranslations(cachedTranslationResult.translations);
       setBlockTranslationTargetLanguage(settings.translationTargetLanguage);
+      const restoredCount = countTranslatedBlocks(cachedTranslationResult.translations);
       setStatusMessage(
         lRef.current(
-          `已恢复历史翻译 ${countTranslatedBlocks(cachedTranslationResult.translations)} 条（${settings.translationTargetLanguage}）`,
-          `Restored ${countTranslatedBlocks(cachedTranslationResult.translations)} saved translations (${settings.translationTargetLanguage})`,
+          `已恢复历史翻译 ${restoredCount} 条（${settings.translationTargetLanguage}）`,
+          `Restored ${restoredCount} saved translations (${settings.translationTargetLanguage})`,
         ),
+      );
+      updateLibraryOperation(
+        "translation",
+        "success",
+        lRef.current(
+          `已恢复历史翻译 ${restoredCount} 条（${settings.translationTargetLanguage}）`,
+          `Restored ${restoredCount} saved translations (${settings.translationTargetLanguage})`,
+        ),
+        restoredCount,
+        flatBlocks.length || null,
       );
     })().catch(() => undefined);
 
@@ -271,6 +282,7 @@ export function useDocumentTranslation({
     setStatusMessage,
     translatedCount,
     tryLoadSavedTranslations,
+    updateLibraryOperation,
     lRef,
   ]);
 

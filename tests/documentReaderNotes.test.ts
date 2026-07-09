@@ -68,6 +68,8 @@ test('buildNoteAnchorJumpDetail carries note and anchor targeting fields', () =>
     id: 'a1',
     paperId: 'paper-2',
     label: 'P8',
+    blockId: 'block-8',
+    pageIndex: 7,
     pdfLocation: { pageNumber: 8 },
   });
   const detail = buildNoteAnchorJumpDetail(targetNote, targetAnchor);
@@ -77,6 +79,9 @@ test('buildNoteAnchorJumpDetail carries note and anchor targeting fields', () =>
   assert.equal(detail.noteId, 'n1');
   assert.equal(detail.noteTitle, 'Title');
   assert.equal(detail.anchorId, 'a1');
+  assert.equal(detail.blockId, 'block-8');
+  assert.equal(detail.pageIndex, 7);
+  assert.equal(detail.previewText, 'quoted text');
   assert.deepEqual(detail.pdfLocation, { pageNumber: 8 });
 });
 
@@ -196,6 +201,12 @@ test('buildSelectedExcerptNoteCreateRequest derives note type from excerpt sourc
     source: 'blocks',
     createdAt: 1,
   };
+  const locatedBlockExcerpt: SelectedExcerpt = {
+    text: 'Located structured block quote',
+    source: 'blocks',
+    blockId: 'block-1',
+    createdAt: 1,
+  };
 
   assert.deepEqual(
     buildSelectedExcerptNoteCreateRequest({
@@ -219,5 +230,13 @@ test('buildSelectedExcerptNoteCreateRequest derives note type from excerpt sourc
       title: 'Structured block quote',
     }).type,
     'standalone',
+  );
+  assert.equal(
+    buildSelectedExcerptNoteCreateRequest({
+      paperId: 'paper-1',
+      selectedExcerpt: locatedBlockExcerpt,
+      title: 'Located structured block quote',
+    }).type,
+    'highlight',
   );
 });

@@ -5,6 +5,7 @@ import {
 } from 'react';
 
 import {
+  prepareMineruCacheDir,
   selectDirectory,
   selectLocalPdfSource,
 } from '../../services/desktop';
@@ -90,6 +91,7 @@ export function useReaderLibraryActions({
   itemParseStatusMap,
   l,
   libraryPreviewStates,
+  librarySettings,
   libraryTranslationSnapshots,
   loadLibraryPreviewBlocks,
   mineruApiToken,
@@ -299,6 +301,7 @@ export function useReaderLibraryActions({
           : null;
         const parseResult = await runMineruCloudParseWithOcrFallback({
           apiToken: mineruApiToken.trim(),
+          apiBaseUrl: settings.mineruApiBaseUrl,
           pdfPath,
           extractDir: cachePaths?.directory,
           language: 'ch',
@@ -417,6 +420,7 @@ export function useReaderLibraryActions({
       setPreferredPreferencesSection,
       setStatusMessage,
       settings.mineruCacheDir,
+      settings.mineruApiBaseUrl,
       syncLibraryParsedState,
       updateLibraryPreviewOperation,
     ],
@@ -754,7 +758,7 @@ export function useReaderLibraryActions({
         select?: boolean;
       },
     ) => {
-      const workspaceItem = createNativeLibraryWorkspaceItem(paper);
+      const workspaceItem = createNativeLibraryWorkspaceItem(paper, librarySettings?.storageDir);
 
       if (!workspaceItem) {
         const message = l('这篇文献缺少可打开的 PDF 附件', 'This paper has no openable PDF attachment');
@@ -774,7 +778,7 @@ export function useReaderLibraryActions({
 
       return workspaceItem;
     },
-    [l, setError, setNativeLibraryItems, setSelectedLibraryItemId, setStatusMessage],
+    [l, librarySettings?.storageDir, setError, setNativeLibraryItems, setSelectedLibraryItemId, setStatusMessage],
   );
 
   const openNativeLibraryWorkspace = useCallback(
@@ -893,13 +897,37 @@ export function useReaderLibraryActions({
         return;
       }
 
-      updateSetting('mineruCacheDir', selectedDir);
+      const previousDir = settings.mineruCacheDir.trim();
+      const prepared = await prepareMineruCacheDir(selectedDir, previousDir);
+      const preparedDir = prepared.directory || selectedDir;
+
       setStatusMessage(
-        l(
-          `已更新 MinerU 缓存目录：${truncateMiddle(selectedDir, 48)}`,
-          `Updated the MinerU cache directory: ${truncateMiddle(selectedDir, 48)}`,
-        ),
+        [
+          l(
+            `已更新 MinerU 缓存目录：${truncateMiddle(preparedDir, 48)}`,
+            `Updated the MinerU cache directory: ${truncateMiddle(preparedDir, 48)}`,
+          ),
+          prepared.migratedCount > 0
+            ? l(
+                `已迁移 ${prepared.migratedCount} 个旧缓存目录`,
+                `Migrated ${prepared.migratedCount} existing cache folder(s)`,
+              )
+            : '',
+          prepared.looseOutputFilesIgnored
+            ? l(
+                '所选根目录中的裸 MinerU 输出文件已保留但不会被直接当作缓存解析',
+                'Loose MinerU output files in the selected root were kept but will not be parsed as cache',
+              )
+            : '',
+          prepared.errors.length > 0
+            ? l(
+                `有 ${prepared.errors.length} 个旧缓存目录迁移失败`,
+                `${prepared.errors.length} old cache folder(s) failed to migrate`,
+              )
+            : '',
+        ].filter(Boolean).join('；'),
       );
+      updateSetting('mineruCacheDir', preparedDir);
     } catch (nextError) {
       const message =
         nextError instanceof Error
@@ -911,7 +939,7 @@ export function useReaderLibraryActions({
       setError(message);
       setStatusMessage(message);
     }
-  }, [l, setError, setStatusMessage, updateSetting]);
+  }, [l, setError, setStatusMessage, settings.mineruCacheDir, updateSetting]);
 
   const handleSelectRemotePdfDownloadDir = useCallback(async () => {
     try {

@@ -168,19 +168,10 @@ export function buildReaderPreferencesSections(
       key: 'models',
       title: l('AI 模型', 'AI Models'),
       description: l(
-        'OpenAI 兼容模型预设和测试',
-        'OpenAI-compatible model presets and tests',
+        '模型预设、功能绑定和 Embedding',
+        'Model presets, role bindings, and embedding',
       ),
       icon: <Sparkles className="h-4 w-4" strokeWidth={1.8} />,
-    },
-    {
-      key: 'embedding',
-      title: l('Embedding', 'Embedding'),
-      description: l(
-        '为本地 RAG 单独配置向量模型的 Base URL、API Key 和 Model',
-        'Configure a dedicated embedding Base URL, API key, and model for local RAG.',
-      ),
-      icon: <Database className="h-4 w-4" strokeWidth={1.8} />,
     },
     {
       key: 'summaryQa',
@@ -657,6 +648,20 @@ export function ReaderPreferencesContent({
           </SettingsField>
 
           <SettingsField
+            label={l('MinerU API Base URL', 'MinerU API Base URL')}
+            description={l(
+              '留空时使用官方地址 https://mineru.net/api/v4；本地部署 MinerU 时填写兼容的 API 根地址。',
+              'Leave empty to use the official https://mineru.net/api/v4 endpoint. For a local MinerU deployment, enter the compatible API root URL.',
+            )}
+          >
+            <SettingsInput
+              value={settings.mineruApiBaseUrl}
+              onChange={(event) => onSettingChange('mineruApiBaseUrl', event.target.value)}
+              placeholder="https://mineru.net/api/v4"
+            />
+          </SettingsField>
+
+          <SettingsField
             label={l('MinerU 缓存目录', 'MinerU Cache Directory')}
             description={l(
               '用于保存 content_list_v2.json、middle.json、full.md 与 manifest 等解析产物。',
@@ -797,7 +802,7 @@ export function ReaderPreferencesContent({
         l={l}
       />
 
-      {activeSection === 'embedding' ? (
+      {activeSection === 'models' ? (
         <SettingsField
           label={l('本地 RAG Embedding 配置', 'Local RAG Embedding Configuration')}
           description={l(
@@ -1009,6 +1014,16 @@ export function ReaderPreferencesContent({
               )}
               checked={settings.autoTranslateSelection}
               onChange={(checked) => onSettingChange('autoTranslateSelection', checked)}
+            />
+
+            <ToggleRow
+              title={l('划词翻译后高亮原文', 'Highlight Source After Selection Translation')}
+              description={l(
+                '划词翻译完成后，在 PDF 或结构化正文中临时高亮刚刚翻译的原文位置。',
+                'After selected-text translation completes, temporarily highlight the translated source text in the PDF or structured document.',
+              )}
+              checked={settings.highlightSelectionTranslation}
+              onChange={(checked) => onSettingChange('highlightSelectionTranslation', checked)}
             />
 
             <div className="flex flex-wrap gap-2">
@@ -1254,8 +1269,8 @@ export function ReaderPreferencesContent({
               />
               <div className="rounded-2xl border border-slate-200 bg-slate-50/80 px-3 py-2 text-xs leading-5 text-slate-500">
                 {l(
-                  'Embedding 模型请在单独的 “Embedding” 分区配置；这里仅控制检索策略和 Top-K 检索块数。',
-                  'Configure the embedding model in the dedicated Embedding section. This panel controls only retrieval strategy and Top-K retrieved blocks.',
+                  'Embedding 模型请在“AI 模型”分区配置；这里仅控制检索策略和 Top-K 检索块数。',
+                  'Configure the embedding model in the AI Models section. This panel controls only retrieval strategy and Top-K retrieved blocks.',
                 )}
               </div>
               <div className="grid gap-3 md:grid-cols-2">

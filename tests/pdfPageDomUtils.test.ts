@@ -7,6 +7,7 @@ import {
   getPageTargetFromElement,
   getRenderedPageSize,
   resolveHitBlockByPoint,
+  resolvePdfBlockHitByPoint,
 } from '../src/features/pdf/pdfPageDomUtils.ts';
 import type { PositionedMineruBlock } from '../src/types/reader.ts';
 
@@ -39,6 +40,7 @@ function block(overrides: Partial<PositionedMineruBlock> = {}): PositionedMineru
     bbox: overrides.bbox ?? [0, 0, 100, 100],
     bboxCoordinateSystem: overrides.bboxCoordinateSystem,
     bboxPageSize: overrides.bboxPageSize,
+    contentSourceBlockId: overrides.contentSourceBlockId,
   };
 }
 
@@ -118,4 +120,33 @@ test('resolveHitBlockByPoint returns the smallest matching block', () => {
     ),
     null,
   );
+});
+
+test('resolvePdfBlockHitByPoint returns a content source for empty continuation blocks', () => {
+  const targetPage = pageElement({ rect: { left: 10, top: 20, width: 1000, height: 1000 } });
+  const source = block({
+    blockId: 'source',
+    content: 'merged paragraph text',
+    bbox: [40, 40, 300, 160],
+  });
+  const continuation = block({
+    blockId: 'continuation',
+    content: '',
+    bbox: [420, 40, 760, 160],
+    contentSourceBlockId: source.blockId,
+  });
+  const blockById = new Map([source, continuation].map((item) => [item.blockId, item]));
+  const hit = resolvePdfBlockHitByPoint(
+    500,
+    90,
+    targetPage,
+    [source, continuation],
+    { width: 1000, height: 1000 },
+    { width: 1000, height: 1000 },
+    (item) => (item.contentSourceBlockId ? blockById.get(item.contentSourceBlockId) ?? item : item),
+    (item) => Boolean(String(item.content ?? '').trim()),
+  );
+
+  assert.equal(hit?.block.blockId, 'source');
+  assert.equal(hit?.anchorBlock.blockId, 'continuation');
 });

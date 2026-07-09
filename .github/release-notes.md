@@ -14,17 +14,17 @@ Download the native installer for your operating system from the Assets section 
 
 ## Highlights
 
-- Optimized macOS titlebar behavior: the app now uses the native traffic-light controls and removes duplicate custom window buttons on macOS.
-- Improved PDF.js lifecycle cleanup to reduce stale worker/render-task errors when opening, switching, or closing PDFs.
-- Improved Agent RAG answers with clickable citation tags that jump back to the referenced paper block or page.
-- Added and clarified the RAG Top-K setting for controlling how many nearest context blocks are sent to the model.
-- Refined selection and paragraph translation popovers, including independent Settings switches and safer positioning around selected text.
-- Improved side-panel chat input behavior, multi-session QA handling, and Agent interaction polish.
+- Review Word export now supports editable OMML formulas, missing-figure fallbacks, localized section titles, 480-twip paragraph indentation, richer references, and inline figure placement from model output.
+- Review writing is more resilient: failed writing tasks no longer stop the whole queue, and more retrieved papers can contribute detailed RAG context.
+- Knowledge graph workflows now support synced Crossref reference data, citation edges for papers already in the library, co-author relations, clearer edge legends, graph export, searchable relation targets, and direct node interactions.
+- MinerU parsing can use a configurable API base URL, so local MinerU deployments can be used while the official endpoint remains the default.
+- Library storage folder changes now migrate the existing storage structure and attachment paths into the new location.
+- Reader and notes workflows now include selection-translation highlighting, a resizable library navigation sidebar, paper-list sorting, and safer note external-update detection after local saves.
 
 ## Notes
 
 - AI features require your own compatible model endpoint and API key in Settings.
-- MinerU parsing requires a MinerU API key unless you are using already parsed local cache data.
+- MinerU parsing requires a MinerU API key unless you are using already parsed local cache data or a compatible local MinerU deployment.
 - Release assets are generated automatically by GitHub Actions.
 
 ---
@@ -45,15 +45,15 @@ PaperQuay 是一个开源 AI 论文工作台，覆盖文献管理、PDF 阅读�
 
 ## 本次更新
 
-- 优化 macOS 标题栏：macOS 下使用系统左上角三色按钮，并隐藏重复的自定义窗口控制按钮。
-- 优化 PDF.js 生命周期清理，减少切换、关闭或重新打开 PDF 时的旧 worker / 渲染任务报错。
-- 优化 Agent RAG 回答：引用标签支持点击跳转到对应论文的结构块或页面。
-- 增加并明确 RAG Top-K 设置，用于控制发送给模型的最相近上下文块数量。
-- 优化划词翻译和 PDF 段落翻译浮层，支持独立开关，并改进浮层位置以减少遮挡。
-- 优化侧边栏问答输入、多会话问答和 Agent 交互体验。
+- 综述 Word 导出支持可编辑 OMML 公式、缺失图片容错、本地化节标题、480 twip 首行缩进、更完整参考文献信息，以及根据模型输出在正文中插图。
+- 综述生成更稳健：单个写作任务失败不会中止整个队列，更多检索论文可参与深度 RAG 上下文。
+- 知识图谱支持同步 Crossref 参考文献数据，只为文库内论文生成引用关系，并补充共同作者关系、边颜色图例、图谱导出、关系目标搜索和节点右键交互。
+- MinerU 解析支持配置 API Base URL，便于使用本地部署的 MinerU；未配置时仍默认使用官方地址。
+- 修改默认文献存储目录时，会迁移已有目录结构和附件路径到新位置。
+- 阅读与笔记流程新增划词翻译高亮、本地文库导航栏拖动调整宽度、文献列表排序，并修复本地保存后误提示外部更新的问题。
 
 ## 备注
 
-- AI 功能需要在设置中自行配置兼容的大模型接口和 API Key。
-- MinerU 解析需要有效的 MinerU API Key，除非你使用的是已经解析好的本地缓存数据。
+- AI 功能需要在设置中自行配置兼容模型接口和 API Key。
+- MinerU 解析需要有效的 MinerU API Key，除非你使用已经解析好的本地缓存或兼容的本地 MinerU 服务。
 - Release 资源由 GitHub Actions 自动生成。

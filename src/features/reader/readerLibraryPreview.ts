@@ -13,6 +13,7 @@ import {
 import { resolveSummaryOutputLanguage } from '../../services/summaryLanguage';
 import {
   flattenMineruPages,
+  parseMineruMarkdownPages,
   parseMineruPages,
 } from '../../services/mineru';
 import type {
@@ -28,7 +29,8 @@ import {
   buildMineruCachePaths,
   buildMineruSummaryCachePath,
   buildMineruSummaryCachePathCandidates,
-  guessSiblingJsonPath,
+  getMineruJsonPathCandidates,
+  guessSiblingJsonPaths,
   guessSiblingMarkdownPath,
 } from '../../utils/mineruCache';
 import {
@@ -63,16 +65,67 @@ export function resolvePreviewJsonCandidatePaths(
 
   if (options.mineruCacheDir.trim()) {
     for (const cachePaths of buildMineruCachePathCandidates(options.mineruCacheDir.trim(), item)) {
-      candidates.add(cachePaths.contentJsonPath);
-      candidates.add(cachePaths.middleJsonPath);
+      for (const candidatePath of getMineruJsonPathCandidates(cachePaths)) {
+        candidates.add(candidatePath);
+      }
     }
   }
 
   if (item.localPdfPath && options.autoLoadSiblingJson) {
-    candidates.add(guessSiblingJsonPath(item.localPdfPath));
+    for (const candidatePath of guessSiblingJsonPaths(item.localPdfPath)) {
+      candidates.add(candidatePath);
+    }
   }
 
   return Array.from(candidates);
+}
+
+function resolvePreviewMarkdownCandidatePaths(
+  item: WorkspaceItem,
+  options: {
+    autoLoadSiblingJson: boolean;
+    mineruCacheDir: string;
+  },
+): string[] {
+  const candidates = new Set<string>();
+
+  if (options.mineruCacheDir.trim()) {
+    for (const cachePaths of buildMineruCachePathCandidates(options.mineruCacheDir.trim(), item)) {
+      candidates.add(cachePaths.markdownPath);
+    }
+  }
+
+  if (item.localPdfPath && options.autoLoadSiblingJson) {
+    candidates.add(guessSiblingMarkdownPath(item.localPdfPath));
+  }
+
+  return Array.from(candidates);
+}
+
+export async function hasExistingMineruOutput(
+  item: WorkspaceItem,
+  options: {
+    autoLoadSiblingJson: boolean;
+    mineruCacheDir: string;
+  },
+): Promise<boolean> {
+  const candidatePaths = [
+    ...resolvePreviewJsonCandidatePaths(item, options),
+    ...resolvePreviewMarkdownCandidatePaths(item, options),
+  ];
+
+  for (const candidatePath of candidatePaths) {
+    try {
+      const text = await readLocalTextFileIfExists(candidatePath);
+      if (text?.trim()) {
+        return true;
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return false;
 }
 
 export async function readExistingMineruJson(
@@ -185,7 +238,7 @@ export async function loadReaderLibraryPreviewBlocks({
 
   if (settings.mineruCacheDir.trim()) {
     for (const cachePaths of buildMineruCachePathCandidates(settings.mineruCacheDir.trim(), item)) {
-      for (const candidatePath of [cachePaths.contentJsonPath, cachePaths.middleJsonPath]) {
+      for (const candidatePath of getMineruJsonPathCandidates(cachePaths)) {
         try {
           const jsonText = await readLocalTextFileIfExists(candidatePath);
           if (!jsonText) continue;
@@ -210,34 +263,53 @@ export async function loadReaderLibraryPreviewBlocks({
   }
 
   if (item.localPdfPath && settings.autoLoadSiblingJson) {
-    const siblingJsonPath = guessSiblingJsonPath(item.localPdfPath);
+    for (const siblingJsonPath of guessSiblingJsonPaths(item.localPdfPath)) {
+      try {
+        const jsonText = await readLocalTextFileIfExists(siblingJsonPath);
+        if (!jsonText) continue;
 
+        const pages = parseMineruPages(jsonText);
+        const blocks = flattenMineruPages(pages);
+
+        return {
+          blocks,
+          currentPdfName: pdfName,
+          currentJsonName: getFileNameFromPath(siblingJsonPath),
+          statusMessage: l(
+            `已从同目录 JSON 加载 ${blocks.length} 个结构块`,
+            `Loaded ${blocks.length} structured blocks from the sibling JSON`,
+          ),
+        };
+      } catch {
+        continue;
+      }
+    }
+  }
+
+  for (const markdownPath of resolvePreviewMarkdownCandidatePaths(item, settings)) {
     try {
-      const jsonText = await readLocalTextFileIfExists(siblingJsonPath);
-      if (!jsonText) throw new Error('Sibling MinerU JSON not found');
+      const markdownText = await readLocalTextFileIfExists(markdownPath);
+      if (!markdownText?.trim()) continue;
 
-      const pages = parseMineruPages(jsonText);
+      const pages = parseMineruMarkdownPages(markdownText);
       const blocks = flattenMineruPages(pages);
+
+      if (blocks.length === 0) {
+        continue;
+      }
 
       return {
         blocks,
         currentPdfName: pdfName,
-        currentJsonName: getFileNameFromPath(siblingJsonPath),
+        currentJsonName: getFileNameFromPath(markdownPath),
         statusMessage: l(
-          `已从同目录 JSON 加载 ${blocks.length} 个结构块`,
-          `Loaded ${blocks.length} structured blocks from the sibling JSON`,
+          `已从 MinerU Markdown 加载 ${blocks.length} 个结构块`,
+          `Loaded ${blocks.length} structured blocks from MinerU Markdown`,
         ),
+        markdownText,
       };
     } catch {
-      return {
-        blocks: [],
-        currentPdfName: pdfName,
-        currentJsonName: noJsonLoadedText,
-        statusMessage: l(
-          '未找到同目录 JSON，请手动选择 MinerU JSON。',
-          'No sibling JSON was found. Please choose a MinerU JSON file manually.',
-        ),
-      };
+      continue;
     }
   }
 

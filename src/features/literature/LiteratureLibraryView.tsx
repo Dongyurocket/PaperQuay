@@ -42,6 +42,7 @@ import type {
   LiteratureCategory,
   LiteraturePaper,
   LiteraturePaperTaskState,
+  ListPapersRequest,
   UpdatePaperRequest,
 } from '../../types/library';
 import type {
@@ -83,12 +84,16 @@ import {
   clampFloatingMenuPosition,
   DETAILS_PANEL_DEFAULT_WIDTH,
   DETAILS_PANEL_WIDTH_STORAGE_KEY,
+  CATEGORY_SIDEBAR_DEFAULT_WIDTH,
+  CATEGORY_SIDEBAR_WIDTH_STORAGE_KEY,
   applyPaperMineruStatusUpdate,
   applyPaperSummaryStatusUpdate,
   buildImportDraftsFromPdfPaths,
   buildInitialPaperStatuses,
+  clampCategorySidebarWidth,
   filterDemoPapers,
   hasMineruOutputForPaper,
+  loadCategorySidebarWidth,
   loadDetailsPanelWidth,
   markPaperStatusesCheckingMineru,
   metadataFromDraft,
@@ -189,6 +194,39 @@ type LibraryConfirmDialogState =
   | { kind: 'delete-category'; category: LiteratureCategory }
   | { kind: 'delete-paper'; paper: LiteraturePaper; deleteFiles: boolean };
 
+type LiteraturePaperSortBy = NonNullable<ListPapersRequest['sortBy']>;
+type LiteraturePaperSortDirection = NonNullable<ListPapersRequest['sortDirection']>;
+
+const PAPER_SORT_STORAGE_KEY = 'paperquay-literature-paper-sort-v1';
+const PAPER_SORT_FIELDS: LiteraturePaperSortBy[] = [
+  'manual',
+  'title',
+  'year',
+  'author',
+  'importedAt',
+  'updatedAt',
+  'lastReadAt',
+];
+
+function loadPaperSortState(): {
+  sortBy: LiteraturePaperSortBy;
+  sortDirection: LiteraturePaperSortDirection;
+} {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(PAPER_SORT_STORAGE_KEY) ?? '{}') as Partial<{
+      sortBy: LiteraturePaperSortBy;
+      sortDirection: LiteraturePaperSortDirection;
+    }>;
+
+    return {
+      sortBy: parsed.sortBy && PAPER_SORT_FIELDS.includes(parsed.sortBy) ? parsed.sortBy : 'manual',
+      sortDirection: parsed.sortDirection === 'desc' ? 'desc' : 'asc',
+    };
+  } catch {
+    return { sortBy: 'manual', sortDirection: 'asc' };
+  }
+}
+
 export default function LiteratureLibraryView({
   onOpenPaper,
   mineruCacheDir = '',
@@ -234,8 +272,15 @@ export default function LiteratureLibraryView({
   const [metadataDialogBusy, setMetadataDialogBusy] = useState(false);
   const [paperDragOverCategoryId, setPaperDragOverCategoryId] = useState<string | null>(null);
   const [tagDialogPaper, setTagDialogPaper] = useState<LiteraturePaper | null>(null);
+  const [paperSort, setPaperSort] = useState(loadPaperSortState);
+  const [categorySidebarWidth, setCategorySidebarWidth] = useState(loadCategorySidebarWidth);
+  const [categorySidebarResizing, setCategorySidebarResizing] = useState(false);
   const [detailsPanelWidth, setDetailsPanelWidth] = useState(loadDetailsPanelWidth);
   const [detailsPanelResizing, setDetailsPanelResizing] = useState(false);
+  const categorySidebarResizeStartRef = useRef({
+    clientX: 0,
+    width: CATEGORY_SIDEBAR_DEFAULT_WIDTH,
+  });
   const detailsPanelResizeStartRef = useRef({
     clientX: 0,
     width: DETAILS_PANEL_DEFAULT_WIDTH,
@@ -253,6 +298,7 @@ export default function LiteratureLibraryView({
     () => categories.find((category) => category.id === selectedCategoryId) ?? null,
     [categories, selectedCategoryId],
   );
+  const libraryStorageDir = settings?.storageDir ?? '';
   const selectedPaper = useMemo(
     () => papers.find((paper) => paper.id === selectedPaperId) ?? papers[0] ?? null,
     [papers, selectedPaperId],
@@ -312,6 +358,7 @@ export default function LiteratureLibraryView({
               mineruCacheDir,
               autoLoadSiblingJson,
               localPathExists,
+              libraryStorageDir,
             ),
             overviewGenerated: Boolean(paper.aiSummary?.trim()),
             checkingMineru: false,
@@ -332,7 +379,7 @@ export default function LiteratureLibraryView({
         ...Object.fromEntries(entries),
       }));
     },
-    [autoLoadSiblingJson, demoLibrary, mineruCacheDir],
+    [autoLoadSiblingJson, demoLibrary, libraryStorageDir, mineruCacheDir],
   );
 
   const refreshPapers = useCallback(
@@ -348,15 +395,15 @@ export default function LiteratureLibraryView({
       const nextPapers = await listLibraryPapers({
         categoryId: nextCategoryId,
         search: searchQuery,
-        sortBy: 'manual',
-        sortDirection: 'asc',
+        sortBy: paperSort.sortBy,
+        sortDirection: paperSort.sortDirection,
         limit: 500,
       });
 
       setPapers(nextPapers);
       setSelectedPaperId((current) => resolveSelectedPaperId(current, nextPapers));
     },
-    [demoLibrary, resolveDemoPapers, searchQuery, selectedCategoryId],
+    [demoLibrary, paperSort.sortBy, paperSort.sortDirection, resolveDemoPapers, searchQuery, selectedCategoryId],
   );
 
   const refreshAll = useCallback(async () => {
@@ -468,6 +515,20 @@ export default function LiteratureLibraryView({
 
   useEffect(() => {
     try {
+      localStorage.setItem(PAPER_SORT_STORAGE_KEY, JSON.stringify(paperSort));
+    } catch {
+    }
+  }, [paperSort]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(CATEGORY_SIDEBAR_WIDTH_STORAGE_KEY, String(categorySidebarWidth));
+    } catch {
+    }
+  }, [categorySidebarWidth]);
+
+  useEffect(() => {
+    try {
       localStorage.setItem(DETAILS_PANEL_WIDTH_STORAGE_KEY, String(detailsPanelWidth));
     } catch {
     }
@@ -507,6 +568,50 @@ export default function LiteratureLibraryView({
       window.removeEventListener('pointerup', handlePointerUp);
     };
   }, [detailsPanelResizing]);
+
+  useEffect(() => {
+    if (!categorySidebarResizing) {
+      return undefined;
+    }
+
+    const handlePointerMove = (event: PointerEvent) => {
+      const start = categorySidebarResizeStartRef.current;
+
+      setCategorySidebarWidth(clampCategorySidebarWidth(start.width + event.clientX - start.clientX));
+    };
+
+    const handlePointerUp = () => {
+      setCategorySidebarResizing(false);
+    };
+
+    const previousUserSelect = document.body.style.userSelect;
+    const previousCursor = document.body.style.cursor;
+
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'col-resize';
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+
+    return () => {
+      document.body.style.userSelect = previousUserSelect;
+      document.body.style.cursor = previousCursor;
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+    };
+  }, [categorySidebarResizing]);
+
+  const handleStartCategorySidebarResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+    }
+    categorySidebarResizeStartRef.current = {
+      clientX: event.clientX,
+      width: categorySidebarWidth,
+    };
+    setCategorySidebarResizing(true);
+  };
 
   const handleStartDetailsPanelResize = (event: ReactPointerEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -1226,7 +1331,7 @@ export default function LiteratureLibraryView({
           const metadata = await lookupLiteratureMetadata({
             doi: paper.doi,
             title: paper.title,
-            path: paperPdfPath(paper),
+            path: paperPdfPath(paper, libraryStorageDir),
           });
 
           if (!metadata) {
@@ -1444,8 +1549,8 @@ export default function LiteratureLibraryView({
       listLibraryPapers({
         categoryId: selectedCategoryId,
         search: searchQuery,
-        sortBy: 'manual',
-        sortDirection: 'asc',
+        sortBy: paperSort.sortBy,
+        sortDirection: paperSort.sortDirection,
         limit: 500,
       }),
     ]);
@@ -1582,6 +1687,11 @@ export default function LiteratureLibraryView({
       return;
     }
 
+    if (paperSort.sortBy !== 'manual') {
+      setStatusMessage(l('请切换到手动排序后再拖拽调整顺序', 'Switch to manual order before drag-sorting papers'));
+      return;
+    }
+
     const nextPapers = reorderPaperList(papers, draggedPaperId, targetPaperId, placement);
 
     if (nextPapers === papers) {
@@ -1682,7 +1792,7 @@ export default function LiteratureLibraryView({
       const metadata = await lookupLiteratureMetadata({
         doi: doi || null,
         title: title || metadataDialog.paper.title,
-        path: paperPdfPath(metadataDialog.paper),
+        path: paperPdfPath(metadataDialog.paper, libraryStorageDir),
       });
       const updateRequest = buildManualMetadataUpdateRequest(
         metadataDialog.paper,
@@ -1809,13 +1919,13 @@ export default function LiteratureLibraryView({
       });
       const [nextCategories, nextPapers] = await Promise.all([
         listLibraryCategories(),
-        listLibraryPapers({
-          categoryId: selectedCategoryId,
-          search: searchQuery,
-          sortBy: 'manual',
-          sortDirection: 'asc',
-          limit: 500,
-        }),
+      listLibraryPapers({
+        categoryId: selectedCategoryId,
+        search: searchQuery,
+        sortBy: paperSort.sortBy,
+        sortDirection: paperSort.sortDirection,
+        limit: 500,
+      }),
       ]);
 
       setCategories(nextCategories);
@@ -1868,7 +1978,7 @@ export default function LiteratureLibraryView({
     <div
       className="pq-saas-scope pq-library-workspace pq-workspace-surface relative grid h-full min-h-0 overflow-hidden text-[var(--pq-text)]"
       style={{
-        gridTemplateColumns: `248px minmax(360px,1fr) ${detailsPanelWidth}px`,
+        gridTemplateColumns: `${categorySidebarWidth}px minmax(360px,1fr) ${detailsPanelWidth}px`,
         gridTemplateRows: 'minmax(0, 1fr)',
       }}
     >
@@ -1893,11 +2003,15 @@ export default function LiteratureLibraryView({
           papers={papers}
           paperStatuses={paperStatuses}
           showReadingHeatmap={showReadingHeatmap}
+          storageDir={libraryStorageDir}
           selectedPaper={selectedPaper}
           searchQuery={searchQuery}
+          sortBy={paperSort.sortBy}
+          sortDirection={paperSort.sortDirection}
           statusMessage={statusMessage}
           error={error}
           onSearchQueryChange={setSearchQuery}
+          onSortChange={(sortBy, sortDirection) => setPaperSort({ sortBy, sortDirection })}
           onImportPdfs={() => void handleImportPdfs()}
           onRefresh={() => void refreshAll()}
           onSelectPaper={setSelectedPaperId}
@@ -1910,6 +2024,32 @@ export default function LiteratureLibraryView({
         onPaperPointerDragOverCategory={setPaperDragOverCategoryId}
         onPaperContextMenu={handlePaperContextMenu}
       />
+      </div>
+
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label={l('拖动调整本地文库导航宽度', 'Drag to resize the local library navigation')}
+        title={l('拖动调整本地文库导航宽度', 'Drag to resize the local library navigation')}
+        onPointerDown={handleStartCategorySidebarResize}
+        onDoubleClick={() => setCategorySidebarWidth(CATEGORY_SIDEBAR_DEFAULT_WIDTH)}
+        className={[
+          'absolute bottom-0 top-0 z-40 w-4 -translate-x-1/2 cursor-col-resize touch-none',
+          categorySidebarResizing ? 'bg-teal-400/10' : 'bg-transparent hover:bg-teal-400/[0.04]',
+        ].join(' ')}
+        style={{
+          left: categorySidebarWidth,
+          touchAction: 'none',
+        }}
+      >
+        <div
+          className={[
+            'mx-auto h-full w-px transition',
+            categorySidebarResizing
+              ? 'bg-teal-400 shadow-[0_0_0_3px_rgba(45,212,191,0.16)]'
+              : 'bg-slate-200 hover:bg-teal-300 dark:bg-white/10 dark:hover:bg-teal-300/60',
+          ].join(' ')}
+        />
       </div>
 
       <div data-tour="ai-summary" className="h-full min-h-0 overflow-hidden">
@@ -2094,8 +2234,12 @@ export default function LiteratureLibraryView({
 
             <div className="mt-3 rounded-[var(--pq-radius-sm)] border border-[var(--pq-border-subtle)] bg-[var(--pq-bg-secondary)] px-3 py-2 text-xs leading-5 text-[var(--pq-text-faint)]">
               <div className="font-medium text-[var(--pq-text-muted)]">{l('PDF 文件', 'PDF File')}</div>
-              <div className="mt-0.5 truncate" title={paperPdfPath(metadataDialog.paper) || undefined}>
-                {paperPdfPath(metadataDialog.paper) || l('未找到 PDF 路径', 'No PDF path found')}
+              <div
+                className="mt-0.5 truncate"
+                title={paperPdfPath(metadataDialog.paper, libraryStorageDir) || undefined}
+              >
+                {paperPdfPath(metadataDialog.paper, libraryStorageDir) ||
+                  l('未找到 PDF 路径', 'No PDF path found')}
               </div>
             </div>
 

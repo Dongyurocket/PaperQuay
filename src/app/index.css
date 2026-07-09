@@ -455,13 +455,23 @@ textarea,
   border: 1px solid var(--pq-border);
   border-radius: var(--pq-radius-lg);
   background: var(--pq-surface-1);
-  box-shadow: var(--pq-shadow-float);
+  box-shadow: var(--pq-shadow-soft);
   backdrop-filter: var(--pq-blur);
+  transition: box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.pq-chat-composer:focus-within {
+  border-color: var(--pq-border-strong);
+  box-shadow: var(--pq-shadow-float);
 }
 
 .dark .pq-chat-composer {
   border-color: var(--pq-border);
   background: var(--pq-surface-1);
+  box-shadow: var(--pq-shadow-soft);
+}
+
+.dark .pq-chat-composer:focus-within {
   box-shadow: var(--pq-shadow-float);
 }
 
@@ -477,9 +487,14 @@ textarea,
 }
 
 .pq-chat-bubble-user {
-  background: var(--pq-accent-button-bg);
-  color: var(--pq-accent-button-text);
+  border: 1px solid var(--pq-accent-border);
+  background: var(--pq-accent-soft);
+  color: var(--pq-text);
   box-shadow: var(--pq-shadow-soft);
+}
+
+.dark .pq-chat-bubble-user {
+  box-shadow: none;
 }
 
 .pq-workspace-surface {
@@ -1520,5 +1535,42 @@ textarea,
 
   .pq-tiptap-editor .ProseMirror {
     padding: 22px 20px 34px 58px;
+  }
+}
+
+@keyframes pq-msg-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.pq-msg-in {
+  animation: pq-msg-in 0.26s ease-out both;
+}
+
+@keyframes pq-menu-drop {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.pq-model-menu {
+  animation: pq-menu-drop 0.16s ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pq-msg-in,
+  .pq-model-menu {
+    animation: none;
   }
 }

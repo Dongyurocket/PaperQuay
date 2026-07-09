@@ -21,12 +21,102 @@ const {
 } = require('./utils.cjs');
 
 const OPENALEX_API_BASE = 'https://api.openalex.org';
+const LIBRARY_REFERENCE_PROGRESS_EVENT = 'paperquay://library-reference-progress';
+const MAX_CROSSREF_REFERENCES_PER_PAPER = 200;
+
+function comparablePath(filePath) {
+  const resolved = path.resolve(filePath);
+  return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+}
+
+function isSamePath(left, right) {
+  return comparablePath(left) === comparablePath(right);
+}
+
+function isSubPath(root, candidate) {
+  const relative = path.relative(path.resolve(root), path.resolve(candidate));
+  return Boolean(relative) && !relative.startsWith('..') && !path.isAbsolute(relative);
+}
+
+function pathExists(filePath) {
+  return fsp.access(filePath).then(() => true).catch(() => false);
+}
+
+async function copyFileIfNeeded(sourcePath, targetPath) {
+  await fsp.mkdir(path.dirname(targetPath), { recursive: true });
+
+  if (await pathExists(targetPath)) {
+    return false;
+  }
+
+  await fsp.copyFile(sourcePath, targetPath);
+  return true;
+}
+
+async function migrateLibraryStorageDirectory(library, previousStorageDir, nextStorageDir) {
+  const previousDir = cleanString(previousStorageDir);
+  const targetDir = cleanString(nextStorageDir);
+
+  if (!previousDir || !targetDir || isSamePath(previousDir, targetDir)) {
+    return { copiedFiles: 0, updatedAttachments: 0 };
+  }
+
+  await fsp.mkdir(targetDir, { recursive: true });
+  let copiedFiles = 0;
+  let updatedAttachments = 0;
+
+  const canCopyWholeDirectory =
+    !isSubPath(previousDir, targetDir) &&
+    !isSubPath(targetDir, previousDir);
+
+  if (canCopyWholeDirectory && await pathExists(previousDir)) {
+    await fsp.cp(previousDir, targetDir, {
+      recursive: true,
+      force: false,
+      errorOnExist: false,
+    });
+  }
+
+  for (const paper of library.papers) {
+    for (const attachment of paper.attachments ?? []) {
+      if (!attachment?.storedPath) {
+        continue;
+      }
+
+      const storedPath = attachment.storedPath;
+      const relativePath = cleanString(attachment.relativePath) ||
+        (isSubPath(previousDir, storedPath) ? path.relative(previousDir, storedPath) : '');
+
+      if (!relativePath || !isSubPath(previousDir, storedPath)) {
+        continue;
+      }
+
+      const nextPath = path.join(targetDir, relativePath);
+
+      if (!isSamePath(storedPath, nextPath)) {
+        if (await pathExists(storedPath)) {
+          copiedFiles += await copyFileIfNeeded(storedPath, nextPath) ? 1 : 0;
+        }
+
+        attachment.storedPath = nextPath;
+        attachment.relativePath = relativePath;
+        attachment.fileName = attachment.fileName || fileNameFromPath(nextPath);
+        attachment.missing = !(await pathExists(nextPath));
+        updatedAttachments += 1;
+        paper.updatedAt = now();
+      }
+    }
+  }
+
+  return { copiedFiles, updatedAttachments };
+}
 
 function normalizeDoi(value) {
   return cleanString(value)
     .replace(/^https?:\/\/(?:dx\.)?doi\.org\//i, '')
     .replace(/^doi:/i, '')
-    .trim();
+    .trim()
+    .toLowerCase();
 }
 
 function firstString(...values) {
@@ -305,6 +395,76 @@ async function lookupCrossrefMetadata({ doi, title }) {
   return mapCrossrefWork(item);
 }
 
+function emitLibraryReferenceProgress(sender, payload) {
+  if (!sender || typeof sender.send !== 'function') {
+    return;
+  }
+
+  sender.send('paperquay:event', LIBRARY_REFERENCE_PROGRESS_EVENT, {
+    updatedAt: Date.now(),
+    ...payload,
+  });
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function crossrefReferenceTitle(reference) {
+  return firstString(
+    reference?.['article-title'],
+    reference?.articleTitle,
+    reference?.title,
+    reference?.['series-title'],
+  );
+}
+
+function crossrefReferenceJournal(reference) {
+  return firstString(
+    reference?.['journal-title'],
+    reference?.journalTitle,
+    reference?.['volume-title'],
+    reference?.['container-title'],
+  );
+}
+
+function mapCrossrefReference(reference, index, paperId) {
+  const doi = normalizeDoi(reference?.DOI || reference?.doi);
+  const title = crossrefReferenceTitle(reference);
+  const unstructured = firstString(reference?.unstructured, reference?.key);
+
+  return {
+    id: `ref:${paperId}:${index + 1}`,
+    paperId,
+    seq: index + 1,
+    doi,
+    title: title || '',
+    authors: firstString(reference?.author) || '',
+    year: normalizeYear(reference?.year),
+    journal: crossrefReferenceJournal(reference) || '',
+    volume: cleanString(reference?.volume),
+    issue: cleanString(reference?.issue),
+    pages: firstString(reference?.['first-page'], reference?.page, reference?.pages) || '',
+    unstructured: unstructured || '',
+  };
+}
+
+async function fetchCrossrefReferences(doi, paperId = '') {
+  const normalizedDoi = normalizeDoi(doi);
+  if (!normalizedDoi) {
+    return [];
+  }
+
+  const endpoint = `https://api.crossref.org/works/${encodeURIComponent(normalizedDoi)}`;
+  const data = await readRequestJson(await fetch(endpoint), 'Crossref references');
+  const references = Array.isArray(data?.message?.reference) ? data.message.reference : [];
+
+  return references
+    .slice(0, MAX_CROSSREF_REFERENCES_PER_PAPER)
+    .map((reference, index) => mapCrossrefReference(reference, index, paperId))
+    .filter((reference) => reference.doi || reference.title || reference.unstructured);
+}
+
 function createLibraryCommands(context) {
   const { appPaths, store } = context;
 
@@ -325,12 +485,20 @@ function createLibraryCommands(context) {
 
     async library_update_settings({ settings }) {
       const library = store.load();
+      const previousStorageDir = library.settings.storageDir;
       library.settings = {
         ...library.settings,
         ...settings,
         importMode: settings.importMode || library.settings.importMode,
       };
-      if (library.settings.storageDir) await fsp.mkdir(library.settings.storageDir, { recursive: true });
+      if (library.settings.storageDir) {
+        await migrateLibraryStorageDirectory(
+          library,
+          previousStorageDir,
+          library.settings.storageDir,
+        );
+        await fsp.mkdir(library.settings.storageDir, { recursive: true });
+      }
       await store.save(library);
       return library.settings;
     },
@@ -508,6 +676,22 @@ function createLibraryCommands(context) {
       }
 
       await store.save(library);
+      for (const result of results) {
+        const paper = result.status === 'imported' ? result.paper : null;
+        if (!paper?.id || !paper.doi) {
+          continue;
+        }
+
+        fetchCrossrefReferences(paper.doi, paper.id)
+          .then((refs) => {
+            if (refs.length > 0) {
+              store.saveReferences(paper.id, refs);
+            }
+          })
+          .catch((error) => {
+            console.warn(`[PaperQuay] Failed to fetch Crossref references for imported paper ${paper.id}: ${error instanceof Error ? error.message : String(error)}`);
+          });
+      }
       return results;
     },
 
@@ -570,6 +754,101 @@ function createLibraryCommands(context) {
 
       await store.save(library);
       return attachment;
+    },
+
+    async library_get_paper_references({ paperId }) {
+      return store.loadReferences(cleanString(paperId));
+    },
+
+    async library_fetch_paper_references({ paperId, force = false }) {
+      const targetPaperId = cleanString(paperId);
+      if (!targetPaperId) {
+        throw new Error('Paper id is required');
+      }
+
+      const library = store.load();
+      const paper = library.papers.find((item) => item.id === targetPaperId);
+      if (!paper) {
+        throw new Error('Paper does not exist');
+      }
+
+      if (!paper.doi) {
+        return { paperId: targetPaperId, fetched: 0, skipped: true, references: [] };
+      }
+
+      const cached = store.loadReferences(targetPaperId);
+      if (!force && cached.length > 0) {
+        return { paperId: targetPaperId, fetched: cached.length, skipped: true, references: cached };
+      }
+
+      const refs = await fetchCrossrefReferences(paper.doi, targetPaperId);
+      const saved = store.saveReferences(targetPaperId, refs);
+      return { paperId: targetPaperId, fetched: saved.length, skipped: false, references: saved };
+    },
+
+    async library_fetch_all_references({ force = false } = {}, event) {
+      const papers = store.load().papers.filter((paper) => normalizeDoi(paper.doi));
+      let fetched = 0;
+      let skipped = 0;
+      let failed = 0;
+
+      emitLibraryReferenceProgress(event?.sender, {
+        status: 'running',
+        current: 0,
+        total: papers.length,
+        fetched,
+        skipped,
+        failed,
+      });
+
+      for (const [index, paper] of papers.entries()) {
+        const cached = store.loadReferences(paper.id);
+        if (!force && cached.length > 0) {
+          skipped += 1;
+          emitLibraryReferenceProgress(event?.sender, {
+            status: 'running',
+            current: index + 1,
+            total: papers.length,
+            paperId: paper.id,
+            title: paper.title,
+            fetched,
+            skipped,
+            failed,
+          });
+          await delay(50);
+          continue;
+        }
+
+        try {
+          const refs = await fetchCrossrefReferences(paper.doi, paper.id);
+          store.saveReferences(paper.id, refs);
+          fetched += 1;
+        } catch (error) {
+          failed += 1;
+          console.warn(`[PaperQuay] Failed to fetch Crossref references for ${paper.id}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+
+        emitLibraryReferenceProgress(event?.sender, {
+          status: 'running',
+          current: index + 1,
+          total: papers.length,
+          paperId: paper.id,
+          title: paper.title,
+          fetched,
+          skipped,
+          failed,
+        });
+        await delay(50);
+      }
+
+      const result = { fetched, skipped, failed };
+      emitLibraryReferenceProgress(event?.sender, {
+        status: failed > 0 ? 'error' : 'done',
+        current: papers.length,
+        total: papers.length,
+        ...result,
+      });
+      return result;
     },
 
     async lookup_literature_metadata({ request }) {

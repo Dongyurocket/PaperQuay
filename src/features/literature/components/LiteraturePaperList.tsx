@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 import { useAppLocale, useLocaleText } from '../../../i18n/uiLanguage';
 import { useWheelScrollDelegate } from '../../../hooks/useWheelScrollDelegate';
-import type { LiteraturePaper } from '../../../types/library';
+import type { ListPapersRequest, LiteraturePaper } from '../../../types/library';
 import type { PdfReadingHeatmap } from '../../../types/reader';
 import {
   loadPaperHistoryMap,
@@ -38,17 +38,24 @@ export interface LiteraturePaperListStatus {
   checkingMineru?: boolean;
 }
 
+export type LiteraturePaperListSortBy = NonNullable<ListPapersRequest['sortBy']>;
+export type LiteraturePaperListSortDirection = NonNullable<ListPapersRequest['sortDirection']>;
+
 interface LiteraturePaperListProps {
   loading: boolean;
   working: boolean;
   papers: LiteraturePaper[];
   paperStatuses: Record<string, LiteraturePaperListStatus>;
   showReadingHeatmap?: boolean;
+  storageDir?: string;
   selectedPaper: LiteraturePaper | null;
   searchQuery: string;
+  sortBy: LiteraturePaperListSortBy;
+  sortDirection: LiteraturePaperListSortDirection;
   statusMessage: string;
   error: string;
   onSearchQueryChange: (value: string) => void;
+  onSortChange: (sortBy: LiteraturePaperListSortBy, sortDirection: LiteraturePaperListSortDirection) => void;
   onImportPdfs: () => void;
   onRefresh: () => void;
   onSelectPaper: (paperId: string) => void;
@@ -76,11 +83,15 @@ export default function LiteraturePaperList({
   papers,
   paperStatuses,
   showReadingHeatmap = true,
+  storageDir = '',
   selectedPaper,
   searchQuery,
+  sortBy,
+  sortDirection,
   statusMessage,
   error,
   onSearchQueryChange,
+  onSortChange,
   onImportPdfs,
   onRefresh,
   onSelectPaper,
@@ -117,6 +128,8 @@ export default function LiteraturePaperList({
   const [categoryDraggingPaperId, setCategoryDraggingPaperId] = useState<string | null>(null);
   const [suppressClickPaperId, setSuppressClickPaperId] = useState<string | null>(null);
   const [heatmapRevision, setHeatmapRevision] = useState(0);
+  const manualSortingEnabled = sortBy === 'manual';
+  const sortValue = `${sortBy}:${sortDirection}`;
   const heatmapsByPaperId = useMemo(() => {
     if (!showReadingHeatmap || papers.length === 0) {
       return {} as Record<string, PdfReadingHeatmap | null>;
@@ -236,6 +249,10 @@ export default function LiteraturePaperList({
     event: PointerEvent<HTMLElement>,
     paper: LiteraturePaper,
   ) => {
+    if (!manualSortingEnabled) {
+      return;
+    }
+
     if (event.button !== 0) {
       return;
     }
@@ -415,6 +432,30 @@ export default function LiteraturePaperList({
             />
           </div>
 
+          <select
+            value={sortValue}
+            onChange={(event) => {
+              const [nextSortBy, nextDirection] = event.target.value.split(':') as [
+                LiteraturePaperListSortBy,
+                LiteraturePaperListSortDirection,
+              ];
+
+              onSortChange(nextSortBy, nextDirection);
+            }}
+            className="pq-input h-9 w-[168px] px-3 text-sm"
+            title={l('排序', 'Sort')}
+          >
+            <option value="manual:asc">{l('手动排序', 'Manual Order')}</option>
+            <option value="title:asc">{l('名称 A-Z', 'Name A-Z')}</option>
+            <option value="title:desc">{l('名称 Z-A', 'Name Z-A')}</option>
+            <option value="importedAt:desc">{l('添加时间 新-旧', 'Added New-Old')}</option>
+            <option value="importedAt:asc">{l('添加时间 旧-新', 'Added Old-New')}</option>
+            <option value="year:desc">{l('出版时间 新-旧', 'Year New-Old')}</option>
+            <option value="year:asc">{l('出版时间 旧-新', 'Year Old-New')}</option>
+            <option value="updatedAt:desc">{l('更新时间 新-旧', 'Updated New-Old')}</option>
+            <option value="author:asc">{l('作者 A-Z', 'Author A-Z')}</option>
+          </select>
+
           <button
             type="button"
             onClick={onImportPdfs}
@@ -437,7 +478,11 @@ export default function LiteraturePaperList({
         </div>
 
         <div className="mt-2 text-xs text-[var(--pq-text-muted)]">
-          {error || statusMessage || l('拖动把手可调整排序；拖动条目到分类可归类。', 'Drag the handle to reorder papers; drag the row onto a category to classify it.')}
+          {error ||
+            statusMessage ||
+            (manualSortingEnabled
+              ? l('拖动把手可调整排序；拖动条目到分类可归类。', 'Drag the handle to reorder papers; drag the row onto a category to classify it.')
+              : l('当前使用自动排序；拖动条目到分类仍可归类。', 'Automatic sorting is active. Dragging a row onto a category still classifies it.'))}
         </div>
       </header>
 
@@ -466,7 +511,7 @@ export default function LiteraturePaperList({
           <div className="space-y-2">
             {papers.map((paper) => {
               const active = selectedPaper?.id === paper.id;
-              const pdfPath = paperPdfPath(paper);
+              const pdfPath = paperPdfPath(paper, storageDir);
               const showBeforeIndicator =
                 dropIndicator?.paperId === paper.id && dropIndicator.placement === 'before';
               const showAfterIndicator =
@@ -512,7 +557,8 @@ export default function LiteraturePaperList({
                     onDoubleClick={() => onOpenPaper(paper)}
                     onKeyDown={(event) => handleRowKeyDown(event, paper)}
                     className={clsx(
-                      'pq-card grid w-full cursor-grab gap-3 px-3 py-3 text-left transition active:cursor-grabbing',
+                      'pq-card grid w-full gap-3 px-3 py-3 text-left transition',
+                      manualSortingEnabled ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer',
                       showReadingHeatmap
                         ? 'grid-cols-[28px_minmax(0,1fr)_minmax(128px,160px)_72px_96px] max-[900px]:grid-cols-[28px_minmax(0,1fr)_64px_86px]'
                         : 'grid-cols-[28px_minmax(0,1fr)_100px_110px]',
@@ -528,12 +574,21 @@ export default function LiteraturePaperList({
                     <span
                       data-paper-sort-handle
                       draggable={false}
-                      title={l('拖拽排序', 'Drag to reorder')}
+                      title={
+                        manualSortingEnabled
+                          ? l('拖拽排序', 'Drag to reorder')
+                          : l('切换到手动排序后可拖拽排序', 'Switch to manual order to drag-sort')
+                      }
                       onPointerDown={(event) => handleSortPointerDown(event, paper)}
                       onPointerMove={handleSortPointerMove}
                       onPointerUp={handleSortPointerUp}
                       onPointerCancel={resetSortDrag}
-                      className="mt-0.5 flex h-8 w-7 cursor-grab items-center justify-center rounded-lg text-[var(--pq-text-faint)] transition hover:bg-[var(--pq-accent-soft)] hover:text-[var(--pq-accent)] active:cursor-grabbing"
+                      className={clsx(
+                        'mt-0.5 flex h-8 w-7 items-center justify-center rounded-lg text-[var(--pq-text-faint)] transition',
+                        manualSortingEnabled
+                          ? 'cursor-grab hover:bg-[var(--pq-accent-soft)] hover:text-[var(--pq-accent)] active:cursor-grabbing'
+                          : 'cursor-not-allowed opacity-45',
+                      )}
                     >
                       <GripVertical className="h-4 w-4" strokeWidth={1.8} />
                     </span>

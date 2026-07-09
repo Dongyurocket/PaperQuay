@@ -184,6 +184,7 @@ export const DEFAULT_SETTINGS: ReaderSettings = {
   showLibraryReadingHeatmap: true,
   enablePdfReadingHeatmap: true,
   enableSelectionTranslation: true,
+  highlightSelectionTranslation: true,
   enablePdfParagraphTranslationPopover: true,
   autoTranslateSelection: false,
   smoothScroll: true,
@@ -191,6 +192,7 @@ export const DEFAULT_SETTINGS: ReaderSettings = {
   showBlockMeta: true,
   hidePageDecorationsInBlockView: false,
   softPageShadow: true,
+  mineruApiBaseUrl: '',
   mineruCacheDir: '',
   remotePdfDownloadDir: '',
   translationBatchSize: 10,
@@ -203,6 +205,7 @@ export const DEFAULT_SETTINGS: ReaderSettings = {
   translationModelPresetId: 'default',
   selectionTranslationModelPresetId: 'default',
   summaryModelPresetId: 'default',
+  reviewModelPresetId: 'default',
   agentModelPresetId: 'default',
   embeddingBaseUrl: 'https://api.openai.com',
   embeddingModel: 'text-embedding-3-small',
@@ -355,6 +358,7 @@ export function normalizeModelRuntimeConfigs(
     translation: normalizeModelRuntimeConfig(rawConfigs.translation),
     selectionTranslation: normalizeModelRuntimeConfig(rawConfigs.selectionTranslation),
     summary: normalizeModelRuntimeConfig(rawConfigs.summary),
+    review: normalizeModelRuntimeConfig(rawConfigs.review),
     agent: normalizeModelRuntimeConfig(rawConfigs.agent),
     qa: normalizeModelRuntimeConfig(rawConfigs.qa),
   };
@@ -757,7 +761,9 @@ export function normalizeReaderSettings(value?: Partial<ReaderSettings> | null):
     showLibraryReadingHeatmap: merged.showLibraryReadingHeatmap !== false,
     enablePdfReadingHeatmap: merged.enablePdfReadingHeatmap !== false,
     enableSelectionTranslation: merged.enableSelectionTranslation !== false,
+    highlightSelectionTranslation: merged.highlightSelectionTranslation !== false,
     enablePdfParagraphTranslationPopover: merged.enablePdfParagraphTranslationPopover !== false,
+    mineruApiBaseUrl: merged.mineruApiBaseUrl?.trim() ?? '',
     translationBatchSize: clampTranslationBatchSize(merged.translationBatchSize),
     translationConcurrency: clampTranslationConcurrency(merged.translationConcurrency),
     translationRequestsPerMinute: clampTranslationRequestsPerMinute(
@@ -771,6 +777,11 @@ export function normalizeReaderSettings(value?: Partial<ReaderSettings> | null):
     ),
     embeddingBatchSize: clampEmbeddingBatchSize(merged.embeddingBatchSize),
     modelRuntimeConfigs: normalizeModelRuntimeConfigs(merged.modelRuntimeConfigs),
+    reviewModelPresetId:
+      merged.reviewModelPresetId?.trim() ||
+      merged.summaryModelPresetId?.trim() ||
+      merged.agentModelPresetId?.trim() ||
+      DEFAULT_SETTINGS.reviewModelPresetId,
     summaryOutputLanguage: merged.summaryOutputLanguage?.trim() || 'follow-ui',
     translationDisplayMode:
       merged.translationDisplayMode === 'original' || merged.translationDisplayMode === 'bilingual'
@@ -925,8 +936,11 @@ export function createStandaloneItem(path: string, locale: UiLanguage): Workspac
   };
 }
 
-export function createNativeLibraryWorkspaceItem(paper: LiteraturePaper): WorkspaceItem | null {
-  const resolvedAttachment = resolvePaperPdfAttachment(paper);
+export function createNativeLibraryWorkspaceItem(
+  paper: LiteraturePaper,
+  storageDir?: string | null,
+): WorkspaceItem | null {
+  const resolvedAttachment = resolvePaperPdfAttachment(paper, { storageDir });
 
   if (!resolvedAttachment) {
     return null;

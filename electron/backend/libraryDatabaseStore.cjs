@@ -2,7 +2,7 @@ const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const path = require('node:path');
 const { DatabaseSync, sqlStringLiteral, withTransaction } = require('./nodeSqlite.cjs');
-const { readJson, writeJsonSync } = require('./utils.cjs');
+const { cleanString, readJson, writeJsonSync } = require('./utils.cjs');
 
 function openDatabase(databasePath) {
   fs.mkdirSync(path.dirname(databasePath), { recursive: true });
@@ -112,11 +112,30 @@ function createSchema(db) {
       FOREIGN KEY (paper_id) REFERENCES papers(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS paper_references (
+      id TEXT PRIMARY KEY,
+      paper_id TEXT NOT NULL,
+      seq INTEGER NOT NULL,
+      doi TEXT,
+      title TEXT,
+      authors TEXT,
+      year TEXT,
+      journal TEXT,
+      volume TEXT,
+      issue TEXT,
+      pages TEXT,
+      unstructured TEXT,
+      fetched_at INTEGER NOT NULL,
+      FOREIGN KEY (paper_id) REFERENCES papers(id) ON DELETE CASCADE
+    );
+
     CREATE INDEX IF NOT EXISTS idx_papers_sort_order ON papers(sort_order);
     CREATE INDEX IF NOT EXISTS idx_attachments_paper_id ON attachments(paper_id);
     CREATE INDEX IF NOT EXISTS idx_authors_paper_id ON authors(paper_id, sort_order);
     CREATE INDEX IF NOT EXISTS idx_tags_paper_id ON tags(paper_id, sort_order);
     CREATE INDEX IF NOT EXISTS idx_paper_categories_category_id ON paper_categories(category_id);
+    CREATE INDEX IF NOT EXISTS idx_paper_references_paper_id ON paper_references(paper_id);
+    CREATE INDEX IF NOT EXISTS idx_paper_references_doi ON paper_references(doi);
   `);
 
   migrateRepeatedIdListTable(db, 'authors', `
@@ -145,6 +164,8 @@ function createSchema(db) {
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_authors_paper_id ON authors(paper_id, sort_order);
     CREATE INDEX IF NOT EXISTS idx_tags_paper_id ON tags(paper_id, sort_order);
+    CREATE INDEX IF NOT EXISTS idx_paper_references_paper_id ON paper_references(paper_id);
+    CREATE INDEX IF NOT EXISTS idx_paper_references_doi ON paper_references(doi);
   `);
 }
 
@@ -346,10 +367,139 @@ function clearData(db) {
   }
 }
 
+function normalizeReferenceRow(row) {
+  return {
+    id: cleanString(row?.id),
+    paperId: cleanString(row?.paperId || row?.paper_id),
+    seq: Number(row?.seq) || 0,
+    doi: cleanString(row?.doi),
+    title: cleanString(row?.title),
+    authors: cleanString(row?.authors),
+    year: cleanString(row?.year),
+    journal: cleanString(row?.journal),
+    volume: cleanString(row?.volume),
+    issue: cleanString(row?.issue),
+    pages: cleanString(row?.pages),
+    unstructured: cleanString(row?.unstructured),
+    fetchedAt: Number(row?.fetchedAt || row?.fetched_at) || 0,
+  };
+}
+
+function loadReferenceRows(db, paperId = '') {
+  const sql = `
+    SELECT
+      id,
+      paper_id AS paperId,
+      seq,
+      doi,
+      title,
+      authors,
+      year,
+      journal,
+      volume,
+      issue,
+      pages,
+      unstructured,
+      fetched_at AS fetchedAt
+    FROM paper_references
+    ${paperId ? 'WHERE paper_id = ?' : ''}
+    ORDER BY paper_id, seq
+  `;
+  const statement = db.prepare(sql);
+  const rows = paperId ? statement.all(paperId) : statement.all();
+  return rows.map(normalizeReferenceRow);
+}
+
+function saveReferenceRows(db, paperId, refs) {
+  const normalizedPaperId = cleanString(paperId);
+  if (!normalizedPaperId) {
+    return [];
+  }
+
+  const fetchedAt = Date.now();
+  const normalizedRefs = (Array.isArray(refs) ? refs : [])
+    .map((ref, index) => ({
+      id: cleanString(ref?.id) || `ref:${normalizedPaperId}:${index + 1}`,
+      paperId: normalizedPaperId,
+      seq: Number.isFinite(Number(ref?.seq)) ? Number(ref.seq) : index + 1,
+      doi: cleanString(ref?.doi).toLowerCase(),
+      title: cleanString(ref?.title),
+      authors: cleanString(ref?.authors),
+      year: cleanString(ref?.year),
+      journal: cleanString(ref?.journal),
+      volume: cleanString(ref?.volume),
+      issue: cleanString(ref?.issue),
+      pages: cleanString(ref?.pages),
+      unstructured: cleanString(ref?.unstructured),
+      fetchedAt: Number(ref?.fetchedAt || ref?.fetched_at) || fetchedAt,
+    }))
+    .filter((ref) => ref.doi || ref.title || ref.unstructured);
+
+  const deleteStatement = db.prepare('DELETE FROM paper_references WHERE paper_id = ?');
+  const insertStatement = db.prepare(`
+    INSERT INTO paper_references (
+      id,
+      paper_id,
+      seq,
+      doi,
+      title,
+      authors,
+      year,
+      journal,
+      volume,
+      issue,
+      pages,
+      unstructured,
+      fetched_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  deleteStatement.run(normalizedPaperId);
+  for (const ref of normalizedRefs) {
+    insertStatement.run(
+      ref.id,
+      ref.paperId,
+      ref.seq,
+      ref.doi || null,
+      ref.title || null,
+      ref.authors || null,
+      ref.year || null,
+      ref.journal || null,
+      ref.volume || null,
+      ref.issue || null,
+      ref.pages || null,
+      ref.unstructured || null,
+      ref.fetchedAt,
+    );
+  }
+
+  return normalizedRefs;
+}
+
+function restoreReferenceRows(db, refs, paperIds) {
+  if (!Array.isArray(refs) || refs.length === 0) {
+    return;
+  }
+
+  const grouped = new Map();
+  for (const ref of refs) {
+    const paperId = cleanString(ref.paperId);
+    if (!paperId || !paperIds.has(paperId)) continue;
+    if (!grouped.has(paperId)) grouped.set(paperId, []);
+    grouped.get(paperId).push(ref);
+  }
+
+  for (const [paperId, paperRefs] of grouped) {
+    saveReferenceRows(db, paperId, paperRefs);
+  }
+}
+
 function saveLibraryToDb(db, appPaths, normalizeLibrary, library) {
   const normalized = normalizeLibrary(library, appPaths);
 
   withTransaction(db, () => {
+    const referenceCache = loadReferenceRows(db);
     clearData(db);
     saveKeyValueTable(db, 'library_settings', normalized.settings);
     saveKeyValueTable(db, 'webdav_settings', normalized.webdav);
@@ -498,6 +648,12 @@ function saveLibraryToDb(db, appPaths, normalizeLibrary, library) {
         );
       });
     }
+
+    restoreReferenceRows(
+      db,
+      referenceCache,
+      new Set(normalized.papers.map((paper) => paper.id)),
+    );
   });
 
   return normalized;
@@ -541,6 +697,18 @@ function createLibraryDatabaseStore(appPaths, helpers) {
 
     saveSync(library) {
       saveLibraryToDb(db, appPaths, normalizeLibrary, library);
+    },
+
+    saveReferences(paperId, refs) {
+      return withTransaction(db, () => saveReferenceRows(db, paperId, refs));
+    },
+
+    loadReferences(paperId) {
+      return loadReferenceRows(db, cleanString(paperId));
+    },
+
+    loadAllReferences() {
+      return loadReferenceRows(db);
     },
 
     loadFromSnapshot(snapshotPath) {

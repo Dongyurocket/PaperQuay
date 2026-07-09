@@ -317,7 +317,12 @@ test('MinerU helpers expose cache and sibling output candidates', async () => {
   const candidates = mineruOutputPathCandidatesForPaper(target, 'D:/cache', true);
 
   assert.equal(candidates.some((path) => path.endsWith('content_list_v2.json')), true);
+  assert.equal(candidates.includes('D:/cache/content_list_v2.json'), false);
+  assert.equal(candidates.includes('D:/cache/content_list.json'), false);
+  assert.equal(candidates.includes('D:/cache/middle.json'), false);
   assert.equal(candidates.includes('D:/papers/content_list_v2.json'), true);
+  assert.equal(candidates.includes('D:/papers/content_list.json'), true);
+  assert.equal(candidates.includes('D:/papers/middle.json'), true);
   assert.equal(candidates.includes('D:/papers/full.md'), true);
 
   const exists = await hasMineruOutputForPaper(
@@ -325,6 +330,36 @@ test('MinerU helpers expose cache and sibling output candidates', async () => {
     'D:/cache',
     true,
     async (path) => path === 'D:/papers/full.md',
+  );
+
+  assert.equal(exists, true);
+});
+
+test('MinerU helpers resolve sibling candidates from the current library storage directory', async () => {
+  const target = paper({
+    id: 'p-storage',
+    title: 'Moved Storage Paper',
+    attachments: [attachment({
+      storedPath: 'D:/old-library/nested/sample.pdf',
+      relativePath: 'nested/sample.pdf',
+    })],
+  });
+  const candidates = mineruOutputPathCandidatesForPaper(
+    target,
+    'D:/cache',
+    true,
+    'D:/new-library',
+  );
+
+  assert.equal(candidates.includes('D:/new-library/nested/content_list_v2.json'), true);
+  assert.equal(candidates.includes('D:/old-library/nested/content_list_v2.json'), false);
+
+  const exists = await hasMineruOutputForPaper(
+    target,
+    'D:/cache',
+    true,
+    async (path) => path === 'D:/new-library/nested/full.md',
+    'D:/new-library',
   );
 
   assert.equal(exists, true);

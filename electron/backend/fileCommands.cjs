@@ -10,19 +10,129 @@ const {
   now,
 } = require('./utils.cjs');
 
+const MINERU_CACHE_MARKER_FILE = '.paperquay-mineru-cache.json';
+const MINERU_OUTPUT_FILE_NAMES = new Set([
+  'content_list_v2.json',
+  'content_list.json',
+  'middle.json',
+  'full.md',
+]);
+
+function comparablePath(filePath) {
+  const resolved = path.resolve(filePath);
+  return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+}
+
+function isSamePath(left, right) {
+  return comparablePath(left) === comparablePath(right);
+}
+
+function isPathInside(child, parent) {
+  const relative = path.relative(path.resolve(parent), path.resolve(child));
+  return Boolean(relative) && !relative.startsWith('..') && !path.isAbsolute(relative);
+}
+
+async function directoryExists(directory) {
+  try {
+    const stat = await fsp.stat(directory);
+    return stat.isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+async function fileExists(filePath) {
+  try {
+    const stat = await fsp.stat(filePath);
+    return stat.isFile();
+  } catch {
+    return false;
+  }
+}
+
+async function hasMineruCacheArtifact(directory) {
+  const artifactNames = [
+    'paper_reader_manifest.json',
+    'content_list_v2.json',
+    'content_list.json',
+    'middle.json',
+    'full.md',
+  ];
+
+  for (const artifactName of artifactNames) {
+    if (await fileExists(path.join(directory, artifactName))) {
+      return true;
+    }
+  }
+
+  return (
+    await directoryExists(path.join(directory, 'translations')) ||
+    await directoryExists(path.join(directory, 'summaries'))
+  );
+}
+
+async function listPaperQuayMineruCacheEntries(rootDir) {
+  try {
+    const entries = await fsp.readdir(rootDir, { withFileTypes: true });
+    const cacheEntries = [];
+
+    for (const entry of entries) {
+      if (!entry.isDirectory()) {
+        continue;
+      }
+
+      const entryPath = path.join(rootDir, entry.name);
+      const looksStandard = entry.name.startsWith('document-');
+
+      if (looksStandard || await hasMineruCacheArtifact(entryPath)) {
+        cacheEntries.push({ name: entry.name, path: entryPath });
+      }
+    }
+
+    return cacheEntries;
+  } catch (error) {
+    if (error?.code === 'ENOENT' || error?.code === 'ENOTDIR') return [];
+    throw error;
+  }
+}
+
+async function hasLooseMineruOutputFiles(directory) {
+  try {
+    const entries = await fsp.readdir(directory, { withFileTypes: true });
+
+    return entries.some((entry) => (
+      entry.isFile() && MINERU_OUTPUT_FILE_NAMES.has(entry.name.toLowerCase())
+    ));
+  } catch (error) {
+    if (error?.code === 'ENOENT' || error?.code === 'ENOTDIR') return false;
+    throw error;
+  }
+}
+
 function createFileCommands(context) {
   const { appPaths, approvedWritePaths, store } = context;
 
   function assertWriteAllowed(filePath) {
     const absolute = path.resolve(filePath);
+    const comparableAbsolute = comparablePath(absolute);
     const library = store.load();
     const roots = [
       path.resolve(appPaths.dataDir),
       path.resolve(library.settings.storageDir || path.join(appPaths.dataDir, 'paperquay-data')),
     ];
 
-    if (roots.some((root) => absolute === root || absolute.startsWith(`${root}${path.sep}`))) return;
-    if (approvedWritePaths.has(absolute)) return;
+    if (roots.some((root) => {
+      const comparableRoot = comparablePath(root);
+      return comparableAbsolute === comparableRoot ||
+        comparableAbsolute.startsWith(`${comparableRoot}${path.sep}`);
+    })) return;
+    for (const approvedPath of approvedWritePaths) {
+      const comparableApprovedPath = comparablePath(approvedPath);
+      if (
+        comparableAbsolute === comparableApprovedPath ||
+        comparableAbsolute.startsWith(`${comparableApprovedPath}${path.sep}`)
+      ) return;
+    }
 
     throw new Error(`Writing to this path is not allowed until approved: ${filePath}`);
   }
@@ -110,6 +220,85 @@ function createFileCommands(context) {
       const win = BrowserWindow.fromWebContents(event.sender);
       const result = await dialog.showOpenDialog(win, { title, properties: ['openDirectory'] });
       return result.canceled ? null : result.filePaths[0] ?? null;
+    },
+
+    async prepare_mineru_cache_dir({ directory, previousDirectory }) {
+      const targetDir = cleanString(directory);
+      if (!targetDir) throw new Error('MinerU cache directory cannot be empty');
+
+      const resolvedTargetDir = path.resolve(targetDir);
+      const existedBefore = await directoryExists(resolvedTargetDir);
+      await fsp.mkdir(resolvedTargetDir, { recursive: true });
+      approvedWritePaths.add(resolvedTargetDir);
+
+      const looseOutputFilesIgnored = await hasLooseMineruOutputFiles(resolvedTargetDir);
+      const previousDir = cleanString(previousDirectory);
+      let migratedCount = 0;
+      let skippedCount = 0;
+      const errors = [];
+
+      if (previousDir) {
+        const resolvedPreviousDir = path.resolve(previousDir);
+
+        if (!isSamePath(resolvedPreviousDir, resolvedTargetDir) && await directoryExists(resolvedPreviousDir)) {
+          const cacheEntries = await listPaperQuayMineruCacheEntries(resolvedPreviousDir);
+
+          for (const entry of cacheEntries) {
+            const resolvedSource = path.resolve(entry.path);
+
+            if (
+              isSamePath(resolvedSource, resolvedTargetDir) ||
+              isPathInside(resolvedTargetDir, resolvedSource)
+            ) {
+              skippedCount += 1;
+              continue;
+            }
+
+            const destination = path.join(resolvedTargetDir, entry.name);
+
+            try {
+              if (await directoryExists(destination)) {
+                skippedCount += 1;
+                continue;
+              }
+
+              await fsp.cp(entry.path, destination, {
+                recursive: true,
+                force: false,
+                errorOnExist: false,
+              });
+              migratedCount += 1;
+            } catch (error) {
+              errors.push({
+                name: entry.name,
+                message: error instanceof Error ? error.message : String(error),
+              });
+            }
+          }
+        }
+      }
+
+      const markerPath = path.join(resolvedTargetDir, MINERU_CACHE_MARKER_FILE);
+      const cacheEntries = await listPaperQuayMineruCacheEntries(resolvedTargetDir);
+      const marker = {
+        version: 1,
+        product: 'PaperQuay',
+        kind: 'mineru-cache-root',
+        updatedAt: new Date().toISOString(),
+      };
+
+      await fsp.writeFile(markerPath, JSON.stringify(marker, null, 2), 'utf8');
+
+      return {
+        directory: resolvedTargetDir,
+        created: !existedBefore,
+        markerPath,
+        entryCount: cacheEntries.length,
+        migratedCount,
+        skippedCount,
+        looseOutputFilesIgnored,
+        errors,
+      };
     },
 
     async list_directory_files({ directory, extensionFilter }) {

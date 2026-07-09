@@ -7,6 +7,7 @@ import {
   loadSavedSummaryCache,
   resolveSavedPdfPath,
 } from '../src/features/reader/documentReaderCache.ts';
+import { parseMineruMarkdownPages } from '../src/services/mineru.ts';
 import type { PaperSummary, PdfSource, WorkspaceItem } from '../src/types/reader.ts';
 
 function item(overrides: Partial<WorkspaceItem> = {}): WorkspaceItem {
@@ -93,6 +94,52 @@ test('loadSavedMineruPages restores the first readable MinerU JSON cache', async
   assert.equal(loaded?.pages[0]?.[0]?.type, 'paragraph');
   assert.match(loaded?.message ?? '', /本地缓存/);
   assert.equal(reads.length, 1);
+});
+
+test('loadSavedMineruPages checks content_list JSON inside document cache folders only', async () => {
+  const reads: string[] = [];
+  const loaded = await loadSavedMineruPages({
+    item: item({ title: 'Cached Paper' }),
+    mineruCacheDir: 'D:/cache',
+    l: zh,
+    parsePages,
+    readText: async (path) => {
+      reads.push(path);
+      return path.endsWith('/content_list.json') && path.includes('/document-')
+        ? JSON.stringify([[{ type: 'paragraph', content: 'content list text' }]])
+        : null;
+    },
+  });
+
+  assert.equal(loaded?.pages[0]?.[0]?.content, 'content list text');
+  assert.equal(reads.includes('D:/cache/content_list_v2.json'), false);
+  assert.equal(reads.includes('D:/cache/content_list.json'), false);
+  assert.match(reads[0] ?? '', /D:\/cache\/document-/);
+  assert.equal(reads.some((path) => path.endsWith('/content_list.json')), true);
+});
+
+test('loadSavedMineruPages can fall back to cached MinerU Markdown blocks', async () => {
+  const reads: string[] = [];
+  const loaded = await loadSavedMineruPages({
+    item: item({ title: 'Markdown Paper' }),
+    mineruCacheDir: 'D:/cache',
+    l: zh,
+    parsePages,
+    parseMarkdownPages: parseMineruMarkdownPages,
+    readText: async (path) => {
+      reads.push(path);
+      return path.endsWith('/full.md') && path.includes('/document-')
+        ? '# Method\n\nThe method uses $x_i$.\n\n- Step one'
+        : null;
+    },
+  });
+
+  assert.equal(loaded?.pages.length, 1);
+  assert.equal(loaded?.pages[0]?.[0]?.type, 'title');
+  assert.equal(loaded?.pages[0]?.[1]?.type, 'paragraph');
+  assert.equal(loaded?.pages[0]?.[2]?.type, 'list');
+  assert.match(loaded?.message ?? '', /MinerU Markdown/);
+  assert.equal(reads.includes('D:/cache/full.md'), false);
 });
 
 test('resolveSavedPdfPath returns the first manifest path that still loads as a PDF', async () => {

@@ -1,13 +1,18 @@
 import { invoke } from '../platform/electron/core';
+import { listen } from '../platform/electron/event';
 import type {
   AssignPaperCategoryRequest,
   CreateCategoryRequest,
   DeletePaperRequest,
+  FetchAllReferencesResult,
+  FetchPaperReferencesResult,
   ImportedPdfResult,
   ImportPdfRequest,
+  LibraryReferenceProgress,
   LibrarySettings,
   LibrarySnapshot,
   ListPapersRequest,
+  PaperReference,
   LiteratureAttachment,
   LiteratureCategory,
   LiteraturePaper,
@@ -17,6 +22,8 @@ import type {
   UpdatePaperRequest,
   UpdateCategoryRequest,
 } from '../types/library';
+
+export const LIBRARY_REFERENCE_PROGRESS_EVENT = 'paperquay://library-reference-progress';
 
 function toErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message) {
@@ -178,4 +185,41 @@ export async function relocateLibraryAttachment(
   } catch (error) {
     throw new Error(toErrorMessage(error, '重新定位 PDF 文件失败'));
   }
+}
+
+export async function getLibraryPaperReferences(paperId: string): Promise<PaperReference[]> {
+  try {
+    return await invoke<PaperReference[]>('library_get_paper_references', { paperId });
+  } catch (error) {
+    throw new Error(toErrorMessage(error, '读取参考文献缓存失败'));
+  }
+}
+
+export async function fetchLibraryPaperReferences(
+  paperId: string,
+  force = false,
+): Promise<FetchPaperReferencesResult> {
+  try {
+    return await invoke<FetchPaperReferencesResult>('library_fetch_paper_references', { paperId, force });
+  } catch (error) {
+    throw new Error(toErrorMessage(error, '同步参考文献失败'));
+  }
+}
+
+export async function fetchAllLibraryReferences(force = false): Promise<FetchAllReferencesResult> {
+  try {
+    return await invoke<FetchAllReferencesResult>('library_fetch_all_references', { force });
+  } catch (error) {
+    throw new Error(toErrorMessage(error, '批量同步参考文献失败'));
+  }
+}
+
+export async function listenLibraryReferenceProgress(
+  handler: (progress: LibraryReferenceProgress) => void,
+): Promise<() => void> {
+  return listen<LibraryReferenceProgress>(LIBRARY_REFERENCE_PROGRESS_EVENT, ({ payload }) => {
+    if (payload) {
+      handler(payload);
+    }
+  });
 }

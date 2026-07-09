@@ -3,7 +3,6 @@ import {
   ArrowUp,
   Bot,
   Camera,
-  ChevronDown,
   Code2,
   Database,
   ExternalLink,
@@ -15,9 +14,9 @@ import {
   Paperclip,
   PanelRightClose,
   PanelRightOpen,
-  Pin,
   Plus,
   Quote,
+  Sparkles,
   Trash2,
   X,
 } from 'lucide-react';
@@ -136,10 +135,6 @@ function findCitationByHref(
     citations.find((citation) => citation.id === `cite:${label}`) ??
     null
   );
-}
-
-function hasInlineCitationLinks(content: string): boolean {
-  return /\[\d+\]\(#cite-\d+\)/.test(content);
 }
 
 function stripHtmlFences(content: string): string {
@@ -646,10 +641,6 @@ function HtmlAnswerPreview({ content }: { content: string }) {
   );
 }
 
-const CHAT_HISTORY_PANEL_WIDTH_STORAGE_KEY = 'paperquay.chat-history-panel-width';
-const MIN_CHAT_HISTORY_PANEL_WIDTH = 120;
-const MAX_CHAT_HISTORY_PANEL_WIDTH = 520;
-const MIN_CHAT_CONTENT_PANEL_WIDTH = 160;
 const CHAT_COMPOSER_COMPACT_WIDTH = 540;
 const CHAT_COMPOSER_ULTRA_COMPACT_WIDTH = 360;
 const CHAT_COMPOSER_MAX_TEXTAREA_HEIGHT = 240;
@@ -657,17 +648,6 @@ const CHAT_AUTO_SCROLL_BOTTOM_THRESHOLD = 96;
 
 function isNearScrollBottom(element: HTMLElement, threshold = CHAT_AUTO_SCROLL_BOTTOM_THRESHOLD) {
   return element.scrollHeight - element.scrollTop - element.clientHeight <= threshold;
-}
-
-function loadStoredPanelWidth(key: string, fallback: number) {
-  if (typeof window === 'undefined') {
-    return fallback;
-  }
-
-  const stored = window.localStorage.getItem(key);
-  const parsed = stored ? Number(stored) : Number.NaN;
-
-  return Number.isFinite(parsed) ? parsed : fallback;
 }
 
 export interface ChatWorkspacePanelProps {
@@ -752,7 +732,9 @@ export function ChatWorkspacePanel({
   const l = useReaderChatLocaleText();
   const locale = l('zh-CN', 'en-US') as 'zh-CN' | 'en-US';
   const panelRef = useRef<HTMLDivElement | null>(null);
-  const historyRootRef = useRef<HTMLElement | null>(null);
+  const historyRootRef = useRef<HTMLDivElement | null>(null);
+  const historyPopoverRef = useRef<HTMLDivElement | null>(null);
+  const historyButtonRef = useRef<HTMLButtonElement | null>(null);
   const chatRootRef = useRef<HTMLDivElement | null>(null);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const messageEndRef = useRef<HTMLDivElement | null>(null);
@@ -764,11 +746,7 @@ export function ChatWorkspacePanel({
   const composerInput = useImeSafeTextareaValue(input, onInputChange);
   const handleHistoryWheelCapture = useWheelScrollDelegate({ rootRef: historyRootRef });
   const handleChatWheelCapture = useWheelScrollDelegate({ rootRef: chatRootRef });
-  const [historyCollapsed, setHistoryCollapsed] = useState(false);
-  const [historyPanelWidth, setHistoryPanelWidth] = useState(() =>
-    loadStoredPanelWidth(CHAT_HISTORY_PANEL_WIDTH_STORAGE_KEY, 228),
-  );
-  const [resizingHistoryPanel, setResizingHistoryPanel] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [composerWidth, setComposerWidth] = useState(0);
   const [compactActionsOpen, setCompactActionsOpen] = useState(false);
   const activePreset =
@@ -788,7 +766,7 @@ export function ChatWorkspacePanel({
     selectedSessionRunning && messages[messages.length - 1]?.role === 'assistant';
   const handleCreateSessionClick = useCallback(() => {
     onSessionCreate();
-    setHistoryCollapsed(false);
+    setHistoryOpen(false);
     window.requestAnimationFrame(() => textareaRef.current?.focus());
   }, [onSessionCreate]);
   const suggestionPrompts = [
@@ -972,174 +950,47 @@ export function ChatWorkspacePanel({
   }, [composerWidth, composerInput.value]);
 
   useEffect(() => {
-    window.localStorage.setItem(
-      CHAT_HISTORY_PANEL_WIDTH_STORAGE_KEY,
-      String(Math.round(historyPanelWidth)),
-    );
-  }, [historyPanelWidth]);
-
-  useEffect(() => {
-    if (!resizingHistoryPanel) {
+    if (!historyOpen) {
       return undefined;
     }
 
-    const handlePointerMove = (event: PointerEvent) => {
-      const panelRect = panelRef.current?.getBoundingClientRect();
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
 
-      if (!panelRect) {
+      if (
+        target &&
+        (historyPopoverRef.current?.contains(target) ||
+          historyButtonRef.current?.contains(target))
+      ) {
         return;
       }
 
-      const boundedMaxWidth = Math.min(
-        MAX_CHAT_HISTORY_PANEL_WIDTH,
-        Math.max(MIN_CHAT_HISTORY_PANEL_WIDTH, panelRect.width - MIN_CHAT_CONTENT_PANEL_WIDTH),
-      );
-      const nextWidth = Math.round(
-        Math.min(
-          boundedMaxWidth,
-          Math.max(MIN_CHAT_HISTORY_PANEL_WIDTH, event.clientX - panelRect.left),
-        ),
-      );
-
-      setHistoryPanelWidth(nextWidth);
+      setHistoryOpen(false);
     };
 
-    const handlePointerUp = () => {
-      setResizingHistoryPanel(false);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setHistoryOpen(false);
+      }
     };
 
-    const previousUserSelect = globalThis.document.body.style.userSelect;
-    const previousCursor = globalThis.document.body.style.cursor;
-
-    globalThis.document.body.style.userSelect = 'none';
-    globalThis.document.body.style.cursor = 'col-resize';
-
-    window.addEventListener('pointermove', handlePointerMove);
-    window.addEventListener('pointerup', handlePointerUp);
+    window.addEventListener('pointerdown', handlePointerDown);
+    window.addEventListener('keydown', handleKeyDown);
 
     return () => {
-      globalThis.document.body.style.userSelect = previousUserSelect;
-      globalThis.document.body.style.cursor = previousCursor;
-      window.removeEventListener('pointermove', handlePointerMove);
-      window.removeEventListener('pointerup', handlePointerUp);
+      window.removeEventListener('pointerdown', handlePointerDown);
+      window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [resizingHistoryPanel]);
+  }, [historyOpen]);
 
   return (
     <div
       ref={panelRef}
       className={cn(
-        'pq-saas-scope pq-chat-workspace paperquay-assistant flex h-full min-h-0 overflow-hidden bg-transparent',
+        'pq-saas-scope pq-chat-workspace paperquay-assistant relative flex h-full min-h-0 overflow-hidden bg-transparent',
         workspaceMode && 'min-h-[520px]',
       )}
     >
-      {!historyCollapsed ? (
-        <aside
-          ref={historyRootRef}
-          onWheelCapture={handleHistoryWheelCapture}
-          className="pq-chat-pane flex min-h-0 shrink-0 flex-col border-r"
-          style={{ width: historyPanelWidth }}
-        >
-          <div className="px-4 pb-2 pt-5">
-            <div className="flex items-center justify-between gap-2">
-              <button
-                type="button"
-                className="inline-flex min-w-0 items-center gap-1.5 rounded-lg text-left text-base font-semibold tracking-tight text-[var(--pq-text)]"
-              >
-                <span className="truncate">{l('最近', 'Recent')}</span>
-                <ChevronDown className="h-4 w-4 shrink-0 text-[var(--pq-text-faint)]" strokeWidth={1.9} />
-              </button>
-              <button
-                type="button"
-                onClick={() => setHistoryCollapsed(true)}
-                title={l('收起历史记录', 'Collapse history')}
-                aria-label={l('收起历史记录', 'Collapse history')}
-                className="pq-icon-button h-7 w-7 shrink-0 border border-transparent bg-transparent text-[var(--pq-text-faint)]"
-              >
-                <PanelRightClose className="h-3.5 w-3.5" strokeWidth={1.8} />
-              </button>
-            </div>
-          </div>
-
-          <div
-            data-wheel-scroll-target
-            className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain px-3 pb-3 pt-1"
-          >
-            {orderedSessions.length > 0 ? (
-              <div className="space-y-0.5">
-                {orderedSessions.map((session) => {
-                  const active = session.id === selectedSessionId;
-                  const running = runningSessionIdSet.has(session.id);
-
-                  return (
-                    <div
-                      key={session.id}
-                      className={cn(
-                        'group flex items-center gap-1 rounded-xl px-2 py-1.5 transition',
-                        active
-                          ? 'bg-[var(--pq-surface-2)]'
-                          : 'hover:bg-[var(--pq-hover)]',
-                      )}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => onSessionSelect(session.id)}
-                        className="min-w-0 flex-1 rounded-lg px-1 py-1 text-left"
-                      >
-                        <div className="truncate text-sm font-medium text-[var(--pq-text)]">
-                          {session.title || l('未命名对话', 'Untitled Chat')}
-                        </div>
-                      </button>
-                      {active ? (
-                        <Pin className="h-3.5 w-3.5 shrink-0 text-[var(--pq-text-faint)]" strokeWidth={1.8} />
-                      ) : null}
-                      {running ? (
-                        <Loader2
-                          className="h-3.5 w-3.5 shrink-0 animate-spin text-[var(--pq-accent)]"
-                          strokeWidth={1.8}
-                        />
-                      ) : null}
-                      <button
-                        type="button"
-                        disabled={running}
-                        onClick={() => onSessionDelete(session.id)}
-                        className="pq-icon-button h-7 w-7 shrink-0 rounded-lg border border-transparent bg-transparent text-rose-500 opacity-0 transition hover:bg-rose-50 hover:text-rose-600 focus:opacity-100 disabled:cursor-not-allowed disabled:text-[var(--pq-text-faint)] disabled:opacity-40 group-hover:opacity-100"
-                        aria-label={l('删除会话', 'Delete chat')}
-                        title={l('删除会话', 'Delete chat')}
-                      >
-                        <Trash2 className="h-3.5 w-3.5" strokeWidth={1.8} />
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="rounded-xl border border-dashed border-[var(--pq-border)] bg-white/58 px-4 py-5 text-sm leading-6 text-[var(--pq-text-muted)]">
-                {l('还没有问答历史。创建新对话后即可开始。', 'No chat history yet. Create a new chat to get started.',
-                )}
-              </div>
-            )}
-          </div>
-        </aside>
-      ) : null}
-
-      {!historyCollapsed ? (
-        <div
-          role="separator"
-          aria-orientation="vertical"
-          aria-label={l('调整历史侧栏宽度', 'Resize history sidebar')}
-          onDoubleClick={() => setHistoryPanelWidth(228)}
-          onPointerDown={(event) => {
-            event.preventDefault();
-            setResizingHistoryPanel(true);
-          }}
-          className="group relative z-10 w-2 shrink-0 cursor-col-resize bg-transparent transition-all duration-200"
-        >
-          <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-slate-300/80 transition-all duration-200 group-hover:w-[3px] group-hover:bg-slate-400" />
-          <div className="absolute left-1/2 top-1/2 h-12 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-slate-300 transition-all duration-200 group-hover:w-1.5 group-hover:bg-slate-500" />
-        </div>
-      ) : null}
-
       <div
         ref={chatRootRef}
         onWheelCapture={handleChatWheelCapture}
@@ -1155,10 +1006,10 @@ export function ChatWorkspacePanel({
             )}
           >
             <div className={cn('min-w-0 pr-1', !workspaceMode && 'hidden')}>
-              <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--pq-text-faint)]">
                 {l('会话', 'SESSION')}
               </div>
-              <div className="mt-1 truncate text-sm font-semibold text-slate-900">
+              <div className="mt-1 truncate text-sm font-semibold text-[var(--pq-text)]">
                 {activeSession?.title || l('新会话', 'New Chat')}
               </div>
             </div>
@@ -1180,7 +1031,7 @@ export function ChatWorkspacePanel({
                   onClick={onAttachAssistant}
                   title={l('停靠回侧边栏', 'Dock back to sidebar')}
                   aria-label={l('停靠回侧边栏', 'Dock back to sidebar')}
-                  className="pq-icon-button h-8 w-8 border border-[var(--pq-border)] bg-white/60"
+                  className="pq-icon-button h-8 w-8"
                 >
                   <PanelRightOpen className="h-3.5 w-3.5" strokeWidth={1.9} />
                 </button>
@@ -1191,22 +1042,25 @@ export function ChatWorkspacePanel({
                   onClick={onDetachAssistant}
                   title={l('弹出为浮动窗口', 'Open as floating window')}
                   aria-label={l('弹出为浮动窗口', 'Open as floating window')}
-                  className="pq-icon-button h-8 w-8 border border-[var(--pq-border)] bg-white/60"
+                  className="pq-icon-button h-8 w-8"
                 >
                   <ExternalLink className="h-3.5 w-3.5" strokeWidth={1.9} />
                 </button>
               ) : null}
-              {historyCollapsed ? (
-                <button
-                  type="button"
-                  onClick={() => setHistoryCollapsed(false)}
-                  title={l('历史记录', 'History')}
-                  aria-label={l('历史记录', 'History')}
-                  className="pq-icon-button h-8 w-8 border border-[var(--pq-border)] bg-white/60"
-                >
-                  <MessageSquareText className="h-3.5 w-3.5" strokeWidth={1.9} />
-                </button>
-              ) : null}
+              <button
+                ref={historyButtonRef}
+                type="button"
+                onClick={() => setHistoryOpen((open) => !open)}
+                title={l('历史记录', 'History')}
+                aria-label={l('历史记录', 'History')}
+                aria-expanded={historyOpen}
+                className={cn(
+                  'pq-icon-button h-8 w-8',
+                  historyOpen && 'bg-[var(--pq-accent-soft)] text-[var(--pq-accent)]',
+                )}
+              >
+                <MessageSquareText className="h-3.5 w-3.5" strokeWidth={1.9} />
+              </button>
               <button
                 type="button"
                 onClick={handleCreateSessionClick}
@@ -1222,7 +1076,7 @@ export function ChatWorkspacePanel({
                   onClick={onCollapseSidebar}
                   title={l('收起侧边栏', 'Collapse sidebar')}
                   aria-label={l('收起侧边栏', 'Collapse sidebar')}
-                  className="pq-icon-button h-8 w-8 border border-[var(--pq-border)] bg-white/60"
+                  className="pq-icon-button h-8 w-8"
                 >
                   <PanelRightClose className="h-3.5 w-3.5" strokeWidth={1.9} />
                 </button>
@@ -1242,42 +1096,44 @@ export function ChatWorkspacePanel({
               shouldStickToBottomRef.current = false;
             }
           }}
-          className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain bg-transparent px-4 py-5"
+          className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain bg-transparent px-4 py-6 sm:px-5"
         >
           {messages.length === 0 ? (
             <div className="flex min-h-full items-center justify-center">
-              <div className="pq-card w-full space-y-4 p-5">
-                <div className="flex items-start gap-3">
-                  <span className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--pq-accent)] text-white shadow-[0_12px_28px_var(--pq-accent-ring)]">
-                    <MessageSquareText className="h-4.5 w-4.5" strokeWidth={1.8} />
-                  </span>
-                  <div className="space-y-1.5">
-                    <div className="text-base font-semibold text-slate-900">
-                      {l('开始文档问答', 'Start document chat')}
-                    </div>
-                    <div className="text-sm leading-6 text-slate-500">
-                      {l('可以直接提问，也可以先附加选中文本、图片、文件或截图。', 'Ask directly, or attach selected text, images, files, or screenshots first.',
-                      )}
-                    </div>
-                  </div>
-                </div>
+              <div className="pq-msg-in mx-auto w-full max-w-md text-center">
+                <span className="mx-auto inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-[var(--pq-accent-soft)] text-[var(--pq-accent)]">
+                  <MessageSquareText className="h-6 w-6" strokeWidth={1.8} />
+                </span>
+                <h2 className="mt-5 text-xl font-semibold tracking-tight text-[var(--pq-text)]">
+                  {l('开始文档问答', 'Start document chat')}
+                </h2>
+                <p className="mx-auto mt-2 max-w-sm text-sm leading-6 text-[var(--pq-text-muted)]">
+                  {l(
+                    '可以直接提问，也可以先附加选中文本、图片、文件或截图。',
+                    'Ask directly, or attach selected text, images, files, or screenshots first.',
+                  )}
+                </p>
 
-                <div className="grid gap-2">
+                <div className="mt-6 grid gap-2.5 text-left sm:grid-cols-2">
                   {suggestionPrompts.map((prompt) => (
                     <button
                       key={prompt}
                       type="button"
                       onClick={() => onInputChange(prompt)}
-                      className="block w-full rounded-xl border border-[var(--pq-border)] bg-white/62 px-4 py-3 text-left text-sm text-[var(--pq-text-muted)] transition hover:border-[var(--pq-border-strong)] hover:bg-white hover:text-[var(--pq-text)]"
+                      className="group/sg flex h-full items-start gap-2.5 rounded-xl border border-[var(--pq-border)] bg-[var(--pq-surface-1)] px-3.5 py-3 text-left text-sm leading-6 text-[var(--pq-text-muted)] transition hover:border-[var(--pq-accent-border)] hover:bg-[var(--pq-accent-soft)] hover:text-[var(--pq-text)]"
                     >
-                      {prompt}
+                      <Sparkles
+                        className="mt-0.5 h-4 w-4 shrink-0 text-[var(--pq-text-faint)] transition group-hover/sg:text-[var(--pq-accent)]"
+                        strokeWidth={1.8}
+                      />
+                      <span>{prompt}</span>
                     </button>
                   ))}
                 </div>
               </div>
             </div>
           ) : (
-            <div className="mx-auto max-w-3xl space-y-5">
+            <div className="mx-auto max-w-3xl space-y-6">
               {messages.map((message) => {
                 const assistantMessage = message.role === 'assistant';
                 const rawMessageContent = (
@@ -1298,219 +1154,224 @@ export function ChatWorkspacePanel({
                   <div
                     key={message.id}
                     className={cn(
-                       'flex gap-3',
-                      assistantMessage ? 'items-start' : 'justify-end',
-                      renderHtmlPreview && 'w-full',
+                      'pq-msg-in group flex flex-col',
+                      assistantMessage ? 'items-stretch' : 'items-end',
                     )}
                   >
                     {assistantMessage ? (
-                      <span className="hidden">
-                        <Bot className="h-4 w-4" strokeWidth={1.9} />
-                      </span>
-                    ) : null}
-
-                    <div
-                      className={cn(
-                        'min-w-0 px-4 py-3',
-                        renderHtmlPreview ? 'flex-1 max-w-none px-3' : 'max-w-[90%]',
-                        assistantMessage
-                          ? 'pq-chat-bubble-assistant rounded-none text-[var(--pq-text)]'
-                          : 'pq-chat-bubble-user rounded-2xl text-[var(--pq-text)]',
-                      )}
-                    >
-                      <div
-                        className={cn(
-                          'mb-2 flex items-center gap-2 text-[11px]',
-                          'text-[var(--pq-text-faint)]',
-                        )}
-                      >
-                        <span className="font-semibold">
-                          {assistantMessage ? l('助手', 'Assistant') : l('你', 'You')}
-                        </span>
-                        {assistantMessage && message.modelLabel ? (
-                          <span className="pq-chip px-2 py-0.5 text-[10px]">
-                            {message.modelLabel}
-                          </span>
-                        ) : null}
-                        {htmlAnswer ? (
-                          <span className="rounded-full border border-[var(--pq-accent-border)] bg-[var(--pq-accent-soft)] px-2 py-0.5 text-[10px] font-semibold text-[var(--pq-accent)]">
-                            HTML
-                          </span>
-                        ) : null}
-                        {assistantMessage && qaContextBadge ? (
-                          <span
-                            className={cn(
-                              'rounded-full px-2 py-0.5 text-[10px]',
-                              qaContextBadgeTone === 'success' &&
-                                'border border-emerald-200 bg-emerald-50 text-emerald-700',
-                              qaContextBadgeTone === 'warning' &&
-                                'border border-amber-200 bg-amber-50 text-amber-700',
-                              qaContextBadgeTone === 'neutral' &&
-                                'border border-slate-200 bg-slate-50 text-slate-500',
-                            )}
-                          >
-                            {qaContextBadge}
-                          </span>
-                        ) : null}
-                        <span>{formatChatSessionTime(message.createdAt, locale)}</span>
-                        {assistantMessage && rawMessageContent ? (
-                          <button
-                            type="button"
-                            onClick={() => onSaveAssistantMessageAsNote?.({
-                              ...message,
-                              content: rawMessageContent,
-                            })}
-                            disabled={!onSaveAssistantMessageAsNote}
-                            className="ml-auto inline-flex h-6 items-center gap-1 rounded-lg border border-[var(--pq-border)] bg-white/64 px-2 text-[10px] font-medium text-[var(--pq-text-muted)] transition hover:border-[var(--pq-border-strong)] hover:bg-white hover:text-[var(--pq-text)] disabled:cursor-not-allowed disabled:opacity-50"
-                            title={l('保存为笔记', 'Save as note')}
-                          >
-                            <FilePlus2 className="h-3 w-3" strokeWidth={1.8} />
-                            {l('保存', 'Save')}
-                          </button>
-                        ) : null}
-                      </div>
-
-                      {renderHtmlPreview ? (
-                        rawMessageContent ? (
-                          <HtmlAnswerPreview content={rawMessageContent} />
+                      <div className="w-full min-w-0">
+                        {renderHtmlPreview ? (
+                          rawMessageContent ? (
+                            <HtmlAnswerPreview content={rawMessageContent} />
+                          ) : (
+                            <div className="text-[15px] leading-7 text-[var(--pq-text-faint)]">
+                              {loading ? l('正在思考...', 'Thinking...') : ''}
+                            </div>
+                          )
                         ) : (
-                          <div className="text-sm leading-7 text-slate-400">
-                            {loading ? l('正在思考...', 'Thinking...') : ''}
+                          <MarkdownPreview
+                            content={
+                              renderedMessageContent ||
+                              (assistantMessage && loading ? l('正在思考...', 'Thinking...') : '')
+                            }
+                            components={{
+                              a: ({ href, children, ...props }) => {
+                                const citation =
+                                  href && onCitationClick
+                                    ? findCitationByHref(href, message.citations)
+                                    : null;
+
+                                if (citation && onCitationClick) {
+                                  return (
+                                    <button
+                                      type="button"
+                                      onClick={() => onCitationClick(citation)}
+                                      className="font-medium text-[var(--pq-accent)] underline underline-offset-2 transition hover:text-[var(--pq-accent-hover)]"
+                                    >
+                                      [{children}]
+                                    </button>
+                                  );
+                                }
+
+                                if (href && message.citations && findCitationByHref(href, message.citations)) {
+                                  return <span className="text-[var(--pq-text-faint)]">[{children}]</span>;
+                                }
+
+                                return (
+                                  <a href={href} target="_blank" rel="noreferrer" {...props}>
+                                    {children}
+                                  </a>
+                                );
+                              },
+                            }}
+                            className={cn(
+                              'text-[15px] leading-7',
+                              !rawMessageContent && loading && 'text-[var(--pq-text-faint)]',
+                            )}
+                          />
+                        )}
+
+                        {qaContextHint ? (
+                          <div className="mt-3 rounded-xl border border-[var(--pq-border)] bg-[var(--pq-surface-2)] px-3 py-2 text-xs leading-5 text-[var(--pq-text-muted)]">
+                            {qaContextHint}
                           </div>
-                        )
-                      ) : (
-                        <MarkdownPreview
-                        content={
-                          renderedMessageContent ||
-                          (assistantMessage && loading ? l('正在思考...', 'Thinking...') : '')
-                        }
-                        components={{
-                          a: ({ href, children, ...props }) => {
-                            const citation =
-                              href && onCitationClick
-                                ? findCitationByHref(href, message.citations)
-                                : null;
+                        ) : null}
 
-                            if (citation && onCitationClick) {
+                        {/*
+                          Only surface citation chips in HTML-preview mode, where inline
+                          citation links cannot be injected into the sandboxed iframe.
+                          In markdown mode, citations appear as clickable inline [n] links
+                          when the model actually references them; if the answer cites
+                          nothing, no chips are shown.
+                        */}
+                        {message.citations &&
+                        message.citations.length > 0 &&
+                        renderHtmlPreview ? (
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            {message.citations.map((citation) => (
+                              <button
+                                key={citation.id}
+                                type="button"
+                                onClick={() => onCitationClick?.(citation)}
+                                className="inline-flex items-center gap-2 rounded-full border border-[var(--pq-accent-border)] bg-[var(--pq-accent-soft)] px-3 py-1 text-[11px] text-[var(--pq-accent)] transition hover:border-[var(--pq-accent-border-strong)] hover:bg-[var(--pq-accent-bg-hover)]"
+                                title={
+                                  citation.previewText
+                                    ? `${
+                                        citation.pageIndex !== null && citation.pageIndex !== undefined
+                                          ? l(`Page ${citation.pageIndex + 1}`, `Page ${citation.pageIndex + 1}`)
+                                          : citation.sourceType
+                                      }\n${citation.previewText}`
+                                    : undefined
+                                }
+                              >
+                                <span>[{citation.label}]</span>
+                              </button>
+                            ))}
+                          </div>
+                        ) : null}
+
+                        {message.attachments && message.attachments.length > 0 ? (
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            {message.attachments.map((attachment) => {
+                              const AttachmentIcon =
+                                attachment.kind === 'image'
+                                  ? ImagePlus
+                                  : attachment.kind === 'screenshot'
+                                    ? Camera
+                                    : Paperclip;
+
                               return (
-                                <button
-                                  type="button"
-                                  onClick={() => onCitationClick(citation)}
-                                  className="font-medium text-indigo-600 underline underline-offset-2 transition hover:text-indigo-800"
+                                <span
+                                  key={attachment.id}
+                                  className="inline-flex items-center gap-2 rounded-full border border-[var(--pq-border)] bg-[var(--pq-surface-2)] px-3 py-1 text-xs text-[var(--pq-text-muted)]"
                                 >
-                                  [{children}]
-                                </button>
-                              );
-                            }
-
-                            if (href && message.citations && findCitationByHref(href, message.citations)) {
-                              return <span className="text-slate-400">[{children}]</span>;
-                            }
-
-                            return (
-                              <a
-                                href={href}
-                                target="_blank"
-                                rel="noreferrer"
-                                {...props}
-                              >
-                                {children}
-                              </a>
-                            );
-                          },
-                        }}
-                          className={cn(
-                            'text-sm leading-7',
-                          assistantMessage && !rawMessageContent && loading && 'text-slate-400',
-                          )}
-                        />
-                      )}
-
-                      {assistantMessage && qaContextHint ? (
-                        <div className="mt-3 rounded-xl border border-[var(--pq-border)] bg-white/56 px-3 py-2 text-xs leading-5 text-[var(--pq-text-muted)]">
-                          {qaContextHint}
-                        </div>
-                      ) : null}
-
-                      {assistantMessage &&
-                      message.citations &&
-                      message.citations.length > 0 &&
-                      (renderHtmlPreview || !hasInlineCitationLinks(renderedMessageContent)) ? (
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          {message.citations.map((citation) => (
-                            <button
-                              key={citation.id}
-                              type="button"
-                              onClick={() => onCitationClick?.(citation)}
-                              className="inline-flex items-center gap-2 rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-[11px] text-indigo-700 transition hover:border-indigo-300 hover:bg-indigo-100"
-                              title={
-                                citation.previewText
-                                  ? `${
-                                      citation.pageIndex !== null && citation.pageIndex !== undefined
-                                        ? l(`Page ${citation.pageIndex + 1}`, `Page ${citation.pageIndex + 1}`)
-                                        : citation.sourceType
-                                    }\n${citation.previewText}`
-                                  : undefined
-                              }
-                            >
-                              <span>[{citation.label}]</span>
-                            </button>
-                          ))}
-                        </div>
-                      ) : null}
-
-                      {message.attachments && message.attachments.length > 0 ? (
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          {message.attachments.map((attachment) => {
-                            const AttachmentIcon =
-                              attachment.kind === 'image'
-                                ? ImagePlus
-                                : attachment.kind === 'screenshot'
-                                  ? Camera
-                                  : Paperclip;
-
-                            return (
-                              <span
-                                key={attachment.id}
-                                className={cn(
-                                  'inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs',
-                                  assistantMessage
-                                    ? 'border-slate-200 bg-slate-50 text-slate-600'
-                                    : 'border-white/10 bg-white/10 text-slate-100',
-                                )}
-                              >
-                                <AttachmentIcon className="h-3.5 w-3.5" strokeWidth={1.8} />
-                                <span className="max-w-[180px] truncate">{attachment.name}</span>
-                                <span className={assistantMessage ? 'text-slate-400' : 'text-slate-300'}>
-                                  {formatFileSize(attachment.size)}
+                                  <AttachmentIcon className="h-3.5 w-3.5" strokeWidth={1.8} />
+                                  <span className="max-w-[180px] truncate">{attachment.name}</span>
+                                  <span className="text-[var(--pq-text-faint)]">
+                                    {formatFileSize(attachment.size)}
+                                  </span>
                                 </span>
-                              </span>
-                            );
-                          })}
+                              );
+                            })}
+                          </div>
+                        ) : null}
+
+                        {/* Hover-reveal meta + actions row, below the answer */}
+                        <div className="mt-2 flex items-center gap-2 text-[11px] text-[var(--pq-text-faint)] opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover:opacity-100">
+                          {message.modelLabel ? (
+                            <span className="pq-chip px-2 py-0.5 text-[10px]">
+                              {message.modelLabel}
+                            </span>
+                          ) : null}
+                          {htmlAnswer ? (
+                            <span className="rounded-full border border-[var(--pq-accent-border)] bg-[var(--pq-accent-soft)] px-2 py-0.5 text-[10px] font-semibold text-[var(--pq-accent)]">
+                              HTML
+                            </span>
+                          ) : null}
+                          {qaContextBadge ? (
+                            <span
+                              className={cn(
+                                'rounded-full px-2 py-0.5 text-[10px]',
+                                qaContextBadgeTone === 'success' &&
+                                  'border border-emerald-200 bg-emerald-50 text-emerald-700',
+                                qaContextBadgeTone === 'warning' &&
+                                  'border border-amber-200 bg-amber-50 text-amber-700',
+                                qaContextBadgeTone === 'neutral' &&
+                                  'border border-[var(--pq-border)] bg-[var(--pq-surface-2)] text-[var(--pq-text-muted)]',
+                              )}
+                            >
+                              {qaContextBadge}
+                            </span>
+                          ) : null}
+                          <span>{formatChatSessionTime(message.createdAt, locale)}</span>
+                          {rawMessageContent ? (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                onSaveAssistantMessageAsNote?.({
+                                  ...message,
+                                  content: rawMessageContent,
+                                })
+                              }
+                              disabled={!onSaveAssistantMessageAsNote}
+                              className="ml-auto inline-flex h-6 items-center gap-1 rounded-lg px-2 text-[10px] font-medium text-[var(--pq-text-muted)] transition hover:bg-[var(--pq-hover)] hover:text-[var(--pq-text)] disabled:cursor-not-allowed disabled:opacity-50"
+                              title={l('保存为笔记', 'Save as note')}
+                            >
+                              <FilePlus2 className="h-3 w-3" strokeWidth={1.8} />
+                              {l('保存', 'Save')}
+                            </button>
+                          ) : null}
                         </div>
-                      ) : null}
-                    </div>
+                      </div>
+                    ) : (
+                      <div className="flex max-w-[85%] flex-col items-end">
+                        <div className="pq-chat-bubble-user min-w-0 rounded-2xl px-4 py-2.5 text-[15px] leading-7 text-[var(--pq-text)]">
+                          <MarkdownPreview content={renderedMessageContent} className="text-[15px] leading-7" />
+                        </div>
+
+                        {message.attachments && message.attachments.length > 0 ? (
+                          <div className="mt-2 flex flex-wrap justify-end gap-2">
+                            {message.attachments.map((attachment) => {
+                              const AttachmentIcon =
+                                attachment.kind === 'image'
+                                  ? ImagePlus
+                                  : attachment.kind === 'screenshot'
+                                    ? Camera
+                                    : Paperclip;
+
+                              return (
+                                <span
+                                  key={attachment.id}
+                                  className="inline-flex items-center gap-2 rounded-full border border-[var(--pq-border)] bg-[var(--pq-surface-2)] px-3 py-1 text-xs text-[var(--pq-text-muted)]"
+                                >
+                                  <AttachmentIcon className="h-3.5 w-3.5" strokeWidth={1.8} />
+                                  <span className="max-w-[180px] truncate">{attachment.name}</span>
+                                  <span className="text-[var(--pq-text-faint)]">
+                                    {formatFileSize(attachment.size)}
+                                  </span>
+                                </span>
+                              );
+                            })}
+                          </div>
+                        ) : null}
+
+                        <span className="mt-1 px-1 text-[11px] text-[var(--pq-text-faint)] opacity-0 transition-opacity duration-200 group-hover:opacity-100">
+                          {formatChatSessionTime(message.createdAt, locale)}
+                        </span>
+                      </div>
+                    )}
                   </div>
                 );
               })}
 
               {loading && !streamingAssistantMessage ? (
-                <div className="flex items-start gap-3">
-                  <span className="mt-1 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-[var(--pq-accent)] text-white shadow-[0_10px_24px_var(--pq-accent-shadow)]">
-                    <Bot className="h-4 w-4" strokeWidth={1.9} />
+                <div className="pq-msg-in flex items-center gap-2 text-[15px] text-[var(--pq-text-muted)]">
+                  <Loader2 className="h-4 w-4 animate-spin text-[var(--pq-accent)]" strokeWidth={1.9} />
+                  <span>
+                    {activePreset
+                      ? l(`${activePreset.label} 回复中…`, `${activePreset.label} is replying…`)
+                      : l('模型回复中…', 'Model is replying…')}
                   </span>
-                  <div className="pq-chat-bubble-assistant max-w-[92%] rounded-2xl px-4 py-3">
-                    <div className="flex items-center gap-2 text-sm font-medium text-slate-700">
-                      <Loader2 className="h-4 w-4 animate-spin text-indigo-500" strokeWidth={1.9} />
-                      {l('模型回复中...', 'Model is replying...')}
-                    </div>
-                    <div className="mt-2 text-xs text-slate-400">
-                      {activePreset
-                        ? l(`当前模型：${activePreset.label}`, `Current model: ${activePreset.label}`)
-                        : l('正在基于当前文档生成回答。', 'Generating a response grounded in the current document.',
-                          )}
-                    </div>
-                  </div>
                 </div>
               ) : null}
 
@@ -1525,7 +1386,8 @@ export function ChatWorkspacePanel({
           ) : null}
         </div>
 
-        <div className="border-t border-[var(--pq-border)] bg-white/62 px-4 py-4 backdrop-blur-xl dark:bg-white/5">
+        <div className="border-t border-[var(--pq-border-soft)] bg-transparent px-4 pb-4 pt-3 sm:px-5">
+          <div className="mx-auto w-full max-w-3xl">
           {attachments.length > 0 ? (
             <div className="mb-3 flex flex-wrap gap-2">
               {attachments.map((attachment) => {
@@ -1554,10 +1416,10 @@ export function ChatWorkspacePanel({
                       </span>
                     )}
                     <div className="min-w-0">
-                      <div className="max-w-[180px] truncate font-medium text-slate-700">
+                      <div className="max-w-[180px] truncate font-medium text-[var(--pq-text)]">
                         {attachment.name}
                       </div>
-                      <div className="mt-0.5 text-[11px] text-slate-400">
+                      <div className="mt-0.5 text-[11px] text-[var(--pq-text-faint)]">
                         {formatFileSize(attachment.size)}
                       </div>
                     </div>
@@ -1585,6 +1447,7 @@ export function ChatWorkspacePanel({
               onChange={composerInput.onChange}
               onCompositionStart={composerInput.onCompositionStart}
               onCompositionEnd={composerInput.onCompositionEnd}
+              onBlur={composerInput.onBlur}
               onKeyDown={(event) => {
                 if (event.key === 'Enter' && !event.shiftKey) {
                   if (isImeComposing(event) || composerInput.isComposingRef.current) {
@@ -1604,7 +1467,7 @@ export function ChatWorkspacePanel({
                   : l('先加载文档结构块，可以获得更准确的回答。', 'Load document blocks before asking questions for more accurate answers.',
                     )
               }
-              className="min-h-[80px] w-full resize-none overflow-y-auto rounded-2xl border-0 bg-transparent px-1 py-1 text-sm leading-7 text-[var(--pq-text)] outline-none placeholder:text-[var(--pq-text-faint)]"
+              className="min-h-[52px] w-full resize-none overflow-y-auto rounded-2xl border-0 bg-transparent px-1 py-1 text-[15px] leading-7 text-[var(--pq-text)] outline-none placeholder:text-[var(--pq-text-faint)]"
             />
 
             <div className="mt-3 flex flex-nowrap items-end justify-between gap-3">
@@ -1620,7 +1483,7 @@ export function ChatWorkspacePanel({
                       disabled={action.disabled}
                       title={action.label}
                       aria-label={action.label}
-                      className="pq-icon-button h-10 w-10 shrink-0 border border-[var(--pq-border)] bg-white/60 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="pq-icon-button h-10 w-10 shrink-0 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {action.key === 'screenshot' && screenshotLoading ? (
                         <Loader2 className="h-4 w-4 animate-spin" strokeWidth={1.8} />
@@ -1637,7 +1500,7 @@ export function ChatWorkspacePanel({
                       type="button"
                       onClick={() => setCompactActionsOpen((open) => !open)}
                       title={l('更多操作', 'More actions')}
-                      className="pq-icon-button h-10 w-10 border border-[var(--pq-border)] bg-white/60"
+                      className="pq-icon-button h-10 w-10"
                       aria-label={l('更多操作', 'More actions')}
                       aria-expanded={compactActionsOpen}
                     >
@@ -1670,7 +1533,7 @@ export function ChatWorkspacePanel({
                               className={cn(
                                 'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm transition disabled:cursor-not-allowed disabled:opacity-50',
                                 active
-                                  ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-400/12 dark:text-emerald-200'
+                                  ? 'bg-[var(--pq-accent-soft)] text-[var(--pq-accent)]'
                                   : 'text-[var(--pq-text-muted)] hover:bg-white/70 hover:text-[var(--pq-text)]',
                               )}
                             >
@@ -1700,10 +1563,9 @@ export function ChatWorkspacePanel({
                         title={action.label}
                         aria-label={action.label}
                         className={cn(
-                          'pq-icon-button h-10 w-10 shrink-0 border transition-all',
-                          action.active
-                            ? 'border-emerald-300 bg-emerald-50 text-emerald-700 shadow-[0_0_0_3px_rgba(16,185,129,0.12)] dark:border-emerald-400/40 dark:bg-emerald-400/12 dark:text-emerald-200'
-                            : 'border-[var(--pq-border)] bg-white/60',
+                          'pq-icon-button h-10 w-10 shrink-0 transition-all',
+                          action.active &&
+                            'border border-[var(--pq-accent-border)] bg-[var(--pq-accent-soft)] text-[var(--pq-accent)] shadow-[0_0_0_3px_var(--pq-accent-ring)]',
                         )}
                       >
                         <Icon className="h-4 w-4" strokeWidth={1.8} />
@@ -1765,8 +1627,96 @@ export function ChatWorkspacePanel({
                 : l('Enter 发送 · Shift+Enter 换行', 'Enter to send · Shift+Enter for a new line')}
             </span>
           </div>
+          </div>
         </div>
       </div>
+
+      {historyOpen ? (
+        <div
+          ref={historyPopoverRef}
+          className="pq-card pq-model-menu absolute right-3 top-[58px] z-40 flex max-h-[min(70%,440px)] w-[300px] max-w-[calc(100%-24px)] flex-col overflow-hidden p-0 shadow-[0_18px_48px_rgba(15,23,42,0.18)]"
+        >
+          <div className="flex shrink-0 items-center justify-between gap-2 border-b border-[var(--pq-border-subtle)] px-3.5 py-2.5">
+            <div className="flex items-center gap-1.5 text-sm font-semibold text-[var(--pq-text)]">
+              <MessageSquareText className="h-4 w-4 shrink-0 text-[var(--pq-accent)]" strokeWidth={1.9} />
+              <span>{l('对话历史', 'Chat History')}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setHistoryOpen(false)}
+              title={l('关闭', 'Close')}
+              aria-label={l('关闭', 'Close')}
+              className="pq-icon-button h-7 w-7"
+            >
+              <X className="h-3.5 w-3.5" strokeWidth={1.9} />
+            </button>
+          </div>
+
+          <div
+            ref={historyRootRef}
+            onWheelCapture={handleHistoryWheelCapture}
+            data-wheel-scroll-target
+            className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain p-2"
+          >
+            {orderedSessions.length > 0 ? (
+              <div className="space-y-0.5">
+                {orderedSessions.map((session) => {
+                  const active = session.id === selectedSessionId;
+                  const running = runningSessionIdSet.has(session.id);
+
+                  return (
+                    <div
+                      key={session.id}
+                      className={cn(
+                        'group flex items-center gap-1 rounded-[var(--pq-radius-sm)] px-2 py-1.5 transition',
+                        active ? 'bg-[var(--pq-accent-soft)]' : 'hover:bg-[var(--pq-hover)]',
+                      )}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onSessionSelect(session.id);
+                          setHistoryOpen(false);
+                        }}
+                        className="min-w-0 flex-1 rounded-lg px-1 py-1 text-left"
+                      >
+                        <div
+                          className={cn(
+                            'truncate text-sm font-medium',
+                            active ? 'text-[var(--pq-accent)]' : 'text-[var(--pq-text)]',
+                          )}
+                        >
+                          {session.title || l('未命名对话', 'Untitled Chat')}
+                        </div>
+                      </button>
+                      {running ? (
+                        <Loader2
+                          className="h-3.5 w-3.5 shrink-0 animate-spin text-[var(--pq-accent)]"
+                          strokeWidth={1.8}
+                        />
+                      ) : null}
+                      <button
+                        type="button"
+                        disabled={running}
+                        onClick={() => onSessionDelete(session.id)}
+                        className="pq-icon-button h-7 w-7 shrink-0 rounded-lg border border-transparent bg-transparent text-rose-500 opacity-0 transition hover:bg-rose-50 hover:text-rose-600 focus:opacity-100 disabled:cursor-not-allowed disabled:text-[var(--pq-text-faint)] disabled:opacity-40 group-hover:opacity-100"
+                        aria-label={l('删除会话', 'Delete chat')}
+                        title={l('删除会话', 'Delete chat')}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" strokeWidth={1.8} />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="rounded-[var(--pq-radius-sm)] border border-dashed border-[var(--pq-border)] px-4 py-6 text-center text-sm leading-6 text-[var(--pq-text-muted)]">
+                {l('还没有问答历史。创建新对话后即可开始。', 'No chat history yet. Create a new chat to get started.')}
+              </div>
+            )}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

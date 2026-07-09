@@ -81,6 +81,47 @@ export interface LiteraturePaper {
   attachments: LiteratureAttachment[];
 }
 
+export interface PaperReference {
+  id: string;
+  paperId: string;
+  seq: number;
+  doi: string;
+  title: string;
+  authors: string;
+  year: string;
+  journal: string;
+  volume: string;
+  issue: string;
+  pages: string;
+  unstructured: string;
+  fetchedAt: number;
+}
+
+export interface FetchPaperReferencesResult {
+  paperId: string;
+  fetched: number;
+  skipped: boolean;
+  references: PaperReference[];
+}
+
+export interface FetchAllReferencesResult {
+  fetched: number;
+  skipped: number;
+  failed: number;
+}
+
+export interface LibraryReferenceProgress {
+  status: 'running' | 'done' | 'error';
+  current: number;
+  total: number;
+  paperId?: string;
+  title?: string;
+  fetched: number;
+  skipped: number;
+  failed: number;
+  updatedAt?: number;
+}
+
 export interface LibrarySnapshot {
   settings: LibrarySettings;
   categories: LiteratureCategory[];

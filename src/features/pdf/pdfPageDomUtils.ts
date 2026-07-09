@@ -15,6 +15,11 @@ export interface PdfPageTarget {
   pageIndex: number;
 }
 
+export interface ResolvedPdfBlockHit {
+  block: PositionedMineruBlock;
+  anchorBlock: PositionedMineruBlock;
+}
+
 function nodeToElement(node: Node | null): Element | null {
   if (!node) {
     return null;
@@ -314,6 +319,106 @@ export function resolveHitBlockByPoint(
   }
 
   return bestBlock;
+}
+
+export function resolvePdfBlockHitByPoint(
+  clientX: number,
+  clientY: number,
+  pageElement: HTMLDivElement,
+  pageBlocks: PositionedMineruBlock[],
+  originalPage: PageSize,
+  renderedPage: PageSize,
+  getTextBlock?: (block: PositionedMineruBlock) => PositionedMineruBlock,
+  hasText?: (block: PositionedMineruBlock) => boolean,
+): ResolvedPdfBlockHit | null {
+  const resolveTextBlock = getTextBlock ?? ((block: PositionedMineruBlock) => block);
+  const acceptsText = hasText ?? (() => true);
+  const hitBlock =
+    resolveHitBlockByPoint(
+      clientX,
+      clientY,
+      pageElement,
+      pageBlocks,
+      originalPage,
+      renderedPage,
+    ) ??
+    resolveNearestBlockByPoint(
+      clientX,
+      clientY,
+      pageElement,
+      pageBlocks,
+      originalPage,
+      renderedPage,
+    );
+
+  if (!hitBlock) {
+    return null;
+  }
+
+  const hitTextBlock = resolveTextBlock(hitBlock);
+
+  if (acceptsText(hitTextBlock)) {
+    return {
+      block: hitTextBlock,
+      anchorBlock: hitBlock,
+    };
+  }
+
+  const resolvedBlocksById = new Map<string, ResolvedPdfBlockHit>();
+
+  for (const block of pageBlocks) {
+    const textBlock = resolveTextBlock(block);
+
+    if (!acceptsText(textBlock)) {
+      continue;
+    }
+
+    resolvedBlocksById.set(textBlock.blockId, {
+      block: textBlock,
+      anchorBlock: block,
+    });
+  }
+
+  const candidates = Array.from(resolvedBlocksById.values());
+
+  if (candidates.length === 0) {
+    return {
+      block: hitTextBlock,
+      anchorBlock: hitBlock,
+    };
+  }
+
+  const nearestTextBlock =
+    resolveHitBlockByPoint(
+      clientX,
+      clientY,
+      pageElement,
+      candidates.map((item) => item.anchorBlock),
+      originalPage,
+      renderedPage,
+    ) ??
+    resolveNearestBlockByPoint(
+      clientX,
+      clientY,
+      pageElement,
+      candidates.map((item) => item.anchorBlock),
+      originalPage,
+      renderedPage,
+    );
+
+  if (!nearestTextBlock) {
+    return {
+      block: hitTextBlock,
+      anchorBlock: hitBlock,
+    };
+  }
+
+  return (
+    candidates.find((item) => item.anchorBlock.blockId === nearestTextBlock.blockId) ?? {
+      block: hitTextBlock,
+      anchorBlock: hitBlock,
+    }
+  );
 }
 
 export function resolveNearestBlockByPoint(

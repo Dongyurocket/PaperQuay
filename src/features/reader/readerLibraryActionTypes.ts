@@ -12,6 +12,7 @@ import type {
 import type {
   LiteraturePaperTaskKind,
   LiteraturePaperTaskState,
+  LibrarySettings,
 } from '../../types/library';
 import type { ReaderDocumentTranslationSnapshot } from './documentReaderShared';
 import type {
@@ -59,6 +60,7 @@ export interface UseReaderLibraryActionsOptions {
   itemParseStatusMap: Record<string, boolean | undefined>;
   l: LocaleTextFn;
   libraryPreviewStates: Record<string, LibraryPreviewState>;
+  librarySettings: LibrarySettings | null;
   loadLibraryPreviewBlocks: (item: WorkspaceItem) => Promise<LibraryPreviewLoadResult>;
   mineruApiToken: string;
   settings: ReaderSettings;

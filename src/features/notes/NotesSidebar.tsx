@@ -12,6 +12,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import type { Note, NoteAnchor, NoteAnchorInsertRequest, UpdateNoteRequest } from '../../types/notes';
+import type { LiteraturePaper } from '../../types/library';
 import type { SelectedExcerpt } from '../../types/reader';
 import { cn } from '../../utils/cn';
 import { NoteEditor } from './NoteEditor';
@@ -35,6 +36,7 @@ type SidebarContextMenu =
 interface NotesSidebarProps {
   notes: Note[];
   activeNoteId: string | null;
+  papers?: LiteraturePaper[];
   documentTitle?: string;
   loading: boolean;
   saving: boolean;
@@ -48,9 +50,10 @@ interface NotesSidebarProps {
   onAddSelectionToNote: () => void;
   onCreateStandaloneNote: () => void;
   onSelectNote: (note: Note) => void;
-  onUpdateNote: (noteId: string, patch: UpdateNoteRequest, options?: { sourceId?: string }) => void;
+  onUpdateNote: (noteId: string, patch: UpdateNoteRequest, options?: { sourceId?: string }) => Note | void | Promise<Note | void>;
   onDeleteNote: (noteId: string) => void;
   onJumpToNoteAnchor: (note: Note, anchor: NoteAnchor) => void;
+  onPaperClick?: (paperId: string) => void;
   onCollapse?: () => void;
 }
 
@@ -92,9 +95,18 @@ function notePlainText(note: Note) {
   return note.contentText || note.content || note.excerpt || '';
 }
 
+function anchorHasLocation(anchor: NoteAnchor) {
+  return Boolean(
+    anchor.blockId ||
+      typeof anchor.pageIndex === 'number' ||
+      (anchor.pdfLocation?.bbox && anchor.pdfLocation.pageNumber),
+  );
+}
+
 export function NotesSidebar({
   notes,
   activeNoteId,
+  papers = [],
   documentTitle,
   loading,
   saving,
@@ -111,6 +123,7 @@ export function NotesSidebar({
   onUpdateNote,
   onDeleteNote,
   onJumpToNoteAnchor,
+  onPaperClick,
   onCollapse,
 }: NotesSidebarProps) {
   const [filter, setFilter] = useState<NotesFilterKey>('all');
@@ -177,12 +190,12 @@ export function NotesSidebar({
 
     if (contextMenu.kind === 'anchor') {
       const { note, anchor } = contextMenu;
-      const hasLocation = Boolean(anchor.pdfLocation?.bbox && anchor.pdfLocation.pageNumber);
+      const hasLocation = anchorHasLocation(anchor);
 
       return [
         {
           id: 'jump',
-          label: '定位到 PDF',
+          label: '定位到原文',
           disabled: !hasLocation,
           tone: 'accent',
           icon: <MapPin className="h-4 w-4" strokeWidth={1.8} />,
@@ -376,7 +389,7 @@ export function NotesSidebar({
               {activeNote && activeAnchors.length > 0 ? (
                 <div className="space-y-1.5">
                   {activeAnchors.map((anchor) => {
-                    const hasLocation = Boolean(anchor.pdfLocation?.bbox && anchor.pdfLocation.pageNumber);
+                    const hasLocation = anchorHasLocation(anchor);
                     const sourceTitle = anchorSourceTitle(anchor, documentTitle);
                     const pageLabel = anchorPageLabel(anchor);
 
@@ -491,12 +504,15 @@ export function NotesSidebar({
           note={activeNote}
           saving={saving}
           onUpdate={onUpdateNote}
+          notes={notes}
+          papers={papers}
           pendingAnchorInsert={pendingAnchorInsert}
           onPendingAnchorInsertHandled={onPendingAnchorInsertHandled}
           editorSourceId={noteEditorSourceId}
           externalUpdateNote={externalUpdateNote}
           onExternalUpdateApply={onExternalUpdateApply}
           onJumpToNoteAnchor={onJumpToNoteAnchor}
+          onPaperClick={onPaperClick}
           compact
         />
       </div>

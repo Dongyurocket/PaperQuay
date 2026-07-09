@@ -24,6 +24,7 @@ import {
   extractTextFromMineruBlock,
   extractTranslatableMarkdownFromMineruBlock,
   flattenMineruPages,
+  parseMineruMarkdownPages,
   parseMineruPages,
   resolveMineruBlockContentSource,
 } from '../../services/mineru';
@@ -49,7 +50,7 @@ import {
   lookupZoteroKey,
 } from '../../services/zotero';
 import { useAppLocale, useLocaleText } from '../../i18n/uiLanguage';
-import type { LiteraturePaperTaskState } from '../../types/library';
+import type { LiteraturePaper, LiteraturePaperTaskState } from '../../types/library';
 import type {
   CreateNoteRequest,
   Note,
@@ -92,7 +93,8 @@ import type {
 } from '../../types/reader';
 import {
   buildMineruCachePaths,
-  guessSiblingJsonPath,
+  guessSiblingJsonPaths,
+  guessSiblingMarkdownPath,
 } from '../../utils/mineruCache';
 import {
   loadPaperHistory,
@@ -259,6 +261,8 @@ interface DocumentReaderTabProps {
   setNotesSaving: StateSetter<boolean>;
   notesError: string;
   setNotesError: StateSetter<string>;
+  notePaperCandidates?: LiteraturePaper[];
+  onNotePaperClick?: (paperId: string) => void;
   pendingNoteAnchorJump?: JumpToNoteAnchorEventDetail | null;
   onPendingNoteAnchorJumpHandled?: (requestId?: string) => void;
   translationSnapshot?: ReaderDocumentTranslationSnapshot | null;
@@ -321,6 +325,8 @@ function DocumentReaderTab({
   setNotesSaving,
   notesError,
   setNotesError,
+  notePaperCandidates = [],
+  onNotePaperClick,
   pendingNoteAnchorJump = null,
   onPendingNoteAnchorJumpHandled,
   translationSnapshot = null,
@@ -379,6 +385,8 @@ function DocumentReaderTab({
   const [capturingScreenshot, setCapturingScreenshot] = useState(false);
   const [selectedExcerpt, setSelectedExcerpt] = useState<SelectedExcerpt | null>(null);
   const [pendingNoteAnchorInsert, setPendingNoteAnchorInsert] = useState<NoteAnchorInsertRequest | null>(null);
+  const [pendingBlockAnchorJump, setPendingBlockAnchorJump] =
+    useState<JumpToNoteAnchorEventDetail | null>(null);
   const [readerNoteExternalUpdate, setReaderNoteExternalUpdate] = useState<Note | null>(null);
   const updateLibraryOperation = useCallback(
     (
@@ -923,6 +931,7 @@ function DocumentReaderTab({
         l: lRef.current,
         readText: readLocalTextFileIfExists,
         parsePages: parseMineruPages,
+        parseMarkdownPages: parseMineruMarkdownPages,
       });
     },
     [settings.mineruCacheDir],
@@ -954,6 +963,25 @@ function DocumentReaderTab({
     [],
   );
 
+  const createSelectionHighlightTarget = useCallback(
+    (excerpt: SelectedExcerpt): PdfHighlightTarget | null => {
+      const location = excerpt.pdfLocation;
+
+      if (!location?.bbox || typeof location.pageNumber !== 'number') {
+        return null;
+      }
+
+      return {
+        blockId: excerpt.blockId || `selection:${excerpt.createdAt}`,
+        pageIndex: Math.max(0, location.pageNumber - 1),
+        bbox: location.bbox,
+        bboxCoordinateSystem: location.bboxCoordinateSystem,
+        bboxPageSize: location.bboxPageSize,
+      };
+    },
+    [],
+  );
+
   const activateBlock = useCallback(
     (
       block: PositionedMineruBlock,
@@ -978,7 +1006,9 @@ function DocumentReaderTab({
         setBlockScrollSignal((current) => current + 1);
       }
 
-      setStatusMessage(nextStatus);
+      if (nextStatus.trim()) {
+        setStatusMessage(nextStatus);
+      }
     },
     [createHighlightTarget],
   );
@@ -1106,41 +1136,81 @@ function DocumentReaderTab({
               return;
             }
 
-            const siblingJsonPath = guessSiblingJsonPath(resolvedSource.path);
+            for (const siblingJsonPath of guessSiblingJsonPaths(resolvedSource.path)) {
+              try {
+                const jsonText = await readLocalTextFileIfExists(siblingJsonPath);
+                if (!jsonText || !isCurrentOpen()) {
+                  continue;
+                }
+
+                const pages = parseMineruPages(jsonText);
+
+                if (!isCurrentOpen()) {
+                  return;
+                }
+
+                const siblingStatusMessage = lRef.current(
+                  `已自动加载《${item.title}》同目录的 MinerU JSON`,
+                  `Automatically loaded the MinerU JSON next to "${item.title}"`,
+                );
+
+                applyMineruPages(pages, siblingJsonPath, {
+                  item: nextResolvedItem,
+                  pdfPath: resolvedSource.path,
+                  pdfSource: resolvedSource,
+                  statusMessage: siblingStatusMessage,
+                });
+                setStatusMessage(siblingStatusMessage);
+
+                await saveMineruParseCache({
+                  item: nextResolvedItem,
+                  pdfPath: resolvedSource.path,
+                  sourceKind: 'sibling-json',
+                  contentJsonText: siblingJsonPath.toLowerCase().endsWith('middle.json') ? null : jsonText,
+                  middleJsonText: siblingJsonPath.toLowerCase().endsWith('middle.json') ? jsonText : null,
+                }).catch(() => undefined);
+                return;
+              } catch {
+                // Cache restore is opportunistic. Keep the PDF open even if parsing is unavailable.
+              }
+            }
+
+            const siblingMarkdownPath = guessSiblingMarkdownPath(resolvedSource.path);
 
             try {
-              const jsonText = await readLocalTextFileIfExists(siblingJsonPath);
-              if (!jsonText || !isCurrentOpen()) {
+              const markdownText = await readLocalTextFileIfExists(siblingMarkdownPath);
+              if (!markdownText?.trim() || !isCurrentOpen()) {
                 return;
               }
 
-              const pages = parseMineruPages(jsonText);
+              const pages = parseMineruMarkdownPages(markdownText);
+              const blockCount = flattenMineruPages(pages).length;
 
-              if (!isCurrentOpen()) {
+              if (blockCount === 0 || !isCurrentOpen()) {
                 return;
               }
 
-              const siblingStatusMessage = lRef.current(
-                `已自动加载《${item.title}》同目录的 MinerU JSON`,
-                `Automatically loaded the MinerU JSON next to "${item.title}"`,
+              const markdownStatusMessage = lRef.current(
+                `已自动加载《${item.title}》同目录的 MinerU Markdown`,
+                `Automatically loaded the MinerU Markdown next to "${item.title}"`,
               );
 
-              applyMineruPages(pages, siblingJsonPath, {
+              applyMineruPages(pages, siblingMarkdownPath, {
                 item: nextResolvedItem,
                 pdfPath: resolvedSource.path,
                 pdfSource: resolvedSource,
-                statusMessage: siblingStatusMessage,
+                statusMessage: markdownStatusMessage,
               });
-              setStatusMessage(siblingStatusMessage);
+              setStatusMessage(markdownStatusMessage);
 
               await saveMineruParseCache({
                 item: nextResolvedItem,
                 pdfPath: resolvedSource.path,
                 sourceKind: 'sibling-json',
-                contentJsonText: jsonText,
+                markdownText,
               }).catch(() => undefined);
             } catch {
-              // Cache restore is opportunistic. Keep the PDF open even if parsing is unavailable.
+              // Markdown fallback is best-effort. Keep the PDF open even if parsing is unavailable.
             }
           })().catch(() => undefined);
         });
@@ -1338,7 +1408,16 @@ function DocumentReaderTab({
   const handlePdfBlockSelect = useCallback(
     (block: PositionedMineruBlock, context?: PdfBlockSelectContext) => {
       const contentBlock = resolveBlockContentSource(block);
-      const clickedHighlight = createHighlightTarget(block);
+      const clickedHighlight =
+        context?.pdfLocation?.bbox && context.pdfLocation.pageNumber
+          ? {
+              blockId: block.blockId,
+              pageIndex: Math.max(0, context.pdfLocation.pageNumber - 1),
+              bbox: context.pdfLocation.bbox,
+              bboxCoordinateSystem: context.pdfLocation.bboxCoordinateSystem,
+              bboxPageSize: context.pdfLocation.bboxPageSize,
+            }
+          : createHighlightTarget(block);
 
       activateBlock(contentBlock, lRef.current(
         `已从 PDF 选中结构块 ${contentBlock.blockId}`,
@@ -1377,14 +1456,7 @@ function DocumentReaderTab({
         anchorClientY: context.anchorClientY,
         anchorClientRect: context.anchorClientRect,
         placement: context.placement ?? 'bottom',
-        pdfLocation: block.bbox
-          ? {
-              pageNumber: block.pageIndex + 1,
-              bbox: block.bbox,
-              bboxCoordinateSystem: block.bboxCoordinateSystem,
-              bboxPageSize: block.bboxPageSize,
-            }
-          : undefined,
+        pdfLocation: context.pdfLocation,
       });
       applySelectedExcerptTranslation(translatedText);
       setStatusMessage(
@@ -1457,6 +1529,7 @@ function DocumentReaderTab({
           : null;
       const result = await runMineruCloudParse({
         apiToken: mineruApiToken.trim(),
+        apiBaseUrl: settings.mineruApiBaseUrl,
         pdfPath,
         extractDir: cachePaths?.directory,
         language: 'ch',
@@ -1539,6 +1612,7 @@ function DocumentReaderTab({
     pdfPath,
     saveMineruParseCache,
     settings.mineruCacheDir,
+    settings.mineruApiBaseUrl,
     updateLibraryOperation,
   ]);
 
@@ -1970,6 +2044,7 @@ function DocumentReaderTab({
     setSelectedExcerpt({
       text: normalizedText,
       source,
+      blockId: selection.blockId,
       createdAt: Date.now(),
       anchorClientX: Number.isFinite(selection.anchorClientX)
         ? selection.anchorClientX
@@ -2010,6 +2085,42 @@ function DocumentReaderTab({
     resetSelectedExcerptTranslationState();
     setStatusMessage(lRef.current('已清除划词内容', 'Cleared the selected excerpt'));
   }, [resetSelectedExcerptTranslationState]);
+
+  useEffect(() => {
+    if (
+      !selectedExcerpt ||
+      !settings.highlightSelectionTranslation ||
+      !selectedExcerptTranslation.trim()
+    ) {
+      return;
+    }
+
+    if (selectedExcerpt.source === 'pdf') {
+      const highlightTarget = createSelectionHighlightTarget(selectedExcerpt);
+
+      if (highlightTarget) {
+        setActivePdfHighlight(highlightTarget);
+        setPdfHighlightSignal((current) => current + 1);
+      }
+
+      return;
+    }
+
+    const targetBlock = selectedExcerpt.blockId
+      ? blockById.get(selectedExcerpt.blockId) ?? null
+      : null;
+
+    if (targetBlock) {
+      activateBlock(targetBlock, '', { syncPdfHighlight: true });
+    }
+  }, [
+    activateBlock,
+    blockById,
+    createSelectionHighlightTarget,
+    selectedExcerpt,
+    selectedExcerptTranslation,
+    settings.highlightSelectionTranslation,
+  ]);
 
   useEffect(() => {
     if (!selectedExcerpt) {
@@ -2292,6 +2403,9 @@ function DocumentReaderTab({
     if (targetBlock) {
       setSelectedAnnotationId(null);
       setWorkspaceStage('reading');
+      setPendingBlockAnchorJump((current) =>
+        current?.requestId === detail.requestId ? null : current,
+      );
 
       if (!agentRagJump) {
         setActiveNoteId(detail.noteId);
@@ -2305,7 +2419,8 @@ function DocumentReaderTab({
       return true;
     }
 
-    if (agentRagJump && detail.blockId && flatBlocks.length === 0) {
+    if (detail.blockId && flatBlocks.length === 0) {
+      setPendingBlockAnchorJump(detail);
       return false;
     }
 
@@ -2326,12 +2441,18 @@ function DocumentReaderTab({
     const highlightTarget = buildNoteAnchorPdfHighlightTarget(detail) ?? pageHighlightTarget;
 
     if (!highlightTarget) {
+      if (detail.blockId) {
+        setPendingBlockAnchorJump(detail);
+      }
       setStatusMessage(lRef.current('该引用没有绑定 PDF 位置', 'This reference is not linked to a PDF location'));
       return false;
     }
 
     setSelectedAnnotationId(null);
     setWorkspaceStage('reading');
+    setPendingBlockAnchorJump((current) =>
+      current?.requestId === detail.requestId ? null : current,
+    );
 
     if (!agentRagJump) {
       setActiveNoteId(detail.noteId);
@@ -2415,12 +2536,14 @@ function DocumentReaderTab({
   ) => {
     setNotesSaving(true);
     setNotesError('');
+    let savedNote: Note | undefined;
 
     try {
       const updated = await updateStoredNote(noteId, patch, {
         ...options,
         sourceId: options.sourceId ?? readerNoteEditorSourceId,
       });
+      savedNote = updated;
 
       setNotes((current) =>
         sortReaderNotes(current.map((note) => (note.id === updated.id ? updated : note))),
@@ -2437,23 +2560,26 @@ function DocumentReaderTab({
     } finally {
       setNotesSaving(false);
     }
+    return savedNote;
   }, [readerNoteEditorSourceId]);
 
-  const handleAddSelectionToNote = useCallback(async () => {
-    if (!selectedExcerpt?.text.trim()) {
+  const handleAddSelectionToNote = useCallback(async (excerptOverride?: SelectedExcerpt) => {
+    const excerpt = excerptOverride ?? selectedExcerpt;
+
+    if (!excerpt?.text.trim()) {
       setStatusMessage(lRef.current('请先在 PDF 或正文中划词', 'Select text in the PDF or document first'));
       return;
     }
 
-    const anchor = createNoteAnchorFromSelection(selectedExcerpt, currentDocument.workspaceId, currentDocument.title);
+    const anchor = createNoteAnchorFromSelection(excerpt, currentDocument.workspaceId, currentDocument.title);
     let targetNote = resolveReaderNoteAnchorTarget(notes, activeNoteId);
 
     if (!targetNote) {
       targetNote = await handleCreateNote(
         buildSelectedExcerptNoteCreateRequest({
           paperId: currentDocument.workspaceId,
-          selectedExcerpt,
-          title: titleFromText(selectedExcerpt.text, lRef.current('新的阅读笔记', 'New Reading Note')),
+          selectedExcerpt: excerpt,
+          title: titleFromText(excerpt.text, lRef.current('新的阅读笔记', 'New Reading Note')),
         }),
       );
 
@@ -2476,6 +2602,46 @@ function DocumentReaderTab({
     setActiveNoteId,
     setAssistantActivePanel,
   ]);
+
+  const handleAddBlockToNote = useCallback(
+    (block: PositionedMineruBlock, selection: TextSelectionPayload) => {
+      const normalizedText = normalizeSelectedText(selection.text);
+
+      if (!normalizedText) {
+        setStatusMessage(lRef.current('当前结构块没有可引用文本', 'This block has no text to cite.'));
+        return;
+      }
+
+      const blockPdfLocation =
+        selection.pdfLocation ??
+        (block.bbox
+          ? {
+              pageNumber: block.pageIndex + 1,
+              bbox: block.bbox,
+              bboxCoordinateSystem: block.bboxCoordinateSystem,
+              bboxPageSize: block.bboxPageSize,
+            }
+          : undefined);
+
+      const nextExcerpt: SelectedExcerpt = {
+        text: normalizedText,
+        source: 'blocks',
+        origin: 'pdf-block',
+        blockId: selection.blockId ?? block.blockId,
+        createdAt: Date.now(),
+        anchorClientX: selection.anchorClientX,
+        anchorClientY: selection.anchorClientY,
+        anchorClientRect: selection.anchorClientRect,
+        placement: selection.placement,
+        pdfLocation: blockPdfLocation,
+      };
+
+      setSelectedExcerpt(nextExcerpt);
+      resetSelectedExcerptTranslationState();
+      void handleAddSelectionToNote(nextExcerpt);
+    },
+    [handleAddSelectionToNote, resetSelectedExcerptTranslationState],
+  );
 
   const handlePendingNoteAnchorInsertHandled = useCallback((requestId: string) => {
     setPendingNoteAnchorInsert((current) =>
@@ -3105,7 +3271,7 @@ function DocumentReaderTab({
       return;
     }
 
-    if (!pdfSource) {
+    if (!pdfSource && !pendingNoteAnchorJump.blockId && typeof pendingNoteAnchorJump.pageIndex !== 'number') {
       return;
     }
 
@@ -3118,6 +3284,21 @@ function DocumentReaderTab({
     onPendingNoteAnchorJumpHandled,
     pdfSource,
     pendingNoteAnchorJump,
+  ]);
+
+  useEffect(() => {
+    if (!pendingBlockAnchorJump || flatBlocks.length === 0) {
+      return;
+    }
+
+    if (applyNoteAnchorJump(pendingBlockAnchorJump)) {
+      onPendingNoteAnchorJumpHandled?.(pendingBlockAnchorJump.requestId);
+    }
+  }, [
+    applyNoteAnchorJump,
+    flatBlocks.length,
+    onPendingNoteAnchorJumpHandled,
+    pendingBlockAnchorJump,
   ]);
 
   useEffect(() => {
@@ -3163,6 +3344,7 @@ function DocumentReaderTab({
         aiConfigured,
         notes,
         activeNoteId,
+        notePaperCandidates,
         notesLoading,
         notesSaving,
         notesError,
@@ -3210,12 +3392,13 @@ function DocumentReaderTab({
         onCreateStandaloneNote: handleCreateStandaloneNote,
         onSelectNote: handleSelectNote,
         onUpdateNote: (noteId, patch, options) => {
-          void handleUpdateNote(noteId, patch, options);
+          return handleUpdateNote(noteId, patch, options);
         },
         onDeleteNote: (noteId) => {
           void handleDeleteNote(noteId);
         },
         onJumpToNoteAnchor: handleJumpToNoteAnchor,
+        onNotePaperClick,
         onAddSelectionToNote: () => {
           void handleAddSelectionToNote();
         },
@@ -3249,6 +3432,7 @@ function DocumentReaderTab({
       handleDeleteNote,
       handleDeleteQaSession,
       handleJumpToNoteAnchor,
+      onNotePaperClick,
       handlePendingNoteAnchorInsertHandled,
       handleQaPresetChange,
       handleReaderNoteExternalUpdateApply,
@@ -3261,6 +3445,7 @@ function DocumentReaderTab({
       handleSubmitQa,
       handleTranslateSelectedExcerpt,
       handleUpdateNote,
+      notePaperCandidates,
       notes,
       notesError,
       notesLoading,
@@ -3540,6 +3725,7 @@ function DocumentReaderTab({
         onPdfBlockHover={handlePdfBlockHover}
         onPdfBlockSelect={handlePdfBlockSelect}
         onBlockClick={handleBlockClick}
+        onAddBlockToNote={handleAddBlockToNote}
         onRetranslateBlock={(block) => void handleRetranslateBlock(block)}
         onTranslationDisplayModeChange={onTranslationDisplayModeChange}
         onTextSelect={handleTextSelect}

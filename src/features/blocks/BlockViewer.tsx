@@ -8,6 +8,7 @@ import {
   type MouseEvent as ReactMouseEvent,
 } from 'react';
 import {
+  FilePlus2,
   Languages,
   RefreshCw,
   SearchCode,
@@ -46,6 +47,7 @@ interface BlockViewerProps {
   active?: boolean;
   translationBusy?: boolean;
   onBlockClick: (block: PositionedMineruBlock) => void;
+  onAddBlockToNote?: (block: PositionedMineruBlock, selection: TextSelectionPayload) => void;
   onRetranslateBlock?: (block: PositionedMineruBlock) => void;
   onTranslationDisplayModeChange?: (mode: TranslationDisplayMode) => void;
   onTextSelect?: (selection: TextSelectionPayload) => void;
@@ -91,6 +93,10 @@ function getScopedSelectionPayload(container: HTMLElement | null): TextSelection
   }
 
   const rangeRect = range.getBoundingClientRect();
+  const blockElement = targetNode instanceof Element
+    ? targetNode.closest<HTMLElement>('[data-block-id]')
+    : null;
+  const blockId = blockElement?.dataset.blockId;
   const anchorClientX =
     rangeRect.width > 0 ? rangeRect.left + rangeRect.width / 2 : rangeRect.left;
   const anchorClientY = rangeRect.bottom;
@@ -110,6 +116,29 @@ function getScopedSelectionPayload(container: HTMLElement | null): TextSelection
     anchorClientY,
     anchorClientRect,
     placement: 'bottom',
+    blockId: blockId || undefined,
+  };
+}
+
+function createBlockSelectionPayload(
+  block: PositionedMineruBlock,
+  text: string,
+  point: { clientX: number; clientY: number },
+): TextSelectionPayload {
+  return {
+    text,
+    anchorClientX: point.clientX,
+    anchorClientY: point.clientY,
+    placement: 'bottom',
+    blockId: block.blockId,
+    pdfLocation: block.bbox
+      ? {
+          pageNumber: block.pageIndex + 1,
+          bbox: block.bbox,
+          bboxCoordinateSystem: block.bboxCoordinateSystem,
+          bboxPageSize: block.bboxPageSize,
+        }
+      : undefined,
   };
 }
 
@@ -165,6 +194,7 @@ function BlockViewer({
   active = true,
   translationBusy = false,
   onBlockClick,
+  onAddBlockToNote,
   onRetranslateBlock,
   onTranslationDisplayModeChange,
   onTextSelect,
@@ -300,7 +330,7 @@ function BlockViewer({
 
   const handleBlockContextMenu = useCallback(
     (block: PositionedMineruBlock, event: ReactMouseEvent<HTMLDivElement>) => {
-      if (!onRetranslateBlock || hasActiveTextSelection()) {
+      if ((!onRetranslateBlock && !onAddBlockToNote) || hasActiveTextSelection()) {
         return;
       }
 
@@ -312,27 +342,58 @@ function BlockViewer({
         y: event.clientY,
       });
     },
-    [onRetranslateBlock],
+    [onAddBlockToNote, onRetranslateBlock],
   );
 
   const contextMenuEntries = useMemo<ContextMenuEntry[]>(() => {
-    if (!contextMenu || !onRetranslateBlock) {
+    if (!contextMenu) {
       return [];
     }
 
-    return [
-      {
+    const entries: ContextMenuEntry[] = [];
+
+    if (onAddBlockToNote) {
+      const blockText = renderableBlocks
+        .find((item) => item.block.blockId === contextMenu.block.blockId)
+        ?.markdown.trim();
+
+      entries.push({
+        id: 'add-block-to-note',
+        label: l('整块加入笔记', 'Add Whole Block to Note'),
+        icon: <FilePlus2 className="h-4 w-4" strokeWidth={1.9} />,
+        tone: 'accent',
+        disabled: !blockText,
+        onSelect: () => {
+          if (!blockText) {
+            return;
+          }
+
+          onAddBlockToNote(
+            contextMenu.block,
+            createBlockSelectionPayload(contextMenu.block, blockText, {
+              clientX: contextMenu.x,
+              clientY: contextMenu.y,
+            }),
+          );
+        },
+      });
+    }
+
+    if (onRetranslateBlock) {
+      entries.push({
         id: 'retranslate-block',
         label: translationBusy
           ? l('翻译进行中', 'Translation in progress')
           : l('重新翻译此块', 'Retranslate This Block'),
         icon: <RefreshCw className="h-4 w-4" strokeWidth={1.9} />,
         disabled: translationBusy,
-        tone: 'accent',
+        tone: entries.length > 0 ? 'default' : 'accent',
         onSelect: () => onRetranslateBlock(contextMenu.block),
-      },
-    ];
-  }, [contextMenu, l, onRetranslateBlock, translationBusy]);
+      });
+    }
+
+    return entries;
+  }, [contextMenu, l, onAddBlockToNote, onRetranslateBlock, renderableBlocks, translationBusy]);
 
   const emitSelectedText = () => {
     if (!onTextSelect) {
@@ -389,10 +450,26 @@ function BlockViewer({
       return undefined;
     }
 
-    blockRefs.current[activeBlockId]?.scrollIntoView({
-      behavior: smoothScroll ? 'smooth' : 'auto',
-      block: 'center',
-    });
+    const scrollToActiveBlock = (behavior: ScrollBehavior) => {
+      const element = blockRefs.current[activeBlockId];
+
+      if (!element) {
+        return false;
+      }
+
+      element.scrollIntoView({
+        behavior,
+        block: 'center',
+      });
+      return true;
+    };
+
+    const didScroll = scrollToActiveBlock(smoothScroll ? 'smooth' : 'auto');
+    const retryTimer = didScroll
+      ? 0
+      : window.setTimeout(() => {
+          scrollToActiveBlock('auto');
+        }, 80);
 
     setFlashBlockId(activeBlockId);
 
@@ -400,7 +477,12 @@ function BlockViewer({
       setFlashBlockId((current) => (current === activeBlockId ? null : current));
     }, 1200);
 
-    return () => window.clearTimeout(timer);
+    return () => {
+      if (retryTimer) {
+        window.clearTimeout(retryTimer);
+      }
+      window.clearTimeout(timer);
+    };
   }, [active, activeBlockId, renderedBlockCount, scrollSignal, smoothScroll]);
 
   useEffect(() => {

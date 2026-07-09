@@ -95,6 +95,7 @@ interface ReaderWorkspaceProps {
   onPdfBlockHover: (block: PositionedMineruBlock | null) => void;
   onPdfBlockSelect: (block: PositionedMineruBlock, context?: PdfBlockSelectContext) => void;
   onBlockClick: (block: PositionedMineruBlock) => void;
+  onAddBlockToNote: (block: PositionedMineruBlock, selection: TextSelectionPayload) => void;
   onRetranslateBlock: (block: PositionedMineruBlock) => void;
   onTranslationDisplayModeChange: (mode: TranslationDisplayMode) => void;
   onTextSelect: (selection: TextSelectionPayload, source: TextSelectionSource) => void;
@@ -204,6 +205,7 @@ function ReadingStage(props: ReaderWorkspaceProps & { immersiveReading: boolean 
     onPdfBlockHover,
     onPdfBlockSelect,
     onBlockClick,
+    onAddBlockToNote,
     onRetranslateBlock,
     onTextSelect,
     qaSessions,
@@ -348,6 +350,7 @@ function ReadingStage(props: ReaderWorkspaceProps & { immersiveReading: boolean 
               selectedAnnotationId={activeNoteAnnotationId ?? selectedAnnotationId}
               onBlockHover={onPdfBlockHover}
               onBlockSelect={onPdfBlockSelect}
+              onAddBlockToNote={onAddBlockToNote}
               blockClickOpensQuickActions={readingViewMode === 'pdf-only'}
               onAnnotationSelect={onSelectAnnotation}
               onTextSelect={handlePdfTextSelect}
@@ -391,6 +394,7 @@ function ReadingStage(props: ReaderWorkspaceProps & { immersiveReading: boolean 
                   active={active}
                   translationBusy={translating}
                   onBlockClick={onBlockClick}
+                  onAddBlockToNote={onAddBlockToNote}
                   onRetranslateBlock={onRetranslateBlock}
                   onTranslationDisplayModeChange={props.onTranslationDisplayModeChange}
                   onTextSelect={handleBlockTextSelect}

@@ -19,6 +19,8 @@ export interface NoteAnchor {
   sourceTitle?: string;
   excerpt: string;
   source?: 'pdf' | 'blocks' | 'ai-chat' | 'manual';
+  blockId?: string | null;
+  pageIndex?: number | null;
   pdfLocation?: NotePdfLocation;
   createdAt: number;
 }

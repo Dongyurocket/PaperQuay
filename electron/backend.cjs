@@ -2,9 +2,11 @@ const { createAiCommands } = require('./backend/aiCommands.cjs');
 const { createAppPaths, createLibraryStore } = require('./backend/libraryStore.cjs');
 const { createFileCommands } = require('./backend/fileCommands.cjs');
 const { createIntegrationCommands } = require('./backend/integrationCommands.cjs');
+const { createKnowledgeGraphCommands } = require('./backend/knowledgeGraphCommands.cjs');
 const { createLibraryCommands } = require('./backend/libraryCommands.cjs');
 const { createNoteCommands } = require('./backend/noteCommands.cjs');
 const { createNoteStore } = require('./backend/noteStore.cjs');
+const { createReviewCommands } = require('./backend/reviewCommands.cjs');
 const { createUpdateCommands } = require('./backend/updateCommands.cjs');
 
 function toErrorMessage(error) {
@@ -84,7 +86,9 @@ function createBackend({ app }) {
     ...createLibraryCommands(context),
     ...createNoteCommands(context),
     ...createAiCommands(context),
+    ...createKnowledgeGraphCommands(context),
     ...createIntegrationCommands(context),
+    ...createReviewCommands(context),
     ...createUpdateCommands(context),
   };
 
