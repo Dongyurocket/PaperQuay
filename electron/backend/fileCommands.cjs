@@ -6,6 +6,7 @@ const {
   cleanString,
   ensureFile,
   pathExists,
+  readJson,
   safeFileName,
   now,
 } = require('./utils.cjs');
@@ -111,6 +112,26 @@ async function hasLooseMineruOutputFiles(directory) {
 
 function createFileCommands(context) {
   const { appPaths, approvedWritePaths, store } = context;
+  const configuredMineruCacheDir = cleanString(
+    readJson(appPaths.configPath, null)?.settings?.mineruCacheDir,
+  );
+
+  if (configuredMineruCacheDir) {
+    approvedWritePaths.add(path.resolve(configuredMineruCacheDir));
+  }
+
+  async function writeTextFileAtomically(filePath, content) {
+    await fsp.mkdir(path.dirname(filePath), { recursive: true });
+    const temporaryPath = `${filePath}.tmp-${process.pid}-${now()}-${Math.random().toString(16).slice(2)}`;
+
+    try {
+      await fsp.writeFile(temporaryPath, String(content ?? ''), 'utf8');
+      await fsp.rename(temporaryPath, filePath);
+    } catch (error) {
+      await fsp.rm(temporaryPath, { force: true }).catch(() => undefined);
+      throw error;
+    }
+  }
 
   function assertWriteAllowed(filePath) {
     const absolute = path.resolve(filePath);
@@ -361,8 +382,7 @@ function createFileCommands(context) {
 
     async write_text_file({ path: filePath, content }) {
       assertWriteAllowed(filePath);
-      await fsp.mkdir(path.dirname(filePath), { recursive: true });
-      await fsp.writeFile(filePath, String(content ?? ''), 'utf8');
+      await writeTextFileAtomically(filePath, content);
     },
 
     async read_binary_file_base64({ path: filePath }) {

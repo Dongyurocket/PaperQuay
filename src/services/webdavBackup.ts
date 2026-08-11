@@ -1,5 +1,7 @@
 import { invoke } from '../platform/electron/core';
+import { listen } from '../platform/electron/event';
 import type {
+  WebdavBackupProgress,
   WebdavBackupResult,
   WebdavLatestBackupInfo,
   WebdavRestoreResult,
@@ -7,6 +9,8 @@ import type {
   WebdavBackupSettingsInput,
   WebdavConnectionTestResult,
 } from '../types/backup';
+
+const WEBDAV_BACKUP_PROGRESS_EVENT = 'paperquay://webdav-backup-progress';
 
 function toErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message) {
@@ -52,6 +56,14 @@ export async function runWebdavBackupNow(): Promise<WebdavBackupResult> {
   } catch (error) {
     throw new Error(toErrorMessage(error, 'WebDAV manual backup failed'));
   }
+}
+
+export async function listenWebdavBackupProgress(
+  handler: (progress: WebdavBackupProgress) => void,
+): Promise<() => void> {
+  return listen<WebdavBackupProgress>(WEBDAV_BACKUP_PROGRESS_EVENT, ({ payload }) => {
+    if (payload) handler(payload);
+  });
 }
 
 export async function inspectLatestWebdavBackup(): Promise<WebdavLatestBackupInfo> {

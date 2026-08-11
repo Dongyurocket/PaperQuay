@@ -1,4 +1,4 @@
-import { Download, FileText, Loader2, Play } from 'lucide-react';
+import { CircleCheck, Download, FileText, Loader2, Play, TriangleAlert } from 'lucide-react';
 import type { ReviewDocxExportResult } from '../../services/reviewWriting';
 
 type LocaleText = (zh: string, en: string) => string;
@@ -13,6 +13,7 @@ export function ReviewExportCard({
   onOpenOutput,
   outputPath,
   skippedFigures,
+  validation,
 }: {
   canExport: boolean;
   exportedPath: string;
@@ -23,6 +24,7 @@ export function ReviewExportCard({
   onOpenOutput: () => void;
   outputPath: string;
   skippedFigures: NonNullable<ReviewDocxExportResult['skippedFigures']>;
+  validation: ReviewDocxExportResult['validation'] | null;
 }) {
   return (
     <div className="rounded-[var(--pq-radius-md)] border border-[var(--pq-border)] bg-[var(--pq-surface)] p-4">
@@ -59,6 +61,26 @@ export function ReviewExportCard({
               `${skippedFigures.length} 张图片未能写入 Word，已使用占位提示。`,
               `${skippedFigures.length} figure(s) could not be embedded and were replaced by placeholders.`,
             )}
+          </div>
+        ) : null}
+        {validation?.status === 'passed' ? (
+          <div className="flex items-start gap-2 rounded-[var(--pq-radius-sm)] border border-[var(--pq-success)] bg-[var(--pq-success-bg)] px-3 py-2 text-xs leading-5 text-[var(--pq-success)]">
+            <CircleCheck className="mt-0.5 h-3.5 w-3.5 shrink-0" strokeWidth={2} />
+            <span>
+              {l(
+                `Word 结构校验通过：${validation.paragraphCount} 个段落、${validation.imageCount} 张图片、${validation.formulaCount} 个可编辑公式。`,
+                `Word validation passed: ${validation.paragraphCount} paragraphs, ${validation.imageCount} images, and ${validation.formulaCount} editable equations.`,
+              )}
+            </span>
+          </div>
+        ) : null}
+        {validation?.status === 'warning' ? (
+          <div className="flex items-start gap-2 rounded-[var(--pq-radius-sm)] border border-[var(--pq-warning)] bg-[var(--pq-warning-bg)] px-3 py-2 text-xs leading-5 text-[var(--pq-warning)]">
+            <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" strokeWidth={2} />
+            <div>
+              <div>{l('Word 已导出，但后置校验发现以下提醒：', 'Word was exported with post-validation warnings:')}</div>
+              {validation.warnings.map((warning) => <div key={warning}>· {warning}</div>)}
+            </div>
           </div>
         ) : null}
       </div>

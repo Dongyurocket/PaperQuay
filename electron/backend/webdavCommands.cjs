@@ -8,6 +8,13 @@ const {
   runRestore,
 } = require('./webdavBackup.cjs');
 
+const WEBDAV_BACKUP_PROGRESS_EVENT = 'paperquay://webdav-backup-progress';
+
+function emitBackupProgress(sender, payload) {
+  if (!sender || typeof sender.send !== 'function') return;
+  sender.send('paperquay:event', WEBDAV_BACKUP_PROGRESS_EVENT, payload);
+}
+
 function updateSettings(store, settings) {
   const library = store.load();
   library.webdav = {
@@ -77,8 +84,10 @@ function createWebdavCommands(context) {
       }
     },
 
-    async webdav_backup_now() {
-      return runBackup(context, createClientFromStore(store));
+    async webdav_backup_now(_args, event) {
+      return runBackup(context, createClientFromStore(store), {
+        onProgress: (payload) => emitBackupProgress(event?.sender, payload),
+      });
     },
 
     async webdav_inspect_latest_backup() {

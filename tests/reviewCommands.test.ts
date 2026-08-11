@@ -14,8 +14,11 @@ import {
   normalizeReviewGeneratedParts,
   normalizeReviewJsonDraft,
   normalizeReviewBlueprint,
+  parseReviewMarkdownBlocks,
   prepareReviewDocxData,
   renderReviewDocxTemplate,
+  reviewDraftToMarkdown,
+  validateReviewDocxBuffer,
 } from '../electron/backend/reviewCommands.cjs';
 
 const tinyPngBase64 =
@@ -346,6 +349,69 @@ test('prepareReviewDocxData splits body sections into consistently formatted par
   assert.equal(draft.sections[0]?.paragraphs[1]?.citationText, '[2]');
 });
 
+test('parseReviewMarkdownBlocks keeps academic block semantics without raw Markdown markers', () => {
+  const blocks = parseReviewMarkdownBlocks(`## Evidence Synthesis
+
+The **first paragraph** links [the method](https://example.com) with $E=mc^2$.
+
+- First limitation
+2. Second limitation
+
+> Evidence should remain qualified.`, { expectedHeading: 'Evidence Synthesis' });
+
+  assert.deepEqual(blocks.map((block: { kind: string }) => block.kind), [
+    'paragraph',
+    'bullet',
+    'ordered',
+    'quote',
+  ]);
+  assert.equal(blocks[0]?.text, 'The first paragraph links the method with $E=mc^2$.');
+  assert.equal(blocks[1]?.marker, '• ');
+  assert.equal(blocks[2]?.marker, '2. ');
+  assert.equal(blocks[3]?.text, 'Evidence should remain qualified.');
+});
+
+test('prepareReviewDocxData normalizes Markdown and removes a repeated section heading', () => {
+  const draft = prepareReviewDocxData({
+    title: 'Markdown Review',
+    sections: [
+      {
+        heading: 'Evidence Synthesis',
+        content: '## Evidence Synthesis\n\nThe **first claim** is grounded [P1].\n\n- A bounded limitation [P1].',
+        citations: ['P1'],
+      },
+    ],
+    references: [{ id: 'P1', title: 'Paper One', authors: 'Author A', year: '2025' }],
+    sources: [{ id: 'P1', title: 'Paper One', sourceType: 'paper', relevance: 'primary evidence' }],
+  });
+
+  assert.equal(draft.sections[0]?.content, 'The first claim is grounded [1].\n\n• A bounded limitation [1].');
+  assert.equal(draft.sections[0]?.paragraphs.length, 2);
+  assert.equal(draft.sections[0]?.paragraphs[0]?.isParagraph, true);
+  assert.equal(draft.sections[0]?.paragraphs[1]?.isList, true);
+  assert.doesNotMatch(draft.sections[0]?.content ?? '', /##|\*\*/);
+});
+
+test('reviewDraftToMarkdown creates a complete auditable intermediate document', () => {
+  const markdown = reviewDraftToMarkdown({
+    title: 'Auditable Review',
+    abstract: 'A concise abstract [P1].',
+    keywords: ['evidence', 'review'],
+    introduction: 'The introduction defines the scope [P1].',
+    sections: [{ heading: 'Evidence Synthesis', content: 'The body compares evidence [P1].', citations: ['P1'] }],
+    conclusion: 'The conclusion follows from the evidence [P1].',
+    references: [{ id: 'P1', title: 'Paper One', authors: 'Author A', year: '2025' }],
+    sources: [{ id: 'P1', title: 'Paper One', sourceType: 'paper', relevance: 'primary evidence' }],
+  }, 'English');
+
+  assert.match(markdown, /^# Auditable Review/m);
+  assert.match(markdown, /^## Abstract$/m);
+  assert.match(markdown, /^### Evidence Synthesis$/m);
+  assert.match(markdown, /The body compares evidence \[1\]\./);
+  assert.match(markdown, /^## References$/m);
+  assert.match(markdown, /\[1\] Author A\. Paper One\. 2025\./);
+});
+
 test('prepareReviewDocxData removes model image placeholders from prose', () => {
   const draft = prepareReviewDocxData({
     title: 'Image Placeholder Review',
@@ -506,6 +572,9 @@ test('renderReviewDocxTemplate uses the built-in template when no custom templat
 
     assert.equal(result.outputPath, outputPath);
     assert.ok(result.byteSize > 0);
+    assert.equal(result.validation.status, 'passed');
+    assert.ok(result.validation.paragraphCount > 0);
+    assert.ok(result.validation.markdownCharacterCount > 0);
     assert.match(documentXml, /Built-in Review/);
     assert.match(documentXml, /Generated from strict JSON/);
     assert.match(documentXml, /Findings/);
@@ -620,6 +689,40 @@ test('built-in review template renders separate body paragraphs with matching in
     assert.ok(secondParagraphIndex > firstParagraphIndex);
     assert.ok(documentXml.slice(firstParagraphIndex, secondParagraphIndex).includes('</w:p>'));
     assert.ok((documentXml.match(/<w:ind w:firstLine="480"\/>/g) ?? []).length >= 2);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('built-in review template renders Markdown lists with hanging indentation', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'paperquay-review-markdown-list-'));
+  const outputPath = path.join(dir, 'output.docx');
+
+  try {
+    const result = await renderReviewDocxTemplate({
+      templatePath: '',
+      outputPath,
+      data: {
+        title: 'Markdown List Review',
+        sections: [
+          {
+            heading: 'Evidence Synthesis',
+            content: '## Evidence Synthesis\n\nThe **main finding** is grounded [P1].\n\n- First limitation [P1].\n- Second limitation [P1].',
+            citations: ['P1'],
+          },
+        ],
+        references: [{ id: 'P1', title: 'Paper One', authors: 'Author A', year: '2025' }],
+        sources: [{ id: 'P1', title: 'Paper One', sourceType: 'paper', relevance: 'primary evidence' }],
+      },
+    });
+    const outputZip = new AdmZip(await readFile(outputPath));
+    const documentXml = outputZip.readAsText('word/document.xml');
+
+    assert.equal(result.validation.status, 'passed');
+    assert.match(documentXml, /The main finding is grounded \[1\]\./);
+    assert.match(documentXml, /• First limitation \[1\]\./);
+    assert.match(documentXml, /<w:ind w:left="480" w:hanging="360"\/>/);
+    assert.doesNotMatch(documentXml, /## Evidence Synthesis|\*\*main finding\*\*|- First limitation/);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -782,6 +885,11 @@ test('built-in review template embeds selected MinerU figure assets into docx me
     assert.match(documentXml, /The visual evidence summarizes the workflow \[1\]\./);
     assert.match(documentXml, /图 1\. Workflow overview from MinerU extraction\. \[1\]/);
     assert.doesNotMatch(documentXml, /__PAPERQUAY_REVIEW_FIGURE_1__/);
+
+    outputZip.deleteFile('word/media/paperquay-review-figure-1.png');
+    const invalidReport = validateReviewDocxBuffer(outputZip.toBuffer());
+    assert.equal(invalidReport.status, 'error');
+    assert.match(invalidReport.errors.join(' '), /points to missing media/);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

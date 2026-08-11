@@ -4,6 +4,7 @@ import { Cloud, Download, RefreshCw, ShieldCheck } from 'lucide-react';
 import {
   getWebdavBackupSettings,
   inspectLatestWebdavBackup,
+  listenWebdavBackupProgress,
   restoreMissingFromLatestWebdavBackup,
   runWebdavBackupNow,
   testWebdavBackupConnection,
@@ -79,6 +80,43 @@ export function ReaderPreferencesBackupSection({
       cancelled = true;
     };
   }, [active, l, loaded]);
+
+  useEffect(() => {
+    if (!active) {
+      return undefined;
+    }
+
+    let disposed = false;
+    let unlisten: (() => void) | null = null;
+
+    void listenWebdavBackupProgress((progress) => {
+      if (disposed) return;
+
+      if (progress.phase === 'preparing') {
+        setMessage(l('正在准备数据库快照和备份文件...', 'Preparing database snapshots and backup files...'));
+      } else if (progress.phase === 'uploading') {
+        const objectLabel = progress.remotePath ? `: ${progress.remotePath}` : '';
+        setMessage(
+          l(
+            `正在上传 ${progress.completed}/${progress.total}${objectLabel}`,
+            `Uploading ${progress.completed}/${progress.total}${objectLabel}`,
+          ),
+        );
+      } else if (progress.phase === 'publishing') {
+        setMessage(l('正在发布最新备份清单...', 'Publishing the latest backup manifest...'));
+      }
+    })
+      .then((cleanup) => {
+        if (disposed) cleanup();
+        else unlisten = cleanup;
+      })
+      .catch((error) => console.error('Failed to listen for WebDAV backup progress.', error));
+
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [active, l]);
 
   if (!active) {
     return null;
@@ -231,6 +269,10 @@ export function ReaderPreferencesBackupSection({
     }
   };
 
+  const failedBackupObjects = lastBackup?.objects
+    .filter((object) => object.status === 'failed')
+    .slice(0, 5) ?? [];
+
   return (
     <SettingsField
       label={l('WebDAV 手动远程备份', 'WebDAV Manual Remote Backup')}
@@ -327,11 +369,29 @@ export function ReaderPreferencesBackupSection({
           ) : null}
 
           {lastBackup ? (
-            <div className="rounded-2xl border border-teal-200 bg-teal-50/80 px-3 py-2 text-xs leading-5 text-teal-800 dark:border-[color-mix(in_srgb,var(--pq-accent)_30%,transparent)] dark:bg-[var(--pq-accent)] dark:text-[var(--pq-accent)]">
-              {l(
-                `最近备份：上传 ${lastBackup.uploadedCount}，跳过 ${lastBackup.skippedCount}，数据库 ${lastBackup.databaseCount}，PDF ${lastBackup.pdfCount}，缓存 ${lastBackup.derivedCount}`,
-                `Last backup: uploaded ${lastBackup.uploadedCount}, skipped ${lastBackup.skippedCount}, databases ${lastBackup.databaseCount}, PDFs ${lastBackup.pdfCount}, caches ${lastBackup.derivedCount}`,
-              )}
+            <div
+              className={
+                lastBackup.failedCount > 0
+                  ? 'rounded-2xl border border-rose-200 bg-rose-50/80 px-3 py-2 text-xs leading-5 text-rose-800 dark:border-rose-400/30 dark:bg-rose-400/10 dark:text-rose-200'
+                  : 'rounded-2xl border border-teal-200 bg-teal-50/80 px-3 py-2 text-xs leading-5 text-teal-800 dark:border-[color-mix(in_srgb,var(--pq-accent)_30%,transparent)] dark:bg-[var(--pq-accent)] dark:text-[var(--pq-accent)]'
+              }
+            >
+              <div>
+                {l(
+                  `最近备份：上传 ${lastBackup.uploadedCount}，跳过 ${lastBackup.skippedCount}，失败 ${lastBackup.failedCount}，数据库 ${lastBackup.databaseCount}，PDF ${lastBackup.pdfCount}，缓存 ${lastBackup.derivedCount}`,
+                  `Last backup: uploaded ${lastBackup.uploadedCount}, skipped ${lastBackup.skippedCount}, failed ${lastBackup.failedCount}, databases ${lastBackup.databaseCount}, PDFs ${lastBackup.pdfCount}, caches ${lastBackup.derivedCount}`,
+                )}
+              </div>
+              {failedBackupObjects.length > 0 ? (
+                <ul className="mt-2 space-y-1 border-t border-current/20 pt-2">
+                  {failedBackupObjects.map((object) => (
+                    <li key={`${object.kind}:${object.remotePath}`} className="break-words">
+                      <span className="font-semibold">{object.remotePath}</span>
+                      {object.message ? `: ${object.message}` : ''}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
             </div>
           ) : null}
 

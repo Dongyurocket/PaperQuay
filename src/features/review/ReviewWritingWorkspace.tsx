@@ -737,6 +737,7 @@ export default function ReviewWritingWorkspace() {
   const [outputPath, setOutputPath] = useState(loadedDraft.outputPath);
   const [exportedPath, setExportedPath] = useState('');
   const [skippedExportFigures, setSkippedExportFigures] = useState<NonNullable<ReviewDocxExportResult['skippedFigures']>>([]);
+  const [exportValidation, setExportValidation] = useState<ReviewDocxExportResult['validation'] | null>(null);
   const [activeStage, setActiveStage] = useState<ReviewStageId>('intent');
   const [runningStage, setRunningStage] = useState<ReviewStageId | null>(null);
   const [statusMessage, setStatusMessage] = useState('');
@@ -781,6 +782,12 @@ export default function ReviewWritingWorkspace() {
       status: runningStage === 'export' ? 'running' : exportedPath ? 'done' : jsonDraft ? 'ready' : 'waiting',
     },
   ];
+
+  useEffect(() => {
+    setExportedPath('');
+    setSkippedExportFigures([]);
+    setExportValidation(null);
+  }, [jsonDraft]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1169,8 +1176,14 @@ export default function ReviewWritingWorkspace() {
       });
       setExportedPath(result.outputPath);
       setSkippedExportFigures(result.skippedFigures ?? []);
+      setExportValidation(result.validation);
       setStatusMessage(
-        result.skippedFigures?.length
+        result.validation.status === 'warning'
+          ? l(
+              `综述已导出，后置校验有 ${result.validation.warnings.length} 条提醒。`,
+              `Review exported with ${result.validation.warnings.length} post-validation warning(s).`,
+            )
+          : result.skippedFigures?.length
           ? l(
               `综述已导出，${result.skippedFigures.length} 张图片已跳过。`,
               `Review exported. ${result.skippedFigures.length} figure(s) were skipped.`,
@@ -1441,6 +1454,7 @@ export default function ReviewWritingWorkspace() {
                 onOpenOutput={() => void openReviewOutput(exportedPath)}
                 outputPath={outputPath}
                 skippedFigures={skippedExportFigures}
+                validation={exportValidation}
               />
             </div>
           </section>

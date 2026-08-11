@@ -14,17 +14,16 @@ Download the native installer for your operating system from the Assets section 
 
 ## Highlights
 
-- Review Word export now supports editable OMML formulas, missing-figure fallbacks, localized section titles, 480-twip paragraph indentation, richer references, and inline figure placement from model output.
-- Review writing is more resilient: failed writing tasks no longer stop the whole queue, and more retrieved papers can contribute detailed RAG context.
-- Knowledge graph workflows now support synced Crossref reference data, citation edges for papers already in the library, co-author relations, clearer edge legends, graph export, searchable relation targets, and direct node interactions.
-- MinerU parsing can use a configurable API base URL, so local MinerU deployments can be used while the official endpoint remains the default.
-- Library storage folder changes now migrate the existing storage structure and attachment paths into the new location.
-- Reader and notes workflows now include selection-translation highlighting, a resizable library navigation sidebar, paper-list sorting, and safer note external-update detection after local saves.
+- Per-paper AI conversations now survive app restarts. The active session and preset are restored, and tab switches or app shutdown flush pending history without replacing it with an empty session.
+- Full-document translations now persist reliably across restarts, including when a custom MinerU cache directory is used. Cache writes are serialized and atomic, and storage failures are shown instead of being silently ignored.
+- WebDAV backup is substantially more reliable: Nutstore-friendly request pacing, `Retry-After` handling, transient-error retries, streamed uploads, adaptive timeouts, detailed failed-object reporting, progress updates, and cleanup of temporary snapshots.
+- Review Word export now supports editable OMML equations, localized Chinese/English headings, correct first-line indentation, richer references, missing-image fallbacks, and figures placed alongside relevant model-generated content.
+- Review generation now keeps completed sections when another writing task fails, reports failed tasks individually, and processes the full queued workload before offering resume.
 
 ## Notes
 
 - AI features require your own compatible model endpoint and API key in Settings.
-- MinerU parsing requires a MinerU API key unless you are using already parsed local cache data or a compatible local MinerU deployment.
+- WebDAV has no universal cross-provider byte-range resume protocol. PaperQuay now streams files and retries at object level so interrupted jobs can continue without re-uploading completed objects on the next backup.
 - Release assets are generated automatically by GitHub Actions.
 
 ---
@@ -45,15 +44,14 @@ PaperQuay 是一个开源 AI 论文工作台，覆盖文献管理、PDF 阅读�
 
 ## 本次更新
 
-- 综述 Word 导出支持可编辑 OMML 公式、缺失图片容错、本地化节标题、480 twip 首行缩进、更完整参考文献信息，以及根据模型输出在正文中插图。
-- 综述生成更稳健：单个写作任务失败不会中止整个队列，更多检索论文可参与深度 RAG 上下文。
-- 知识图谱支持同步 Crossref 参考文献数据，只为文库内论文生成引用关系，并补充共同作者关系、边颜色图例、图谱导出、关系目标搜索和节点右键交互。
-- MinerU 解析支持配置 API Base URL，便于使用本地部署的 MinerU；未配置时仍默认使用官方地址。
-- 修改默认文献存储目录时，会迁移已有目录结构和附件路径到新位置。
-- 阅读与笔记流程新增划词翻译高亮、本地文库导航栏拖动调整宽度、文献列表排序，并修复本地保存后误提示外部更新的问题。
+- 文献问答会话现在会按论文持久化保存，重启软件后可恢复当前会话、历史对话和预设；切换标签页或退出时会及时落盘，不再被空白“新对话”覆盖。
+- 全文翻译结果可在重启后可靠恢复，包括使用自定义 MinerU 缓存目录的场景；缓存改为串行原子写入，读写失败会明确提示，不再静默丢失。
+- WebDAV 备份可靠性显著提升：针对坚果云限制进行请求节流，支持 `Retry-After`、瞬时错误重试、流式上传、自适应超时、失败对象与服务端响应明细、进度反馈，以及异常后的临时快照清理。
+- 综述 Word 导出支持可编辑 OMML 公式、中英文节标题、正确首行缩进、更完整的参考文献信息、缺图容错，并可把图片插入模型生成的相关正文位置。
+- 综述生成任务不再因单项失败而中止队列；已完成章节会保留，失败任务会单独上报，全部排队任务处理后仍可继续生成。
 
 ## 备注
 
 - AI 功能需要在设置中自行配置兼容模型接口和 API Key。
-- MinerU 解析需要有效的 MinerU API Key，除非你使用已经解析好的本地缓存或兼容的本地 MinerU 服务。
+- WebDAV 没有跨服务商统一的分块断点续传协议。本版本采用流式上传与对象级重试，后续备份可跳过已完成且未变化的对象。
 - Release 资源由 GitHub Actions 自动生成。

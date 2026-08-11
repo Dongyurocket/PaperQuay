@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -10,12 +10,14 @@ const { createLibraryStore } = require('../electron/backend/libraryStore.cjs');
 const { createNoteStore } = require('../electron/backend/noteStore.cjs');
 const { createRagStore } = require('../electron/backend/ragStore.cjs');
 const { LATEST_MANIFEST_REMOTE_PATH, NOTES_DATABASE_REMOTE_PATH, runBackup, runRestore } = require('../electron/backend/webdavBackup.cjs');
+const { WebdavClient, parseRetryAfter } = require('../electron/backend/webdavClient.cjs');
 
 const LIBRARY_DATABASE_REMOTE_PATH = 'latest/database/paperquay-library.sqlite';
 const RAG_DATABASE_REMOTE_PATH = 'latest/database/paperquay-rag.sqlite';
 
 class MemoryWebdav {
   objects = new Map<string, Buffer>();
+  fileUploadCount = 0;
 
   async getText(remotePath: string): Promise<string | null> {
     const bytes = this.objects.get(remotePath);
@@ -29,6 +31,15 @@ class MemoryWebdav {
 
   async atomicUploadBytes(remotePath: string, _backupId: string, bytes: Buffer): Promise<void> {
     this.objects.set(remotePath, Buffer.from(bytes));
+  }
+
+  async atomicUploadFile(
+    remotePath: string,
+    _backupId: string,
+    filePath: string,
+  ): Promise<void> {
+    this.fileUploadCount += 1;
+    this.objects.set(remotePath, readFileSync(filePath));
   }
 }
 
@@ -183,12 +194,21 @@ test('WebDAV backup uploads and restores library, notes, and RAG SQLite database
     seedNotes(source);
     seedRag(source);
 
-    const backup = await runBackup(source, webdav);
+    const progressEvents: Array<{ phase: string; completed: number; total: number }> = [];
+    const backup = await runBackup(source, webdav, {
+      onProgress: (progress: { phase: string; completed: number; total: number }) => {
+        progressEvents.push(progress);
+      },
+    });
     assert.equal(backup.ok, true);
     assert.equal(backup.databaseCount, 3);
+    assert.ok(webdav.fileUploadCount >= 3);
     assert.ok(webdav.objects.has(LIBRARY_DATABASE_REMOTE_PATH));
     assert.ok(webdav.objects.has(NOTES_DATABASE_REMOTE_PATH));
     assert.ok(webdav.objects.has(RAG_DATABASE_REMOTE_PATH));
+    assert.equal(progressEvents[0]?.phase, 'preparing');
+    assert.equal(progressEvents.at(-1)?.phase, 'done');
+    assert.equal(progressEvents.at(-1)?.completed, progressEvents.at(-1)?.total);
 
     const manifest = JSON.parse((await webdav.getText(LATEST_MANIFEST_REMOTE_PATH)) ?? '{}');
     assert.equal(manifest.version, 3);
@@ -228,5 +248,220 @@ test('WebDAV backup uploads and restores library, notes, and RAG SQLite database
   } finally {
     source.close();
     target.close();
+  }
+});
+
+test('WebDAV backup propagates latest manifest errors and does not leave snapshot directories', async () => {
+  const context = createContext('paperquay-webdav-manifest-error-');
+  const webdav = {
+    async getText() {
+      throw new Error('WebDAV GET failed for latest/manifest.json: HTTP 401: unauthorized');
+    },
+  };
+
+  try {
+    seedLibrary(context);
+    await assert.rejects(
+      runBackup(context, webdav),
+      /latest\/manifest\.json: HTTP 401: unauthorized/,
+    );
+    assert.equal(existsSync(path.join(context.appPaths.dataDir, '.backup-snapshots')), false);
+  } finally {
+    context.close();
+  }
+});
+
+test('WebDAV backup removes a partially created SQLite snapshot after collection failure', async () => {
+  const context = createContext('paperquay-webdav-snapshot-error-');
+  const webdav = new MemoryWebdav();
+  const originalSnapshotTo = context.store.snapshotTo;
+
+  try {
+    context.store.snapshotTo = (targetPath: string) => {
+      mkdirSync(path.dirname(targetPath), { recursive: true });
+      writeFileSync(targetPath, 'partial snapshot');
+      throw new Error('snapshot failed');
+    };
+
+    await assert.rejects(runBackup(context, webdav), /snapshot failed/);
+    const snapshotRoot = path.join(context.appPaths.dataDir, '.backup-snapshots');
+    assert.deepEqual(existsSync(snapshotRoot) ? readdirSync(snapshotRoot) : [], []);
+  } finally {
+    context.store.snapshotTo = originalSnapshotTo;
+    context.close();
+  }
+});
+
+test('WebDAV client honors Retry-After when retrying HTTP 429', async () => {
+  let requestCount = 0;
+  const sleeps: number[] = [];
+  const client = new WebdavClient(
+    {
+      endpointUrl: 'https://dav.example.test',
+      remoteRoot: 'paperquay',
+      username: '',
+      password: '',
+    },
+    {
+      fetch: async () => {
+        requestCount += 1;
+        return requestCount === 1
+          ? new Response('rate limited', { status: 429, headers: { 'Retry-After': '2' } })
+          : new Response('{}', { status: 200 });
+      },
+      maximumRetries: 1,
+      minimumRequestIntervalMs: 0,
+      random: () => 0,
+      sleep: async (milliseconds: number) => {
+        sleeps.push(milliseconds);
+      },
+    },
+  );
+
+  const response = await client.request('GET', 'latest/manifest.json');
+
+  assert.equal(response.status, 200);
+  assert.equal(requestCount, 2);
+  assert.deepEqual(sleeps, [2000]);
+  assert.equal(parseRetryAfter('3'), 3000);
+});
+
+test('WebDAV client does not retry authentication failures and includes the server response', async () => {
+  let requestCount = 0;
+  const client = new WebdavClient(
+    {
+      endpointUrl: 'https://dav.example.test',
+      remoteRoot: 'paperquay',
+      username: 'reader',
+      password: 'secret',
+    },
+    {
+      fetch: async () => {
+        requestCount += 1;
+        return new Response('application password rejected', { status: 401 });
+      },
+      maximumRetries: 3,
+      minimumRequestIntervalMs: 0,
+      sleep: async () => undefined,
+    },
+  );
+
+  await assert.rejects(
+    client.getText('latest/manifest.json'),
+    /GET failed for latest\/manifest\.json: HTTP 401: application password rejected/,
+  );
+  assert.equal(requestCount, 1);
+});
+
+test('WebDAV client caches MKCOL requests and uploads files as streams without HEAD', async () => {
+  const directory = mkdtempSync(path.join(tmpdir(), 'paperquay-webdav-stream-'));
+  const sourcePath = path.join(directory, 'large.sqlite');
+  const methods: string[] = [];
+  const uploadedPayloads: Buffer[] = [];
+  writeFileSync(sourcePath, Buffer.from('streamed sqlite content'));
+
+  const client = new WebdavClient(
+    {
+      endpointUrl: 'https://dav.example.test',
+      remoteRoot: 'paperquay',
+      username: '',
+      password: '',
+    },
+    {
+      fetch: async (_url: string, options: { method?: string; body?: AsyncIterable<Uint8Array> }) => {
+        const method = options.method ?? 'GET';
+        methods.push(method);
+        if (method === 'PUT' && options.body) {
+          if (Buffer.isBuffer(options.body)) {
+            uploadedPayloads.push(Buffer.from(options.body));
+          } else {
+            const chunks: Buffer[] = [];
+            for await (const chunk of options.body) chunks.push(Buffer.from(chunk));
+            uploadedPayloads.push(Buffer.concat(chunks));
+          }
+        }
+        return new Response(null, { status: method === 'MOVE' ? 201 : 201 });
+      },
+      maximumRetries: 0,
+      minimumRequestIntervalMs: 0,
+      sleep: async () => undefined,
+    },
+  );
+
+  try {
+    await client.atomicUploadFile(
+      'latest/database/large.sqlite',
+      'backup-1',
+      sourcePath,
+      readFileSync(sourcePath).length,
+    );
+    await client.putBytes('latest/database/manifest.json', Buffer.from('{}'));
+
+    assert.equal(methods.filter((method) => method === 'MKCOL').length, 3);
+    assert.equal(methods.includes('HEAD'), false);
+    assert.equal(methods.filter((method) => method === 'PUT').length, 2);
+    assert.equal(methods.filter((method) => method === 'MOVE').length, 1);
+    assert.equal(uploadedPayloads[0]?.toString('utf8'), 'streamed sqlite content');
+    assert.equal(uploadedPayloads[1]?.toString('utf8'), '{}');
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('WebDAV client does not replace the destination when MOVE fails with authentication error', async () => {
+  const methods: string[] = [];
+  const client = new WebdavClient(
+    {
+      endpointUrl: 'https://dav.example.test',
+      remoteRoot: 'paperquay',
+      username: '',
+      password: '',
+    },
+    {
+      fetch: async (_url: string, options: { method?: string }) => {
+        const method = options.method ?? 'GET';
+        methods.push(method);
+        return method === 'MOVE'
+          ? new Response('not authorized to move', { status: 401 })
+          : new Response(null, { status: 201 });
+      },
+      maximumRetries: 0,
+      minimumRequestIntervalMs: 0,
+      sleep: async () => undefined,
+    },
+  );
+
+  await assert.rejects(
+    client.atomicUploadBytes('latest/database/data.sqlite', 'backup-1', Buffer.from('data')),
+    /MOVE failed.*HTTP 401: not authorized to move/,
+  );
+  assert.equal(methods.filter((method) => method === 'PUT').length, 1);
+});
+
+test('WebDAV backup result identifies the first failed remote object', async () => {
+  const context = createContext('paperquay-webdav-object-error-');
+  const webdav = new MemoryWebdav();
+  const originalUploadFile = webdav.atomicUploadFile.bind(webdav);
+
+  webdav.atomicUploadFile = async (remotePath, backupId, filePath) => {
+    if (remotePath === NOTES_DATABASE_REMOTE_PATH) {
+      throw new Error('WebDAV PUT failed: HTTP 507: quota exceeded');
+    }
+    await originalUploadFile(remotePath, backupId, filePath);
+  };
+
+  try {
+    const result = await runBackup(context, webdav);
+
+    assert.equal(result.ok, false);
+    assert.equal(result.failedCount, 1);
+    assert.match(result.message, new RegExp(NOTES_DATABASE_REMOTE_PATH.replaceAll('.', '\\.')));
+    assert.match(result.message, /HTTP 507: quota exceeded/);
+    assert.equal(
+      result.objects.find((object: { remotePath: string }) => object.remotePath === NOTES_DATABASE_REMOTE_PATH)?.status,
+      'failed',
+    );
+  } finally {
+    context.close();
   }
 });

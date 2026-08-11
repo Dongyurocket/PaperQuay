@@ -193,6 +193,15 @@ export interface ReviewDocxExportResult {
     id: string;
     reason: string;
   }>;
+  validation: {
+    status: 'passed' | 'warning';
+    errors: string[];
+    warnings: string[];
+    paragraphCount: number;
+    imageCount: number;
+    formulaCount: number;
+    markdownCharacterCount: number;
+  };
 }
 
 function cleanBridgeErrorMessage(message: string): string {

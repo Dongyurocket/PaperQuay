@@ -69,6 +69,14 @@ export interface WebdavBackupResult {
   objects: BackupObject[];
 }
 
+export interface WebdavBackupProgress {
+  phase: 'preparing' | 'uploading' | 'publishing' | 'done';
+  completed: number;
+  total: number;
+  remotePath: string | null;
+  status: BackupObjectStatus | null;
+}
+
 export interface WebdavLatestBackupInfo {
   available: boolean;
   backupId: string | null;

@@ -7,6 +7,26 @@ import {
 import type { TranslationCacheEnvelope } from './readerShared';
 import { normalizeTranslationMap } from './readerTranslation';
 
+const translationCacheWriteChains = new Map<string, Promise<unknown>>();
+
+async function enqueueTranslationCacheWrite<T>(
+  cachePath: string,
+  write: () => Promise<T>,
+): Promise<T> {
+  const previousWrite = translationCacheWriteChains.get(cachePath) ?? Promise.resolve();
+  const nextWrite = previousWrite.catch(() => undefined).then(write);
+
+  translationCacheWriteChains.set(cachePath, nextWrite);
+
+  try {
+    return await nextWrite;
+  } finally {
+    if (translationCacheWriteChains.get(cachePath) === nextWrite) {
+      translationCacheWriteChains.delete(cachePath);
+    }
+  }
+}
+
 export interface TranslationCacheReadResult {
   path: string;
   sourceLanguage: string;
@@ -33,6 +53,7 @@ export async function readTranslationCache({
     item,
     targetLanguage,
   );
+  let lastReadError: unknown = null;
 
   for (const candidatePath of candidatePaths) {
     try {
@@ -55,9 +76,17 @@ export async function readTranslationCache({
         translatedAt: parsed?.translatedAt ?? '',
         translations,
       };
-    } catch {
+    } catch (error) {
+      lastReadError = error;
       continue;
     }
+  }
+
+  if (lastReadError) {
+    const message = lastReadError instanceof Error
+      ? lastReadError.message
+      : String(lastReadError);
+    throw new Error(`Failed to read translation cache: ${message}`);
   }
 
   return null;
@@ -93,6 +122,8 @@ export async function writeTranslationCache({
     translations: normalizeTranslationMap(translations),
   };
 
-  await writeLocalTextFile(cachePath, JSON.stringify(payload, null, 2));
+  await enqueueTranslationCacheWrite(cachePath, () =>
+    writeLocalTextFile(cachePath, JSON.stringify(payload, null, 2)),
+  );
   return cachePath;
 }

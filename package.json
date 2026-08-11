@@ -1,7 +1,7 @@
 {
   "name": "paperquay",
   "private": true,
-  "version": "0.1.24",
+  "version": "0.1.25",
   "description": "AI-assisted desktop literature reader and library manager.",
   "author": {
     "name": "PaperQuay Developers",
@@ -38,6 +38,7 @@
     "@tiptap/react": "^3.23.6",
     "@tiptap/starter-kit": "^3.23.6",
     "@tiptap/suggestion": "^3.23.6",
+    "@xmldom/xmldom": "^0.9.10",
     "adm-zip": "^0.5.16",
     "cytoscape": "^3.34.0",
     "docxtemplater": "^3.68.7",

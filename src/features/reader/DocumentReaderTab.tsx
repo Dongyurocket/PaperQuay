@@ -158,6 +158,7 @@ import {
 } from './documentReaderNotes';
 import {
   buildReaderLocalPdfPathCandidates,
+  restorePaperQaHistory,
   restorePdfSourceHistory,
   upsertRecentPdfReadingHeatmap,
   upsertRecentPdfScrollPosition,
@@ -345,6 +346,15 @@ function DocumentReaderTab({
   } | null>(null);
   const paperOpenedAtRef = useRef(Date.now());
   const restoredHistoryRef = useRef('');
+  const qaHistoryReadyWorkspaceRef = useRef('');
+  const qaHistoryExpectedRef = useRef<{
+    workspaceId: string;
+    qaSessions: DocumentChatSession[];
+    selectedQaSessionId: string;
+  } | null>(null);
+  const qaSessionsRef = useRef(qaSessions);
+  const selectedQaSessionIdRef = useRef(selectedQaSessionId);
+  const selectedQaPresetIdRef = useRef(selectedQaPresetId);
   const autoTranslatedSelectionKeyRef = useRef('');
   const autoSummarySourceKeyRef = useRef('');
   const pendingHistoryActiveBlockIdRef = useRef<string | null>(null);
@@ -534,12 +544,23 @@ function DocumentReaderTab({
   const pdfReadingHeatmap = pdfScrollSourceKey
     ? pdfReadingHeatmapsRef.current[pdfScrollSourceKey] ?? null
     : null;
+
+  qaSessionsRef.current = qaSessions;
+  selectedQaSessionIdRef.current = selectedQaSessionId;
+  selectedQaPresetIdRef.current = selectedQaPresetId;
+
   const saveCurrentPaperHistory = useCallback(
     (
       nextPdfScrollPositions = pdfScrollPositionsRef.current,
       nextPdfReadingHeatmaps = pdfReadingHeatmapsRef.current,
+      force = false,
     ) => {
-      if (!currentDocument.workspaceId || !pdfSource) {
+      if (
+        (!isActive && !force) ||
+        !currentDocument.workspaceId ||
+        !pdfSource ||
+        qaHistoryReadyWorkspaceRef.current !== currentDocument.workspaceId
+      ) {
         return;
       }
 
@@ -557,29 +578,37 @@ function DocumentReaderTab({
         lastActiveBlockId: activeBlockId,
         workspaceStage,
         readingViewMode,
-        selectedQaPresetId,
-        selectedQaSessionId: null,
+        selectedQaPresetId: selectedQaPresetIdRef.current,
+        selectedQaSessionId: selectedQaSessionIdRef.current || null,
         paperSummary,
         paperSummarySourceKey,
         workspaceNoteMarkdown: '',
         annotations,
-        qaSessions: [],
+        qaSessions: qaSessionsRef.current,
       });
     },
     [
       activeBlockId,
       annotations,
       currentDocument,
+      isActive,
       mineruPath,
       paperSummary,
       paperSummarySourceKey,
       pdfPath,
       pdfSource,
       readingViewMode,
-      selectedQaPresetId,
       workspaceStage,
     ],
   );
+  const forceSaveCurrentPaperHistoryRef = useRef<() => void>(() => undefined);
+  forceSaveCurrentPaperHistoryRef.current = () => {
+    saveCurrentPaperHistory(
+      pdfScrollPositionsRef.current,
+      pdfReadingHeatmapsRef.current,
+      true,
+    );
+  };
   const handlePdfScrollPositionChange = useCallback((position: PdfScrollPosition) => {
     const next = upsertRecentPdfScrollPosition(pdfScrollPositionsRef.current, position);
 
@@ -3030,6 +3059,10 @@ function DocumentReaderTab({
       }
 
       const updateStreamingAnswer = (answer: string) => {
+        if (qaHistoryReadyWorkspaceRef.current !== currentDocument.workspaceId) {
+          return;
+        }
+
         streamedAnswer = answer;
         const updatedAssistantMessage: DocumentChatMessage = {
           ...nextAssistantMessage,
@@ -3078,9 +3111,14 @@ function DocumentReaderTab({
         updateStreamingAnswer(answer);
       }
 
-      setStatusMessage(formatQaContextStatus(qaRequest.qaContext, lRef.current));
+      if (qaHistoryReadyWorkspaceRef.current === currentDocument.workspaceId) {
+        setStatusMessage(formatQaContextStatus(qaRequest.qaContext, lRef.current));
+      }
     } catch (nextError) {
-      if (!streamedAnswer.trim()) {
+      const sessionStillActive =
+        qaHistoryReadyWorkspaceRef.current === currentDocument.workspaceId;
+
+      if (!streamedAnswer.trim() && sessionStillActive) {
         setQaSessions((current) =>
           hadCurrentSession
             ? updateQaSession(current, previousSession)
@@ -3092,7 +3130,9 @@ function DocumentReaderTab({
         setQaAttachments(previousAttachments);
       }
 
-      setQaError(nextError instanceof Error ? nextError.message : lRef.current('文档问答失败', 'Document QA failed'));
+      if (sessionStillActive) {
+        setQaError(nextError instanceof Error ? nextError.message : lRef.current('文档问答失败', 'Document QA failed'));
+      }
     } finally {
       setQaRunningSessionIds((current) => current.filter((sessionId) => sessionId !== currentSession.id));
     }
@@ -3112,6 +3152,54 @@ function DocumentReaderTab({
     selectedQaSessionId,
     selectedExcerpt?.text,
   ]);
+
+  useEffect(() => {
+    const workspaceId = currentDocument.workspaceId;
+
+    if (!isActive || !workspaceId) {
+      qaHistoryReadyWorkspaceRef.current = '';
+      qaHistoryExpectedRef.current = null;
+      return;
+    }
+
+    qaHistoryReadyWorkspaceRef.current = '';
+    const history = loadPaperHistory(workspaceId);
+    const restoredQa = restorePaperQaHistory(
+      history,
+      () => createQaSession(localeRef.current),
+      selectedQaPresetIdRef.current,
+    );
+
+    qaHistoryExpectedRef.current = {
+      workspaceId,
+      qaSessions: restoredQa.qaSessions,
+      selectedQaSessionId: restoredQa.selectedQaSessionId,
+    };
+    setQaSessions(restoredQa.qaSessions);
+    setSelectedQaSessionId(restoredQa.selectedQaSessionId);
+    setSelectedQaPresetId(restoredQa.selectedQaPresetId);
+    setQaInput('');
+    setQaAttachments([]);
+    setQaRunningSessionIds([]);
+    setQaError('');
+  }, [currentDocument.workspaceId, isActive]);
+
+  useEffect(() => {
+    const expected = qaHistoryExpectedRef.current;
+
+    if (
+      !isActive ||
+      !expected ||
+      expected.workspaceId !== currentDocument.workspaceId ||
+      qaSessions !== expected.qaSessions ||
+      selectedQaSessionId !== expected.selectedQaSessionId
+    ) {
+      return;
+    }
+
+    qaHistoryReadyWorkspaceRef.current = expected.workspaceId;
+    qaHistoryExpectedRef.current = null;
+  }, [currentDocument.workspaceId, isActive, qaSessions, selectedQaSessionId]);
 
   useEffect(() => {
     if (!currentDocument.workspaceId || !pdfSource) {
@@ -3322,6 +3410,38 @@ function DocumentReaderTab({
   useEffect(() => {
     saveCurrentPaperHistory();
   }, [saveCurrentPaperHistory]);
+
+  useEffect(() => {
+    if (
+      !isActive ||
+      qaHistoryReadyWorkspaceRef.current !== currentDocument.workspaceId
+    ) {
+      return undefined;
+    }
+
+    const timer = window.setTimeout(saveCurrentPaperHistory, 300);
+    return () => window.clearTimeout(timer);
+  }, [
+    currentDocument.workspaceId,
+    isActive,
+    qaSessions,
+    saveCurrentPaperHistory,
+    selectedQaPresetId,
+    selectedQaSessionId,
+  ]);
+
+  useEffect(() => {
+    if (!isActive) {
+      return undefined;
+    }
+
+    const handleBeforeUnload = () => forceSaveCurrentPaperHistoryRef.current();
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      forceSaveCurrentPaperHistoryRef.current();
+    };
+  }, [currentDocument.workspaceId, isActive]);
 
   useEffect(() => {
     localStorage.setItem(PANE_RATIO_STORAGE_KEY, String(leftPaneWidthRatio));

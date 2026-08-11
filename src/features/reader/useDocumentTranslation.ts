@@ -55,6 +55,10 @@ function buildTranslatableBlockInputs(blocks: PositionedMineruBlock[]): Translat
     .filter((block): block is TranslationBlockInput => Boolean(block));
 }
 
+function translationCacheFailureMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 interface UseDocumentTranslationOptions {
   currentDocument: WorkspaceItem;
   flatBlocks: PositionedMineruBlock[];
@@ -268,7 +272,21 @@ export function useDocumentTranslation({
         restoredCount,
         flatBlocks.length || null,
       );
-    })().catch(() => undefined);
+    })().catch((error) => {
+      if (cancelled) {
+        return;
+      }
+
+      const detail = translationCacheFailureMessage(error);
+      const message = lRef.current(
+        `读取已保存的全文译文失败：${detail}`,
+        `Failed to restore saved full-document translations: ${detail}`,
+      );
+      console.error('Failed to restore translation cache', error);
+      setError(message);
+      setStatusMessage(message);
+      updateLibraryOperation('translation', 'error', message, null, flatBlocks.length || null);
+    });
 
     return () => {
       cancelled = true;
@@ -279,6 +297,7 @@ export function useDocumentTranslation({
     flatBlocks.length,
     settings.mineruCacheDir,
     settings.translationTargetLanguage,
+    setError,
     setStatusMessage,
     translatedCount,
     tryLoadSavedTranslations,
@@ -336,11 +355,15 @@ export function useDocumentTranslation({
       0,
       blocksToTranslate.length,
     );
+    let cacheWriteError: unknown = null;
 
     try {
       const cachedTranslationResult = await tryLoadSavedTranslations(
         currentDocument,
-      ).catch(() => null);
+      ).catch((cacheError) => {
+        console.warn('Failed to read translation cache before translation resume', cacheError);
+        return null;
+      });
       const resumedTranslations = mergeReaderTranslations(
         mergeReaderTranslations(
           blockTranslations,
@@ -380,10 +403,12 @@ export function useDocumentTranslation({
           setTranslationProgressCompleted(progress.translatedCount);
 
           if (progress.translatedCount > 0) {
-            await saveTranslationCache(
-              currentDocument,
-              progress.translations,
-            ).catch(() => undefined);
+            try {
+              await saveTranslationCache(currentDocument, progress.translations);
+            } catch (cacheError) {
+              cacheWriteError = cacheError;
+              console.error('Failed to save translation progress', cacheError);
+            }
           }
 
           const progressMessage = lRef.current(
@@ -420,9 +445,19 @@ export function useDocumentTranslation({
       setBlockTranslationTargetLanguage(settings.translationTargetLanguage);
       setTranslationProgressCompleted(nextTranslatedCount);
 
-      await saveTranslationCache(currentDocument, nextTranslations).catch(
-        () => undefined,
-      );
+      try {
+        await saveTranslationCache(currentDocument, nextTranslations);
+      } catch (cacheError) {
+        cacheWriteError = cacheError;
+        console.error('Failed to save completed translation cache', cacheError);
+      }
+
+      const cacheStatusSuffix = cacheWriteError
+        ? lRef.current(
+            '；译文缓存写入失败，本次结果仅保留在当前窗口',
+            '; the translation cache could not be written, so this result is only available in the current window',
+          )
+        : '';
 
       if (result.cancelled) {
         const remainingCount = Math.max(0, blocksToTranslate.length - nextTranslatedCount);
@@ -431,14 +466,18 @@ export function useDocumentTranslation({
           `Full-document translation cancelled. Kept ${nextTranslatedCount} translated blocks; click Translate Document again to continue the remaining ${remainingCount}`,
         );
 
-        setStatusMessage(cancelledMessage);
+        const finalCancelledMessage = `${cancelledMessage}${cacheStatusSuffix}`;
+        setStatusMessage(finalCancelledMessage);
         updateLibraryOperation(
           "translation",
-          "success",
-          cancelledMessage,
+          cacheWriteError ? "error" : "success",
+          finalCancelledMessage,
           nextTranslatedCount,
           blocksToTranslate.length,
         );
+        if (cacheWriteError) {
+          setError(translationCacheFailureMessage(cacheWriteError));
+        }
         return;
       }
 
@@ -453,16 +492,19 @@ export function useDocumentTranslation({
               `翻译完成，已生成 ${nextTranslatedCount} 段译文`,
               `Translation complete. Generated ${nextTranslatedCount} translated blocks`,
             );
-      setStatusMessage(finishedMessage);
+      const finalFinishedMessage = `${finishedMessage}${cacheStatusSuffix}`;
+      setStatusMessage(finalFinishedMessage);
       updateLibraryOperation(
         "translation",
-        failedCount > 0 ? "error" : "success",
-        finishedMessage,
+        failedCount > 0 || cacheWriteError ? "error" : "success",
+        finalFinishedMessage,
         nextTranslatedCount,
         blocksToTranslate.length,
       );
 
-      if (failedCount > 0) {
+      if (cacheWriteError) {
+        setError(translationCacheFailureMessage(cacheWriteError));
+      } else if (failedCount > 0) {
         setError(
           sanitizeTranslationErrorMessage(
             result.failureMessages[0],
@@ -589,6 +631,7 @@ export function useDocumentTranslation({
       );
       setStatusMessage(startMessage);
       updateLibraryOperation("translation", "running", startMessage, 0, 1);
+      let cacheWriteError: unknown = null;
 
       try {
         const result = await translateBlocksBestEffort({
@@ -618,9 +661,12 @@ export function useDocumentTranslation({
             setTranslationProgressCompleted(progress.translatedCount);
 
             if (progress.translatedCount > 0) {
-              await saveTranslationCache(currentDocument, mergedTranslations).catch(
-                () => undefined,
-              );
+              try {
+                await saveTranslationCache(currentDocument, mergedTranslations);
+              } catch (cacheError) {
+                cacheWriteError = cacheError;
+                console.error('Failed to save retranslated block progress', cacheError);
+              }
             }
           },
           reasoningEffort: getModelRuntimeConfig(settings, "translation").reasoningEffort,
@@ -645,17 +691,37 @@ export function useDocumentTranslation({
         setBlockTranslations(nextTranslations);
         setBlockTranslationTargetLanguage(settings.translationTargetLanguage);
         setTranslationProgressCompleted(translatedText ? 1 : 0);
-        await saveTranslationCache(currentDocument, nextTranslations).catch(
-          () => undefined,
-        );
+        try {
+          await saveTranslationCache(currentDocument, nextTranslations);
+        } catch (cacheError) {
+          cacheWriteError = cacheError;
+          console.error('Failed to save retranslated block', cacheError);
+        }
+
+        const cacheStatusSuffix = cacheWriteError
+          ? lRef.current(
+              '；译文缓存写入失败，本次结果仅保留在当前窗口',
+              '; the translation cache could not be written, so this result is only available in the current window',
+            )
+          : '';
 
         if (result.cancelled) {
           const message = lRef.current(
             "已取消单块重译，原有译文已保留。",
             "Block retranslation cancelled. Existing translation was kept.",
           );
-          setStatusMessage(message);
-          updateLibraryOperation("translation", "success", message, translatedText ? 1 : 0, 1);
+          const finalMessage = `${message}${cacheStatusSuffix}`;
+          setStatusMessage(finalMessage);
+          updateLibraryOperation(
+            "translation",
+            cacheWriteError ? "error" : "success",
+            finalMessage,
+            translatedText ? 1 : 0,
+            1,
+          );
+          if (cacheWriteError) {
+            setError(translationCacheFailureMessage(cacheWriteError));
+          }
           return;
         }
 
@@ -680,8 +746,18 @@ export function useDocumentTranslation({
           "已重新翻译当前结构块",
           "Retranslated the selected structured block",
         );
-        setStatusMessage(message);
-        updateLibraryOperation("translation", "success", message, 1, 1);
+        const finalMessage = `${message}${cacheStatusSuffix}`;
+        setStatusMessage(finalMessage);
+        updateLibraryOperation(
+          "translation",
+          cacheWriteError ? "error" : "success",
+          finalMessage,
+          1,
+          1,
+        );
+        if (cacheWriteError) {
+          setError(translationCacheFailureMessage(cacheWriteError));
+        }
       } catch (error) {
         if (documentTranslationRequestIdRef.current !== requestId) {
           return;

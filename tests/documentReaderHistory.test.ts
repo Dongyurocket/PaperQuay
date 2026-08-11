@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   arePdfScrollPositionsEquivalent,
   buildReaderLocalPdfPathCandidates,
+  restorePaperQaHistory,
   restorePdfSourceHistory,
   shouldStorePdfReadingHeatmap,
   upsertRecentPdfReadingHeatmap,
@@ -11,6 +12,7 @@ import {
 } from '../src/features/reader/documentReaderHistory.ts';
 import { aggregateReadingTimeChartBins } from '../src/features/literature/readingTimeChartUtils.ts';
 import type { PdfReadingHeatmap, PdfScrollPosition } from '../src/types/reader.ts';
+import type { DocumentChatSession, PaperHistoryRecord } from '../src/types/reader.ts';
 
 function scrollPosition(overrides: Partial<PdfScrollPosition> = {}): PdfScrollPosition {
   return {
@@ -148,4 +150,50 @@ test('buildReaderLocalPdfPathCandidates preserves priority and removes path dupl
   });
 
   assert.deepEqual(candidates, ['D:/papers/history.pdf', 'D:/papers/downloaded.pdf']);
+});
+
+test('restorePaperQaHistory restores saved sessions and selection instead of creating a blank chat', () => {
+  const savedSession: DocumentChatSession = {
+    id: 'saved-session',
+    title: 'Saved conversation',
+    createdAt: 10,
+    updatedAt: 20,
+    messages: [{ id: 'message-1', role: 'user', content: 'What is the method?', createdAt: 10 }],
+  };
+  const history = {
+    qaSessions: [savedSession],
+    selectedQaSessionId: savedSession.id,
+    selectedQaPresetId: 'qa-preset-saved',
+  } as PaperHistoryRecord;
+  let createdCount = 0;
+
+  const restored = restorePaperQaHistory(
+    history,
+    () => {
+      createdCount += 1;
+      return { ...savedSession, id: 'new-session', messages: [] };
+    },
+    'qa-preset-default',
+  );
+
+  assert.equal(createdCount, 0);
+  assert.equal(restored.qaSessions, history.qaSessions);
+  assert.equal(restored.selectedQaSessionId, 'saved-session');
+  assert.equal(restored.selectedQaPresetId, 'qa-preset-saved');
+});
+
+test('restorePaperQaHistory creates one session only when no saved conversation exists', () => {
+  const initialSession: DocumentChatSession = {
+    id: 'new-session',
+    title: 'New chat',
+    createdAt: 10,
+    updatedAt: 10,
+    messages: [],
+  };
+
+  const restored = restorePaperQaHistory(null, () => initialSession, 'qa-preset-default');
+
+  assert.deepEqual(restored.qaSessions, [initialSession]);
+  assert.equal(restored.selectedQaSessionId, initialSession.id);
+  assert.equal(restored.selectedQaPresetId, 'qa-preset-default');
 });

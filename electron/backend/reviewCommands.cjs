@@ -1,6 +1,7 @@
 const fsp = require('node:fs/promises');
 const path = require('node:path');
 const { BrowserWindow, dialog, nativeImage, shell } = require('electron');
+const { DOMParser } = require('@xmldom/xmldom');
 const Docxtemplater = require('docxtemplater');
 const temml = require('temml');
 const mathml2omml = require('mathml2omml');
@@ -1548,10 +1549,194 @@ function formatReferenceText(reference, source) {
   return parts.map((part) => (/[.!?。！？]$/.test(part) ? part : `${part}.`)).join(' ');
 }
 
+function stripOuterReviewMarkdownFence(value) {
+  const text = cleanString(value).replace(/^\uFEFF/, '').trim();
+  const match = text.match(/^```(?:markdown|md|text)?\s*\n([\s\S]*?)\n```$/i);
+  return match ? match[1].trim() : text;
+}
+
+function normalizeReviewMarkdownInline(value) {
+  const protectedTokens = [];
+  const protect = (token) => {
+    const marker = `\uE000${protectedTokens.length}\uE001`;
+    protectedTokens.push(token);
+    return marker;
+  };
+  let text = cleanString(value)
+    .replace(/\$\$[\s\S]*?\$\$|\$[^$\n]+\$|\[\s*(?:Image|Figure|Fig\.?)\s*(?::|#)?\s*[A-Za-z0-9_-]+\s*]|\[[A-Za-z]\d+]/gi, protect)
+    .replace(/!\[([^\]]*)]\([^)]+\)/g, '$1')
+    .replace(/\[([^\]]+)]\([^)]+\)/g, '$1')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/~~([^~]+)~~/g, '$1')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/__([^_]+)__/g, '$1')
+    .replace(/(^|[^\w])\*([^*\n]+)\*(?=$|[^\w])/g, '$1$2')
+    .replace(/(^|[^\w])_([^_\n]+)_(?=$|[^\w])/g, '$1$2')
+    .replace(/<br\s*\/?\s*>/gi, ' ')
+    .replace(/<[^>]+>/g, '')
+    .replace(/\\([\\`*_[\]{}()#+\-.!>])/g, '$1')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
+
+  for (const [index, token] of protectedTokens.entries()) {
+    text = text.replaceAll(`\uE000${index}\uE001`, token);
+  }
+
+  return text;
+}
+
+function reviewMarkdownBlock(kind, text, marker = '') {
+  const normalizedText = kind === 'equation'
+    ? cleanString(text).replace(/\s*\n\s*/g, ' ').trim()
+    : normalizeReviewMarkdownInline(text);
+
+  if (!normalizedText) {
+    return null;
+  }
+
+  return {
+    kind,
+    text: normalizedText,
+    marker,
+    suffixText: '',
+    isParagraph: kind === 'paragraph',
+    isList: kind === 'bullet' || kind === 'ordered',
+    isHeading: kind === 'heading',
+    isQuote: kind === 'quote',
+    isEquation: kind === 'equation',
+  };
+}
+
+function reviewHeadingKey(value) {
+  return normalizeReviewMarkdownInline(value)
+    .replace(/^\d+(?:\.\d+)*[.、]?\s*/, '')
+    .replace(/[\s:：。.!?？]+/g, '')
+    .toLowerCase();
+}
+
+function parseReviewMarkdownBlocks(value, options = {}) {
+  const text = stripOuterReviewMarkdownFence(value).replace(/\r\n?/g, '\n');
+  if (!text) return [];
+
+  const lines = text.split('\n');
+  const blocks = [];
+  const paragraphLines = [];
+  const addBlock = (kind, blockText, marker = '') => {
+    const block = reviewMarkdownBlock(kind, blockText, marker);
+    if (block) blocks.push(block);
+  };
+  const flushParagraph = () => {
+    if (paragraphLines.length === 0) return;
+    addBlock('paragraph', paragraphLines.join(' '));
+    paragraphLines.length = 0;
+  };
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const trimmed = line.trim();
+
+    if (!trimmed) {
+      flushParagraph();
+      continue;
+    }
+
+    if (/^(```+|~~~+)/.test(trimmed)) {
+      flushParagraph();
+      const fence = trimmed.match(/^(```+|~~~+)/)?.[1] || '```';
+      const codeLines = [];
+      index += 1;
+      while (index < lines.length && !lines[index].trim().startsWith(fence)) {
+        codeLines.push(lines[index]);
+        index += 1;
+      }
+      addBlock('quote', codeLines.join(' '));
+      continue;
+    }
+
+    if (trimmed.startsWith('$$') || trimmed.startsWith('\\[')) {
+      flushParagraph();
+      const closesInline = trimmed.startsWith('$$')
+        ? /^\$\$[\s\S]+\$\$$/.test(trimmed)
+        : /^\\\[[\s\S]+\\\]$/.test(trimmed);
+      const mathLines = [trimmed];
+
+      if (!closesInline) {
+        const closing = trimmed.startsWith('$$') ? '$$' : '\\]';
+        index += 1;
+        while (index < lines.length) {
+          mathLines.push(lines[index].trim());
+          if (lines[index].trim().endsWith(closing)) break;
+          index += 1;
+        }
+      }
+
+      const mathText = mathLines.join(' ')
+        .replace(/^\\\[/, '$$')
+        .replace(/\\\]$/, '$$');
+      addBlock('equation', mathText);
+      continue;
+    }
+
+    const headingMatch = trimmed.match(/^#{1,6}\s+(.+)$/);
+    if (headingMatch) {
+      flushParagraph();
+      addBlock('heading', headingMatch[1]);
+      continue;
+    }
+
+    if (/^(?:-{3,}|\*{3,}|_{3,})$/.test(trimmed)) {
+      flushParagraph();
+      continue;
+    }
+
+    const bulletMatch = line.match(/^\s*[-+*]\s+(.+)$/);
+    if (bulletMatch) {
+      flushParagraph();
+      addBlock('bullet', bulletMatch[1], '• ');
+      continue;
+    }
+
+    const orderedMatch = line.match(/^\s*(\d+)[.)、]\s+(.+)$/);
+    if (orderedMatch) {
+      flushParagraph();
+      addBlock('ordered', orderedMatch[2], `${orderedMatch[1]}. `);
+      continue;
+    }
+
+    const quoteMatch = line.match(/^\s*>\s?(.*)$/);
+    if (quoteMatch) {
+      flushParagraph();
+      addBlock('quote', quoteMatch[1]);
+      continue;
+    }
+
+    paragraphLines.push(trimmed);
+  }
+
+  flushParagraph();
+
+  const expectedHeadingKey = reviewHeadingKey(options.expectedHeading);
+  if (
+    expectedHeadingKey &&
+    blocks[0]?.isHeading &&
+    reviewHeadingKey(blocks[0].text) === expectedHeadingKey
+  ) {
+    blocks.shift();
+  }
+
+  return blocks;
+}
+
+function reviewBlocksToPlainText(blocks) {
+  return (blocks || [])
+    .map((block) => `${block.marker || ''}${block.text || ''}`.trim())
+    .filter(Boolean)
+    .join('\n\n');
+}
+
 function splitReviewParagraphs(value) {
-  return cleanString(value)
-    .split(/\n\s*\n+/)
-    .map((item) => item.replace(/\s*\n\s*/g, ' ').replace(/\s{2,}/g, ' ').trim())
+  return parseReviewMarkdownBlocks(value)
+    .map((block) => `${block.marker || ''}${block.text || ''}`.trim())
     .filter(Boolean);
 }
 
@@ -1666,11 +1851,21 @@ function stripReviewFigureAnchors(value) {
   );
 }
 
-function reviewTextParagraphs(value) {
-  const paragraphs = splitReviewParagraphs(value);
-  return (paragraphs.length > 0 ? paragraphs : [cleanString(value)])
-    .map((text) => ({ text }))
-    .filter((paragraph) => paragraph.text);
+function reviewTextParagraphs(value, options = {}) {
+  return parseReviewMarkdownBlocks(value, options)
+    .map((block) => {
+      const text = options.stripFigureAnchors
+        ? stripReviewFigureAnchors(block.text)
+        : block.text;
+      return {
+        ...block,
+        text,
+        hasText: Boolean(text),
+        inlineFigures: [],
+        hasInlineFigures: false,
+      };
+    })
+    .filter((block) => block.hasText);
 }
 
 function prepareReviewDocxData(value, outputLanguage = '') {
@@ -1772,18 +1967,19 @@ function prepareReviewDocxData(value, outputLanguage = '') {
   const usedFigureNumbers = new Set();
   const sections = draft.sections.map((section, sectionIndex) => {
     const rawContent = replaceInternalCitations(section.content);
-    const content = stripReviewFigureAnchors(rawContent);
     const labels = citationLabels(section.citations);
+    const contentBlocks = parseReviewMarkdownBlocks(rawContent, { expectedHeading: section.heading });
+    const content = stripReviewFigureAnchors(reviewBlocksToPlainText(contentBlocks));
     const missingCitationText = labels.filter((label) => !content.includes(label)).join(' ');
-    const contentParagraphs = splitReviewParagraphs(rawContent);
-    const rawParagraphs = contentParagraphs.length > 0 ? contentParagraphs : [rawContent];
-    const paragraphs = rawParagraphs
-      .map((paragraph) => {
-        const parsed = extractInlineReviewFigures(paragraph, figureByAnchor, usedFigureNumbers, t.figureLabel);
+    const paragraphs = contentBlocks
+      .map((block) => {
+        const parsed = extractInlineReviewFigures(block.text, figureByAnchor, usedFigureNumbers, t.figureLabel);
         return {
+          ...block,
           text: parsed.text,
           hasText: Boolean(parsed.text),
           citationText: '',
+          suffixText: '',
           inlineFigures: parsed.inlineFigures,
           hasInlineFigures: parsed.inlineFigures.length > 0,
         };
@@ -1796,6 +1992,7 @@ function prepareReviewDocxData(value, outputLanguage = '') {
 
     if (lastTextParagraphIndex >= 0) {
       paragraphs[lastTextParagraphIndex].citationText = missingCitationText;
+      paragraphs[lastTextParagraphIndex].suffixText = missingCitationText ? ` ${missingCitationText}` : '';
     }
 
     const placedFigureNumbers = new Set();
@@ -1829,9 +2026,11 @@ function prepareReviewDocxData(value, outputLanguage = '') {
         paragraphs[targetIndex].hasInlineFigures = true;
       } else {
         paragraphs.push({
+          ...reviewMarkdownBlock('paragraph', ''),
           text: '',
           hasText: false,
           citationText: '',
+          suffixText: '',
           inlineFigures: placementFigures,
           hasInlineFigures: true,
         });
@@ -1847,25 +2046,50 @@ function prepareReviewDocxData(value, outputLanguage = '') {
     };
   });
   const remainingFigures = figures.filter((figure) => !usedFigureNumbers.has(cleanString(figure.number)));
-  const abstract = stripReviewFigureAnchors(replaceInternalCitations(draft.abstract));
-  const intentSummary = stripReviewFigureAnchors(replaceInternalCitations(draft.intentSummary));
-  const thesis = stripReviewFigureAnchors(replaceInternalCitations(draft.thesis));
-  const introduction = stripReviewFigureAnchors(replaceInternalCitations(draft.introduction));
-  const conclusion = stripReviewFigureAnchors(replaceInternalCitations(draft.conclusion));
+  const preparedField = (value) => {
+    const paragraphs = reviewTextParagraphs(replaceInternalCitations(value), { stripFigureAnchors: true });
+    return {
+      text: reviewBlocksToPlainText(paragraphs),
+      paragraphs,
+    };
+  };
+  const abstractField = preparedField(draft.abstract);
+  const intentField = preparedField(draft.intentSummary);
+  const thesisField = preparedField(draft.thesis);
+  const introductionField = preparedField(draft.introduction);
+  const conclusionField = preparedField(draft.conclusion);
+  const asReviewListBlock = (block) => block.isList
+    ? block
+    : {
+        ...block,
+        kind: 'bullet',
+        marker: '• ',
+        isParagraph: false,
+        isList: true,
+        isHeading: false,
+        isQuote: false,
+        isEquation: false,
+      };
+  const researchGapBlocks = draft.researchGaps.flatMap((item) =>
+    reviewTextParagraphs(replaceInternalCitations(item), { stripFigureAnchors: true }).map(asReviewListBlock),
+  );
+  const futureDirectionBlocks = draft.futureDirections.flatMap((item) =>
+    reviewTextParagraphs(replaceInternalCitations(item), { stripFigureAnchors: true }).map(asReviewListBlock),
+  );
 
   return {
     ...draft,
-    abstract,
-    abstractParagraphs: reviewTextParagraphs(abstract),
-    intentSummary,
-    intentSummaryParagraphs: reviewTextParagraphs(intentSummary),
-    thesis,
-    thesisParagraphs: reviewTextParagraphs(thesis),
-    introduction,
-    introductionParagraphs: reviewTextParagraphs(introduction),
+    abstract: abstractField.text,
+    abstractParagraphs: abstractField.paragraphs,
+    intentSummary: intentField.text,
+    intentSummaryParagraphs: intentField.paragraphs,
+    thesis: thesisField.text,
+    thesisParagraphs: thesisField.paragraphs,
+    introduction: introductionField.text,
+    introductionParagraphs: introductionField.paragraphs,
     sections,
     comparisonTable: draft.comparisonTable.map((row) => {
-      const conclusion = stripReviewFigureAnchors(replaceInternalCitations(row.conclusion));
+      const conclusion = preparedField(row.conclusion).text;
       const labels = citationLabels(row.papers);
       return {
         ...row,
@@ -1874,10 +2098,12 @@ function prepareReviewDocxData(value, outputLanguage = '') {
         paperLabelsText: labels.filter((label) => !conclusion.includes(label)).join(' '),
       };
     }),
-    researchGaps: draft.researchGaps.map((item) => stripReviewFigureAnchors(replaceInternalCitations(item))),
-    futureDirections: draft.futureDirections.map((item) => stripReviewFigureAnchors(replaceInternalCitations(item))),
-    conclusion,
-    conclusionParagraphs: reviewTextParagraphs(conclusion),
+    researchGaps: draft.researchGaps.map((item) => preparedField(item).text),
+    researchGapBlocks,
+    futureDirections: draft.futureDirections.map((item) => preparedField(item).text),
+    futureDirectionBlocks,
+    conclusion: conclusionField.text,
+    conclusionParagraphs: conclusionField.paragraphs,
     references,
     hasFigures: remainingFigures.length > 0,
     hasRemainingFigures: remainingFigures.length > 0,
@@ -1894,6 +2120,98 @@ function prepareReviewDocxData(value, outputLanguage = '') {
       };
     }),
   };
+}
+
+function reviewBlockToMarkdown(block) {
+  const text = cleanString(block?.text);
+  if (!text) return '';
+
+  if (block.isHeading) return `#### ${text}`;
+  if (block.isList) {
+    const marker = block.kind === 'ordered' ? cleanString(block.marker) || '1. ' : '- ';
+    return `${marker}${text}`;
+  }
+  if (block.isQuote) return `> ${text}`;
+  return text;
+}
+
+function reviewFigureToMarkdown(figure) {
+  const caption = cleanString(figure?.captionText || figure?.caption || figure?.title)
+    .replace(/]/g, '\\]');
+  const target = cleanString(figure?.path).replace(/\\/g, '/').replace(/[<>]/g, '');
+
+  if (!target) {
+    return `> [${caption || cleanString(figure?.id) || 'Figure'}]`;
+  }
+
+  return `![${caption || cleanString(figure?.id) || 'Figure'}](<${target}>)`;
+}
+
+function renderPreparedReviewMarkdown(data, outputLanguage = '') {
+  const t = reviewSectionTitles(outputLanguage);
+  const lines = [];
+  const addSection = (heading, blocks) => {
+    const content = (blocks || []).map(reviewBlockToMarkdown).filter(Boolean);
+    if (content.length === 0) return;
+    lines.push(`## ${heading}`, '', content.join('\n\n'), '');
+  };
+
+  lines.push(`# ${cleanString(data.title) || 'Literature Review'}`, '');
+  addSection(t.abstract, data.abstractParagraphs);
+
+  if (Array.isArray(data.keywords) && data.keywords.length > 0) {
+    lines.push(`**${t.keywordsLabel.trim()}** ${data.keywords.join('; ')}`, '');
+  }
+
+  addSection(t.intent, data.intentSummaryParagraphs);
+  addSection(t.thesis, data.thesisParagraphs);
+  addSection(t.introduction, data.introductionParagraphs);
+
+  if (Array.isArray(data.sections) && data.sections.length > 0) {
+    lines.push(`## ${t.body}`, '');
+    for (const section of data.sections) {
+      lines.push(`### ${cleanString(section.heading)}`, '');
+      for (const paragraph of section.paragraphs || []) {
+        const blockText = reviewBlockToMarkdown(paragraph);
+        if (blockText) lines.push(blockText, '');
+        for (const figure of paragraph.inlineFigures || []) {
+          lines.push(reviewFigureToMarkdown(figure), '');
+        }
+      }
+    }
+  }
+
+  if (Array.isArray(data.remainingFigures) && data.remainingFigures.length > 0) {
+    lines.push(`## ${t.figures}`, '');
+    for (const figure of data.remainingFigures) {
+      lines.push(reviewFigureToMarkdown(figure), '');
+    }
+  }
+
+  if (Array.isArray(data.comparisonTable) && data.comparisonTable.length > 0) {
+    lines.push(`## ${t.comparison}`, '');
+    for (const row of data.comparisonTable) {
+      lines.push(`- **${cleanString(row.theme)}:** ${cleanString(row.conclusion)}${row.paperLabelsText ? ` ${row.paperLabelsText}` : ''}`.trim(), '');
+    }
+  }
+
+  addSection(t.gaps, data.researchGapBlocks);
+  addSection(t.future, data.futureDirectionBlocks);
+  addSection(t.conclusion, data.conclusionParagraphs);
+
+  if (Array.isArray(data.references) && data.references.length > 0) {
+    lines.push(`## ${t.references}`, '');
+    for (const reference of data.references) {
+      lines.push(`${reference.label} ${reference.formattedText}`, '');
+    }
+  }
+
+  return lines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+function reviewDraftToMarkdown(value, outputLanguage = '') {
+  const language = cleanString(outputLanguage || value?.outputLanguage);
+  return renderPreparedReviewMarkdown(prepareReviewDocxData(value, language), language);
 }
 
 function formatDocxtemplaterError(error) {
@@ -1941,6 +2259,10 @@ function wordText(text, options = {}) {
     runProperties.push('<w:b/>');
   }
 
+  if (options.italic) {
+    runProperties.push('<w:i/>');
+  }
+
   if (options.size) {
     runProperties.push(`<w:sz w:val="${options.size}"/>`);
   }
@@ -1960,8 +2282,18 @@ function wordParagraph(text, options = {}) {
     properties.push(`<w:jc w:val="${options.align}"/>`);
   }
 
+  const indentAttributes = [];
   if (options.firstLine) {
-    properties.push(`<w:ind w:firstLine="${options.firstLine}"/>`);
+    indentAttributes.push(`w:firstLine="${options.firstLine}"`);
+  }
+  if (options.leftIndent) {
+    indentAttributes.push(`w:left="${options.leftIndent}"`);
+  }
+  if (options.hangingIndent) {
+    indentAttributes.push(`w:hanging="${options.hangingIndent}"`);
+  }
+  if (indentAttributes.length > 0) {
+    properties.push(`<w:ind ${indentAttributes.join(' ')}/>`);
   }
 
   if (options.spacing) {
@@ -2128,6 +2460,158 @@ function injectOmmlInDocx(zip) {
   }
 
   return { convertedParagraphs };
+}
+
+function parseReviewDocxXml(xml, partName, errors) {
+  const parserMessages = [];
+  const collect = (_level, message) => parserMessages.push(cleanString(message));
+  const document = new DOMParser({
+    onError: collect,
+  }).parseFromString(xml, 'application/xml');
+
+  if (!document?.documentElement) {
+    errors.push(`${partName} has no XML document element.`);
+    return null;
+  }
+
+  for (const message of parserMessages) {
+    errors.push(`${partName}: ${message.replace(/\s+/g, ' ')}`);
+  }
+
+  return document;
+}
+
+function xmlTextFromNodes(nodes) {
+  let text = '';
+  for (let index = 0; index < nodes.length; index += 1) {
+    text += nodes[index]?.textContent || '';
+  }
+  return text;
+}
+
+function validateReviewDocxBuffer(buffer, options = {}) {
+  const errors = [];
+  const warnings = [];
+  const baseReport = {
+    status: 'error',
+    errors,
+    warnings,
+    paragraphCount: 0,
+    imageCount: 0,
+    formulaCount: 0,
+    markdownCharacterCount: cleanString(options.markdown).length,
+  };
+  let zip;
+
+  try {
+    zip = new PizZip(buffer);
+  } catch (error) {
+    errors.push(`The generated file is not a readable DOCX package: ${error instanceof Error ? error.message : String(error)}`);
+    return baseReport;
+  }
+
+  const requiredParts = ['[Content_Types].xml', '_rels/.rels', 'word/document.xml'];
+  for (const partName of requiredParts) {
+    if (!zip.file(partName)) {
+      errors.push(`Missing required DOCX part: ${partName}`);
+    }
+  }
+
+  const xmlDocuments = new Map();
+  for (const partName of Object.keys(zip.files).filter((name) => /(?:\.xml|\.rels)$/i.test(name))) {
+    const file = zip.file(partName);
+    if (!file) continue;
+    const xml = file.asText();
+    const parsed = parseReviewDocxXml(xml, partName, errors);
+    if (parsed) xmlDocuments.set(partName, parsed);
+  }
+
+  const documentFile = zip.file('word/document.xml');
+  const documentXml = documentFile?.asText() || '';
+  const document = xmlDocuments.get('word/document.xml');
+  if (!document || !documentXml) {
+    return baseReport;
+  }
+
+  const paragraphNodes = document.getElementsByTagName('w:p');
+  const textNodes = document.getElementsByTagName('w:t');
+  const documentText = xmlTextFromNodes(textNodes);
+  const paragraphTexts = [];
+  for (let index = 0; index < paragraphNodes.length; index += 1) {
+    paragraphTexts.push(xmlTextFromNodes(paragraphNodes[index].getElementsByTagName('w:t')));
+  }
+
+  baseReport.paragraphCount = paragraphNodes.length;
+  baseReport.formulaCount = document.getElementsByTagName('m:oMath').length;
+
+  if (paragraphNodes.length === 0 || !documentText.trim()) {
+    errors.push('The generated Word document does not contain readable paragraphs.');
+  }
+
+  const unresolvedTemplatePattern = /__PAPERQUAY_REVIEW_FIGURE_|\{(?:[#/][A-Za-z][^{}]*|title|abstract|content|heading|marker|captionText|formattedText)\}/;
+  if (unresolvedTemplatePattern.test(documentXml)) {
+    errors.push('The generated Word document still contains unresolved template placeholders.');
+  }
+
+  const relationships = new Map();
+  const relationshipsDocument = xmlDocuments.get('word/_rels/document.xml.rels');
+  if (relationshipsDocument) {
+    const relationshipNodes = relationshipsDocument.getElementsByTagName('Relationship');
+    for (let index = 0; index < relationshipNodes.length; index += 1) {
+      const node = relationshipNodes[index];
+      relationships.set(node.getAttribute('Id'), {
+        target: cleanString(node.getAttribute('Target')),
+        targetMode: cleanString(node.getAttribute('TargetMode')),
+        type: cleanString(node.getAttribute('Type')),
+      });
+    }
+  }
+
+  const imageNodes = document.getElementsByTagName('a:blip');
+  baseReport.imageCount = imageNodes.length;
+  for (let index = 0; index < imageNodes.length; index += 1) {
+    const relationshipId = cleanString(imageNodes[index].getAttribute('r:embed'));
+    const relationship = relationships.get(relationshipId);
+    if (!relationshipId || !relationship) {
+      errors.push(`Image ${index + 1} has no valid document relationship.`);
+      continue;
+    }
+    if (relationship.targetMode.toLowerCase() === 'external') continue;
+
+    const targetPath = path.posix.normalize(path.posix.join('word', relationship.target.replace(/\\/g, '/')));
+    if (!zip.file(targetPath)) {
+      errors.push(`Image relationship ${relationshipId} points to missing media: ${targetPath}`);
+    }
+  }
+
+  if (options.strictContent) {
+    const expectedTitle = cleanString(options.expectedTitle);
+    if (expectedTitle && !documentText.includes(expectedTitle)) {
+      warnings.push('The generated Word document does not contain the expected review title.');
+    }
+
+    const missingHeadings = (Array.isArray(options.expectedSectionHeadings) ? options.expectedSectionHeadings : [])
+      .map(cleanString)
+      .filter((heading) => heading && !documentText.includes(heading));
+    if (missingHeadings.length > 0) {
+      warnings.push(`${missingHeadings.length} expected section heading(s) were not found in the generated Word document.`);
+    }
+  }
+
+  if (paragraphTexts.some((text) => /^\s*#{1,6}\s+/.test(text) || /^\s*[-+*]\s+/.test(text) || /\*\*[^*]+\*\*/.test(text))) {
+    warnings.push('Some Markdown formatting markers remain in the generated Word document.');
+  }
+
+  if (/\$\$[\s\S]+?\$\$|\$[^$\n]+\$/.test(documentText)) {
+    warnings.push('Some LaTeX formulas could not be converted to editable Word equations and were kept as text.');
+  }
+
+  if (/\[\s*(?:Image|Figure|Fig\.?)\s*(?::|#)\s*[A-Za-z0-9_-]+\s*]/i.test(documentText)) {
+    warnings.push('Some figure anchors remain as text in the generated Word document.');
+  }
+
+  baseReport.status = errors.length > 0 ? 'error' : warnings.length > 0 ? 'warning' : 'passed';
+  return baseReport;
 }
 
 function imageExtensionForDocx(filePath) {
@@ -2398,40 +2882,58 @@ async function embedReviewFiguresInDocx(zip, data, outputLanguage = '') {
   return { skippedFigures };
 }
 
+function reviewBlockLoopTemplate(loopName, options = {}) {
+  const bodySpacing = options.bodySpacing || { before: 0, after: 160, line: 360 };
+  const rows = [
+    wordParagraph(`{#${loopName}}`),
+    wordParagraph('{#isParagraph}'),
+    wordParagraph('{text}{suffixText}', { size: 24, firstLine: 480, spacing: bodySpacing }),
+    wordParagraph('{/isParagraph}'),
+    wordParagraph('{#isList}'),
+    wordParagraph('{marker}{text}{suffixText}', { size: 24, leftIndent: 480, hangingIndent: 360, spacing: bodySpacing }),
+    wordParagraph('{/isList}'),
+    wordParagraph('{#isHeading}'),
+    wordParagraph('{text}{suffixText}', { bold: true, size: 24, spacing: { before: 120, after: 80, line: 320 } }),
+    wordParagraph('{/isHeading}'),
+    wordParagraph('{#isQuote}'),
+    wordParagraph('{text}{suffixText}', { italic: true, size: 23, leftIndent: 480, spacing: bodySpacing }),
+    wordParagraph('{/isQuote}'),
+    wordParagraph('{#isEquation}'),
+    wordParagraph('{text}{suffixText}', { size: 24, align: 'center', spacing: bodySpacing }),
+    wordParagraph('{/isEquation}'),
+  ];
+
+  if (options.includeFigures) {
+    rows.push(
+      wordParagraph('{#inlineFigures}'),
+      wordParagraph('{marker}', { align: 'center', spacing: { before: 80, after: 80, line: 320 } }),
+      wordParagraph('{captionText}', { size: 21, align: 'center', spacing: { before: 0, after: 160, line: 300 } }),
+      wordParagraph('{/inlineFigures}'),
+    );
+  }
+
+  rows.push(wordParagraph(`{/${loopName}}`));
+  return rows;
+}
+
 function defaultReviewTemplateBuffer(outputLanguage = '') {
   const zip = new PizZip();
   const t = reviewSectionTitles(outputLanguage);
   const documentBody = [
     wordParagraph('{title}', { align: 'center', bold: true, size: 32, spacing: { before: 0, after: 240, line: 360 } }),
     wordParagraph(t.abstract, { bold: true, size: 28, spacing: { before: 240, after: 120, line: 320 } }),
-    wordParagraph('{#abstractParagraphs}'),
-    wordParagraph('{text}', { size: 24, firstLine: 480, spacing: { before: 0, after: 160, line: 360 } }),
-    wordParagraph('{/abstractParagraphs}'),
+    ...reviewBlockLoopTemplate('abstractParagraphs'),
     wordParagraph(`${t.keywordsLabel}{#keywords}{.}; {/keywords}`, { size: 24, spacing: { before: 0, after: 200, line: 320 } }),
     wordParagraph(t.intent, { bold: true, size: 28, spacing: { before: 240, after: 120, line: 320 } }),
-    wordParagraph('{#intentSummaryParagraphs}'),
-    wordParagraph('{text}', { size: 24, firstLine: 480, spacing: { before: 0, after: 160, line: 360 } }),
-    wordParagraph('{/intentSummaryParagraphs}'),
+    ...reviewBlockLoopTemplate('intentSummaryParagraphs'),
     wordParagraph(t.thesis, { bold: true, size: 28, spacing: { before: 240, after: 120, line: 320 } }),
-    wordParagraph('{#thesisParagraphs}'),
-    wordParagraph('{text}', { size: 24, firstLine: 480, spacing: { before: 0, after: 160, line: 360 } }),
-    wordParagraph('{/thesisParagraphs}'),
+    ...reviewBlockLoopTemplate('thesisParagraphs'),
     wordParagraph(t.introduction, { bold: true, size: 28, spacing: { before: 240, after: 120, line: 320 } }),
-    wordParagraph('{#introductionParagraphs}'),
-    wordParagraph('{text}', { size: 24, firstLine: 480, spacing: { before: 0, after: 160, line: 360 } }),
-    wordParagraph('{/introductionParagraphs}'),
+    ...reviewBlockLoopTemplate('introductionParagraphs'),
     wordParagraph(t.body, { bold: true, size: 28, spacing: { before: 240, after: 120, line: 320 } }),
     wordParagraph('{#sections}'),
     wordParagraph('{heading}', { bold: true, size: 26, spacing: { before: 160, after: 80, line: 320 } }),
-    wordParagraph('{#paragraphs}'),
-    wordParagraph('{#hasText}'),
-    wordParagraph('{text} {citationText}', { size: 24, firstLine: 480, spacing: { before: 0, after: 160, line: 360 } }),
-    wordParagraph('{/hasText}'),
-    wordParagraph('{#inlineFigures}'),
-    wordParagraph('{marker}', { align: 'center', spacing: { before: 80, after: 80, line: 320 } }),
-    wordParagraph('{captionText}', { size: 21, align: 'center', spacing: { before: 0, after: 160, line: 300 } }),
-    wordParagraph('{/inlineFigures}'),
-    wordParagraph('{/paragraphs}'),
+    ...reviewBlockLoopTemplate('paragraphs', { includeFigures: true }),
     wordParagraph('{/sections}'),
     wordParagraph('{#hasRemainingFigures}'),
     wordParagraph(t.figures, { bold: true, size: 28, spacing: { before: 240, after: 120, line: 320 } }),
@@ -2445,17 +2947,11 @@ function defaultReviewTemplateBuffer(outputLanguage = '') {
     wordParagraph('{theme}：{conclusion} {paperLabelsText}', { size: 24, firstLine: 480, spacing: { before: 0, after: 120, line: 360 } }),
     wordParagraph('{/comparisonTable}'),
     wordParagraph(t.gaps, { bold: true, size: 28, spacing: { before: 240, after: 120, line: 320 } }),
-    wordParagraph('{#researchGaps}'),
-    wordParagraph('{.}', { size: 24, firstLine: 480, spacing: { before: 0, after: 120, line: 360 } }),
-    wordParagraph('{/researchGaps}'),
+    ...reviewBlockLoopTemplate('researchGapBlocks', { bodySpacing: { before: 0, after: 120, line: 360 } }),
     wordParagraph(t.future, { bold: true, size: 28, spacing: { before: 240, after: 120, line: 320 } }),
-    wordParagraph('{#futureDirections}'),
-    wordParagraph('{.}', { size: 24, firstLine: 480, spacing: { before: 0, after: 120, line: 360 } }),
-    wordParagraph('{/futureDirections}'),
+    ...reviewBlockLoopTemplate('futureDirectionBlocks', { bodySpacing: { before: 0, after: 120, line: 360 } }),
     wordParagraph(t.conclusion, { bold: true, size: 28, spacing: { before: 240, after: 120, line: 320 } }),
-    wordParagraph('{#conclusionParagraphs}'),
-    wordParagraph('{text}', { size: 24, firstLine: 480, spacing: { before: 0, after: 160, line: 360 } }),
-    wordParagraph('{/conclusionParagraphs}'),
+    ...reviewBlockLoopTemplate('conclusionParagraphs'),
     wordParagraph(t.references, { bold: true, size: 28, spacing: { before: 240, after: 120, line: 320 } }),
     wordParagraph('{#references}'),
     wordParagraph('{label} {formattedText}', { size: 22, spacing: { before: 0, after: 120, line: 320 } }),
@@ -2505,6 +3001,7 @@ async function renderReviewDocxTemplate({ templatePath, outputPath, data }) {
       linebreaks: true,
     });
     const docxData = prepareReviewDocxData(data, outputLanguage);
+    const markdown = renderPreparedReviewMarkdown(docxData, outputLanguage);
     doc.render(docxData);
     const { skippedFigures } = await embedReviewFiguresInDocx(doc.getZip(), docxData, outputLanguage);
     injectOmmlInDocx(doc.getZip());
@@ -2512,6 +3009,16 @@ async function renderReviewDocxTemplate({ templatePath, outputPath, data }) {
       type: 'nodebuffer',
       compression: 'DEFLATE',
     });
+    const validation = validateReviewDocxBuffer(buffer, {
+      markdown,
+      strictContent: !cleanString(templatePath),
+      expectedTitle: docxData.title,
+      expectedSectionHeadings: docxData.sections.map((section) => section.heading),
+    });
+
+    if (validation.errors.length > 0) {
+      throw new Error(`Generated DOCX validation failed: ${validation.errors.join(' ')}`);
+    }
 
     await fsp.mkdir(path.dirname(outputPath), { recursive: true });
     await fsp.writeFile(outputPath, buffer);
@@ -2520,6 +3027,7 @@ async function renderReviewDocxTemplate({ templatePath, outputPath, data }) {
       outputPath,
       byteSize: buffer.byteLength,
       skippedFigures,
+      validation,
     };
   } catch (error) {
     throw new Error(`Word template export failed: ${formatDocxtemplaterError(error)}`);
@@ -2621,6 +3129,9 @@ module.exports = {
   normalizeReviewGeneratedParts,
   normalizeReviewJsonDraft,
   normalizeReviewBlueprint,
+  parseReviewMarkdownBlocks,
   prepareReviewDocxData,
   renderReviewDocxTemplate,
+  reviewDraftToMarkdown,
+  validateReviewDocxBuffer,
 };

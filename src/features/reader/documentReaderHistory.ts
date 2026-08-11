@@ -1,4 +1,5 @@
 import type {
+  DocumentChatSession,
   PaperHistoryRecord,
   PdfReadingHeatmap,
   PdfScrollPosition,
@@ -10,6 +11,33 @@ type ReaderPdfHistorySnapshot = Pick<
   PaperHistoryRecord,
   'pdfScrollPositions' | 'pdfReadingHeatmaps'
 >;
+
+export interface RestoredPaperQaHistory {
+  qaSessions: DocumentChatSession[];
+  selectedQaSessionId: string;
+  selectedQaPresetId: string;
+}
+
+export function restorePaperQaHistory(
+  history: PaperHistoryRecord | null | undefined,
+  createSession: () => DocumentChatSession,
+  fallbackPresetId: string,
+): RestoredPaperQaHistory {
+  const qaSessions = history?.qaSessions?.length
+    ? history.qaSessions
+    : [createSession()];
+  const selectedQaSessionId =
+    history?.selectedQaSessionId &&
+    qaSessions.some((session) => session.id === history.selectedQaSessionId)
+      ? history.selectedQaSessionId
+      : qaSessions[0]?.id ?? '';
+
+  return {
+    qaSessions,
+    selectedQaSessionId,
+    selectedQaPresetId: history?.selectedQaPresetId?.trim() || fallbackPresetId,
+  };
+}
 
 function normalizeLocalPathForCompare(path: string): string {
   return path.replace(/[/\\]/g, '/').trim().toLowerCase();

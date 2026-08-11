@@ -90,11 +90,10 @@ function previousObjectIndex(manifest) {
 }
 
 async function fileDigest(filePath) {
-  const bytes = await fsp.readFile(filePath);
+  const stat = await fsp.stat(filePath);
   return {
-    byteSize: bytes.length,
-    checksum: hashBytes(bytes),
-    bytes,
+    byteSize: stat.size,
+    checksum: await hashFile(filePath),
   };
 }
 
@@ -124,8 +123,11 @@ async function collectFiles(root) {
     let entries = [];
     try {
       entries = await fsp.readdir(directory, { withFileTypes: true });
-    } catch {
-      return;
+    } catch (error) {
+      if (error?.code === 'ENOENT' || error?.code === 'ENOTDIR') return;
+      throw new Error(
+        `Failed to collect backup files from ${directory}: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
 
     for (const entry of entries) {
@@ -291,7 +293,20 @@ async function uploadSource(webdav, backupId, source, previous) {
       };
     }
 
-    await webdav.atomicUploadBytes(source.remotePath, backupId, digest.bytes);
+    if (typeof webdav.atomicUploadFile === 'function') {
+      await webdav.atomicUploadFile(
+        source.remotePath,
+        backupId,
+        source.localPath,
+        digest.byteSize,
+      );
+    } else {
+      await webdav.atomicUploadBytes(
+        source.remotePath,
+        backupId,
+        await fsp.readFile(source.localPath),
+      );
+    }
     return {
       kind: source.kind,
       remotePath: source.remotePath,
@@ -316,45 +331,75 @@ async function uploadSource(webdav, backupId, source, previous) {
   }
 }
 
-async function runBackup(context, webdav) {
+async function runBackup(context, webdav, options = {}) {
   const backupId = createBackupId();
   const createdAt = isoTimestamp();
-  const previous = previousObjectIndex(await loadLatestManifest(webdav).catch(() => null));
-  const { sources, snapshotDir } = await collectBackupSources(context, backupId);
+  const snapshotDir = path.join(context.appPaths.dataDir, '.backup-snapshots', backupId);
   const objects = [];
+  const onProgress = typeof options.onProgress === 'function'
+    ? options.onProgress
+    : () => undefined;
 
   try {
+    onProgress({ phase: 'preparing', completed: 0, total: 0, remotePath: null, status: null });
+    const previous = previousObjectIndex(await loadLatestManifest(webdav));
+    const { sources } = await collectBackupSources(context, backupId);
+    onProgress({ phase: 'uploading', completed: 0, total: sources.length, remotePath: null, status: null });
+
     for (const source of sources) {
-      objects.push(await uploadSource(webdav, backupId, source, previous));
+      const object = await uploadSource(webdav, backupId, source, previous);
+      objects.push(object);
+      onProgress({
+        phase: 'uploading',
+        completed: objects.length,
+        total: sources.length,
+        remotePath: object.remotePath,
+        status: object.status,
+      });
     }
+
+    const manifest = buildManifest(backupId, createdAt, objects);
+    const manifestBytes = Buffer.from(JSON.stringify(manifest, null, 2), 'utf8');
+    const runManifestRemotePath = `runs/${backupId}/manifest.json`;
+
+    onProgress({
+      phase: 'publishing',
+      completed: objects.length,
+      total: sources.length,
+      remotePath: runManifestRemotePath,
+      status: null,
+    });
+    await webdav.atomicUploadBytes(runManifestRemotePath, backupId, manifestBytes);
+    await webdav.atomicUploadBytes(LATEST_MANIFEST_REMOTE_PATH, backupId, manifestBytes);
+    onProgress({
+      phase: 'done',
+      completed: objects.length,
+      total: sources.length,
+      remotePath: LATEST_MANIFEST_REMOTE_PATH,
+      status: manifest.summary.failedCount === 0 ? 'uploaded' : 'failed',
+    });
+
+    const firstFailure = objects.find((object) => object.status === 'failed');
+    return {
+      ok: manifest.summary.failedCount === 0,
+      backupId,
+      createdAt,
+      manifestRemotePath: LATEST_MANIFEST_REMOTE_PATH,
+      runManifestRemotePath,
+      uploadedCount: manifest.summary.uploadedCount,
+      skippedCount: manifest.summary.skippedCount,
+      failedCount: manifest.summary.failedCount,
+      databaseCount: manifest.summary.databaseCount,
+      pdfCount: manifest.summary.pdfCount,
+      derivedCount: manifest.summary.derivedCount,
+      message: manifest.summary.failedCount === 0
+        ? `WebDAV backup finished: ${manifest.summary.uploadedCount} uploaded, ${manifest.summary.skippedCount} skipped.`
+        : `WebDAV backup finished with ${manifest.summary.failedCount} failed object(s). First failure: ${firstFailure?.remotePath ?? 'unknown object'}: ${firstFailure?.message ?? 'unknown error'}`,
+      objects,
+    };
   } finally {
     await removeDirectoryQuietly(snapshotDir);
   }
-
-  const manifest = buildManifest(backupId, createdAt, objects);
-  const manifestBytes = Buffer.from(JSON.stringify(manifest, null, 2), 'utf8');
-  const runManifestRemotePath = `runs/${backupId}/manifest.json`;
-
-  await webdav.atomicUploadBytes(runManifestRemotePath, backupId, manifestBytes);
-  await webdav.atomicUploadBytes(LATEST_MANIFEST_REMOTE_PATH, backupId, manifestBytes);
-
-  return {
-    ok: manifest.summary.failedCount === 0,
-    backupId,
-    createdAt,
-    manifestRemotePath: LATEST_MANIFEST_REMOTE_PATH,
-    runManifestRemotePath,
-    uploadedCount: manifest.summary.uploadedCount,
-    skippedCount: manifest.summary.skippedCount,
-    failedCount: manifest.summary.failedCount,
-    databaseCount: manifest.summary.databaseCount,
-    pdfCount: manifest.summary.pdfCount,
-    derivedCount: manifest.summary.derivedCount,
-    message: manifest.summary.failedCount === 0
-      ? `WebDAV backup finished: ${manifest.summary.uploadedCount} uploaded, ${manifest.summary.skippedCount} skipped.`
-      : `WebDAV backup finished with ${manifest.summary.failedCount} failed object(s).`,
-    objects,
-  };
 }
 
 function latestInfoFromManifest(manifest) {

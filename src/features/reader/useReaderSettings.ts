@@ -7,6 +7,7 @@ import {
 } from 'react';
 
 import {
+  approveWritePath,
   getAppDefaultPaths,
   readLocalTextFileIfExists,
 } from '../../services/desktop';
@@ -397,6 +398,18 @@ export function useReaderSettings({
     localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
     emitUiLanguageChanged(settings.uiLanguage);
   }, [settings]);
+
+  useEffect(() => {
+    const mineruCacheDir = settings.mineruCacheDir.trim();
+
+    if (!configHydrated || !mineruCacheDir) {
+      return;
+    }
+
+    void approveWritePath(mineruCacheDir).catch((error) => {
+      console.error('Failed to approve the configured MinerU cache directory.', error);
+    });
+  }, [configHydrated, settings.mineruCacheDir]);
 
   useEffect(() => {
     if (qaModelPresets.some((preset) => preset.id === settings.qaActivePresetId)) {
