@@ -26,6 +26,8 @@
   <a href="#本地开发">本地开发</a>
 </p>
 
+> 二次开发、上游同步、本地构建和个人 Fork 更新流程请阅读 [开发手册](./docs/DEVELOPMENT.zh-CN.md)。
+
 <p align="center">
   <img src="./docs/assets/readme-hero.svg" alt="PaperQuay feature overview" width="920">
 </p>

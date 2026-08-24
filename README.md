@@ -26,6 +26,8 @@
   <a href="#development">Development</a>
 </p>
 
+> 二次开发与本地更新流程请阅读 [中文开发手册](./docs/DEVELOPMENT.zh-CN.md)。
+
 <p align="center">
   <img src="./docs/assets/readme-hero.svg" alt="PaperQuay feature overview" width="920">
 </p>
