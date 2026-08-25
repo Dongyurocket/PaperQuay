@@ -465,7 +465,7 @@ function App() {
 
             <div className="h-full min-h-0 overflow-hidden rounded-[var(--pq-radius-md)]" hidden={activeWorkspace !== 'graph'}>
               <WorkspaceErrorBoundary name="Graph" resetKey={activeWorkspace}>
-                <KnowledgeGraphWorkspace />
+                <KnowledgeGraphWorkspace workspaceActive={activeWorkspace === 'graph'} />
               </WorkspaceErrorBoundary>
             </div>
           </main>
