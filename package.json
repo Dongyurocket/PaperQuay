@@ -43,6 +43,7 @@
     "@xmldom/xmldom": "^0.9.10",
     "adm-zip": "^0.5.16",
     "cytoscape": "^3.34.0",
+    "cytoscape-fcose": "^2.2.0",
     "docxtemplater": "^3.68.7",
     "electron-updater": "^6.8.9",
     "eventsource-parser": "^3.1.0",

@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import cytoscape, { type Core, type ElementDefinition, type StylesheetJson } from 'cytoscape';
+import fcose from 'cytoscape-fcose';
+
+cytoscape.use(fcose);
 import {
   Brain,
   ChevronDown,
@@ -460,7 +463,7 @@ function toElements(snapshot: KnowledgeGraphSnapshot): ElementDefinition[] {
 function runGraphLayout(cy: Core, mode: LayoutMode) {
   const layout = cy.layout(
     mode === 'local'
-      ? {
+      ? ({
           name: 'concentric',
           animate: true,
           animationDuration: 320,
@@ -469,21 +472,34 @@ function runGraphLayout(cy: Core, mode: LayoutMode) {
           concentric: (node) => node.degree(),
           levelWidth: () => 2,
           minNodeSpacing: 40,
-        } as cytoscape.LayoutOptions
-      : {
-          name: 'cose',
+        } as cytoscape.LayoutOptions)
+      : ({
+          // fcose 布局参数经 headless 复现实验标定（45 节点多分量图与 662 节点大图均验证）。
+          // 注意：cytoscape 布局以容器尺寸为边界，容器 hidden（0x0）时任何布局都会把节点压成一团，
+          // 因此调用方必须保证容器可见（见渲染 effect 中的尺寸检查与 pendingLayoutRef 补跑）。
+          name: 'fcose',
+          quality: 'proof',
+          randomize: true,
           animate: true,
           animationDuration: 320,
           fit: true,
           padding: 36,
-          nodeRepulsion: 7600,
-          idealEdgeLength: 96,
-          gravity: 0.22,
-          numIter: 900,
-        } as cytoscape.LayoutOptions,
+          nodeRepulsion: 40000,
+          idealEdgeLength: 180,
+          edgeElasticity: 0.2,
+          gravity: 0.3,
+          numIter: 2500,
+          packComponents: true,
+          tile: true,
+          nodeDimensionsIncludeLabels: true,
+        } as unknown as cytoscape.LayoutOptions),
   );
 
   layout.run();
+}
+
+function graphContainerHasSize(container: HTMLDivElement | null) {
+  return Boolean(container && container.clientWidth > 0 && container.clientHeight > 0);
 }
 
 function CollapsiblePanel({
@@ -532,7 +548,7 @@ function CollapsiblePanel({
   );
 }
 
-export default function KnowledgeGraphWorkspace() {
+export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { workspaceActive?: boolean }) {
   const locale = useAppLocale();
   const l = useLocaleText();
   const isEnglish = locale === 'en-US';
@@ -542,6 +558,8 @@ export default function KnowledgeGraphWorkspace() {
   const renderedNodeIdsRef = useRef<Set<string>>(new Set());
   const renderedEdgeIdsRef = useRef<Set<string>>(new Set());
   const renderedLayoutModeRef = useRef<LayoutMode>('global');
+  // 容器不可见（工作区 hidden 挂载）时推迟的布局，激活后补跑
+  const pendingLayoutRef = useRef(false);
   const openNoteTab = useTabsStore((state) => state.openNoteTab);
   const [snapshot, setSnapshot] = useState<KnowledgeGraphSnapshot | null>(null);
   const [selectedNode, setSelectedNode] = useState<KnowledgeGraphNode | null>(null);
@@ -790,7 +808,13 @@ export default function KnowledgeGraphWorkspace() {
       renderedNodeIdsRef.current = nextNodeIds;
       renderedEdgeIdsRef.current = nextEdgeIds;
       renderedLayoutModeRef.current = layoutMode;
-      runGraphLayout(cy, layoutMode);
+      // 工作区以 hidden 常驻挂载（App.tsx），容器为 0x0 时布局会把所有节点压成一团，
+      // 这里推迟到工作区激活（workspaceActive）后再补跑。
+      if (graphContainerHasSize(containerRef.current)) {
+        runGraphLayout(cy, layoutMode);
+      } else {
+        pendingLayoutRef.current = true;
+      }
       return;
     }
 
@@ -814,6 +838,21 @@ export default function KnowledgeGraphWorkspace() {
 
     renderedEdgeIdsRef.current = nextEdgeIds;
   }, [filteredSnapshot, layoutMode]);
+
+  // 工作区从 hidden 切换为可见时：同步画布尺寸，补跑被推迟的布局（或重新适配视图）。
+  useEffect(() => {
+    if (!workspaceActive) return;
+    const cy = cyRef.current;
+    if (!cy) return;
+
+    cy.resize();
+    if (pendingLayoutRef.current) {
+      pendingLayoutRef.current = false;
+      runGraphLayout(cy, renderedLayoutModeRef.current);
+    } else if (cy.nodes().length > 0) {
+      cy.fit(undefined, 36);
+    }
+  }, [workspaceActive]);
 
   useEffect(() => {
     const cy = cyRef.current;
@@ -1016,6 +1055,13 @@ export default function KnowledgeGraphWorkspace() {
     setQuickRelationSourceNode(null);
   }, []);
 
+  // createRelation 依赖 relationLabel/relationDescription 等输入态，引用会频繁变化。
+  // cytoscape 实例只能创建一次，事件回调统一走 ref，避免输入文字时销毁重建整个图谱。
+  const createRelationRef = useRef(createRelation);
+  useEffect(() => {
+    createRelationRef.current = createRelation;
+  }, [createRelation]);
+
   useEffect(() => {
     if (!containerRef.current) return;
 
@@ -1033,7 +1079,7 @@ export default function KnowledgeGraphWorkspace() {
       const data = event.target.data() as KnowledgeGraphNode;
       const quickSource = quickRelationSourceRef.current;
       if (quickSource && quickSource.id !== data.id) {
-        void createRelation(quickSource, data).then(() => {
+        void createRelationRef.current(quickSource, data).then(() => {
           setQuickRelationSourceNode(null);
         });
         return;
@@ -1081,7 +1127,8 @@ export default function KnowledgeGraphWorkspace() {
       cy.destroy();
       cyRef.current = null;
     };
-  }, [createRelation, selectGraphEdge, selectGraphNode]);
+    // selectGraphNode/selectGraphEdge 依赖均为空、引用稳定；createRelation 走 createRelationRef。
+  }, [selectGraphEdge, selectGraphNode]);
 
   const runAiRelationSuggestion = async () => {
     setAiWorking(true);
