@@ -19,7 +19,7 @@ git tag app-v0.1.26
 git push origin app-v0.1.26
 ```
 
-GitHub Actions 会在个人 Fork 中创建 Draft Release，并上传 Windows、Linux 和 macOS 安装包及更新元数据。确认安装包和说明无误后，再在 GitHub 页面点击发布。
+GitHub Actions 会在个人 Fork 中创建 Release，上传 Windows、Linux 和 macOS 安装包及更新元数据，并在构建全部成功后自动将 Draft 转为正式发布。Release 说明来自 `.github/release-notes.md`（`{{VERSION}}` 为版本占位符），发布前应先更新该文件为本次实际变更；若发布后才发现说明有误，可直接在 GitHub 页面编辑 Release 内容。
 
 ## 更新源
 

@@ -14,16 +14,13 @@ Download the native installer for your operating system from the Assets section 
 
 ## Highlights
 
-- Per-paper AI conversations now survive app restarts. The active session and preset are restored, and tab switches or app shutdown flush pending history without replacing it with an empty session.
-- Full-document translations now persist reliably across restarts, including when a custom MinerU cache directory is used. Cache writes are serialized and atomic, and storage failures are shown instead of being silently ignored.
-- WebDAV backup is substantially more reliable: Nutstore-friendly request pacing, `Retry-After` handling, transient-error retries, streamed uploads, adaptive timeouts, detailed failed-object reporting, progress updates, and cleanup of temporary snapshots.
-- Review Word export now supports editable OMML equations, localized Chinese/English headings, correct first-line indentation, richer references, missing-image fallbacks, and figures placed alongside relevant model-generated content.
-- Review generation now keeps completed sections when another writing task fails, reports failed tasks individually, and processes the full queued workload before offering resume.
+- Knowledge graph nodes no longer pile up and overlap in the center. The layout used to run while the graph workspace was still hidden (a zero-size container), compressing every node into a tiny area that was never recomputed. Layout now waits until the workspace is visible and re-runs when you switch to the Graph tab.
+- The global graph layout engine switches from the built-in cose layout to fcose with benchmarked parameters, spreading dense graphs apart faster and more evenly (about 20× faster on large graphs in headless benchmarks).
+- Typing in the Custom Relations panel no longer wipes the graph. Editing the relation label or description used to destroy and recreate the whole graph canvas, leaving it blank.
 
 ## Notes
 
 - AI features require your own compatible model endpoint and API key in Settings.
-- WebDAV has no universal cross-provider byte-range resume protocol. PaperQuay now streams files and retries at object level so interrupted jobs can continue without re-uploading completed objects on the next backup.
 - Release assets are generated automatically by GitHub Actions.
 
 ---
@@ -44,14 +41,11 @@ PaperQuay 是一个开源 AI 论文工作台，覆盖文献管理、PDF 阅读�
 
 ## 本次更新
 
-- 文献问答会话现在会按论文持久化保存，重启软件后可恢复当前会话、历史对话和预设；切换标签页或退出时会及时落盘，不再被空白“新对话”覆盖。
-- 全文翻译结果可在重启后可靠恢复，包括使用自定义 MinerU 缓存目录的场景；缓存改为串行原子写入，读写失败会明确提示，不再静默丢失。
-- WebDAV 备份可靠性显著提升：针对坚果云限制进行请求节流，支持 `Retry-After`、瞬时错误重试、流式上传、自适应超时、失败对象与服务端响应明细、进度反馈，以及异常后的临时快照清理。
-- 综述 Word 导出支持可编辑 OMML 公式、中英文节标题、正确首行缩进、更完整的参考文献信息、缺图容错，并可把图片插入模型生成的相关正文位置。
-- 综述生成任务不再因单项失败而中止队列；已完成章节会保留，失败任务会单独上报，全部排队任务处理后仍可继续生成。
+- 修复知识图谱节点全部聚集在中心重叠的问题：此前布局在图谱页仍隐藏（容器尺寸为 0）时就已经执行完毕，所有节点被压缩在极小区域且不再重算；现在布局会等图谱页可见后才执行，切换到图谱页时自动补算。
+- 全局图谱布局引擎从内置 cose 更换为 fcose，参数经基准实验标定，密集图谱分布更均匀，大图布局速度提升约 20 倍。
+- 修复在“自定义关系”面板输入文字时图谱被销毁重建、画布变空白的问题。
 
 ## 备注
 
 - AI 功能需要在设置中自行配置兼容模型接口和 API Key。
-- WebDAV 没有跨服务商统一的分块断点续传协议。本版本采用流式上传与对象级重试，后续备份可跳过已完成且未变化的对象。
 - Release 资源由 GitHub Actions 自动生成。
