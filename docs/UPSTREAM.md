@@ -39,4 +39,5 @@ git diff upstream/main...main
 - 先保留用户数据和存储迁移相关代码的行为。
 - UI 冲突要结合截图和实际交互验证，不只看 TypeScript 是否通过。
 - `electron/backend/updateCommands.cjs` 和 `package.json` 的发布配置属于个人 Fork 配置，若上游同步覆盖，重新运行 `Configure-Fork.ps1`。
+- README 已本地化：`README.md` 是中文主文档，`README_EN.md` 是英文版，`README.zh-CN.md` 仅保留跳转。上游若更新英文 `README.md`，合并时把有效内容合入 `README_EN.md`，并同步更新中文主文档，不要让上游英文版覆盖回默认 README。
 - 不要把个人 API 配置、测试论文或本地路径提交到仓库。

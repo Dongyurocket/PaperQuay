@@ -133,19 +133,21 @@ PaperQuay 的 Windows 自动更新依赖 GitHub Release。个人构建必须使�
 
 1. 在个人 Fork 的 `main` 上准备一个可发布版本。
 2. 修改 `package.json` 的 `version`，例如从 `0.1.25` 改为 `0.1.26`。
-3. 提交并推送版本变更。
-4. 创建并推送 `app-v0.1.26` 标签：
+3. 更新 `.github/release-notes.md` 为本次实际变更说明（`{{VERSION}}` 为版本占位符），否则 Release 会沿用上一次的内容。
+4. 提交并推送版本变更。
+5. 创建并推送 `app-v0.1.26` 标签：
 
 ```powershell
 git tag app-v0.1.26
 git push origin app-v0.1.26
 ```
 
-5. GitHub Actions 会构建 Windows、Linux 和 macOS 安装包，并创建 Draft Release。
-6. 在 GitHub 上检查构建产物和发布说明，确认无误后发布 Release。
+6. GitHub Actions 会构建 Windows、Linux 和 macOS 安装包，先创建 Draft Release，构建全部成功后自动转为正式发布；发现说明或产物有误时，可直接在 GitHub 页面编辑 Release 或按 `docs/RELEASE.md` 回滚。
 7. 已安装的个人版本下次检查更新时会从个人 Fork 获取新版本。
 
 版本号必须递增。不要使用与上游相同或更低的版本号，否则更新器会认为没有新版本。
+
+注意：若 Fork 仓库从未运行过 GitHub Actions，GitHub 会默认禁用工作流（Actions 页面显示 “Workflows aren't being run on this forked repository”）。需要先在仓库 Actions 页面手动启用，标签推送才能触发 Release 工作流。
 
 ## 文档约定
 
