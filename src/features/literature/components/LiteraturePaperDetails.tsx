@@ -4,13 +4,16 @@ import {
   BookOpenText,
   ChevronRight,
   CheckCircle2,
+  FilePlus2,
   FileText,
   Languages,
   Loader2,
   Pencil,
+  Replace,
   Save,
   Sparkles,
   Star,
+  Trash2,
   X,
 } from 'lucide-react';
 import { useAppLocale, useLocaleText } from '../../../i18n/uiLanguage';
@@ -33,22 +36,32 @@ import {
 import {
   paperAuthors,
   paperPdfPath,
+  paperTranslatedPdfAttachment,
 } from '../literatureUi';
+import {
+  resolvePaperTitleDisplay,
+  type PaperTitleDisplayMode,
+} from '../titleDisplay';
 import LiteratureReadingTimeChart from './LiteratureReadingTimeChart';
 
 interface LiteraturePaperDetailsProps {
   selectedPaper: LiteraturePaper | null;
+  titleDisplayMode: PaperTitleDisplayMode;
   saving: boolean;
   onOpenPaper: (paper: LiteraturePaper) => void;
   onSavePaper: (request: UpdatePaperRequest) => void;
   actionState?: LiteraturePaperTaskState | null;
   onRunMineruParse?: (paper: LiteraturePaper) => void;
   onTranslatePaper?: (paper: LiteraturePaper) => void;
+  onTranslatePaperTitle?: (paper: LiteraturePaper) => Promise<string | null>;
+  onAttachTranslatedPdf?: (paper: LiteraturePaper) => void;
+  onRemoveTranslatedPdf?: (paper: LiteraturePaper) => void;
   onGenerateSummary?: (paper: LiteraturePaper) => void;
 }
 
 interface PaperEditDraft {
   title: string;
+  titleZh: string;
   authors: string;
   year: string;
   publication: string;
@@ -241,6 +254,7 @@ function latestReadingHeatmapForPaper(paperId: string | null | undefined): PdfRe
 function draftFromPaper(paper: LiteraturePaper | null): PaperEditDraft {
   return {
     title: paper?.title ?? '',
+    titleZh: paper?.titleZh ?? '',
     authors: paper?.authors.map((author) => author.name).join(', ') ?? '',
     year: paper?.year ?? '',
     publication: paper?.publication ?? '',
@@ -469,12 +483,16 @@ function TaskStatusPanel({
 
 export default function LiteraturePaperDetails({
   selectedPaper,
+  titleDisplayMode,
   saving,
   onOpenPaper,
   onSavePaper,
   actionState,
   onRunMineruParse,
   onTranslatePaper,
+  onTranslatePaperTitle,
+  onAttachTranslatedPdf,
+  onRemoveTranslatedPdf,
   onGenerateSummary,
 }: LiteraturePaperDetailsProps) {
   const l = useLocaleText();
@@ -483,6 +501,7 @@ export default function LiteraturePaperDetails({
   const handleWheelCapture = useWheelScrollDelegate({ rootRef });
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<PaperEditDraft>(() => draftFromPaper(selectedPaper));
+  const [titleTranslating, setTitleTranslating] = useState(false);
   const [activeOverviewKey, setActiveOverviewKey] = useState<OverviewSectionKey>('overview');
   const [readingHeatmap, setReadingHeatmap] = useState<PdfReadingHeatmap | null>(() =>
     latestReadingHeatmapForPaper(selectedPaper?.id),
@@ -491,6 +510,7 @@ export default function LiteraturePaperDetails({
   useEffect(() => {
     setEditing(false);
     setDraft(draftFromPaper(selectedPaper));
+    setTitleTranslating(false);
     setReadingHeatmap(latestReadingHeatmapForPaper(selectedPaper?.id));
   }, [selectedPaper?.id]);
 
@@ -518,6 +538,7 @@ export default function LiteraturePaperDetails({
     onSavePaper({
       paperId: selectedPaper.id,
       title: draft.title.trim() || selectedPaper.title,
+      titleZh: inputValue(draft.titleZh),
       authors: splitList(draft.authors),
       year: inputValue(draft.year),
       publication: inputValue(draft.publication),
@@ -544,6 +565,10 @@ export default function LiteraturePaperDetails({
   };
 
   const hasPdf = selectedPaper ? Boolean(paperPdfPath(selectedPaper)) : false;
+  const translatedPdf = selectedPaper ? paperTranslatedPdfAttachment(selectedPaper) : null;
+  const titleDisplay = selectedPaper
+    ? resolvePaperTitleDisplay(selectedPaper, titleDisplayMode)
+    : null;
   const activeTaskKind: LiteraturePaperTaskKind | null =
     actionState?.status === 'running' ? actionState.kind : null;
   const pipelineBusy = isPaperPipelineBusy(actionState);
@@ -590,7 +615,12 @@ export default function LiteraturePaperDetails({
           <div className="space-y-5">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <h2 className="text-lg font-semibold leading-7">{selectedPaper.title}</h2>
+                <h2 className="text-lg font-semibold leading-7">{titleDisplay?.primary}</h2>
+                {titleDisplay?.secondary ? (
+                  <p className="mt-1 text-sm leading-6 text-slate-600 dark:text-[#c3c3c3]">
+                    {titleDisplay.secondary}
+                  </p>
+                ) : null}
                 <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-[#a0a0a0]">
                   {paperAuthors(selectedPaper, locale)}
                 </p>
@@ -693,6 +723,61 @@ export default function LiteraturePaperDetails({
                     title={l('概览生成', 'Generate Overview')}
                     description={l('生成研究问题、方法和结论概览', 'Generate questions, methods, and findings')}
                   />
+
+                  {translatedPdf ? (
+                    <div className="flex items-center justify-between gap-2 rounded-xl border border-emerald-300/55 bg-emerald-50/70 px-3 py-2.5 dark:border-emerald-300/20 dark:bg-emerald-300/10">
+                      <div className="flex min-w-0 items-center gap-2.5">
+                        <FileText className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-300" strokeWidth={1.9} />
+                        <div className="min-w-0">
+                          <div className="text-xs font-semibold text-emerald-800 dark:text-emerald-100">
+                            {l('翻译版 PDF 已附加', 'Translated PDF attached')}
+                          </div>
+                          <div
+                            className="truncate text-[11px] text-emerald-700/80 dark:text-emerald-200/70"
+                            title={translatedPdf.path}
+                          >
+                            {translatedPdf.attachment.fileName}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-1">
+                        <button
+                          type="button"
+                          disabled={saving || !onAttachTranslatedPdf}
+                          onClick={() => onAttachTranslatedPdf?.(selectedPaper)}
+                          className="rounded-lg p-1.5 text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-emerald-200 dark:hover:bg-emerald-300/15"
+                          title={l('替换翻译版 PDF', 'Replace translated PDF')}
+                          aria-label={l('替换翻译版 PDF', 'Replace translated PDF')}
+                        >
+                          <Replace className="h-3.5 w-3.5" strokeWidth={1.9} />
+                        </button>
+                        <button
+                          type="button"
+                          disabled={saving || !onRemoveTranslatedPdf}
+                          onClick={() => onRemoveTranslatedPdf?.(selectedPaper)}
+                          className="rounded-lg p-1.5 text-rose-600 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-rose-300 dark:hover:bg-rose-300/15"
+                          title={l('移除翻译版 PDF', 'Remove translated PDF')}
+                          aria-label={l('移除翻译版 PDF', 'Remove translated PDF')}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" strokeWidth={1.9} />
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <ProcessingActionTile
+                      dataTour="attach-translated-pdf"
+                      disabled={!hasPdf || saving || !onAttachTranslatedPdf}
+                      active={false}
+                      busy={false}
+                      icon={<FilePlus2 className="h-4 w-4" strokeWidth={1.9} />}
+                      onClick={() => onAttachTranslatedPdf?.(selectedPaper)}
+                      title={l('附加翻译版 PDF', 'Attach Translated PDF')}
+                      description={l(
+                        '关联 retainpdf 翻译的 PDF，用于逐页对照阅读',
+                        'Link a retainpdf-translated PDF for page-aligned compare reading',
+                      )}
+                    />
+                  )}
                 </div>
 
                 {actionState ? (
@@ -712,6 +797,42 @@ export default function LiteraturePaperDetails({
                     onChange={(value) => patchDraft({ title: value })}
                   />
                 </label>
+
+                <div>
+                  <span className="flex items-center justify-between gap-2">
+                    <FieldLabel>{l('中文标题', 'Chinese Title')}</FieldLabel>
+                    {onTranslatePaperTitle ? (
+                      <button
+                        type="button"
+                        disabled={saving || titleTranslating || !draft.title.trim()}
+                        onClick={() => {
+                          if (!selectedPaper || !onTranslatePaperTitle) {
+                            return;
+                          }
+
+                          setTitleTranslating(true);
+                          void onTranslatePaperTitle(selectedPaper)
+                            .then((translated) => {
+                              if (translated) {
+                                patchDraft({ titleZh: translated });
+                              }
+                            })
+                            .finally(() => setTitleTranslating(false));
+                        }}
+                        className="mb-1 inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium text-indigo-600 transition hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-indigo-300 dark:hover:bg-indigo-300/10"
+                        title={l('使用翻译模型生成中文标题', 'Generate Chinese title with the translation model')}
+                      >
+                        <Languages className="h-3 w-3" strokeWidth={1.9} />
+                        {titleTranslating ? l('翻译中…', 'Translating…') : l('AI 翻译标题', 'Translate Title')}
+                      </button>
+                    ) : null}
+                  </span>
+                  <TextInput
+                    value={draft.titleZh}
+                    placeholder={l('留空则仅显示原文标题', 'Leave empty to show the original title only')}
+                    onChange={(value) => patchDraft({ titleZh: value })}
+                  />
+                </div>
 
                 <label>
                   <FieldLabel>{l('作者', 'Authors')}</FieldLabel>

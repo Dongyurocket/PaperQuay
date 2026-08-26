@@ -30,6 +30,11 @@ import {
   paperAuthors,
   paperPdfPath,
 } from '../literatureUi';
+import {
+  persistPaperTitleDisplayMode,
+  resolvePaperTitleDisplay,
+  type PaperTitleDisplayMode,
+} from '../titleDisplay';
 import LiteratureReadingHeatmapPreview from './LiteratureReadingHeatmapPreview';
 
 export interface LiteraturePaperListStatus {
@@ -52,10 +57,12 @@ interface LiteraturePaperListProps {
   searchQuery: string;
   sortBy: LiteraturePaperListSortBy;
   sortDirection: LiteraturePaperListSortDirection;
+  titleDisplayMode: PaperTitleDisplayMode;
   statusMessage: string;
   error: string;
   onSearchQueryChange: (value: string) => void;
   onSortChange: (sortBy: LiteraturePaperListSortBy, sortDirection: LiteraturePaperListSortDirection) => void;
+  onTitleDisplayModeChange: (mode: PaperTitleDisplayMode) => void;
   onImportPdfs: () => void;
   onRefresh: () => void;
   onSelectPaper: (paperId: string) => void;
@@ -88,10 +95,12 @@ export default function LiteraturePaperList({
   searchQuery,
   sortBy,
   sortDirection,
+  titleDisplayMode,
   statusMessage,
   error,
   onSearchQueryChange,
   onSortChange,
+  onTitleDisplayModeChange,
   onImportPdfs,
   onRefresh,
   onSelectPaper,
@@ -456,6 +465,21 @@ export default function LiteraturePaperList({
             <option value="author:asc">{l('作者 A-Z', 'Author A-Z')}</option>
           </select>
 
+          <select
+            value={titleDisplayMode}
+            onChange={(event) => {
+              const nextMode = event.target.value as PaperTitleDisplayMode;
+              onTitleDisplayModeChange(nextMode);
+              persistPaperTitleDisplayMode(nextMode);
+            }}
+            className="pq-input h-9 w-[132px] px-3 text-sm"
+            title={l('标题语言显示', 'Title language display')}
+          >
+            <option value="both">{l('中英标题', 'Bilingual Titles')}</option>
+            <option value="zh">{l('中文标题', 'Chinese Titles')}</option>
+            <option value="original">{l('原文标题', 'Original Titles')}</option>
+          </select>
+
           <button
             type="button"
             onClick={onImportPdfs}
@@ -511,6 +535,7 @@ export default function LiteraturePaperList({
           <div className="space-y-2">
             {papers.map((paper) => {
               const active = selectedPaper?.id === paper.id;
+              const titleDisplay = resolvePaperTitleDisplay(paper, titleDisplayMode);
               const pdfPath = paperPdfPath(paper, storageDir);
               const showBeforeIndicator =
                 dropIndicator?.paperId === paper.id && dropIndicator.placement === 'before';
@@ -598,9 +623,14 @@ export default function LiteraturePaperList({
                           <Star className="h-3.5 w-3.5 shrink-0 text-amber-500 dark:text-amber-200" fill="currentColor" strokeWidth={1.8} />
                         ) : null}
                         <span className="block truncate text-sm font-semibold">
-                          {paper.title}
+                          {titleDisplay.primary}
                         </span>
                       </span>
+                      {titleDisplay.secondary ? (
+                        <span className="mt-0.5 block truncate text-xs text-slate-500 dark:text-[#a0a0a0]">
+                          {titleDisplay.secondary}
+                        </span>
+                      ) : null}
                       <span className="mt-1 block truncate text-xs text-slate-500 dark:text-[#a0a0a0]">
                         {paperAuthors(paper, locale)}
                       </span>

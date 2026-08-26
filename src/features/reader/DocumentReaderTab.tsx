@@ -225,6 +225,8 @@ interface DocumentReaderTabProps {
   onLibraryPreviewSync: (payload: LibraryPreviewSyncPayload) => void;
   onOpenPreferences: () => void;
   onOpenStandalonePdf: () => void;
+  /** 为当前文档附加翻译版 PDF（仅 native-library 文档有效） */
+  onAttachTranslatedPdf?: (document: WorkspaceItem) => Promise<boolean>;
   onBridgeStateChange: (tabId: string, bridge: ReaderTabBridgeState | null) => void;
   onTranslationDisplayModeChange: (mode: TranslationDisplayMode) => void;
   translationTargetLanguageLabel: string;
@@ -289,6 +291,7 @@ function DocumentReaderTab({
   onLibraryPreviewSync,
   onOpenPreferences,
   onOpenStandalonePdf,
+  onAttachTranslatedPdf,
   onBridgeStateChange,
   onTranslationDisplayModeChange,
   translationTargetLanguageLabel,
@@ -367,6 +370,7 @@ function DocumentReaderTab({
   const lRef = useRef(l);
 
   const [currentDocument, setCurrentDocument] = useState<WorkspaceItem>(document);
+  const [attachTranslatedPdfBusy, setAttachTranslatedPdfBusy] = useState(false);
   const [pdfSource, setPdfSource] = useState<PdfSource>(null);
   const [pdfData, setPdfData] = useState<Uint8Array | null>(null);
   const [pdfPath, setPdfPath] = useState('');
@@ -392,6 +396,31 @@ function DocumentReaderTab({
   const [paperSummaryError, setPaperSummaryError] = useState('');
   const [paperSummarySourceKey, setPaperSummarySourceKey] = useState('');
   const [libraryOperation, setLibraryOperation] = useState<LiteraturePaperTaskState | null>(null);
+
+  // 文献库侧附加/移除翻译版 PDF 后，document prop 会更新；这里把该字段增量同步到本地文档状态，
+  // 使阅读中的 PDF 对照模式能即时感知。
+  useEffect(() => {
+    setCurrentDocument((current) =>
+      current.workspaceId === document.workspaceId &&
+      (current.translatedPdfPath ?? '') !== (document.translatedPdfPath ?? '')
+        ? { ...current, translatedPdfPath: document.translatedPdfPath }
+        : current,
+    );
+  }, [document.translatedPdfPath, document.workspaceId]);
+
+  const handleAttachTranslatedPdf = useCallback(async () => {
+    if (!onAttachTranslatedPdf || currentDocument.source !== 'native-library') {
+      return;
+    }
+
+    setAttachTranslatedPdfBusy(true);
+
+    try {
+      await onAttachTranslatedPdf(currentDocument);
+    } finally {
+      setAttachTranslatedPdfBusy(false);
+    }
+  }, [onAttachTranslatedPdf, currentDocument]);
   const [capturingScreenshot, setCapturingScreenshot] = useState(false);
   const [selectedExcerpt, setSelectedExcerpt] = useState<SelectedExcerpt | null>(null);
   const [pendingNoteAnchorInsert, setPendingNoteAnchorInsert] = useState<NoteAnchorInsertRequest | null>(null);
@@ -3850,6 +3879,8 @@ function DocumentReaderTab({
         onTranslationDisplayModeChange={onTranslationDisplayModeChange}
         onTextSelect={handleTextSelect}
         onOpenStandalonePdf={onOpenStandalonePdf}
+        onAttachTranslatedPdf={onAttachTranslatedPdf ? () => void handleAttachTranslatedPdf() : undefined}
+        attachTranslatedPdfBusy={attachTranslatedPdfBusy}
         onOpenMineruJson={() => void handleOpenMineruJson()}
         onCloudParse={() => void handleCloudParse()}
         onTranslateDocument={() => void handleTranslateDocument()}

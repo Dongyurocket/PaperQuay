@@ -17,7 +17,7 @@ import type {
   WorkspaceItem,
 } from '../../types/reader';
 import type { LiteraturePaper, LiteraturePaperTaskState } from '../../types/library';
-import { resolvePaperPdfAttachment } from '../../utils/libraryPaper';
+import { resolvePaperPdfAttachment, resolvePaperTranslatedPdfAttachment } from '../../utils/libraryPaper';
 import { getFileNameFromPath } from '../../utils/text';
 
 export const SETTINGS_STORAGE_KEY = 'paper-reader-settings-v3';
@@ -947,6 +947,7 @@ export function createNativeLibraryWorkspaceItem(
   }
 
   const { attachment, path } = resolvedAttachment;
+  const translatedPdfPath = resolvePaperTranslatedPdfAttachment(paper, { storageDir })?.path;
   const workspaceId = `native-library:${paper.id}`;
 
   return {
@@ -959,6 +960,7 @@ export function createNativeLibraryWorkspaceItem(
     itemType: 'pdf',
     attachmentFilename: attachment.fileName,
     localPdfPath: path,
+    translatedPdfPath: translatedPdfPath ?? undefined,
     source: 'native-library',
     workspaceId,
     groupKey: workspaceId,

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type RefObject } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { Minimize2 } from 'lucide-react';
 import BlockViewer from '../blocks/BlockViewer';
 import PdfViewer from '../pdf/PdfViewer';
@@ -6,6 +6,8 @@ import { useLocaleText } from '../../i18n/uiLanguage';
 import { ReaderWorkspaceOverview } from './readerWorkspaceOverview';
 import { ReaderWorkspaceHeader } from './readerWorkspaceHeader';
 import { FloatingAssistantPanel, SelectionQuickActions } from './readerWorkspaceOverlays';
+import TranslatedPdfPane from './TranslatedPdfPane';
+import { getFileNameFromPath } from '../../utils/text';
 import {
   formatReaderDocumentSource,
   type ReaderWorkspaceDocument,
@@ -152,6 +154,9 @@ interface ReaderWorkspaceProps {
   onTranslateSelectedExcerpt: () => void;
   onClearSelectedExcerpt: () => void;
   onPdfAnnotationSaveSuccess: (path: string) => void;
+  /** 阅读器内附加翻译版 PDF（仅 native-library 文档提供） */
+  onAttachTranslatedPdf?: () => void;
+  attachTranslatedPdfBusy?: boolean;
   aiConfigured: boolean;
   assistantDetached: boolean;
   leftSidebarCollapsed: boolean;
@@ -254,7 +259,9 @@ function ReadingStage(props: ReaderWorkspaceProps & { immersiveReading: boolean 
     onReadingViewModeChange,
     active,
   } = props;
-  const showDualPane = readingViewMode === 'dual-pane';
+  const pdfCompareMode = readingViewMode === 'pdf-compare';
+  const showDualPane = readingViewMode === 'dual-pane' || pdfCompareMode;
+  const translatedPdfPath = currentDocument.translatedPdfPath ?? '';
   const matchesCurrentDocument = useCallback(
     (paperId?: string | null) => {
       const value = paperId?.trim();
@@ -315,6 +322,108 @@ function ReadingStage(props: ReaderWorkspaceProps & { immersiveReading: boolean 
     [onTextSelect],
   );
 
+  // PDF 对照模式：左右两栏按页码（1-based）双向同步。
+  // 规则：只有页码发生变化才向对方发送同步信号，且目标页与对端当前页相同则跳过，天然避免回环。
+  const [pdfCompareSyncEnabled, setPdfCompareSyncEnabled] = useState(true);
+  const [leftPageSyncSignal, setLeftPageSyncSignal] = useState<{ context: string; page: number; token: number } | null>(null);
+  const [rightPageSyncSignal, setRightPageSyncSignal] = useState<{ context: string; page: number; token: number } | null>(null);
+  const lastLeftPageRef = useRef<number | null>(null);
+  const lastRightPageRef = useRef<number | null>(null);
+  const pendingRightPageSyncTokenRef = useRef<number | null>(null);
+  const pageSyncTokenRef = useRef(0);
+  const pdfCompareContextRef = useRef('');
+  const pdfCompareContextKey = [
+    currentDocument.workspaceId,
+    pdfScrollPosition?.sourceKey ?? '',
+    translatedPdfPath,
+  ].join('\u0000');
+  const leftPageSyncContext = pdfScrollPosition?.sourceKey ?? '';
+  const rightPageSyncContext = translatedPdfPath ? `local:${translatedPdfPath}` : '';
+
+  useEffect(() => {
+    const contextChanged = pdfCompareContextRef.current !== pdfCompareContextKey;
+    pdfCompareContextRef.current = pdfCompareContextKey;
+    const initialPage = contextChanged
+      ? pdfScrollPosition?.page ?? 1
+      : lastLeftPageRef.current ?? pdfScrollPosition?.page ?? 1;
+    lastLeftPageRef.current = initialPage;
+    lastRightPageRef.current = null;
+
+    setLeftPageSyncSignal(null);
+    setRightPageSyncSignal(null);
+
+    if (pdfCompareMode && pdfCompareSyncEnabled && rightPageSyncContext) {
+      pageSyncTokenRef.current += 1;
+      pendingRightPageSyncTokenRef.current = pageSyncTokenRef.current;
+      setRightPageSyncSignal({ context: rightPageSyncContext, page: initialPage, token: pageSyncTokenRef.current });
+    } else {
+      pendingRightPageSyncTokenRef.current = null;
+    }
+  }, [pdfCompareMode, pdfCompareContextKey, pdfCompareSyncEnabled, rightPageSyncContext]);
+
+  const handleLeftPdfPageChange = useCallback(
+    (page: number) => {
+      const pageChanged = page !== lastLeftPageRef.current;
+      lastLeftPageRef.current = page;
+
+      if (!pdfCompareMode || !pdfCompareSyncEnabled || !pageChanged || !rightPageSyncContext) {
+        return;
+      }
+
+      if (page === lastRightPageRef.current) {
+        return;
+      }
+
+      pageSyncTokenRef.current += 1;
+      pendingRightPageSyncTokenRef.current = pageSyncTokenRef.current;
+      setRightPageSyncSignal({ context: rightPageSyncContext, page, token: pageSyncTokenRef.current });
+    },
+    [pdfCompareMode, pdfCompareSyncEnabled, rightPageSyncContext],
+  );
+
+  const handleLeftPdfScrollPositionChange = useCallback(
+    (position: PdfScrollPosition) => {
+      onPdfScrollPositionChange(position);
+    },
+    [onPdfScrollPositionChange],
+  );
+
+  const handleTranslatedPdfPageSyncApplied = useCallback((page: number, token: number) => {
+    if (pendingRightPageSyncTokenRef.current !== token) {
+      return;
+    }
+
+    pendingRightPageSyncTokenRef.current = null;
+    lastRightPageRef.current = page;
+  }, []);
+
+  const handleTranslatedPdfPageChange = useCallback(
+    (page: number) => {
+      if (
+        !pdfCompareMode ||
+        !pdfCompareSyncEnabled ||
+        !leftPageSyncContext ||
+        pendingRightPageSyncTokenRef.current !== null
+      ) {
+        return;
+      }
+
+      if (page === lastRightPageRef.current) {
+        return;
+      }
+
+      lastRightPageRef.current = page;
+
+      if (page === lastLeftPageRef.current) {
+        return;
+      }
+
+      pageSyncTokenRef.current += 1;
+      setLeftPageSyncSignal({ context: leftPageSyncContext, page, token: pageSyncTokenRef.current });
+    },
+    [leftPageSyncContext, pdfCompareMode, pdfCompareSyncEnabled],
+  );
+
   return (
     <div data-tour="linked-reading" className="relative flex min-h-0 flex-1 overflow-hidden">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -329,6 +438,7 @@ function ReadingStage(props: ReaderWorkspaceProps & { immersiveReading: boolean 
               source={pdfSource}
               pdfData={pdfData}
               scrollPosition={pdfScrollPosition}
+              pageSyncSignal={leftPageSyncSignal}
               readingHeatmap={pdfReadingHeatmap}
               currentPdfName={currentPdfName}
               defaultSaveDirectory={pdfAnnotationSaveDirectory}
@@ -354,7 +464,8 @@ function ReadingStage(props: ReaderWorkspaceProps & { immersiveReading: boolean 
               blockClickOpensQuickActions={readingViewMode === 'pdf-only'}
               onAnnotationSelect={onSelectAnnotation}
               onTextSelect={handlePdfTextSelect}
-              onScrollPositionChange={onPdfScrollPositionChange}
+              onPageChange={handleLeftPdfPageChange}
+              onScrollPositionChange={handleLeftPdfScrollPositionChange}
               onReadingHeatmapChange={onPdfReadingHeatmapChange}
               onSaveSuccess={onPdfAnnotationSaveSuccess}
             />
@@ -378,7 +489,23 @@ function ReadingStage(props: ReaderWorkspaceProps & { immersiveReading: boolean 
               </div>
 
               <section data-tour="block-translation" className="min-h-0 min-w-0 flex-1 bg-[#f7f9fc] transition-all duration-300">
-                <BlockViewer
+                {pdfCompareMode ? (
+                  <TranslatedPdfPane
+                    translatedPdfPath={translatedPdfPath}
+                    fileName={translatedPdfPath ? getFileNameFromPath(translatedPdfPath) : ''}
+                    pageSyncSignal={rightPageSyncSignal}
+                    syncEnabled={pdfCompareSyncEnabled}
+                    onSyncEnabledChange={setPdfCompareSyncEnabled}
+                    onPageChange={handleTranslatedPdfPageChange}
+                    onPageSyncApplied={handleTranslatedPdfPageSyncApplied}
+                    onAttachTranslatedPdf={props.onAttachTranslatedPdf}
+                    attaching={props.attachTranslatedPdfBusy ?? false}
+                    active={active}
+                    smoothScroll={smoothScroll}
+                    softPageShadow={softPageShadow}
+                  />
+                ) : (
+                  <BlockViewer
                   blocks={blocks}
                   mineruPath={mineruPath}
                   translations={translations}
@@ -398,7 +525,8 @@ function ReadingStage(props: ReaderWorkspaceProps & { immersiveReading: boolean 
                   onRetranslateBlock={onRetranslateBlock}
                   onTranslationDisplayModeChange={props.onTranslationDisplayModeChange}
                   onTextSelect={handleBlockTextSelect}
-                />
+                  />
+                )}
               </section>
             </>
           ) : (
@@ -453,6 +581,10 @@ function ReaderWorkspace(props: ReaderWorkspaceProps) {
   } = props;
   const sourceLabel =
     formatReaderDocumentSource(l, currentDocument, selectedSectionTitle);
+  const pdfCompareAvailable = Boolean(
+    currentDocument.translatedPdfPath?.trim() ||
+    (currentDocument.source === 'native-library' && props.onAttachTranslatedPdf),
+  );
   const [immersiveReading, setImmersiveReading] = useState(false);
   const floatingAssistantChatProps = {
     sessions: props.qaSessions,
@@ -524,6 +656,7 @@ function ReaderWorkspace(props: ReaderWorkspaceProps) {
           availablePdfOptions={availablePdfOptions}
           workspaceStage={workspaceStage}
           readingViewMode={readingViewMode}
+          pdfCompareAvailable={pdfCompareAvailable}
           loading={loading}
           translating={translating}
           translationCancelling={translationCancelling}

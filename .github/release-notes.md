@@ -14,9 +14,9 @@ Download the native installer for your operating system from the Assets section 
 
 ## Highlights
 
-- Knowledge graph nodes no longer pile up and overlap in the center. The layout used to run while the graph workspace was still hidden (a zero-size container), compressing every node into a tiny area that was never recomputed. Layout now waits until the workspace is visible and re-runs when you switch to the Graph tab.
-- The global graph layout engine switches from the built-in cose layout to fcose with benchmarked parameters, spreading dense graphs apart faster and more evenly (about 20× faster on large graphs in headless benchmarks).
-- Typing in the Custom Relations panel no longer wipes the graph. Editing the relation label or description used to destroy and recreate the whole graph canvas, leaving it blank.
+- Bilingual paper titles: papers can carry a Chinese title alongside the original. Edit it manually or generate it with your translation model, and switch the library between bilingual, Chinese-only, and original-only display modes. Chinese titles are searchable.
+- Translated PDF attachments and PDF compare reading: attach a retainpdf-translated PDF to a local library paper and read it side by side with the original, with bidirectional page-by-page scroll sync that can be toggled off. Attach, replace, or remove the translated copy from either the library details panel or the reader itself.
+- Translated PDFs are included in WebDAV backups, and restores across devices or data directories now fix up attachment paths so the translated copy stays openable.
 
 ## Notes
 
@@ -41,9 +41,9 @@ PaperQuay 是一个开源 AI 论文工作台，覆盖文献管理、PDF 阅读�
 
 ## 本次更新
 
-- 修复知识图谱节点全部聚集在中心重叠的问题：此前布局在图谱页仍隐藏（容器尺寸为 0）时就已经执行完毕，所有节点被压缩在极小区域且不再重算；现在布局会等图谱页可见后才执行，切换到图谱页时自动补算。
-- 全局图谱布局引擎从内置 cose 更换为 fcose，参数经基准实验标定，密集图谱分布更均匀，大图布局速度提升约 20 倍。
-- 修复在“自定义关系”面板输入文字时图谱被销毁重建、画布变空白的问题。
+- 文献支持中英双语标题：可手工编辑中文标题，或用翻译模型一键生成；文献库支持“中英 / 中文 / 原文”三种显示模式，中文标题可搜索。
+- 支持为本地文献附加 retainpdf 翻译版 PDF，阅读器新增“PDF 对照”模式：左侧原版、右侧翻译版，按页码双向同步滚动，可随时关闭；文献库详情和阅读器内均可附加、替换、移除。
+- 翻译版 PDF 随 WebDAV 备份上传；跨设备或跨数据目录恢复时自动修正附件路径，保证恢复后可直接打开。
 
 ## 备注
 

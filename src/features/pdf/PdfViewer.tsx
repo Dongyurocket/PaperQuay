@@ -122,6 +122,10 @@ interface PdfViewerProps {
   source: PdfSource;
   pdfData: Uint8Array | null;
   scrollPosition?: PdfScrollPosition | null;
+  /** 页码同步信号：token 变化时滚动到指定页（1-based），context 必须匹配当前 PDF */
+  pageSyncSignal?: { context: string; page: number; token: number } | null;
+  /** 同步信号实际应用后的页码（已按目标 PDF 页数 clamp） */
+  onPageSyncApplied?: (page: number, token: number) => void;
   readingHeatmap?: PdfReadingHeatmap | null;
   currentPdfName?: string;
   defaultSaveDirectory?: string;
@@ -147,6 +151,8 @@ interface PdfViewerProps {
   blockClickOpensQuickActions?: boolean;
   onAnnotationSelect?: (annotationId: string) => void;
   onTextSelect?: (selection: TextSelectionPayload) => void;
+  /** 当前页变化通知（1-based），包括工具栏跳页和滚动换页 */
+  onPageChange?: (page: number) => void;
   onScrollPositionChange?: (position: PdfScrollPosition) => void;
   onReadingHeatmapChange?: (heatmap: PdfReadingHeatmap) => void;
   onSaveSuccess?: (path: string) => void;
@@ -209,6 +215,8 @@ function PdfViewer({
   source,
   pdfData,
   scrollPosition = null,
+  pageSyncSignal = null,
+  onPageSyncApplied,
   readingHeatmap = null,
   currentPdfName = '',
   defaultSaveDirectory = '',
@@ -234,6 +242,7 @@ function PdfViewer({
   blockClickOpensQuickActions = false,
   onAnnotationSelect,
   onTextSelect,
+  onPageChange,
   onScrollPositionChange,
   onReadingHeatmapChange,
   onSaveSuccess,
@@ -367,7 +376,11 @@ function PdfViewer({
 
   useEffect(() => {
     currentPageRef.current = currentPage;
-  }, [currentPage]);
+
+    if (pageCount > 0) {
+      onPageChange?.(currentPage);
+    }
+  }, [currentPage, onPageChange, pageCount]);
 
   useEffect(() => {
     hoveredBlockIdRef.current = hoveredBlockId;
@@ -888,22 +901,39 @@ function PdfViewer({
   }, [restoreSavedScroll, scrollPosition, sourceSignature]);
 
   const scrollToPage = useCallback(
-    (pageIndex: number) => {
+    (pageIndex: number, behavior?: ScrollBehavior) => {
       const pageHost = pageHosts[pageIndex]?.element;
+      const container = containerRef.current;
+      const scrollBehavior = behavior ?? (smoothScroll ? 'smooth' : 'auto');
 
-      if (pageHost) {
-        pageHost.scrollIntoView({
-          behavior: smoothScroll ? 'smooth' : 'auto',
-          block: 'start',
+      const appliedPage = pageIndex + 1;
+
+      try {
+        if (pdfViewerRef.current?.pdfDocument) {
+          pdfViewerRef.current.currentPageNumber = appliedPage;
+        }
+      } catch {
+        // PDF.js may reject page changes while pages are still being initialized.
+      }
+
+      if (pageHost && container) {
+        const maxTop = Math.max(0, container.scrollHeight - container.clientHeight);
+        const previousScrollBehavior = container.style.scrollBehavior;
+        container.style.scrollBehavior = 'auto';
+        container.scrollTo({
+          top: Math.min(Math.max(0, pageHost.offsetTop), maxTop),
+          left: container.scrollLeft,
+          behavior: 'auto',
         });
+        container.style.scrollBehavior = previousScrollBehavior;
       } else {
         pdfViewerRef.current?.scrollPageIntoView?.({
-          pageNumber: pageIndex + 1,
+          pageNumber: appliedPage,
         });
       }
 
-      currentPageRef.current = pageIndex + 1;
-      setNumberStateIfChanged(setCurrentPage, pageIndex + 1);
+      currentPageRef.current = appliedPage;
+      setNumberStateIfChanged(setCurrentPage, appliedPage);
 
       window.requestAnimationFrame(() => {
         syncPageHosts();
@@ -912,6 +942,50 @@ function PdfViewer({
     },
     [pageHosts, smoothScroll, syncPageHosts],
   );
+
+  const lastPageSyncTokenRef = useRef(0);
+
+  useEffect(() => {
+    if (!pageSyncSignal || pageSyncSignal.token === lastPageSyncTokenRef.current) {
+      return;
+    }
+
+    if (pageSyncSignal.context !== sourceSignature) {
+      return;
+    }
+
+    if (
+      !Number.isFinite(pageSyncSignal.page) ||
+      pageSyncSignal.page <= 0 ||
+      pageCount <= 0 ||
+      !pdfDocumentRef.current
+    ) {
+      return;
+    }
+
+    const targetIndex = Math.min(
+      Math.max(0, Math.round(pageSyncSignal.page) - 1),
+      pageCount - 1,
+    );
+
+    // Wait until PDF.js has materialized the target page. Consuming the token before
+    // pagesinit lets the subsequent saved-position restore overwrite the sync jump.
+    if (!pageHosts[targetIndex]?.element) {
+      return;
+    }
+
+    lastPageSyncTokenRef.current = pageSyncSignal.token;
+    const appliedPage = targetIndex + 1;
+
+    if (appliedPage === currentPageRef.current) {
+      onPageSyncApplied?.(appliedPage, pageSyncSignal.token);
+      return;
+    }
+
+    // 对照同步必须即时定位，避免平滑滚动途经中间页时反向触发另一栏。
+    scrollToPage(targetIndex, 'auto');
+    onPageSyncApplied?.(appliedPage, pageSyncSignal.token);
+  }, [onPageSyncApplied, pageSyncSignal, pageCount, pageHosts, scrollToPage, sourceSignature]);
 
   const scrollToReadingProgress = useCallback(
     (progressRatio: number) => {
@@ -1638,6 +1712,7 @@ function PdfViewer({
 
   useEffect(() => {
     setPageCount(0);
+    lastPageSyncTokenRef.current = 0;
     pageSizesRef.current = {};
     pendingPageSizeRequestsRef.current.clear();
     setPageSizes({});

@@ -10,6 +10,8 @@ export interface ReaderWorkspaceDocument {
   creators: string;
   year: string;
   source: string;
+  /** 文献库中附加的翻译版 PDF 路径（仅 native-library 文档可能有） */
+  translatedPdfPath?: string;
 }
 
 export type LocaleTextFn = (zh: string, en: string) => string;

@@ -17,7 +17,10 @@ import {
   extractTranslatableMarkdownFromMineruBlock,
 } from '../../services/mineru';
 import { resolveSummaryOutputLanguage } from '../../services/summarySource';
-import { translateBlocksOpenAICompatible } from '../../services/translation';
+import {
+  translateBlocksOpenAICompatible,
+  translateTextOpenAICompatible,
+} from '../../services/translation';
 import type {
   OpenAICompatibleModelListResult,
   OpenAICompatibleTestResult,
@@ -66,6 +69,7 @@ export interface UseReaderLibraryActionsResult {
   handleNativeLibraryGenerateSummary: (paper: LiteraturePaper) => void;
   handleNativeLibraryMineruParse: (paper: LiteraturePaper) => void;
   handleNativeLibraryTranslate: (paper: LiteraturePaper) => void;
+  handleNativeLibraryTranslatePaperTitle: (paper: LiteraturePaper) => Promise<string | null>;
   handleOpenNativeLibraryPaper: (paper: LiteraturePaper) => void;
   handleOpenStandalonePdf: () => Promise<void>;
   handleSelectMineruCacheDir: () => Promise<void>;
@@ -861,6 +865,72 @@ export function useReaderLibraryActions({
     [generateLibraryPreview, triggerNativeLibraryReaderAction],
   );
 
+  const handleNativeLibraryTranslatePaperTitle = useCallback(
+    async (paper: LiteraturePaper): Promise<string | null> => {
+      const sourceTitle = paper.title.trim();
+
+      if (!sourceTitle) {
+        return null;
+      }
+
+      if (!translationModelPreset?.apiKey.trim() || !translationModelPreset.baseUrl.trim()) {
+        setPreferredPreferencesSection('models');
+        setPreferencesOpen(true);
+        const message = l('请先配置可用的翻译模型', 'Configure an available translation model first');
+        setError(message);
+        setStatusMessage(message);
+        return null;
+      }
+
+      setError('');
+      setStatusMessage(
+        l(`正在翻译标题：${sourceTitle}`, `Translating title: ${sourceTitle}`),
+      );
+
+      try {
+        const translated = (
+          await translateTextOpenAICompatible({
+            baseUrl: translationModelPreset.baseUrl,
+            apiKey: translationModelPreset.apiKey.trim(),
+            model: translationModelPreset.model,
+            apiMode: translationModelPreset.apiMode,
+            sourceLanguage: settings.translationSourceLanguage,
+            targetLanguage: 'Simplified Chinese',
+            text: sourceTitle,
+          })
+        ).trim();
+
+        if (!translated) {
+          throw new Error(
+            l('翻译接口没有返回可用内容', 'The translation endpoint returned no usable content'),
+          );
+        }
+
+        setError('');
+        setStatusMessage(
+          l('标题翻译完成，确认后请保存文献信息。', 'Title translated. Save the paper to apply it.'),
+        );
+        return translated;
+      } catch (nextError) {
+        const message = nextError instanceof Error
+          ? nextError.message
+          : l('标题翻译失败', 'Failed to translate the title');
+        setError(message);
+        setStatusMessage(message);
+        return null;
+      }
+    },
+    [
+      l,
+      setError,
+      setPreferencesOpen,
+      setPreferredPreferencesSection,
+      setStatusMessage,
+      settings.translationSourceLanguage,
+      translationModelPreset,
+    ],
+  );
+
   const handleWindowMinimize = useCallback(() => {
     void appWindow.minimize().catch((nextError) => {
       const message = nextError instanceof Error ? nextError.message : '窗口最小化失败';
@@ -1087,6 +1157,7 @@ export function useReaderLibraryActions({
     handleNativeLibraryGenerateSummary,
     handleNativeLibraryMineruParse,
     handleNativeLibraryTranslate,
+    handleNativeLibraryTranslatePaperTitle,
     handleOpenNativeLibraryPaper,
     handleOpenStandalonePdf,
     handleSelectMineruCacheDir,

@@ -31,6 +31,16 @@ import type {
 } from '../src/types/library.ts';
 import type { MetadataLookupResult } from '../src/types/metadata.ts';
 import type { ZoteroLibraryItem } from '../src/types/reader.ts';
+import {
+  loadPaperTitleDisplayMode,
+  normalizePaperTitleDisplayMode,
+  persistPaperTitleDisplayMode,
+  resolvePaperTitleDisplay,
+} from '../src/features/literature/titleDisplay.ts';
+import {
+  paperTranslatedPdfPath,
+  resolvePaperTranslatedPdfAttachment,
+} from '../src/utils/libraryPaper.ts';
 
 function category(overrides: Partial<LiteratureCategory> & Pick<LiteratureCategory, 'id' | 'name'>): LiteratureCategory {
   return {
@@ -67,6 +77,7 @@ function paper(overrides: Partial<LiteraturePaper> & Pick<LiteraturePaper, 'id' 
   return {
     id: overrides.id,
     title: overrides.title,
+    titleZh: overrides.titleZh ?? null,
     year: overrides.year ?? null,
     publication: overrides.publication ?? null,
     doi: overrides.doi ?? null,
@@ -148,6 +159,70 @@ function metadata(overrides: Partial<MetadataLookupResult> = {}): MetadataLookup
   };
 }
 
+test('paper title display supports bilingual, Chinese-only, and original-only modes', () => {
+  const bilingual = paper({
+    id: 'p-title',
+    title: 'Retrieval-Augmented Generation',
+    titleZh: '检索增强生成',
+  });
+
+  assert.deepEqual(resolvePaperTitleDisplay(bilingual, 'both'), {
+    primary: '检索增强生成',
+    secondary: 'Retrieval-Augmented Generation',
+  });
+  assert.deepEqual(resolvePaperTitleDisplay(bilingual, 'zh'), {
+    primary: '检索增强生成',
+    secondary: '',
+  });
+  assert.deepEqual(resolvePaperTitleDisplay(bilingual, 'original'), {
+    primary: 'Retrieval-Augmented Generation',
+    secondary: '',
+  });
+  assert.deepEqual(
+    resolvePaperTitleDisplay(paper({ id: 'p-fallback', title: 'Original only' }), 'zh'),
+    { primary: 'Original only', secondary: '' },
+  );
+  assert.equal(normalizePaperTitleDisplayMode('invalid'), 'both');
+
+  let stored = '';
+  const storage = {
+    getItem: () => stored || null,
+    setItem: (_key: string, value: string) => {
+      stored = value;
+    },
+  };
+  persistPaperTitleDisplayMode('zh', storage);
+  assert.equal(loadPaperTitleDisplayMode(storage), 'zh');
+});
+
+test('translated PDF resolver selects the latest available translated attachment', () => {
+  const target = paper({
+    id: 'p-translated',
+    title: 'Original',
+    attachments: [
+      attachment({ id: 'primary', kind: 'pdf', relativePath: 'original.pdf', createdAt: 1 }),
+      attachment({ id: 'translated-old', kind: 'translated-pdf', relativePath: 'translated/old.pdf', createdAt: 2 }),
+      attachment({ id: 'translated-missing', kind: 'translated-pdf', relativePath: 'translated/missing.pdf', createdAt: 4, missing: true }),
+      attachment({ id: 'translated-new', kind: 'translated-pdf', relativePath: 'translated/new.pdf', createdAt: 3 }),
+    ],
+  });
+
+  const resolved = resolvePaperTranslatedPdfAttachment(target, { storageDir: 'D:/library' });
+  assert.equal(resolved?.attachment.id, 'translated-new');
+  assert.equal(resolved?.path, 'D:/library/translated/new.pdf');
+  assert.equal(paperTranslatedPdfPath(target, { storageDir: 'D:/library' }), 'D:/library/translated/new.pdf');
+  assert.equal(
+    resolvePaperTranslatedPdfAttachment(
+      paper({
+        id: 'p-missing',
+        title: 'Missing translated PDF',
+        attachments: [attachment({ kind: 'translated-pdf', missing: true })],
+      }),
+    ),
+    null,
+  );
+});
+
 test('metadata helpers normalize draft and Zotero input', () => {
   assert.deepEqual(splitAuthors('Alice; Bob，Carol；Dave'), ['Alice', 'Bob', 'Carol', 'Dave']);
   assert.deepEqual(metadataFromDraft(draft()), {
@@ -175,7 +250,7 @@ test('filterDemoPapers applies category and search filters', () => {
     settings: settings(),
     categories: [favorites, ai],
     papers: [
-      paper({ id: 'p1', title: 'Graph Retrieval', isFavorite: true, categoryIds: [ai.id] }),
+      paper({ id: 'p1', title: 'Graph Retrieval', titleZh: '图检索', isFavorite: true, categoryIds: [ai.id] }),
       paper({ id: 'p2', title: 'Visualization', categoryIds: [ai.id] }),
       paper({ id: 'p3', title: 'Other', isFavorite: true }),
     ],
@@ -184,6 +259,7 @@ test('filterDemoPapers applies category and search filters', () => {
 
   assert.deepEqual(filterDemoPapers(demo, favorites.id, '').map((item) => item.id), ['p1', 'p3']);
   assert.deepEqual(filterDemoPapers(demo, ai.id, 'retrieval').map((item) => item.id), ['p1']);
+  assert.deepEqual(filterDemoPapers(demo, ai.id, '图检索').map((item) => item.id), ['p1']);
 });
 
 test('reorderPaperList moves an item relative to the target', () => {

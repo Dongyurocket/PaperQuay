@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import {
+  BookCopy,
   BookOpen,
   ChevronDown,
   ChevronUp,
@@ -35,6 +36,7 @@ export interface ReaderWorkspaceHeaderProps {
   availablePdfOptions: PdfOption[];
   workspaceStage: WorkspaceStage;
   readingViewMode: ReaderViewMode;
+  pdfCompareAvailable: boolean;
   loading: boolean;
   translating: boolean;
   translationCancelling: boolean;
@@ -91,8 +93,12 @@ function HeaderStageTabs({
 
 function HeaderReadingModeTabs({
   readingViewMode,
+  pdfCompareAvailable,
   onReadingViewModeChange,
-}: Pick<ReaderWorkspaceHeaderProps, 'readingViewMode' | 'onReadingViewModeChange'>) {
+}: Pick<
+  ReaderWorkspaceHeaderProps,
+  'readingViewMode' | 'pdfCompareAvailable' | 'onReadingViewModeChange'
+>) {
   const l = useLocaleText();
 
   return (
@@ -100,19 +106,34 @@ function HeaderReadingModeTabs({
       {[
         { key: 'pdf-only' as const, label: l('PDF 阅读', 'PDF Only') },
         { key: 'dual-pane' as const, label: l('双栏对照', 'Dual Pane') },
+        {
+          key: 'pdf-compare' as const,
+          disabled: !pdfCompareAvailable,
+          label: pdfCompareAvailable
+            ? l('PDF 对照', 'PDF Compare')
+            : l('PDF 对照（本地文献可附加翻译版 PDF）', 'PDF Compare (available for local library papers)'),
+        },
       ].map((mode) => {
         const modeIcon =
           mode.key === 'pdf-only' ? (
             <FileText className="h-4 w-4" strokeWidth={1.8} />
+          ) : mode.key === 'pdf-compare' ? (
+            <BookCopy className="h-4 w-4" strokeWidth={1.8} />
           ) : (
             <Columns2 className="h-4 w-4" strokeWidth={1.8} />
           );
-        const shortLabel = mode.key === 'pdf-only' ? 'PDF' : l('\u53cc\u680f', 'Dual');
+        const shortLabel =
+          mode.key === 'pdf-only'
+            ? 'PDF'
+            : mode.key === 'pdf-compare'
+              ? l('对照', 'Compare')
+              : l('\u53cc\u680f', 'Dual');
 
         return (
           <button
             key={mode.key}
             type="button"
+            disabled={'disabled' in mode && mode.disabled === true}
             onClick={() => onReadingViewModeChange(mode.key)}
             title={mode.label}
             className={cn(
@@ -120,6 +141,7 @@ function HeaderReadingModeTabs({
               readingViewMode === mode.key
                 ? 'bg-white text-slate-900 shadow-[0_6px_18px_rgba(15,23,42,0.08)]'
                 : 'text-slate-500 hover:text-slate-800',
+              'disabled' in mode && mode.disabled === true && 'cursor-not-allowed opacity-45 hover:text-slate-500',
             )}
           >
             {modeIcon}
@@ -367,6 +389,7 @@ export function ReaderWorkspaceHeader({
   availablePdfOptions,
   workspaceStage,
   readingViewMode,
+  pdfCompareAvailable,
   loading,
   translating,
   translationCancelling,
@@ -433,6 +456,7 @@ export function ReaderWorkspaceHeader({
             {workspaceStage === 'reading' ? (
               <HeaderReadingModeTabs
                 readingViewMode={readingViewMode}
+                pdfCompareAvailable={pdfCompareAvailable}
                 onReadingViewModeChange={onReadingViewModeChange}
               />
             ) : null}

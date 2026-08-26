@@ -251,6 +251,50 @@ test('WebDAV backup uploads and restores library, notes, and RAG SQLite database
   }
 });
 
+test('WebDAV backup includes translated PDF attachments when PDF backup is enabled', async () => {
+  const context = createContext('paperquay-webdav-translated-pdf-');
+  const webdav = new MemoryWebdav();
+
+  try {
+    seedLibrary(context);
+    const library = context.store.load();
+    const paper = library.papers.find((item: { id: string }) => item.id === 'paper-webdav');
+    assert.ok(paper);
+
+    const translatedPath = path.join(library.settings.storageDir, 'seed-translated.pdf');
+    writeFileSync(translatedPath, '%PDF-1.7\ntranslated\n');
+    paper.attachments.push({
+      id: 'att-webdav-translated',
+      paperId: paper.id,
+      kind: 'translated-pdf',
+      originalPath: translatedPath,
+      storedPath: translatedPath,
+      relativePath: 'seed-translated.pdf',
+      fileName: 'seed-translated.pdf',
+      mimeType: 'application/pdf',
+      fileSize: readFileSync(translatedPath).length,
+      contentHash: null,
+      createdAt: 1002,
+      missing: false,
+    });
+    library.webdav.includePdfs = true;
+    context.store.save(library);
+
+    const result = await runBackup(context, webdav);
+    assert.equal(result.ok, true);
+
+    const manifest = JSON.parse((await webdav.getText(LATEST_MANIFEST_REMOTE_PATH)) ?? '{}');
+    const translatedObject = manifest.objects.find(
+      (object: { source?: string }) => object.source?.includes('attachment:att-webdav-translated:'),
+    );
+    assert.ok(translatedObject);
+    assert.equal(translatedObject.kind, 'pdf');
+    assert.equal(webdav.objects.get(translatedObject.remotePath)?.toString('utf8'), '%PDF-1.7\ntranslated\n');
+  } finally {
+    context.close();
+  }
+});
+
 test('WebDAV backup propagates latest manifest errors and does not leave snapshot directories', async () => {
   const context = createContext('paperquay-webdav-manifest-error-');
   const webdav = {
@@ -463,5 +507,65 @@ test('WebDAV backup result identifies the first failed remote object', async () 
     );
   } finally {
     context.close();
+  }
+});
+
+test('WebDAV restore rewrites translated PDF relativePath for cross-directory restore', async () => {
+  const source = createContext('paperquay-webdav-translated-source-');
+  const target = createContext('paperquay-webdav-translated-target-');
+  const webdav = new MemoryWebdav();
+
+  try {
+    seedLibrary(source);
+    const library = source.store.load();
+    const paper = library.papers.find((item: { id: string }) => item.id === 'paper-webdav');
+    assert.ok(paper);
+
+    const externalDir = mkdtempSync(path.join(tmpdir(), 'paperquay-translated-external-'));
+    const externalPath = path.join(externalDir, 'retainpdf-output.pdf');
+    writeFileSync(externalPath, '%PDF-1.7\ntranslated-cross-directory\n');
+    paper.attachments.push({
+      id: 'att-translated-external',
+      paperId: paper.id,
+      kind: 'translated-pdf',
+      originalPath: externalPath,
+      storedPath: externalPath,
+      relativePath: null,
+      fileName: 'retainpdf-output.pdf',
+      mimeType: 'application/pdf',
+      fileSize: readFileSync(externalPath).length,
+      contentHash: null,
+      createdAt: 1002,
+      missing: false,
+    });
+    library.webdav.includePdfs = true;
+    library.webdav.includeDerived = false;
+    source.store.save(library);
+
+    const backup = await runBackup(source, webdav);
+    assert.equal(backup.ok, true);
+
+    const restore = await runRestore(target, webdav);
+    assert.equal(restore.ok, true);
+
+    const restoredLibrary = target.store.load();
+    const restoredPaper = restoredLibrary.papers.find((item: { id: string }) => item.id === 'paper-webdav');
+    const restoredAttachment = restoredPaper?.attachments.find(
+      (item: { id: string }) => item.id === 'att-translated-external',
+    );
+    assert.ok(restoredAttachment);
+    assert.ok(restoredAttachment.storedPath.startsWith(restoredLibrary.settings.storageDir));
+    assert.equal(
+      restoredAttachment.relativePath,
+      path.relative(restoredLibrary.settings.storageDir, restoredAttachment.storedPath),
+    );
+    assert.equal(existsSync(restoredAttachment.storedPath), true);
+    assert.equal(
+      readFileSync(restoredAttachment.storedPath, 'utf8'),
+      '%PDF-1.7\ntranslated-cross-directory\n',
+    );
+  } finally {
+    source.close();
+    target.close();
   }
 });

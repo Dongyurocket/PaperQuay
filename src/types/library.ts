@@ -59,6 +59,7 @@ export interface LiteratureAttachment {
 export interface LiteraturePaper {
   id: string;
   title: string;
+  titleZh: string | null;
   year: string | null;
   publication: string | null;
   doi: string | null;
@@ -187,6 +188,17 @@ export interface RelocateAttachmentRequest {
   newPath: string;
 }
 
+export interface AddAttachmentRequest {
+  paperId: string;
+  sourcePath: string;
+  kind: 'translated-pdf';
+}
+
+export interface RemoveAttachmentRequest {
+  attachmentId: string;
+  deleteFile?: boolean;
+}
+
 export interface AssignPaperCategoryRequest {
   paperId: string;
   categoryId: string;
@@ -195,6 +207,7 @@ export interface AssignPaperCategoryRequest {
 export interface UpdatePaperRequest {
   paperId: string;
   title?: string | null;
+  titleZh?: string | null;
   year?: string | null;
   publication?: string | null;
   doi?: string | null;

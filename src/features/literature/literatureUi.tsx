@@ -5,6 +5,10 @@ import type {
 } from '../../types/library';
 import type { UiLanguage } from '../../types/reader';
 import { paperPdfPath as resolveLibraryPaperPdfPath } from '../../utils/libraryPaper';
+import {
+  resolvePaperTranslatedPdfAttachment,
+  type ResolvedPaperPdfAttachment,
+} from '../../utils/libraryPaper';
 
 export interface FlatLiteratureCategory extends LiteratureCategory {
   depth: number;
@@ -91,4 +95,11 @@ export function paperAuthors(paper: LiteraturePaper, locale: UiLanguage = 'zh-CN
 
 export function paperPdfPath(paper: LiteraturePaper, storageDir?: string | null): string | null {
   return resolveLibraryPaperPdfPath(paper, { storageDir });
+}
+
+export function paperTranslatedPdfAttachment(
+  paper: LiteraturePaper,
+  storageDir?: string | null,
+): ResolvedPaperPdfAttachment | null {
+  return resolvePaperTranslatedPdfAttachment(paper, { storageDir });
 }

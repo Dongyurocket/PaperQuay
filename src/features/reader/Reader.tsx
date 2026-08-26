@@ -16,8 +16,11 @@ import {
   type OpenLibraryPaperEventDetail,
   type OpenPreferencesEventDetail,
 } from '../../app/appEvents';
-import { selectDirectory } from '../../services/desktop';
-import { listLibraryPapers } from '../../services/library';
+import { selectDirectory, selectLocalPdfSource } from '../../services/desktop';
+import {
+  addLibraryAttachment,
+  listLibraryPapers,
+} from '../../services/library';
 import { AppLocaleProvider } from '../../i18n/uiLanguage';
 import { getHomeTabTitle, HOME_TAB_ID, type ReaderTab, useTabsStore } from '../../stores/useTabsStore';
 import {
@@ -29,6 +32,7 @@ import type {
   LiteraturePaperTaskKind,
   LiteraturePaperTaskState,
 } from '../../types/library';
+import { ATTACHMENT_KIND_TRANSLATED_PDF } from '../../utils/libraryPaper';
 import type { Note } from '../../types/notes';
 import type {
   AssistantPanelKey,
@@ -42,7 +46,13 @@ import type {
 import DocumentReaderTab from './DocumentReaderTab';
 import { AssistantSidebar } from './AssistantSidebar';
 import LiteratureLibraryView from '../literature/LiteratureLibraryView';
-import { emitLibraryMetadataEnrichRequest } from '../literature/libraryEvents';
+import {
+  emitLibraryMetadataEnrichRequest,
+  emitNativePaperUpdated,
+  NATIVE_PAPER_UPDATED_EVENT,
+  type NativePaperUpdatedEventDetail,
+} from '../literature/libraryEvents';
+import { readPdfPageCount } from '../literature/pdfPageCount';
 import ReaderPreferencesWindow from './ReaderPreferencesWindow';
 import { useReaderLibraryActions } from './useReaderLibraryActions';
 import { useReaderLibraryPreview } from './useReaderLibraryPreview';
@@ -437,6 +447,7 @@ function Reader({ workspaceActive = true }: ReaderProps) {
     handleNativeLibraryGenerateSummary,
     handleNativeLibraryMineruParse,
     handleNativeLibraryTranslate,
+    handleNativeLibraryTranslatePaperTitle,
     handleOpenNativeLibraryPaper,
     handleOpenStandalonePdf,
     handleSelectMineruCacheDir,
@@ -721,6 +732,94 @@ function Reader({ workspaceActive = true }: ReaderProps) {
     ],
   );
 
+  // 阅读器内为当前文献附加翻译版 PDF（retainpdf 输出），附加后同步更新打开的文档与文献库视图
+  const handleReaderAttachTranslatedPdf = useCallback(
+    async (item: WorkspaceItem): Promise<boolean> => {
+      if (item.source !== 'native-library') {
+        return false;
+      }
+
+      setError('');
+
+      try {
+        const source = await selectLocalPdfSource();
+        const sourcePath = source?.kind === 'local-path' ? source.path : '';
+
+        if (!sourcePath) {
+          return false;
+        }
+
+        // retainpdf 翻译版应与原版页码一一对应；页数不一致时给出警告但允许继续
+        const [originalPages, translatedPages] = await Promise.all([
+          item.localPdfPath ? readPdfPageCount(item.localPdfPath) : Promise.resolve(null),
+          readPdfPageCount(sourcePath),
+        ]);
+
+        if (originalPages && translatedPages && originalPages !== translatedPages) {
+          const proceed = window.confirm(l(
+            `翻译版 PDF 页数（${translatedPages} 页）与原版（${originalPages} 页）不一致，对照阅读时页码可能错位。仍要附加吗？`,
+            `The translated PDF has ${translatedPages} pages, but the original has ${originalPages}. Page alignment in compare mode may be off. Attach anyway?`,
+          ));
+
+          if (!proceed) {
+            return false;
+          }
+        }
+
+        const updatedPaper = await addLibraryAttachment({
+          paperId: item.itemKey,
+          sourcePath,
+          kind: ATTACHMENT_KIND_TRANSLATED_PDF,
+        });
+
+        const refreshedItem = createNativeLibraryWorkspaceItem(updatedPaper, librarySettings?.storageDir);
+
+        if (refreshedItem) {
+          handleWorkspaceItemResolved(refreshedItem);
+        }
+
+        emitNativePaperUpdated(updatedPaper);
+        setError('');
+        setStatusMessage(l('已附加翻译版 PDF，可在阅读视图中启用 PDF 对照', 'Translated PDF attached. Enable PDF Compare in the reading view.'));
+        return true;
+      } catch (nextError) {
+        const message = nextError instanceof Error
+          ? nextError.message
+          : l('附加翻译版 PDF 失败', 'Failed to attach the translated PDF');
+        setError(message);
+        setStatusMessage(message);
+        return false;
+      }
+    },
+    [
+      l,
+      librarySettings?.storageDir,
+      handleWorkspaceItemResolved,
+      setError,
+      setStatusMessage,
+    ],
+  );
+
+  // 文献库视图中附加/移除翻译版 PDF 后，同步更新已打开的阅读标签页文档
+  useEffect(() => {
+    const handleNativePaperUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<NativePaperUpdatedEventDetail>).detail;
+
+      if (!detail?.paper) {
+        return;
+      }
+
+      const refreshedItem = createNativeLibraryWorkspaceItem(detail.paper, librarySettings?.storageDir);
+
+      if (refreshedItem) {
+        handleWorkspaceItemResolved(refreshedItem);
+      }
+    };
+
+    window.addEventListener(NATIVE_PAPER_UPDATED_EVENT, handleNativePaperUpdated);
+    return () => window.removeEventListener(NATIVE_PAPER_UPDATED_EVENT, handleNativePaperUpdated);
+  }, [handleWorkspaceItemResolved, librarySettings?.storageDir]);
+
   useEffect(() => {
     if (!configHydrated) {
       return undefined;
@@ -800,6 +899,7 @@ function Reader({ workspaceActive = true }: ReaderProps) {
                   showReadingHeatmap={settings.showLibraryReadingHeatmap}
                   onRunMineruParse={handleNativeLibraryMineruParse}
                   onTranslatePaper={handleNativeLibraryTranslate}
+                  onTranslatePaperTitle={handleNativeLibraryTranslatePaperTitle}
                   onGenerateSummary={handleNativeLibraryGenerateSummary}
                   paperActionStates={nativePaperActionStates}
                 />
@@ -833,6 +933,7 @@ function Reader({ workspaceActive = true }: ReaderProps) {
                     onLibraryPreviewSync={handleLibraryPreviewSync}
                     onOpenPreferences={handleOpenPreferences}
                     onOpenStandalonePdf={handleReaderOpenStandalonePdf}
+                    onAttachTranslatedPdf={handleReaderAttachTranslatedPdf}
                     onBridgeStateChange={handleBridgeStateChange}
                     onTranslationDisplayModeChange={handleReaderTranslationDisplayModeChange}
                     translationTargetLanguageLabel={translationTargetLanguageLabel}

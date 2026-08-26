@@ -11,6 +11,7 @@ import {
   upsertRecentPdfScrollPosition,
 } from '../src/features/reader/documentReaderHistory.ts';
 import { aggregateReadingTimeChartBins } from '../src/features/literature/readingTimeChartUtils.ts';
+import { loadPaperHistoryMap } from '../src/utils/paperHistory.ts';
 import type { PdfReadingHeatmap, PdfScrollPosition } from '../src/types/reader.ts';
 import type { DocumentChatSession, PaperHistoryRecord } from '../src/types/reader.ts';
 
@@ -35,6 +36,45 @@ function heatmap(overrides: Partial<PdfReadingHeatmap> = {}): PdfReadingHeatmap 
     ...overrides,
   };
 }
+
+test('paper history preserves PDF compare mode', () => {
+  const originalLocalStorage = globalThis.localStorage;
+  const storedHistory = JSON.stringify({
+    'native-library:paper-compare': {
+      workspaceId: 'native-library:paper-compare',
+      lastOpenedAt: 10,
+      readingViewMode: 'pdf-compare',
+      qaSessions: [],
+      annotations: [],
+      pdfScrollPositions: {},
+      pdfReadingHeatmaps: {},
+    },
+  });
+
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    value: {
+      getItem: () => storedHistory,
+      setItem: () => undefined,
+    },
+  });
+
+  try {
+    assert.equal(
+      loadPaperHistoryMap()['native-library:paper-compare']?.readingViewMode,
+      'pdf-compare',
+    );
+  } finally {
+    if (originalLocalStorage) {
+      Object.defineProperty(globalThis, 'localStorage', {
+        configurable: true,
+        value: originalLocalStorage,
+      });
+    } else {
+      delete (globalThis as { localStorage?: Storage }).localStorage;
+    }
+  }
+});
 
 test('arePdfScrollPositionsEquivalent ignores tiny scroll jitter', () => {
   const existing = scrollPosition({

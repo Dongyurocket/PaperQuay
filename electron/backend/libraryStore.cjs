@@ -200,6 +200,7 @@ function paperMatches(paper, request, library) {
 
   const haystack = [
     paper.title,
+    paper.titleZh,
     paper.year,
     paper.publication,
     paper.doi,

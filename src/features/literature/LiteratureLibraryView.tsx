@@ -15,6 +15,7 @@ import { localPathExists } from '../../services/desktop';
 import { lookupLiteratureMetadata } from '../../services/metadata';
 import { extractLocalPdfMetadataPreview } from '../../services/pdfMetadata';
 import {
+  addLibraryAttachment,
   assignPaperToLibraryCategory,
   createLibraryCategory,
   deleteLibraryPaper,
@@ -25,6 +26,7 @@ import {
   listLibraryCategories,
   listLibraryPapers,
   moveLibraryCategory,
+  removeLibraryAttachment,
   reorderLibraryPapers,
   selectLibraryPdfFiles,
   updateLibraryPaper,
@@ -64,17 +66,26 @@ import LiteraturePaperDetails from './components/LiteraturePaperDetails';
 import LiteraturePaperList, {
   type LiteraturePaperListStatus,
 } from './components/LiteraturePaperList';
-import { flattenCategories, paperPdfPath } from './literatureUi';
+import { flattenCategories, paperPdfPath, paperTranslatedPdfAttachment } from './literatureUi';
+import { readPdfPageCount } from './pdfPageCount';
+import {
+  loadPaperTitleDisplayMode,
+  type PaperTitleDisplayMode,
+} from './titleDisplay';
+import { ATTACHMENT_KIND_TRANSLATED_PDF } from '../../utils/libraryPaper';
 import {
   filterZoteroItemsOutsideCollections,
   uniqueZoteroItems,
 } from './zoteroImport';
 import {
   emitLibrarySettingsUpdated,
+  emitNativePaperUpdated,
   LIBRARY_METADATA_ENRICH_REQUEST_EVENT,
   LIBRARY_SETTINGS_UPDATED_EVENT,
+  NATIVE_PAPER_UPDATED_EVENT,
   ZOTERO_IMPORT_REQUEST_EVENT,
   type LibrarySettingsUpdatedEventDetail,
+  type NativePaperUpdatedEventDetail,
   type ZoteroImportRequestEventDetail,
 } from './libraryEvents';
 import { useDesktopPdfDrop } from './useDesktopPdfDrop';
@@ -113,6 +124,7 @@ interface LiteratureLibraryViewProps {
   paperActionStates?: Record<string, LiteraturePaperTaskState | null | undefined>;
   onRunMineruParse?: (paper: LiteraturePaper) => void;
   onTranslatePaper?: (paper: LiteraturePaper) => void;
+  onTranslatePaperTitle?: (paper: LiteraturePaper) => Promise<string | null>;
   onGenerateSummary?: (paper: LiteraturePaper) => void;
 }
 
@@ -192,7 +204,8 @@ type CategoryNameDialogState =
 
 type LibraryConfirmDialogState =
   | { kind: 'delete-category'; category: LiteratureCategory }
-  | { kind: 'delete-paper'; paper: LiteraturePaper; deleteFiles: boolean };
+  | { kind: 'delete-paper'; paper: LiteraturePaper; deleteFiles: boolean }
+  | { kind: 'remove-translated-pdf'; paper: LiteraturePaper; attachmentId: string; fileName: string };
 
 type LiteraturePaperSortBy = NonNullable<ListPapersRequest['sortBy']>;
 type LiteraturePaperSortDirection = NonNullable<ListPapersRequest['sortDirection']>;
@@ -236,6 +249,7 @@ export default function LiteratureLibraryView({
   paperActionStates = {},
   onRunMineruParse,
   onTranslatePaper,
+  onTranslatePaperTitle,
   onGenerateSummary,
 }: LiteratureLibraryViewProps) {
   const l = useLocaleText();
@@ -273,6 +287,9 @@ export default function LiteratureLibraryView({
   const [paperDragOverCategoryId, setPaperDragOverCategoryId] = useState<string | null>(null);
   const [tagDialogPaper, setTagDialogPaper] = useState<LiteraturePaper | null>(null);
   const [paperSort, setPaperSort] = useState(loadPaperSortState);
+  const [titleDisplayMode, setTitleDisplayMode] = useState<PaperTitleDisplayMode>(
+    () => loadPaperTitleDisplayMode(),
+  );
   const [categorySidebarWidth, setCategorySidebarWidth] = useState(loadCategorySidebarWidth);
   const [categorySidebarResizing, setCategorySidebarResizing] = useState(false);
   const [detailsPanelWidth, setDetailsPanelWidth] = useState(loadDetailsPanelWidth);
@@ -723,12 +740,28 @@ export default function LiteratureLibraryView({
       );
     };
 
+    const handleNativePaperUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<NativePaperUpdatedEventDetail>).detail;
+
+      if (!detail?.paper?.id) {
+        return;
+      }
+
+      setPapers((current) =>
+        current.some((paper) => paper.id === detail.paper.id)
+          ? current.map((paper) => (paper.id === detail.paper.id ? detail.paper : paper))
+          : current,
+      );
+    };
+
     window.addEventListener('paperquay:native-summary-updated', handleNativeSummaryUpdated);
     window.addEventListener('paperquay:native-mineru-status-updated', handleNativeMineruStatusUpdated);
+    window.addEventListener(NATIVE_PAPER_UPDATED_EVENT, handleNativePaperUpdated);
 
     return () => {
       window.removeEventListener('paperquay:native-summary-updated', handleNativeSummaryUpdated);
       window.removeEventListener('paperquay:native-mineru-status-updated', handleNativeMineruStatusUpdated);
+      window.removeEventListener(NATIVE_PAPER_UPDATED_EVENT, handleNativePaperUpdated);
     };
   }, []);
 
@@ -1600,6 +1633,105 @@ export default function LiteratureLibraryView({
     });
   };
 
+  const handleAttachTranslatedPdf = async (paper: LiteraturePaper) => {
+    if (demoMode) {
+      showDemoLockedMessage();
+      return;
+    }
+
+    setError('');
+
+    try {
+      const paths = await selectLibraryPdfFiles();
+      const sourcePath = paths[0];
+
+      if (!sourcePath) {
+        return;
+      }
+
+      setPaperSaving(true);
+
+      // retainpdf 翻译版应与原版页码一一对应；页数不一致时给出警告但允许继续
+      const originalPath = paperPdfPath(paper, libraryStorageDir);
+      const [originalPages, translatedPages] = await Promise.all([
+        originalPath ? readPdfPageCount(originalPath) : Promise.resolve(null),
+        readPdfPageCount(sourcePath),
+      ]);
+
+      if (originalPages && translatedPages && originalPages !== translatedPages) {
+        const proceed = window.confirm(l(
+          `翻译版 PDF 页数（${translatedPages} 页）与原版（${originalPages} 页）不一致，对照阅读时页码可能错位。仍要附加吗？`,
+          `The translated PDF has ${translatedPages} pages, but the original has ${originalPages}. Page alignment in compare mode may be off. Attach anyway?`,
+        ));
+
+        if (!proceed) {
+          setStatusMessage(l('已取消附加翻译版 PDF', 'Translated PDF attachment cancelled'));
+          return;
+        }
+      }
+
+      const updatedPaper = await addLibraryAttachment({
+        paperId: paper.id,
+        sourcePath,
+        kind: ATTACHMENT_KIND_TRANSLATED_PDF,
+      });
+      await reloadAfterPaperUpdate(updatedPaper);
+      emitNativePaperUpdated(updatedPaper);
+      setStatusMessage(l('已附加翻译版 PDF', 'Translated PDF attached'));
+    } catch (nextError) {
+      const message = nextError instanceof Error
+        ? nextError.message
+        : l('附加翻译版 PDF 失败', 'Failed to attach the translated PDF');
+      setError(message);
+      setStatusMessage(message);
+    } finally {
+      setPaperSaving(false);
+    }
+  };
+
+  const handleRemoveTranslatedPdf = (paper: LiteraturePaper) => {
+    if (demoMode) {
+      showDemoLockedMessage();
+      return;
+    }
+
+    const attachment = paperTranslatedPdfAttachment(paper, libraryStorageDir)?.attachment;
+
+    if (!attachment) {
+      return;
+    }
+
+    setConfirmDialog({
+      kind: 'remove-translated-pdf',
+      paper,
+      attachmentId: attachment.id,
+      fileName: attachment.fileName,
+    });
+  };
+
+  const removeTranslatedPdfAfterConfirm = async (attachmentId: string) => {
+    setPaperSaving(true);
+    setDialogBusy(true);
+    setError('');
+
+    try {
+      const updatedPaper = await removeLibraryAttachment({ attachmentId, deleteFile: true });
+      await reloadAfterPaperUpdate(updatedPaper);
+      emitNativePaperUpdated(updatedPaper);
+      setStatusMessage(l('已移除翻译版 PDF', 'Translated PDF removed'));
+      setConfirmDialog(null);
+    } catch (nextError) {
+      const message = nextError instanceof Error
+        ? nextError.message
+        : l('移除翻译版 PDF 失败', 'Failed to remove the translated PDF');
+      setError(message);
+      setStatusMessage(message);
+    } finally {
+      setPaperSaving(false);
+      setDialogBusy(false);
+    }
+  };
+
   const deletePaperAfterConfirm = async (paper: LiteraturePaper, deleteFiles: boolean) => {
     setPaperSaving(true);
     setDialogBusy(true);
@@ -2008,10 +2140,12 @@ export default function LiteratureLibraryView({
           searchQuery={searchQuery}
           sortBy={paperSort.sortBy}
           sortDirection={paperSort.sortDirection}
+          titleDisplayMode={titleDisplayMode}
           statusMessage={statusMessage}
           error={error}
           onSearchQueryChange={setSearchQuery}
           onSortChange={(sortBy, sortDirection) => setPaperSort({ sortBy, sortDirection })}
+          onTitleDisplayModeChange={setTitleDisplayMode}
           onImportPdfs={() => void handleImportPdfs()}
           onRefresh={() => void refreshAll()}
           onSelectPaper={setSelectedPaperId}
@@ -2055,12 +2189,16 @@ export default function LiteratureLibraryView({
       <div data-tour="ai-summary" className="h-full min-h-0 overflow-hidden">
         <LiteraturePaperDetails
           selectedPaper={selectedPaper}
+          titleDisplayMode={titleDisplayMode}
           saving={paperSaving}
           onOpenPaper={onOpenPaper}
           onSavePaper={(request) => void handleSavePaper(request)}
           actionState={selectedPaper ? paperActionStates[selectedPaper.id] ?? null : null}
           onRunMineruParse={onRunMineruParse}
           onTranslatePaper={onTranslatePaper}
+          onTranslatePaperTitle={onTranslatePaperTitle}
+          onAttachTranslatedPdf={(paper) => void handleAttachTranslatedPdf(paper)}
+          onRemoveTranslatedPdf={handleRemoveTranslatedPdf}
           onGenerateSummary={onGenerateSummary}
         />
       </div>
@@ -2338,7 +2476,9 @@ export default function LiteratureLibraryView({
         title={
           confirmDialog?.kind === 'delete-category'
             ? l('删除分类', 'Delete Category')
-            : l('删除文献', 'Delete Paper')
+            : confirmDialog?.kind === 'remove-translated-pdf'
+              ? l('移除翻译版 PDF', 'Remove Translated PDF')
+              : l('删除文献', 'Delete Paper')
         }
         description={
           confirmDialog?.kind === 'delete-category'
@@ -2350,9 +2490,12 @@ export default function LiteratureLibraryView({
                   )
                 : l(`删除“${confirmDialog.paper.title}”的文献记录？磁盘上的 PDF 文件不会被删除。`, `Delete the paper record for "${confirmDialog.paper.title}"? PDF files on disk will not be deleted.`,
                   )
+              : confirmDialog?.kind === 'remove-translated-pdf'
+                ? l(`移除“${confirmDialog.paper.title}”的翻译版 PDF（${confirmDialog.fileName}）？文献库中的副本文件会被删除，原始 PDF 不受影响。`, `Remove the translated PDF (${confirmDialog.fileName}) for "${confirmDialog.paper.title}"? The stored copy will be deleted. The original PDF is not affected.`,
+                  )
               : ''
         }
-        confirmLabel={l('删除', 'Delete')}
+        confirmLabel={confirmDialog?.kind === 'remove-translated-pdf' ? l('移除', 'Remove') : l('删除', 'Delete')}
         cancelLabel={l('取消', 'Cancel')}
         busy={dialogBusy}
         danger
@@ -2368,6 +2511,11 @@ export default function LiteratureLibraryView({
 
           if (confirmDialog.kind === 'delete-category') {
             void deleteCategoryAfterConfirm(confirmDialog.category);
+            return;
+          }
+
+          if (confirmDialog.kind === 'remove-translated-pdf') {
+            void removeTranslatedPdfAfterConfirm(confirmDialog.attachmentId);
             return;
           }
 

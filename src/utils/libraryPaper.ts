@@ -3,6 +3,9 @@ import type {
   LiteraturePaper,
 } from '../types/library';
 
+/** 翻译版 PDF 附件的 kind 值（retainpdf 输出，页码与原版一一对应） */
+export const ATTACHMENT_KIND_TRANSLATED_PDF = 'translated-pdf';
+
 export interface ResolvedPaperPdfAttachment {
   attachment: LiteratureAttachment;
   path: string;
@@ -74,4 +77,34 @@ export function paperPdfPath(
   options: ResolvePaperPdfAttachmentOptions = {},
 ): string | null {
   return resolvePaperPdfAttachment(paper, options)?.path ?? null;
+}
+
+/**
+ * 解析文献的翻译版 PDF 附件（kind === 'translated-pdf'）。
+ * 同一篇文献只保留一份翻译版 PDF；如出现多份，取最新创建且未缺失的一份。
+ */
+export function resolvePaperTranslatedPdfAttachment(
+  paper: LiteraturePaper,
+  options: ResolvePaperPdfAttachmentOptions = {},
+): ResolvedPaperPdfAttachment | null {
+  const candidates = paper.attachments
+    .filter((attachment) => attachment.kind === ATTACHMENT_KIND_TRANSLATED_PDF && !attachment.missing)
+    .sort((left, right) => right.createdAt - left.createdAt);
+
+  for (const attachment of candidates) {
+    const path = resolveAttachmentPdfPath(attachment, options);
+
+    if (path) {
+      return { attachment, path };
+    }
+  }
+
+  return null;
+}
+
+export function paperTranslatedPdfPath(
+  paper: LiteraturePaper,
+  options: ResolvePaperPdfAttachmentOptions = {},
+): string | null {
+  return resolvePaperTranslatedPdfAttachment(paper, options)?.path ?? null;
 }

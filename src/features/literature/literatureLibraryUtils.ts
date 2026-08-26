@@ -70,6 +70,7 @@ export function filterDemoPapers(
 
     return [
       paper.title,
+      paper.titleZh ?? '',
       paper.publication ?? '',
       paper.abstractText ?? '',
       paper.authors.map((author) => author.name).join(' '),

@@ -30,6 +30,7 @@ function paper(overrides: Partial<LiteraturePaper> & Pick<LiteraturePaper, 'id' 
   return {
     id: overrides.id,
     title: overrides.title,
+    titleZh: overrides.titleZh ?? null,
     year: overrides.year ?? null,
     publication: overrides.publication ?? null,
     doi: overrides.doi ?? null,

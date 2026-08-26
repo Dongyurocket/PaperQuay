@@ -44,6 +44,7 @@ function createSchema(db) {
     CREATE TABLE IF NOT EXISTS papers (
       id TEXT PRIMARY KEY,
       title TEXT NOT NULL,
+      title_zh TEXT,
       year TEXT,
       publication TEXT,
       doi TEXT,
@@ -167,6 +168,16 @@ function createSchema(db) {
     CREATE INDEX IF NOT EXISTS idx_paper_references_paper_id ON paper_references(paper_id);
     CREATE INDEX IF NOT EXISTS idx_paper_references_doi ON paper_references(doi);
   `);
+
+  ensureColumn(db, 'papers', 'title_zh', 'TEXT');
+}
+
+function ensureColumn(db, tableName, columnName, columnDefinition) {
+  const columns = db.prepare(`PRAGMA table_info(${tableName})`).all();
+
+  if (columns.some((column) => column.name === columnName)) return;
+
+  db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${columnDefinition}`);
 }
 
 function tableHasPrimaryKey(db, tableName) {
@@ -311,6 +322,7 @@ function loadLibraryFromDb(db, appPaths, normalizeLibrary) {
     SELECT
       id,
       title,
+      title_zh AS titleZh,
       year,
       publication,
       doi,
@@ -526,6 +538,7 @@ function saveLibraryToDb(db, appPaths, normalizeLibrary, library) {
       INSERT INTO papers (
         id,
         title,
+        title_zh,
         year,
         publication,
         doi,
@@ -542,7 +555,7 @@ function saveLibraryToDb(db, appPaths, normalizeLibrary, library) {
         source,
         sort_order
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const insertKeyword = db.prepare(`
       INSERT INTO paper_keywords (paper_id, keyword, sort_order)
@@ -595,6 +608,7 @@ function saveLibraryToDb(db, appPaths, normalizeLibrary, library) {
       insertPaper.run(
         paper.id,
         paper.title,
+        paper.titleZh ?? null,
         paper.year ?? null,
         paper.publication ?? null,
         paper.doi ?? null,

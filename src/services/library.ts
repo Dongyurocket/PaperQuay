@@ -1,6 +1,7 @@
 import { invoke } from '../platform/electron/core';
 import { listen } from '../platform/electron/event';
 import type {
+  AddAttachmentRequest,
   AssignPaperCategoryRequest,
   CreateCategoryRequest,
   DeletePaperRequest,
@@ -18,6 +19,7 @@ import type {
   LiteraturePaper,
   MoveCategoryRequest,
   RelocateAttachmentRequest,
+  RemoveAttachmentRequest,
   ReorderPapersRequest,
   UpdatePaperRequest,
   UpdateCategoryRequest,
@@ -184,6 +186,26 @@ export async function relocateLibraryAttachment(
     return await invoke<LiteratureAttachment>('library_relocate_attachment', { request });
   } catch (error) {
     throw new Error(toErrorMessage(error, '重新定位 PDF 文件失败'));
+  }
+}
+
+export async function addLibraryAttachment(
+  request: AddAttachmentRequest,
+): Promise<LiteraturePaper> {
+  try {
+    return await invoke<LiteraturePaper>('library_add_attachment', { request });
+  } catch (error) {
+    throw new Error(toErrorMessage(error, '添加附件失败'));
+  }
+}
+
+export async function removeLibraryAttachment(
+  request: RemoveAttachmentRequest,
+): Promise<LiteraturePaper> {
+  try {
+    return await invoke<LiteraturePaper>('library_remove_attachment', { request });
+  } catch (error) {
+    throw new Error(toErrorMessage(error, '移除附件失败'));
   }
 }
 

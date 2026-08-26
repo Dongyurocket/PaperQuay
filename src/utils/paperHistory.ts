@@ -276,7 +276,9 @@ export function loadPaperHistoryMap(): Record<string, PaperHistoryRecord> {
         readingViewMode:
           legacyReadingViewMode === 'pdf-only' || legacyReadingViewMode === 'pdf-annotate'
             ? 'pdf-only'
-            : 'dual-pane',
+            : legacyReadingViewMode === 'pdf-compare'
+              ? 'pdf-compare'
+              : 'dual-pane',
         selectedQaSessionId,
         pdfScrollPositions: normalizePdfScrollPositions(
           (value as { pdfScrollPositions?: unknown }).pdfScrollPositions,

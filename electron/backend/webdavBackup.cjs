@@ -195,7 +195,10 @@ async function collectBackupSources(context, backupId) {
   if (library.webdav.includePdfs !== false) {
     for (const paper of library.papers ?? []) {
       for (const attachment of paper.attachments ?? []) {
-        if (attachment.kind !== 'pdf' || !attachment.storedPath) continue;
+        if (
+          (attachment.kind !== 'pdf' && attachment.kind !== 'translated-pdf') ||
+          !attachment.storedPath
+        ) continue;
 
         const exists = await pathExists(attachment.storedPath);
         const fileName = safeFileName(attachment.fileName || path.basename(attachment.storedPath));
@@ -666,13 +669,15 @@ function restorePdfTarget(library, object, appPaths) {
   const paper = source ? library.papers.find((item) => item.id === source.paperId) : null;
   const attachment = paper?.attachments?.find((item) => item.id === source.attachmentId);
   const preferred = attachment?.storedPath || source?.originalPath || '';
+  const target = preferred && isSubPath(storageDir, preferred)
+    ? preferred
+    : path.join(storageDir, `${source?.paperId || 'restored'}-${fileName}`);
 
-  if (preferred && isSubPath(storageDir, preferred)) return preferred;
-  return path.join(storageDir, `${source?.paperId || 'restored'}-${fileName}`);
+  return { storageDir, target };
 }
 
 async function restorePdfObject(webdav, library, object, appPaths) {
-  const target = restorePdfTarget(library, object, appPaths);
+  const { storageDir, target } = restorePdfTarget(library, object, appPaths);
   if (await localFileMatches(target, object)) {
     return { kind: 'pdf', remotePath: object.remotePath, localPath: target, byteSize: object.byteSize, checksum: object.checksum, status: 'skipped', message: 'local file already matches backup' };
   }
@@ -688,6 +693,10 @@ async function restorePdfObject(webdav, library, object, appPaths) {
   const attachment = paper?.attachments?.find((item) => item.id === source.attachmentId);
   if (attachment) {
     attachment.storedPath = target;
+    attachment.relativePath = isSubPath(storageDir, target)
+      ? path.relative(storageDir, target)
+      : null;
+    attachment.fileName = path.basename(target);
     attachment.fileSize = bytes.length;
     attachment.contentHash = object.checksum || hashBytes(bytes);
     attachment.missing = false;

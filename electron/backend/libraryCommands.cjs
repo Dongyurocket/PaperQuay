@@ -38,6 +38,18 @@ function isSubPath(root, candidate) {
   return Boolean(relative) && !relative.startsWith('..') && !path.isAbsolute(relative);
 }
 
+function canDeleteLibraryOwnedFile(library, attachment, storageDir) {
+  if (!attachment?.storedPath || !storageDir || !isSubPath(storageDir, attachment.storedPath)) {
+    return false;
+  }
+
+  return !library.papers.some((paper) =>
+    paper.attachments.some((other) =>
+      other.id !== attachment.id && isSamePath(other.storedPath, attachment.storedPath),
+    ),
+  );
+}
+
 function pathExists(filePath) {
   return fsp.access(filePath).then(() => true).catch(() => false);
 }
@@ -710,7 +722,7 @@ function createLibraryCommands(context) {
       const paper = library.papers.find((item) => item.id === request.paperId);
       if (!paper) throw new Error('Paper does not exist');
 
-      for (const key of ['title', 'year', 'publication', 'doi', 'url', 'abstractText', 'userNote', 'aiSummary', 'citation']) {
+      for (const key of ['title', 'titleZh', 'year', 'publication', 'doi', 'url', 'abstractText', 'userNote', 'aiSummary', 'citation']) {
         if (request[key] !== undefined) paper[key] = request[key];
       }
       if (request.keywords) paper.keywords = request.keywords.map(cleanString).filter(Boolean);
@@ -758,6 +770,103 @@ function createLibraryCommands(context) {
 
     async library_get_paper_references({ paperId }) {
       return store.loadReferences(cleanString(paperId));
+    },
+
+    async library_add_attachment({ request }) {
+      const library = store.load();
+      const paper = library.papers.find((item) => item.id === request.paperId);
+      if (!paper) throw new Error('Paper does not exist');
+
+      const sourcePath = cleanString(request.sourcePath);
+      const kind = cleanString(request.kind) || 'translated-pdf';
+      if (!sourcePath) throw new Error('Missing source path');
+      if (kind !== 'translated-pdf') throw new Error('Only translated-pdf attachments are supported');
+      if (!isPdf(sourcePath)) throw new Error('Only PDF files can be attached');
+      await ensureFile(sourcePath);
+
+      const storageDir = library.settings.storageDir || path.join(appPaths.dataDir, 'paperquay-data');
+      await fsp.mkdir(storageDir, { recursive: true });
+
+      const bytes = await fsp.readFile(sourcePath);
+      const contentHash = hashBytes(bytes);
+      const fileName = safeFileName(fileNameFromPath(sourcePath));
+      const attachmentId = id('att');
+      const storedPath = path.join(storageDir, `${paper.id}-translated-${attachmentId}-${fileName}`);
+      const replaced = paper.attachments.filter((attachment) => attachment.kind === kind);
+      const copiedToLibrary = !isSamePath(sourcePath, storedPath);
+
+      try {
+        if (copiedToLibrary) {
+          await fsp.copyFile(sourcePath, storedPath);
+        }
+        const stat = await fsp.stat(storedPath);
+
+        paper.attachments = paper.attachments.filter((attachment) => attachment.kind !== kind);
+        paper.attachments.push({
+          id: attachmentId,
+          paperId: paper.id,
+          kind,
+          originalPath: sourcePath,
+          storedPath,
+          relativePath: path.relative(storageDir, storedPath),
+          fileName,
+          mimeType: 'application/pdf',
+          fileSize: stat.size,
+          contentHash,
+          createdAt: now(),
+          missing: false,
+        });
+        paper.updatedAt = now();
+
+        await store.save(library);
+      } catch (error) {
+        if (copiedToLibrary) {
+          await fsp.rm(storedPath, { force: true }).catch(() => {});
+        }
+        throw error;
+      }
+
+      // Commit metadata before deleting superseded copies. A cleanup failure may leave an
+      // orphaned file, but it cannot leave the database pointing at a file removed early.
+      for (const attachment of replaced) {
+        if (
+          attachment.storedPath &&
+          !isSamePath(attachment.storedPath, storedPath) &&
+          canDeleteLibraryOwnedFile(library, attachment, storageDir)
+        ) {
+          await fsp.rm(attachment.storedPath, { force: true }).catch(() => {});
+        }
+      }
+
+      return paper;
+    },
+
+    async library_remove_attachment({ request }) {
+      const library = store.load();
+      const storageDir = library.settings.storageDir || path.join(appPaths.dataDir, 'paperquay-data');
+      const paper = library.papers.find((item) =>
+        item.attachments.some((attachment) => attachment.id === request.attachmentId),
+      );
+      if (!paper) throw new Error('Attachment does not exist');
+
+      const attachment = paper.attachments.find((item) => item.id === request.attachmentId);
+      if (attachment.kind !== 'translated-pdf') {
+        throw new Error('Only translated-pdf attachments can be removed');
+      }
+
+      paper.attachments = paper.attachments.filter((item) => item.id !== request.attachmentId);
+      paper.updatedAt = now();
+
+      await store.save(library);
+
+      if (
+        request.deleteFile !== false &&
+        canDeleteLibraryOwnedFile(library, attachment, storageDir)
+      ) {
+        await fsp.rm(attachment.storedPath, { force: true }).catch(() => {});
+      }
+
+      return paper;
     },
 
     async library_fetch_paper_references({ paperId, force = false }) {

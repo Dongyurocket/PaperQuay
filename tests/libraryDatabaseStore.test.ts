@@ -78,6 +78,7 @@ function legacyLibrary(appPaths: ReturnType<typeof createAppPaths>) {
       {
         id: 'paper-1',
         title: 'SQLite Library Paper',
+        titleZh: 'SQLite 文献库论文',
         year: '2026',
         publication: 'PaperQuay Tests',
         doi: '10.0000/paperquay',
@@ -199,6 +200,7 @@ test('library SQLite store migrates legacy JSON and preserves full paper metadat
     const paper = migrated.papers.find((item: { id: string }) => item.id === 'paper-1');
     assert.ok(paper);
     assert.equal(paper.title, 'SQLite Library Paper');
+    assert.equal(paper.titleZh, 'SQLite 文献库论文');
     assert.equal(paper.source, 'zotero');
     assert.equal(paper.authors[0].name, 'Ada Lovelace');
     assert.deepEqual(paper.keywords, ['sqlite', 'paperquay']);
@@ -215,6 +217,7 @@ test('library SQLite store migrates legacy JSON and preserves full paper metadat
     const snapshotted = store.loadFromSnapshot(snapshotPath);
     const snapshottedPaper = snapshotted.papers.find((item: { id: string }) => item.id === 'paper-1');
     assert.ok(snapshottedPaper);
+    assert.equal(snapshottedPaper.titleZh, 'SQLite 文献库论文');
     assert.equal(snapshottedPaper.attachments[0].paperId, 'paper-1');
     assert.equal(snapshottedPaper.readingProgress, 0.42);
 
@@ -346,12 +349,16 @@ test('library SQLite store upgrades early author and tag tables with global ids'
     const library = store.load();
     const paper = library.papers.find((item: { id: string }) => item.id === 'paper-old');
     assert.ok(paper);
+    assert.equal(paper.titleZh, null);
     assert.equal(paper.authors[0].id, 'author-shared');
     assert.equal(paper.tags[0].id, 'tag-shared');
+
+    paper.titleZh = '旧结构论文';
 
     library.papers.push({
       id: 'paper-new',
       title: 'New Shared Author Paper',
+      titleZh: '新共享作者论文',
       year: null,
       publication: null,
       doi: null,
@@ -387,6 +394,8 @@ test('library SQLite store upgrades early author and tag tables with global ids'
 
     const reloaded = store.load();
     assert.equal(reloaded.papers.length, 2);
+    assert.equal(reloaded.papers.find((item: { id: string }) => item.id === 'paper-old')?.titleZh, '旧结构论文');
+    assert.equal(reloaded.papers.find((item: { id: string }) => item.id === 'paper-new')?.titleZh, '新共享作者论文');
     assert.deepEqual(
       reloaded.papers.map((paper: { authors: Array<{ id: string }> }) => paper.authors[0]?.id).sort(),
       ['author-shared', 'author-shared'],

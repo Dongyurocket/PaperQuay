@@ -403,7 +403,7 @@ export type AssistantPanelKey =
 
 export type WorkspaceStage = "overview" | "reading";
 
-export type ReaderViewMode = "dual-pane" | "pdf-only";
+export type ReaderViewMode = "dual-pane" | "pdf-only" | "pdf-compare";
 
 export type TextSelectionSource = "pdf" | "blocks";
 
@@ -485,6 +485,8 @@ export interface ZoteroLibraryItem {
   attachmentTitle?: string;
   attachmentFilename?: string;
   localPdfPath?: string;
+  /** 文献库中附加的翻译版 PDF（retainpdf 输出，页码与原版对应）的本地路径 */
+  translatedPdfPath?: string;
 }
 
 export interface ZoteroCollection {
