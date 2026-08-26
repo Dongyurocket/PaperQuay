@@ -182,6 +182,24 @@ export async function selectSavePdfPath(options?: {
   }
 }
 
+export async function selectSaveFilePath(options?: {
+  suggestedFileName?: string;
+  initialDirectory?: string;
+  filterName?: string;
+  extensions?: string[];
+}): Promise<string | null> {
+  try {
+    return await invoke<string | null>('select_save_file_path', {
+      suggestedFileName: options?.suggestedFileName ?? null,
+      initialDirectory: options?.initialDirectory ?? null,
+      filterName: options?.filterName ?? null,
+      extensions: options?.extensions ?? null,
+    });
+  } catch (error) {
+    throw new Error(toErrorMessage(error, '选择保存路径失败'));
+  }
+}
+
 export async function approveWritePath(path: string): Promise<void> {
   try {
     await invoke('approve_write_path', { path });

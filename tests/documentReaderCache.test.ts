@@ -71,8 +71,27 @@ test('loadSavedSummaryCache skips stale or malformed cache candidates', async ()
     },
   });
 
-  assert.deepEqual(loaded, saved);
+  assert.deepEqual(loaded, { summary: saved, matchedSourceKey: 'source-1' });
   assert.equal(reads.length, 2);
+});
+
+test('loadSavedSummaryCache falls back to legacy source keys and reports the matched key', async () => {
+  const saved = summary({ title: 'Legacy Cached Summary' });
+  const reads: string[] = [];
+  const loaded = await loadSavedSummaryCache({
+    item: item(),
+    mineruCacheDir: 'D:/cache',
+    sourceKey: 'new-source-key',
+    legacySourceKeys: ['legacy-reader-key'],
+    readText: async (path) => {
+      reads.push(path);
+      // 所有新 key 与 legacy key 的候选路径都返回同一文件，仅 legacy key 能通过 envelope 校验。
+      return JSON.stringify({ sourceKey: 'legacy-reader-key', summary: saved });
+    },
+  });
+
+  assert.deepEqual(loaded, { summary: saved, matchedSourceKey: 'legacy-reader-key' });
+  assert.equal(reads.length, 1);
 });
 
 test('loadSavedMineruPages restores the first readable MinerU JSON cache', async () => {

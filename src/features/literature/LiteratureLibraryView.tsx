@@ -126,6 +126,11 @@ interface LiteratureLibraryViewProps {
   onTranslatePaper?: (paper: LiteraturePaper) => void;
   onTranslatePaperTitle?: (paper: LiteraturePaper) => Promise<string | null>;
   onGenerateSummary?: (paper: LiteraturePaper) => void;
+  /** 批量标题翻译（P1）：由 Reader 层注入，作用于多选集合。 */
+  onBatchTranslatePaperTitles?: (papers: LiteraturePaper[]) => void;
+  /** 批量导出 Bib（P2）：由 Reader 层注入，作用于多选集合。mode=merged 合并单文件，separate 每篇一个文件。 */
+  onBatchExportBib?: (papers: LiteraturePaper[], mode: 'merged' | 'separate') => void;
+  batchTitleTranslationRunning?: boolean;
 }
 
 interface NativeSummaryUpdatedEventDetail {
@@ -205,6 +210,7 @@ type CategoryNameDialogState =
 type LibraryConfirmDialogState =
   | { kind: 'delete-category'; category: LiteratureCategory }
   | { kind: 'delete-paper'; paper: LiteraturePaper; deleteFiles: boolean }
+  | { kind: 'delete-papers'; papers: LiteraturePaper[]; deleteFiles: boolean }
   | { kind: 'remove-translated-pdf'; paper: LiteraturePaper; attachmentId: string; fileName: string };
 
 type LiteraturePaperSortBy = NonNullable<ListPapersRequest['sortBy']>;
@@ -251,6 +257,9 @@ export default function LiteratureLibraryView({
   onTranslatePaper,
   onTranslatePaperTitle,
   onGenerateSummary,
+  onBatchTranslatePaperTitles,
+  onBatchExportBib,
+  batchTitleTranslationRunning = false,
 }: LiteratureLibraryViewProps) {
   const l = useLocaleText();
   const demoMode = Boolean(demoLibrary);
@@ -260,6 +269,10 @@ export default function LiteratureLibraryView({
   const [paperStatuses, setPaperStatuses] = useState<Record<string, LiteraturePaperListStatus>>({});
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
   const [selectedPaperId, setSelectedPaperId] = useState<string | null>(null);
+  const [multiSelectedPaperIds, setMultiSelectedPaperIds] = useState<string[]>([]);
+  const [selectionAnchorId, setSelectionAnchorId] = useState<string | null>(null);
+  const [batchWorking, setBatchWorking] = useState(false);
+  const [bibExportMenuOpen, setBibExportMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState(false);
@@ -319,6 +332,73 @@ export default function LiteratureLibraryView({
   const selectedPaper = useMemo(
     () => papers.find((paper) => paper.id === selectedPaperId) ?? papers[0] ?? null,
     [papers, selectedPaperId],
+  );
+
+  // 多选集合：与 selectedPaperId（详情面板主选中）独立，仅在批量操作时生效。
+  const multiSelectedPaperIdSet = useMemo(() => new Set(multiSelectedPaperIds), [multiSelectedPaperIds]);
+  const multiSelectedPapers = useMemo(
+    () => papers.filter((paper) => multiSelectedPaperIdSet.has(paper.id)),
+    [papers, multiSelectedPaperIdSet],
+  );
+  const multiSelectActive = multiSelectedPaperIds.length > 0;
+
+  // 文献列表刷新/过滤后，清理已不在当前列表中的多选 id。
+  useEffect(() => {
+    setMultiSelectedPaperIds((current) => {
+      if (current.length === 0) {
+        return current;
+      }
+
+      const validIds = new Set(papers.map((paper) => paper.id));
+      const next = current.filter((id) => validIds.has(id));
+      return next.length === current.length ? current : next;
+    });
+  }, [papers]);
+
+  const clearMultiSelection = useCallback(() => {
+    setMultiSelectedPaperIds([]);
+  }, []);
+
+  const handleSelectPaperWithModifiers = useCallback(
+    (paperId: string, modifiers: { ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean } = {}) => {
+      const orderedIds = papers.map((paper) => paper.id);
+
+      if (modifiers.shiftKey) {
+        const anchorId = selectionAnchorId ?? selectedPaperId;
+        const anchorIndex = anchorId ? orderedIds.indexOf(anchorId) : -1;
+        const targetIndex = orderedIds.indexOf(paperId);
+
+        if (anchorIndex >= 0 && targetIndex >= 0) {
+          const [start, end] = anchorIndex < targetIndex ? [anchorIndex, targetIndex] : [targetIndex, anchorIndex];
+          const rangeIds = orderedIds.slice(start, end + 1);
+
+          setMultiSelectedPaperIds((current) =>
+            modifiers.ctrlKey || modifiers.metaKey
+              ? [...new Set([...current, ...rangeIds])]
+              : rangeIds,
+          );
+          setSelectedPaperId(paperId);
+          return;
+        }
+      }
+
+      if (modifiers.ctrlKey || modifiers.metaKey) {
+        setMultiSelectedPaperIds((current) =>
+          current.includes(paperId)
+            ? current.filter((id) => id !== paperId)
+            : [...current, paperId],
+        );
+        setSelectionAnchorId(paperId);
+        setSelectedPaperId(paperId);
+        return;
+      }
+
+      // 普通点击：单选并清空多选。
+      setMultiSelectedPaperIds([]);
+      setSelectionAnchorId(paperId);
+      setSelectedPaperId(paperId);
+    },
+    [papers, selectedPaperId, selectionAnchorId],
   );
 
   const resolveDemoPapers = useCallback(
@@ -1757,6 +1837,145 @@ export default function LiteratureLibraryView({
     }
   };
 
+  const handleBatchDeletePapers = () => {
+    if (demoMode) {
+      showDemoLockedMessage();
+      return;
+    }
+
+    if (multiSelectedPapers.length === 0) {
+      return;
+    }
+
+    setConfirmDialog({
+      kind: 'delete-papers',
+      papers: multiSelectedPapers,
+      deleteFiles: selectedCategory?.systemKey === 'all',
+    });
+  };
+
+  const deletePapersAfterConfirm = async (papersToDelete: LiteraturePaper[], deleteFiles: boolean) => {
+    setBatchWorking(true);
+    setDialogBusy(true);
+    setError('');
+    let failedCount = 0;
+
+    try {
+      for (const paper of papersToDelete) {
+        try {
+          await deleteLibraryPaper({ paperId: paper.id, deleteFiles });
+        } catch {
+          failedCount += 1;
+        }
+      }
+
+      await refreshAll();
+      clearMultiSelection();
+      setStatusMessage(
+        failedCount > 0
+          ? l(
+            `已删除 ${papersToDelete.length - failedCount} 篇文献，${failedCount} 篇失败。`,
+            `Deleted ${papersToDelete.length - failedCount} papers; ${failedCount} failed.`,
+          )
+          : l(
+            `已删除 ${papersToDelete.length} 篇文献${deleteFiles ? '及其 PDF 文件' : '记录'}。`,
+            `Deleted ${papersToDelete.length} paper${papersToDelete.length > 1 ? 's' : ''}${deleteFiles ? ' and their PDF files' : ' records'}.`,
+          ),
+      );
+      setConfirmDialog(null);
+    } finally {
+      setBatchWorking(false);
+      setDialogBusy(false);
+    }
+  };
+
+  const handleBatchSetFavorite = async (favorite: boolean) => {
+    if (demoMode) {
+      showDemoLockedMessage();
+      return;
+    }
+
+    if (multiSelectedPapers.length === 0) {
+      return;
+    }
+
+    setBatchWorking(true);
+    setError('');
+    let failedCount = 0;
+
+    try {
+      for (const paper of multiSelectedPapers) {
+        if (paper.isFavorite === favorite) {
+          continue;
+        }
+
+        try {
+          await updateLibraryPaper({ paperId: paper.id, isFavorite: favorite });
+        } catch {
+          failedCount += 1;
+        }
+      }
+
+      await refreshAll();
+      setStatusMessage(
+        failedCount > 0
+          ? l(
+            `已更新 ${multiSelectedPapers.length - failedCount} 篇收藏状态，${failedCount} 篇失败。`,
+            `Updated ${multiSelectedPapers.length - failedCount} papers; ${failedCount} failed.`,
+          )
+          : favorite
+            ? l(`已收藏 ${multiSelectedPapers.length} 篇文献。`, `Favorited ${multiSelectedPapers.length} papers.`)
+            : l(`已取消收藏 ${multiSelectedPapers.length} 篇文献。`, `Unfavorited ${multiSelectedPapers.length} papers.`),
+      );
+    } finally {
+      setBatchWorking(false);
+    }
+  };
+
+  const handleBatchMoveToCategory = async (categoryId: string) => {
+    if (demoMode) {
+      showDemoLockedMessage();
+      return;
+    }
+
+    const targetCategory = flatCategories.find((category) => category.id === categoryId);
+
+    if (!targetCategory || targetCategory.isSystem || multiSelectedPapers.length === 0) {
+      return;
+    }
+
+    setBatchWorking(true);
+    setError('');
+    let failedCount = 0;
+
+    try {
+      for (const paper of multiSelectedPapers) {
+        try {
+          await assignPaperToLibraryCategory({ paperId: paper.id, categoryId });
+        } catch {
+          failedCount += 1;
+        }
+      }
+
+      const nextCategories = await listLibraryCategories();
+      setCategories(nextCategories);
+      await refreshAll();
+      setStatusMessage(
+        failedCount > 0
+          ? l(
+            `已移动 ${multiSelectedPapers.length - failedCount} 篇到「${targetCategory.name}」，${failedCount} 篇失败。`,
+            `Moved ${multiSelectedPapers.length - failedCount} papers to "${targetCategory.name}"; ${failedCount} failed.`,
+          )
+          : l(
+            `已移动 ${multiSelectedPapers.length} 篇文献到「${targetCategory.name}」。`,
+            `Moved ${multiSelectedPapers.length} papers to "${targetCategory.name}".`,
+          ),
+      );
+    } finally {
+      setBatchWorking(false);
+    }
+  };
+
   const handlePaperDragStart = (
     event: DragEvent<HTMLDivElement>,
     paper: LiteraturePaper,
@@ -2128,36 +2347,139 @@ export default function LiteratureLibraryView({
         />
       </div>
 
-      <div data-tour="paper-list" className="h-full min-h-0 overflow-hidden">
-        <LiteraturePaperList
-          loading={loading}
-          working={working}
-          papers={papers}
-          paperStatuses={paperStatuses}
-          showReadingHeatmap={showReadingHeatmap}
-          storageDir={libraryStorageDir}
-          selectedPaper={selectedPaper}
-          searchQuery={searchQuery}
-          sortBy={paperSort.sortBy}
-          sortDirection={paperSort.sortDirection}
-          titleDisplayMode={titleDisplayMode}
-          statusMessage={statusMessage}
-          error={error}
-          onSearchQueryChange={setSearchQuery}
-          onSortChange={(sortBy, sortDirection) => setPaperSort({ sortBy, sortDirection })}
-          onTitleDisplayModeChange={setTitleDisplayMode}
-          onImportPdfs={() => void handleImportPdfs()}
-          onRefresh={() => void refreshAll()}
-          onSelectPaper={setSelectedPaperId}
-          onOpenPaper={onOpenPaper}
-          onPaperDragStart={handlePaperDragStart}
-          onPaperReorder={(draggedPaperId, targetPaperId, placement) =>
-          void handlePaperReorder(draggedPaperId, targetPaperId, placement)
-        }
-        onPaperDropOnCategory={handlePaperDropOnCategory}
-        onPaperPointerDragOverCategory={setPaperDragOverCategoryId}
-        onPaperContextMenu={handlePaperContextMenu}
-      />
+      <div data-tour="paper-list" className="flex h-full min-h-0 flex-col overflow-hidden">
+        {multiSelectedPaperIds.length > 0 ? (
+          <div className="flex flex-wrap items-center gap-2 border-b border-[var(--pq-border)] bg-[var(--pq-accent-soft)] px-4 py-2">
+            <span className="text-xs font-semibold text-[var(--pq-accent)]">
+              {l(`已选 ${multiSelectedPaperIds.length} 篇`, `${multiSelectedPaperIds.length} selected`)}
+            </span>
+            <div className="mx-1 h-4 w-px bg-[var(--pq-border)]" />
+            {onBatchTranslatePaperTitles ? (
+              <button
+                type="button"
+                disabled={batchWorking || batchTitleTranslationRunning || demoMode}
+                onClick={() => onBatchTranslatePaperTitles(multiSelectedPapers)}
+                className="pq-button px-2.5 py-1 text-xs disabled:opacity-50"
+              >
+                {l('翻译标题', 'Translate Titles')}
+              </button>
+            ) : null}
+            {onBatchExportBib ? (
+              <span className="relative">
+                <button
+                  type="button"
+                  disabled={batchWorking}
+                  onClick={() => setBibExportMenuOpen((current) => !current)}
+                  className="pq-button px-2.5 py-1 text-xs disabled:opacity-50"
+                >
+                  {l('导出 Bib', 'Export Bib')}
+                </button>
+                {bibExportMenuOpen ? (
+                  <span className="absolute left-0 top-full z-30 mt-1 flex min-w-[168px] flex-col rounded-xl border border-[var(--pq-border)] bg-white p-1 shadow-lg dark:bg-[#1b212b]">
+                    <button
+                      type="button"
+                      className="rounded-lg px-3 py-1.5 text-left text-xs hover:bg-[var(--pq-accent-soft)]"
+                      onClick={() => {
+                        setBibExportMenuOpen(false);
+                        onBatchExportBib(multiSelectedPapers, 'merged');
+                      }}
+                    >
+                      {l('合并为单个 .bib', 'Merge into one .bib')}
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded-lg px-3 py-1.5 text-left text-xs hover:bg-[var(--pq-accent-soft)]"
+                      onClick={() => {
+                        setBibExportMenuOpen(false);
+                        onBatchExportBib(multiSelectedPapers, 'separate');
+                      }}
+                    >
+                      {l('每篇一个 .bib 文件', 'One .bib per paper')}
+                    </button>
+                  </span>
+                ) : null}
+              </span>
+            ) : null}
+            <select
+              value=""
+              disabled={batchWorking}
+              onChange={(event) => {
+                const categoryId = event.target.value;
+                event.target.value = '';
+                if (categoryId) {
+                  void handleBatchMoveToCategory(categoryId);
+                }
+              }}
+              className="pq-input h-7 max-w-[140px] px-2 text-xs disabled:opacity-50"
+              title={l('移动到分类', 'Move to category')}
+            >
+              <option value="">{l('移动到分类…', 'Move to…')}</option>
+              {flatCategories
+                .filter((category) => !category.isSystem)
+                .map((category) => (
+                  <option key={category.id} value={category.id}>
+                    {category.name}
+                  </option>
+                ))}
+            </select>
+            <button
+              type="button"
+              disabled={batchWorking}
+              onClick={() => void handleBatchSetFavorite(true)}
+              className="pq-button px-2.5 py-1 text-xs disabled:opacity-50"
+            >
+              {l('收藏', 'Favorite')}
+            </button>
+            <button
+              type="button"
+              disabled={batchWorking}
+              onClick={handleBatchDeletePapers}
+              className="pq-button px-2.5 py-1 text-xs text-rose-600 disabled:opacity-50 dark:text-rose-300"
+            >
+              {l('删除', 'Delete')}
+            </button>
+            <button
+              type="button"
+              disabled={batchWorking}
+              onClick={clearMultiSelection}
+              className="pq-button px-2.5 py-1 text-xs disabled:opacity-50"
+            >
+              {l('取消选择', 'Clear')}
+            </button>
+          </div>
+        ) : null}
+        <div className="min-h-0 flex-1 overflow-hidden">
+          <LiteraturePaperList
+            loading={loading}
+            working={working}
+            papers={papers}
+            paperStatuses={paperStatuses}
+            showReadingHeatmap={showReadingHeatmap}
+            storageDir={libraryStorageDir}
+            selectedPaper={selectedPaper}
+            multiSelectedPaperIds={multiSelectedPaperIds}
+            searchQuery={searchQuery}
+            sortBy={paperSort.sortBy}
+            sortDirection={paperSort.sortDirection}
+            titleDisplayMode={titleDisplayMode}
+            statusMessage={statusMessage}
+            error={error}
+            onSearchQueryChange={setSearchQuery}
+            onSortChange={(sortBy, sortDirection) => setPaperSort({ sortBy, sortDirection })}
+            onTitleDisplayModeChange={setTitleDisplayMode}
+            onImportPdfs={() => void handleImportPdfs()}
+            onRefresh={() => void refreshAll()}
+            onSelectPaper={handleSelectPaperWithModifiers}
+            onOpenPaper={onOpenPaper}
+            onPaperDragStart={handlePaperDragStart}
+            onPaperReorder={(draggedPaperId, targetPaperId, placement) =>
+            void handlePaperReorder(draggedPaperId, targetPaperId, placement)
+          }
+          onPaperDropOnCategory={handlePaperDropOnCategory}
+          onPaperPointerDragOverCategory={setPaperDragOverCategoryId}
+          onPaperContextMenu={handlePaperContextMenu}
+        />
+        </div>
       </div>
 
       <div
@@ -2187,20 +2509,51 @@ export default function LiteratureLibraryView({
       </div>
 
       <div data-tour="ai-summary" className="h-full min-h-0 overflow-hidden">
-        <LiteraturePaperDetails
-          selectedPaper={selectedPaper}
-          titleDisplayMode={titleDisplayMode}
-          saving={paperSaving}
-          onOpenPaper={onOpenPaper}
-          onSavePaper={(request) => void handleSavePaper(request)}
-          actionState={selectedPaper ? paperActionStates[selectedPaper.id] ?? null : null}
-          onRunMineruParse={onRunMineruParse}
-          onTranslatePaper={onTranslatePaper}
-          onTranslatePaperTitle={onTranslatePaperTitle}
-          onAttachTranslatedPdf={(paper) => void handleAttachTranslatedPdf(paper)}
-          onRemoveTranslatedPdf={handleRemoveTranslatedPdf}
-          onGenerateSummary={onGenerateSummary}
-        />
+        {multiSelectedPaperIds.length >= 2 ? (
+          <div className="flex h-full min-h-0 flex-col overflow-y-auto p-4">
+            <div className="rounded-[22px] border border-[var(--pq-border)] bg-white/70 p-4 dark:bg-white/5">
+              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--pq-text-faint)]">
+                {l('批量操作', 'Batch Operations')}
+              </div>
+              <div className="mt-2 text-base font-semibold">
+                {l(`已选择 ${multiSelectedPaperIds.length} 篇文献`, `${multiSelectedPaperIds.length} papers selected`)}
+              </div>
+              <p className="mt-2 text-sm leading-6 text-[var(--pq-text-muted)]">
+                {l(
+                  '使用列表顶部的批量工具栏执行标题翻译、导出 Bib、移动分类、收藏或删除。再次普通点击任一篇文献可退出多选。',
+                  'Use the batch toolbar above the list to translate titles, export Bib, move to a category, favorite, or delete. Click any paper normally to exit multi-select.',
+                )}
+              </p>
+              <ul className="mt-3 max-h-72 space-y-1.5 overflow-y-auto text-sm text-[var(--pq-text-muted)]">
+                {multiSelectedPapers.slice(0, 12).map((paper) => (
+                  <li key={paper.id} className="truncate">
+                    · {paper.title}
+                  </li>
+                ))}
+                {multiSelectedPapers.length > 12 ? (
+                  <li className="text-[var(--pq-text-faint)]">
+                    {l(`… 等 ${multiSelectedPapers.length} 篇`, `… and ${multiSelectedPapers.length} papers`)}
+                  </li>
+                ) : null}
+              </ul>
+            </div>
+          </div>
+        ) : (
+          <LiteraturePaperDetails
+            selectedPaper={selectedPaper}
+            titleDisplayMode={titleDisplayMode}
+            saving={paperSaving}
+            onOpenPaper={onOpenPaper}
+            onSavePaper={(request) => void handleSavePaper(request)}
+            actionState={selectedPaper ? paperActionStates[selectedPaper.id] ?? null : null}
+            onRunMineruParse={onRunMineruParse}
+            onTranslatePaper={onTranslatePaper}
+            onTranslatePaperTitle={onTranslatePaperTitle}
+            onAttachTranslatedPdf={(paper) => void handleAttachTranslatedPdf(paper)}
+            onRemoveTranslatedPdf={handleRemoveTranslatedPdf}
+            onGenerateSummary={onGenerateSummary}
+          />
+        )}
       </div>
 
       <div
@@ -2478,12 +2831,20 @@ export default function LiteratureLibraryView({
             ? l('删除分类', 'Delete Category')
             : confirmDialog?.kind === 'remove-translated-pdf'
               ? l('移除翻译版 PDF', 'Remove Translated PDF')
-              : l('删除文献', 'Delete Paper')
+              : confirmDialog?.kind === 'delete-papers'
+                ? l('批量删除文献', 'Delete Selected Papers')
+                : l('删除文献', 'Delete Paper')
         }
         description={
           confirmDialog?.kind === 'delete-category'
             ? l(`删除分类“${confirmDialog.category.name}”及其所有子分类？这只会移除分类关系，不会删除磁盘上的 PDF 文件。`, `Delete category "${confirmDialog.category.name}" and all subcategories? This only removes category relations and does not delete PDF files on disk.`,
               )
+            : confirmDialog?.kind === 'delete-papers'
+              ? confirmDialog.deleteFiles
+                ? l(`从所有文献中删除选中的 ${confirmDialog.papers.length} 篇文献？这也会删除磁盘上的 PDF 文件。`, `Delete the selected ${confirmDialog.papers.length} papers from All Papers? This will also delete PDF files from disk.`,
+                  )
+                : l(`删除选中的 ${confirmDialog.papers.length} 篇文献记录？磁盘上的 PDF 文件不会被删除。`, `Delete the records of the selected ${confirmDialog.papers.length} papers? PDF files on disk will not be deleted.`,
+                  )
             : confirmDialog?.kind === 'delete-paper'
               ? confirmDialog.deleteFiles
                 ? l(`从所有文献中删除“${confirmDialog.paper.title}”？这也会删除磁盘上的 PDF 文件。`, `Delete "${confirmDialog.paper.title}" from All Papers? This will also delete PDF files from disk.`,
@@ -2516,6 +2877,11 @@ export default function LiteratureLibraryView({
 
           if (confirmDialog.kind === 'remove-translated-pdf') {
             void removeTranslatedPdfAfterConfirm(confirmDialog.attachmentId);
+            return;
+          }
+
+          if (confirmDialog.kind === 'delete-papers') {
+            void deletePapersAfterConfirm(confirmDialog.papers, confirmDialog.deleteFiles);
             return;
           }
 

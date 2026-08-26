@@ -2,12 +2,16 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useState,
 } from 'react';
 
 import {
   prepareMineruCacheDir,
   selectDirectory,
   selectLocalPdfSource,
+  selectSaveFilePath,
+  approveWritePath,
+  writeLocalTextFile,
 } from '../../services/desktop';
 import {
   listOpenAICompatibleModels,
@@ -37,10 +41,14 @@ import { buildMineruCachePaths } from '../../utils/mineruCache';
 import {
   createNativeLibraryWorkspaceItem,
   createStandaloneItem,
+  clampBatchConcurrency,
   getModelRuntimeConfig,
   EMPTY_LIBRARY_PREVIEW_STATE,
   type BatchProgressState,
 } from './readerShared';
+import { emitNativePaperUpdated } from '../literature/libraryEvents';
+import { updateLibraryPaper } from '../../services/library';
+import { buildCitationKey, papersToBibtex, paperToBibtexEntry } from '../../utils/bibtex';
 import { isPaperPipelineBusy } from './paperTaskState';
 import {
   writeLibraryTranslationCache,
@@ -70,6 +78,12 @@ export interface UseReaderLibraryActionsResult {
   handleNativeLibraryMineruParse: (paper: LiteraturePaper) => void;
   handleNativeLibraryTranslate: (paper: LiteraturePaper) => void;
   handleNativeLibraryTranslatePaperTitle: (paper: LiteraturePaper) => Promise<string | null>;
+  /** P1：批量翻译多选文献的标题并直接落库到 titleZh。 */
+  handleBatchTranslatePaperTitles: (papers: LiteraturePaper[]) => Promise<void>;
+  batchTitleTranslationRunning: boolean;
+  /** P2：批量导出 Bib。mode=merged 合并为单个 .bib；mode=separate 每篇一个 .bib 文件。 */
+  handleBatchExportBib: (papers: LiteraturePaper[], mode: 'merged' | 'separate') => Promise<void>;
+  batchBibExportRunning: boolean;
   handleOpenNativeLibraryPaper: (paper: LiteraturePaper) => void;
   handleOpenStandalonePdf: () => Promise<void>;
   handleSelectMineruCacheDir: () => Promise<void>;
@@ -866,8 +880,7 @@ export function useReaderLibraryActions({
   );
 
   const handleNativeLibraryTranslatePaperTitle = useCallback(
-    async (paper: LiteraturePaper): Promise<string | null> => {
-      const sourceTitle = paper.title.trim();
+    async (paper: LiteraturePaper): Promise<string | null> => {      const sourceTitle = paper.title.trim();
 
       if (!sourceTitle) {
         return null;
@@ -929,6 +942,219 @@ export function useReaderLibraryActions({
       settings.translationSourceLanguage,
       translationModelPreset,
     ],
+  );
+
+  // P1：批量标题翻译。复用翻译模型 preset，逐篇翻译并直接落库 titleZh；
+  // 默认跳过已有中文标题的文献，失败项不中断整体批次。
+  const [batchTitleTranslationRunning, setBatchTitleTranslationRunning] = useState(false);
+
+  const handleBatchTranslatePaperTitles = useCallback(
+    async (papers: LiteraturePaper[]) => {
+      if (batchTitleTranslationRunning) {
+        return;
+      }
+
+      const candidates = papers.filter((paper) => paper.title.trim() && !paper.titleZh?.trim());
+      const skippedCount = papers.length - candidates.length;
+
+      if (candidates.length === 0) {
+        setStatusMessage(
+          l(
+            '选中文献已有中文标题或缺少标题，无需翻译。',
+            'Selected papers already have translated titles or have no title to translate.',
+          ),
+        );
+        return;
+      }
+
+      if (!translationModelPreset?.apiKey.trim() || !translationModelPreset.baseUrl.trim()) {
+        setPreferredPreferencesSection('models');
+        setPreferencesOpen(true);
+        const message = l('请先配置可用的翻译模型', 'Configure an available translation model first');
+        setError(message);
+        setStatusMessage(message);
+        return;
+      }
+
+      setBatchTitleTranslationRunning(true);
+      setError('');
+
+      const concurrency = clampBatchConcurrency(settings.libraryBatchConcurrency);
+      let cursor = 0;
+      let succeededCount = 0;
+      let failedCount = 0;
+
+      const runWorker = async () => {
+        while (true) {
+          const currentIndex = cursor;
+          cursor += 1;
+
+          if (currentIndex >= candidates.length) {
+            return;
+          }
+
+          const paper = candidates[currentIndex];
+          setStatusMessage(
+            l(
+              `批量翻译标题中：${currentIndex + 1}/${candidates.length} ${truncateMiddle(paper.title, 48)}`,
+              `Translating titles: ${currentIndex + 1}/${candidates.length} ${truncateMiddle(paper.title, 48)}`,
+            ),
+          );
+
+          try {
+            const translated = (
+              await translateTextOpenAICompatible({
+                baseUrl: translationModelPreset.baseUrl,
+                apiKey: translationModelPreset.apiKey.trim(),
+                model: translationModelPreset.model,
+                apiMode: translationModelPreset.apiMode,
+                sourceLanguage: settings.translationSourceLanguage,
+                targetLanguage: 'Simplified Chinese',
+                text: paper.title.trim(),
+              })
+            ).trim();
+
+            if (!translated) {
+              throw new Error('empty translation');
+            }
+
+            const updatedPaper = await updateLibraryPaper({ paperId: paper.id, titleZh: translated });
+            emitNativePaperUpdated(updatedPaper);
+            succeededCount += 1;
+          } catch {
+            failedCount += 1;
+          }
+        }
+      };
+
+      try {
+        await Promise.all(Array.from({ length: concurrency }, () => runWorker()));
+
+        const doneMessage = failedCount > 0
+          ? l(
+            `标题翻译完成：成功 ${succeededCount} 篇，失败 ${failedCount} 篇，跳过 ${skippedCount} 篇。`,
+            `Title translation finished: ${succeededCount} succeeded, ${failedCount} failed, ${skippedCount} skipped.`,
+          )
+          : l(
+            `标题翻译完成：成功 ${succeededCount} 篇，跳过 ${skippedCount} 篇。`,
+            `Title translation finished: ${succeededCount} succeeded, ${skippedCount} skipped.`,
+          );
+        setStatusMessage(doneMessage);
+
+        if (failedCount > 0) {
+          setError(doneMessage);
+        }
+      } finally {
+        setBatchTitleTranslationRunning(false);
+      }
+    },
+    [
+      batchTitleTranslationRunning,
+      l,
+      setError,
+      setPreferencesOpen,
+      setPreferredPreferencesSection,
+      setStatusMessage,
+      settings.libraryBatchConcurrency,
+      settings.translationSourceLanguage,
+      translationModelPreset,
+    ],
+  );
+
+  // P2：批量导出 Bib。两种形态：合并为单个 .bib 文件（merged）或每篇一个 .bib 文件（separate）。
+  const [batchBibExportRunning, setBatchBibExportRunning] = useState(false);
+
+  const handleBatchExportBib = useCallback(
+    async (papers: LiteraturePaper[], mode: 'merged' | 'separate') => {
+      if (batchBibExportRunning) {
+        return;
+      }
+
+      const exportable = papers.filter((paper) => paper.title.trim());
+
+      if (exportable.length === 0) {
+        setStatusMessage(
+          l('选中文献没有可导出的标题信息。', 'Selected papers have no title information to export.'),
+        );
+        return;
+      }
+
+      setBatchBibExportRunning(true);
+      setError('');
+
+      try {
+        if (mode === 'merged') {
+          const dateStamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+          const targetPath = await selectSaveFilePath({
+            suggestedFileName: `library-${dateStamp}.bib`,
+            filterName: 'BibTeX',
+            extensions: ['bib'],
+          });
+
+          if (!targetPath) {
+            return;
+          }
+
+          await writeLocalTextFile(targetPath, papersToBibtex(exportable));
+          setStatusMessage(
+            l(
+              `已导出 ${exportable.length} 篇文献的 Bib 到：${targetPath}`,
+              `Exported ${exportable.length} papers to ${targetPath}`,
+            ),
+          );
+          return;
+        }
+
+        const targetDir = await selectDirectory(
+          l('选择 Bib 导出目录', 'Choose Bib export directory'),
+        );
+
+        if (!targetDir) {
+          return;
+        }
+
+        const usedKeys = new Set<string>();
+        let succeededCount = 0;
+        let failedCount = 0;
+
+        for (const paper of exportable) {
+          const citationKey = buildCitationKey(paper, usedKeys);
+          const filePath = `${targetDir}${targetDir.includes('\\') ? '\\' : '/'}${citationKey}.bib`;
+
+          try {
+            await approveWritePath(filePath);
+            await writeLocalTextFile(filePath, `${paperToBibtexEntry(paper, { citationKey }, usedKeys)}\n`);
+            succeededCount += 1;
+          } catch {
+            failedCount += 1;
+          }
+        }
+
+        const doneMessage = failedCount > 0
+          ? l(
+            `Bib 导出完成：成功 ${succeededCount} 篇，失败 ${failedCount} 篇。目录：${targetDir}`,
+            `Bib export finished: ${succeededCount} succeeded, ${failedCount} failed. Directory: ${targetDir}`,
+          )
+          : l(
+            `已导出 ${succeededCount} 个 Bib 文件到：${targetDir}`,
+            `Exported ${succeededCount} Bib files to ${targetDir}`,
+          );
+        setStatusMessage(doneMessage);
+
+        if (failedCount > 0) {
+          setError(doneMessage);
+        }
+      } catch (nextError) {
+        const message = nextError instanceof Error
+          ? nextError.message
+          : l('导出 Bib 失败', 'Failed to export Bib');
+        setError(message);
+        setStatusMessage(message);
+      } finally {
+        setBatchBibExportRunning(false);
+      }
+    },
+    [batchBibExportRunning, l, setError, setStatusMessage],
   );
 
   const handleWindowMinimize = useCallback(() => {
@@ -1158,6 +1384,10 @@ export function useReaderLibraryActions({
     handleNativeLibraryMineruParse,
     handleNativeLibraryTranslate,
     handleNativeLibraryTranslatePaperTitle,
+    handleBatchTranslatePaperTitles,
+    batchTitleTranslationRunning,
+    handleBatchExportBib,
+    batchBibExportRunning,
     handleOpenNativeLibraryPaper,
     handleOpenStandalonePdf,
     handleSelectMineruCacheDir,

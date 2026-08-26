@@ -261,7 +261,7 @@ export interface QaModelPreset {
   labelCustomized?: boolean;
 }
 
-export type ModelReasoningEffort = "auto" | "low" | "medium" | "high" | "xhigh";
+export type ModelReasoningEffort = "auto" | "low" | "medium" | "high" | "xhigh" | "max";
 
 export type ModelRuntimeRole =
   | "translation"

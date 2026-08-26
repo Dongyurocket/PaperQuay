@@ -285,6 +285,13 @@ export const MODEL_REASONING_OPTIONS: Array<{
     descriptionZh: '用于最复杂的长上下文推理，速度和成本会更高。',
     descriptionEn: 'For the hardest long-context reasoning; slower and more expensive.',
   },
+  {
+    value: 'max',
+    labelZh: '最高',
+    labelEn: 'Max',
+    descriptionZh: '向服务商请求最高推理档位；仅部分新模型支持，若调用报错请降回更低档位。',
+    descriptionEn: 'Requests the provider\'s highest reasoning tier; only some newer models support it. Lower the tier if calls fail.',
+  },
 ];
 
 export const MODEL_API_MODE_OPTIONS: Array<{

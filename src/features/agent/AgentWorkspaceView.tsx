@@ -129,6 +129,7 @@ const agentReasoningOptions: Array<{ value: ModelReasoningEffort; labelZh: strin
   { value: 'medium', labelZh: '中', labelEn: 'Medium' },
   { value: 'high', labelZh: '高', labelEn: 'High' },
   { value: 'xhigh', labelZh: '极高', labelEn: 'XHigh' },
+  { value: 'max', labelZh: '最高', labelEn: 'Max' },
 ];
 
 function AgentReasoningPicker({

@@ -181,8 +181,11 @@ import {
   resolveSavedPdfPath,
 } from './documentReaderCache';
 import {
+  buildLegacyPaperSummarySourceKeys,
   buildPaperSummarySourceKey,
+  computeMineruBlocksContentSignature,
   loadMineruMarkdownDocument,
+  resolveMineruMarkdownCandidatePaths,
 } from './documentReaderSummarySource';
 import { buildReaderAssistantSidebarProps } from './readerAssistantSidebarProps';
 import { formatReaderDocumentSource } from './readerWorkspaceShared';
@@ -762,8 +765,31 @@ function DocumentReaderTab({
     [flatBlocks],
   );
 
+  const mineruContentSignature = useMemo(
+    () => computeMineruBlocksContentSignature(flatBlocks),
+    [flatBlocks],
+  );
   const paperSummaryNextSourceKey = useMemo(() => {
     return buildPaperSummarySourceKey({
+      item: currentDocument,
+      promptVersion: SUMMARY_PROMPT_VERSION,
+      summaryLanguage: resolveSummaryOutputLanguage(settings),
+      summarySourceMode: settings.summarySourceMode,
+      pdfSignature: pdfSource ? getPdfSourceSignature(pdfSource, pdfPath || currentPdfName) : '',
+      mineruContentSignature,
+    });
+  }, [
+    currentDocument,
+    currentPdfName,
+    mineruContentSignature,
+    pdfSource,
+    pdfPath,
+    settings.summaryOutputLanguage,
+    settings.summarySourceMode,
+    settings.uiLanguage,
+  ]);
+  const paperSummaryLegacySourceKeys = useMemo(() => {
+    return buildLegacyPaperSummarySourceKeys({
       item: currentDocument,
       promptVersion: SUMMARY_PROMPT_VERSION,
       summaryLanguage: resolveSummaryOutputLanguage(settings),
@@ -774,6 +800,13 @@ function DocumentReaderTab({
       mineruPath,
       currentJsonName,
       blockCount: flatBlocks.length,
+      mineruMarkdownCandidatePaths: currentDocument
+        ? resolveMineruMarkdownCandidatePaths({
+          item: currentDocument,
+          mineruCacheDir: settings.mineruCacheDir,
+          mineruPath,
+        })
+        : [],
     });
   }, [
     currentDocument,
@@ -783,6 +816,7 @@ function DocumentReaderTab({
     mineruPath,
     pdfSource,
     pdfPath,
+    settings.mineruCacheDir,
     settings.summaryOutputLanguage,
     settings.summarySourceMode,
     settings.uiLanguage,
@@ -971,14 +1005,26 @@ function DocumentReaderTab({
 
   const tryLoadSavedSummary = useCallback(
     async (item: WorkspaceItem, sourceKey: string) => {
-      return loadSavedSummaryCache({
+      const result = await loadSavedSummaryCache({
         item,
         mineruCacheDir: settings.mineruCacheDir,
         sourceKey,
+        legacySourceKeys: paperSummaryLegacySourceKeys,
         readText: readLocalTextFileIfExists,
       });
+
+      if (result && result.matchedSourceKey !== sourceKey && sourceKey.trim()) {
+        await writePreviewSummaryCache({
+          item,
+          mineruCacheDir: settings.mineruCacheDir,
+          sourceKey,
+          summary: result.summary,
+        }).catch(() => undefined);
+      }
+
+      return result?.summary ?? null;
     },
-    [settings.mineruCacheDir],
+    [paperSummaryLegacySourceKeys, settings.mineruCacheDir],
   );
 
   const tryLoadSavedMineruPages = useCallback(

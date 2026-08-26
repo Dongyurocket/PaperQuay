@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.1.26-2563eb?style=flat-square" alt="Version v0.1.26">
+  <img src="https://img.shields.io/badge/version-v0.1.28-2563eb?style=flat-square" alt="Version v0.1.28">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-4b5563?style=flat-square" alt="Windows macOS Linux">
   <img src="https://img.shields.io/badge/built%20with-Electron-47848f?style=flat-square" alt="Electron">
   <img src="https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-0f766e?style=flat-square" alt="React TypeScript">
@@ -51,13 +51,15 @@
 
 ## 近期更新
 
-v0.1.26 修复知识图谱显示问题并更换布局引擎：
+v0.1.28 带来文库批量操作与稳定性修复：
 
-- 修复知识图谱节点聚集在中心重叠的问题：布局不再于图谱页隐藏时提前执行，切换到图谱页会自动按可见区域重算布局。
-- 全局图谱布局引擎从内置 cose 更换为 fcose，密集图谱分布更均匀，大图布局速度提升约 20 倍。
-- 修复在“自定义关系”面板输入文字时图谱画布被清空的问题。
+- 文库页支持多选文献（Ctrl/Cmd 点选、Shift 范围选择、复选框），批量工具栏支持删除、移动分类和收藏。
+- 支持批量翻译文献标题（中文标题直接入库）与批量导出 Bib（合并单文件或每篇一个文件）。
+- 思考强度新增“最高（max）”档；设置页新增“测试 Embedding 连接”。
+- 修复概览在文库预览生成后、打开文献时重复生成的问题（缓存键已统一并自动迁移）。
+- 修复 Agent 问答在本地 RAG 失败时静默回退的问题，现在会明确显示未命中提示。
 
-v0.1.25 增强了会话与翻译结果的持久化、WebDAV 备份可靠性和综述 Word 导出。历史版本变更见 [更新日志](./CHANGELOG.md)。
+v0.1.27 支持中英双语标题与 retainpdf 翻译版 PDF 对照阅读；v0.1.26 修复知识图谱显示问题并更换 fcose 布局引擎。历史版本变更见 [更新日志](./CHANGELOG.md)。
 
 ---
 
@@ -163,7 +165,7 @@ Agent 工作区不是普通聊天框，而是面向文献库操作设计。它�
 
 | 模块 | 已完成能力 |
 | ---- | ---------- |
-| 本地文献库 | 使用本地 SQLite 保存论文、作者、分类、标签、附件、笔记、批注、导入记录、设置和 RAG 索引 |
+| 本地文献库 | 使用本地 SQLite 保存论文、作者、分类、标签、附件、笔记、批注、导入记录、设置和 RAG 索引，文献列表支持多选与批量操作（删除、移动分类、收藏） |
 | PDF 导入 | 支持文件选择器和拖拽导入，入库前进入导入确认窗口 |
 | 文件管理 | 支持文献存储文件夹、复制/移动/保留原路径、命名规则、原始路径记录和本地私有文件管理 |
 | 元数据 | 支持通过 DOI 或标题优先调用 OpenAlex 补全，可配置 OpenAlex API Key / mailto，Crossref 兜底，导入前可手动编辑 |
@@ -173,7 +175,8 @@ Agent 工作区不是普通聊天框，而是面向文献库操作设计。它�
 | 笔记编辑器 | 支持富文本、标题、列表、任务列表、代码块、表格、图片、数学公式、高亮、链接、组件块和斜杠菜单式插入 |
 | 内联笔记链接 | 支持 `[[笔记]]` 双向链接、`#标签`、`@paper` 文献引用、补全菜单，以及笔记和文献之间的内联跳转 |
 | 阅读器 | 支持 PDF 阅读、MinerU 结构块视图、PDF 区域联动、阅读热力进度、阅读时间记录和批注工具 |
-| 翻译 | 支持全文翻译、块级翻译缓存和划词翻译，模型使用 OpenAI 兼容接口 |
+| 翻译 | 支持全文翻译、块级翻译缓存和划词翻译，模型使用 OpenAI 兼容接口；支持批量翻译文献标题 |
+| 引用导出 | 支持多选文献批量导出 Bib：合并为单个 .bib 或每篇一个文件，自动生成去重 citation key 并推断条目类型 |
 | 论文概览 | 支持背景、研究问题、方法、实验设置、主要发现、结论和局限等速读概览字段 |
 | Agent 工作区 | 支持对话、执行轨迹、工具调用卡片、文献选择、元数据工具、重命名、打标签、分类和总结 |
 | Zotero 导入 | 支持从 `zotero.sqlite` 导入 Zotero 分类、标签和可用 PDF 附件 |

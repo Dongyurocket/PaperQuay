@@ -2,7 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  buildLegacyPaperSummarySourceKeys,
   buildPaperSummarySourceKey,
+  computeMineruBlocksContentSignature,
   loadMineruMarkdownDocument,
   resolveMineruMarkdownCandidatePaths,
 } from '../src/features/reader/documentReaderSummarySource.ts';
@@ -42,15 +44,12 @@ test('buildPaperSummarySourceKey distinguishes pdf text and MinerU markdown sour
       promptVersion: 'prompt-v1',
       summaryLanguage: 'Chinese',
       summarySourceMode: 'pdf-text',
-      pdfSource: { kind: 'local-path', path: 'D:/papers/paper.pdf' },
-      pdfPath: '',
-      currentPdfName: 'paper.pdf',
-      mineruPath: '',
-      currentJsonName: 'content_list_v2.json',
-      blockCount: 0,
+      pdfSignature: 'local:D:/papers/paper.pdf',
     }),
     'paper-1::prompt-v1::Chinese::pdf-text::local:D:/papers/paper.pdf',
   );
+
+  const signature = computeMineruBlocksContentSignature([block()]);
 
   assert.equal(
     buildPaperSummarySourceKey({
@@ -58,14 +57,56 @@ test('buildPaperSummarySourceKey distinguishes pdf text and MinerU markdown sour
       promptVersion: 'prompt-v1',
       summaryLanguage: 'English',
       summarySourceMode: 'mineru-markdown',
-      pdfSource: null,
-      pdfPath: '',
-      currentPdfName: 'paper.pdf',
-      mineruPath: 'D:/cache/content_list_v2.json',
-      currentJsonName: 'content_list_v2.json',
-      blockCount: 12,
+      mineruContentSignature: signature,
     }),
-    'paper-1::prompt-v1::English::mineru-markdown::D:/cache/content_list_v2.json::12',
+    `paper-1::prompt-v1::English::mineru-markdown::${signature}`,
+  );
+});
+
+test('buildPaperSummarySourceKey is stable regardless of MinerU cache paths', () => {
+  // 同一批结构块在不同 mineruPath/缓存位置下应得到相同的 key（由内容签名决定）。
+  const blocks = [block(), block({ blockId: 'page-1-block-2', content: 'other text' })];
+  const signatureA = computeMineruBlocksContentSignature(blocks);
+  const signatureB = computeMineruBlocksContentSignature(blocks);
+
+  assert.equal(signatureA, signatureB);
+  assert.equal(computeMineruBlocksContentSignature([]), '');
+
+  const key = buildPaperSummarySourceKey({
+    item: item({ itemKey: 'paper-1' }),
+    promptVersion: 'prompt-v1',
+    summaryLanguage: 'Chinese',
+    summarySourceMode: 'mineru-markdown',
+    mineruContentSignature: signatureA,
+  });
+
+  assert.equal(key, `paper-1::prompt-v1::Chinese::mineru-markdown::${signatureA}`);
+});
+
+test('buildLegacyPaperSummarySourceKeys covers reader and preview era key formats', () => {
+  const legacyKeys = buildLegacyPaperSummarySourceKeys({
+    item: item({ itemKey: 'paper-1', workspaceId: 'native-library:paper-1' }),
+    promptVersion: 'prompt-v1',
+    summaryLanguage: 'Chinese',
+    summarySourceMode: 'mineru-markdown',
+    mineruPath: 'D:/cache/content_list_v2.json',
+    currentJsonName: 'content_list_v2.json',
+    blockCount: 12,
+    mineruMarkdownCandidatePaths: ['D:/cache/document-x/full.md'],
+  });
+
+  assert.ok(
+    legacyKeys.includes(
+      'paper-1::prompt-v1::Chinese::mineru-markdown::D:/cache/content_list_v2.json::12',
+    ),
+  );
+  assert.ok(
+    legacyKeys.includes(
+      'native-library:paper-1::prompt-v1::Chinese::mineru-markdown::D:/cache/document-x/full.md::12',
+    ),
+  );
+  assert.ok(
+    legacyKeys.includes('native-library:paper-1::prompt-v1::Chinese::mineru-markdown::blocks::12'),
   );
 });
 
@@ -76,12 +117,18 @@ test('buildPaperSummarySourceKey returns empty when the selected source is unava
       promptVersion: 'prompt-v1',
       summaryLanguage: 'Chinese',
       summarySourceMode: 'pdf-text',
-      pdfSource: null,
-      pdfPath: '',
-      currentPdfName: '',
-      mineruPath: '',
-      currentJsonName: '',
-      blockCount: 0,
+      pdfSignature: '',
+    }),
+    '',
+  );
+
+  assert.equal(
+    buildPaperSummarySourceKey({
+      item: item(),
+      promptVersion: 'prompt-v1',
+      summaryLanguage: 'Chinese',
+      summarySourceMode: 'mineru-markdown',
+      mineruContentSignature: '',
     }),
     '',
   );

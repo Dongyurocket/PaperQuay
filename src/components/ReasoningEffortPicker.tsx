@@ -10,6 +10,7 @@ const REASONING_OPTIONS: Array<{ value: ModelReasoningEffort; labelZh: string; l
   { value: 'medium', labelZh: '中', labelEn: 'Medium' },
   { value: 'high', labelZh: '高', labelEn: 'High' },
   { value: 'xhigh', labelZh: '极高', labelEn: 'XHigh' },
+  { value: 'max', labelZh: '最高', labelEn: 'Max' },
 ];
 
 interface ReasoningEffortPickerProps {

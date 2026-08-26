@@ -60,6 +60,8 @@ export interface AgentChatMessage {
   thinking?: string | null;
   trace?: AgentTraceStep[];
   ragCitations?: LibraryAgentRagCitation[];
+  /** RAG 检索失败时的用户可见提示（Agent 已回退到全文/摘要上下文）。 */
+  ragNotice?: string | null;
   toolCall?: AgentToolCallView;
   plan?: LibraryAgentPlan;
   choices?: LibraryAgentUserChoice[];

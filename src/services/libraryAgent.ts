@@ -242,6 +242,8 @@ export type LibraryAgentRunResult =
     contextLabel: string;
     thinking?: string | null;
     citations?: LibraryAgentRagCitation[];
+    /** RAG 检索失败时的用户可见提示（已回退到全文/摘要上下文）。 */
+    ragNotice?: string | null;
   }
   | {
     kind: 'choice';
@@ -249,6 +251,7 @@ export type LibraryAgentRunResult =
     choices: LibraryAgentUserChoice[];
     thinking?: string | null;
     citations?: LibraryAgentRagCitation[];
+    ragNotice?: string | null;
   }
   | {
     kind: 'paper-selection';
@@ -261,6 +264,7 @@ export type LibraryAgentRunResult =
     plan: LibraryAgentPlan;
     thinking?: string | null;
     citations?: LibraryAgentRagCitation[];
+    ragNotice?: string | null;
   };
 
 interface LibraryAgentContextRequest {
@@ -282,6 +286,18 @@ interface PaperContextPayload {
   text: string;
   citations?: LibraryAgentRagCitation[];
   figures?: LibraryPaperReviewFigure[];
+  /** RAG 检索失败时的错误信息（已回退到全文/摘要），用于向用户透传状态。 */
+  ragError?: string | null;
+}
+
+function buildAgentRagNotice(ragErrors: string[]): string | null {
+  if (ragErrors.length === 0) {
+    return null;
+  }
+
+  const detail = ragErrors.join('；');
+
+  return `本次未命中本地 RAG：检索失败，已回退到全文/摘要上下文。错误：${detail}（Local RAG retrieval failed and fell back to full-text context: ${detail}）`;
 }
 
 function escapeRegExp(value: string): string {
@@ -434,7 +450,8 @@ function normalizeAgentRuntimeConfig(settings: Partial<ReaderSettings>): ModelRu
     config.reasoningEffort === 'low' ||
     config.reasoningEffort === 'medium' ||
     config.reasoningEffort === 'high' ||
-    config.reasoningEffort === 'xhigh'
+    config.reasoningEffort === 'xhigh' ||
+    config.reasoningEffort === 'max'
       ? config.reasoningEffort
       : 'auto';
 
@@ -846,6 +863,8 @@ async function loadPaperContext(
       }
     }
 
+    let ragError: string | null = null;
+
     if (
       options?.ragEnabled !== false &&
       workspaceItem &&
@@ -879,7 +898,12 @@ async function loadPaperContext(
             figures: mineruContext?.figures ?? [],
           };
         }
+
+        if (ragResolution.kind === 'failed') {
+          ragError = ragResolution.errorMessage?.trim() || '本地 RAG 检索失败';
+        }
       } catch (error) {
+        ragError = error instanceof Error ? error.message : String(error);
         console.warn('Failed to build local Agent RAG context', error);
       }
     }
@@ -889,6 +913,7 @@ async function loadPaperContext(
         source: mineruContext.source,
         text: mineruContext.text,
         figures: mineruContext.figures,
+        ragError,
       };
     }
 
@@ -897,6 +922,7 @@ async function loadPaperContext(
         source: 'pdf-text',
         text: normalizedPdfText,
         figures: mineruContext?.figures ?? [],
+        ragError,
       };
     }
   } catch (error) {
@@ -943,7 +969,7 @@ async function buildPapersWithRequestedContext(
     ragEnabled?: boolean;
     categoryPathById?: Map<string, string>;
   },
-): Promise<{ inputs: LibraryAgentPaperInput[]; label: string; citations: LibraryAgentRagCitation[] }> {
+): Promise<{ inputs: LibraryAgentPaperInput[]; label: string; citations: LibraryAgentRagCitation[]; ragErrors: string[] }> {
   const requestedIds = new Set((Array.isArray(request.paperIds) ? request.paperIds : []).filter(Boolean));
   const requestedPapers = requestedIds.size > 0
     ? papers.filter((paper) => requestedIds.has(paper.id))
@@ -990,6 +1016,12 @@ async function buildPapersWithRequestedContext(
     .map(([source, count]) => `${source} x${count}`)
     .join(', ') || 'metadata only';
 
+  const ragErrors = [...new Set(
+    [...normalizedContextByPaperId.values()]
+      .map((context) => context.ragError?.trim())
+      .filter((message): message is string => Boolean(message)),
+  )];
+
   return {
     inputs: papers.map((paper) => paperToAgentInput(
       paper,
@@ -998,6 +1030,7 @@ async function buildPapersWithRequestedContext(
     )),
     label,
     citations,
+    ragErrors,
   };
 }
 
@@ -1204,7 +1237,7 @@ function isLikelyContextSizeError(error: unknown): boolean {
 function choiceResultFromRequest(
   request: LibraryAgentUserChoiceRequest,
   citations?: LibraryAgentRagCitation[],
-): LibraryAgentRunResult {
+): Extract<LibraryAgentRunResult, { kind: 'choice' }> {
   const choices = (Array.isArray(request.options) ? request.options : [])
     .map((option, index) => ({
       id: option.id?.trim() || `option-${index + 1}`,
@@ -2350,6 +2383,7 @@ export async function runConversationalLibraryAgent({
         contextLabel: enrichedContext.label,
         thinking: normalizeModelThinking(enrichedResponse.thinking),
         citations: enrichedContext.citations,
+        ragNotice: buildAgentRagNotice(enrichedContext.ragErrors),
       };
     }
 
@@ -2383,6 +2417,7 @@ export async function runConversationalLibraryAgent({
 
       return {
         ...choiceResultFromRequest(enrichedResponse.userChoices, enrichedContext.citations),
+        ragNotice: buildAgentRagNotice(enrichedContext.ragErrors),
         thinking: normalizeModelThinking(enrichedResponse.thinking),
       };
     }
@@ -2400,6 +2435,7 @@ export async function runConversationalLibraryAgent({
         plan: convertGeneratedAgentPlan(enrichedResponse.plan.tool ?? 'classify', contextPapers, enrichedResponse.plan),
         thinking: normalizeModelThinking(enrichedResponse.thinking),
         citations: enrichedContext.citations,
+        ragNotice: buildAgentRagNotice(enrichedContext.ragErrors),
       };
   }
 

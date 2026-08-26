@@ -356,6 +356,24 @@ function createFileCommands(context) {
       return result.filePath;
     },
 
+    async select_save_file_path({ suggestedFileName, initialDirectory, filterName, extensions }, event) {
+      const win = BrowserWindow.fromWebContents(event.sender);
+      const safeExtensions = Array.isArray(extensions)
+        ? extensions.map((ext) => cleanString(ext).replace(/^\./, '')).filter(Boolean)
+        : [];
+      const result = await dialog.showSaveDialog(win, {
+        defaultPath: path.join(initialDirectory || appPaths.remotePdfDownloadDir, safeFileName(suggestedFileName)),
+        filters: safeExtensions.length > 0
+          ? [{ name: cleanString(filterName) || 'Files', extensions: safeExtensions }]
+          : undefined,
+      });
+
+      if (result.canceled || !result.filePath) return null;
+
+      approvedWritePaths.add(path.resolve(result.filePath));
+      return result.filePath;
+    },
+
     async approve_write_path({ path: filePath }) {
       approvedWritePaths.add(path.resolve(filePath));
     },

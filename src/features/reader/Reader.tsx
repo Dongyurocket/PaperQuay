@@ -448,6 +448,10 @@ function Reader({ workspaceActive = true }: ReaderProps) {
     handleNativeLibraryMineruParse,
     handleNativeLibraryTranslate,
     handleNativeLibraryTranslatePaperTitle,
+    handleBatchTranslatePaperTitles,
+    batchTitleTranslationRunning,
+    handleBatchExportBib,
+    batchBibExportRunning,
     handleOpenNativeLibraryPaper,
     handleOpenStandalonePdf,
     handleSelectMineruCacheDir,
@@ -901,6 +905,9 @@ function Reader({ workspaceActive = true }: ReaderProps) {
                   onTranslatePaper={handleNativeLibraryTranslate}
                   onTranslatePaperTitle={handleNativeLibraryTranslatePaperTitle}
                   onGenerateSummary={handleNativeLibraryGenerateSummary}
+                  onBatchTranslatePaperTitles={(papers) => void handleBatchTranslatePaperTitles(papers)}
+                  batchTitleTranslationRunning={batchTitleTranslationRunning}
+                  onBatchExportBib={(papers, mode) => void handleBatchExportBib(papers, mode)}
                   paperActionStates={nativePaperActionStates}
                 />
               </div>

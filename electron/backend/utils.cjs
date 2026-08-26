@@ -1042,6 +1042,7 @@ module.exports = {
   cleanString,
   completionEndpoint,
   embedTexts,
+  embeddingsEndpoint,
   ensureFile,
   fileNameFromPath,
   hashBytes,

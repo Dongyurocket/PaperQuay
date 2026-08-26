@@ -38,6 +38,11 @@ import {
   type MineruCacheManifest,
   type SummaryCacheEnvelope,
 } from './readerShared';
+import {
+  buildLegacyPaperSummarySourceKeys,
+  buildPaperSummarySourceKey,
+  computeMineruBlocksContentSignature,
+} from './documentReaderSummarySource';
 import { writeTranslationCache } from './readerTranslationCache';
 
 type LocaleTextFn = (zh: string, en: string) => string;
@@ -50,6 +55,7 @@ export type ExistingMineruJson = {
 type PreviewSummaryRequest = {
   summaryInputs: ReturnType<typeof buildSummaryBlockInputs>;
   sourceKey: string;
+  legacySourceKeys: string[];
   documentText: string;
   errorMessage: string;
 };
@@ -348,12 +354,21 @@ export async function buildLibraryPreviewSummaryRequest({
 
   if (settings.summarySourceMode === 'pdf-text') {
     const pdfPath = item.localPdfPath?.trim() ?? '';
-    const sourceKey = `${item.workspaceId}::${SUMMARY_PROMPT_VERSION}::${summaryLanguage}::pdf-text::${pdfPath || 'no-pdf'}`;
+    const sourceKey = pdfPath
+      ? buildPaperSummarySourceKey({
+        item,
+        promptVersion: SUMMARY_PROMPT_VERSION,
+        summaryLanguage,
+        summarySourceMode: 'pdf-text',
+        pdfSignature: `local:${pdfPath}`,
+      })
+      : '';
 
     if (!pdfPath) {
       return {
         summaryInputs,
         sourceKey,
+        legacySourceKeys: [],
         documentText: '',
         errorMessage: l(
           '概览模式要求读取 PDF 文本，但当前文献没有可用 PDF。',
@@ -364,11 +379,21 @@ export async function buildLibraryPreviewSummaryRequest({
 
     const pdfData = await readLocalBinaryFile(pdfPath);
     const documentText = await extractPdfTextByPdfJs(pdfData);
+    const legacySourceKeys = buildLegacyPaperSummarySourceKeys({
+      item,
+      promptVersion: SUMMARY_PROMPT_VERSION,
+      summaryLanguage,
+      summarySourceMode: 'pdf-text',
+      pdfPath,
+      blockCount: blocks.length,
+      legacyPdfByteLength: pdfData.byteLength,
+    });
 
     if (!documentText.trim()) {
       return {
         summaryInputs,
-        sourceKey: `${sourceKey}::${pdfData.byteLength}`,
+        sourceKey,
+        legacySourceKeys,
         documentText: '',
         errorMessage: l(
           '未能从 PDF 中提取可用文本。',
@@ -379,7 +404,8 @@ export async function buildLibraryPreviewSummaryRequest({
 
     return {
       summaryInputs,
-      sourceKey: `${sourceKey}::${pdfData.byteLength}`,
+      sourceKey,
+      legacySourceKeys,
       documentText,
       errorMessage: '',
     };
@@ -397,6 +423,23 @@ export async function buildLibraryPreviewSummaryRequest({
     candidateMarkdownPaths.add(guessSiblingMarkdownPath(item.localPdfPath));
   }
 
+  const mineruContentSignature = computeMineruBlocksContentSignature(blocks);
+  const sourceKey = buildPaperSummarySourceKey({
+    item,
+    promptVersion: SUMMARY_PROMPT_VERSION,
+    summaryLanguage,
+    summarySourceMode: 'mineru-markdown',
+    mineruContentSignature,
+  });
+  const legacySourceKeys = buildLegacyPaperSummarySourceKeys({
+    item,
+    promptVersion: SUMMARY_PROMPT_VERSION,
+    summaryLanguage,
+    summarySourceMode: 'mineru-markdown',
+    blockCount: blocks.length,
+    mineruMarkdownCandidatePaths: Array.from(candidateMarkdownPaths),
+  });
+
   for (const candidatePath of candidateMarkdownPaths) {
     try {
       const documentText = await readLocalTextFileIfExists(candidatePath);
@@ -405,7 +448,8 @@ export async function buildLibraryPreviewSummaryRequest({
       if (documentText.trim()) {
         return {
           summaryInputs,
-          sourceKey: `${item.workspaceId}::${SUMMARY_PROMPT_VERSION}::${summaryLanguage}::mineru-markdown::${candidatePath}::${blocks.length}`,
+          sourceKey,
+          legacySourceKeys,
           documentText,
           errorMessage: '',
         };
@@ -420,7 +464,8 @@ export async function buildLibraryPreviewSummaryRequest({
   if (!documentText.trim()) {
     return {
       summaryInputs,
-      sourceKey: `${item.workspaceId}::${SUMMARY_PROMPT_VERSION}::${summaryLanguage}::mineru-markdown::empty`,
+      sourceKey: '',
+      legacySourceKeys,
       documentText: '',
       errorMessage: l(
         '未能生成可用的 MinerU Markdown 内容。',
@@ -431,7 +476,8 @@ export async function buildLibraryPreviewSummaryRequest({
 
   return {
     summaryInputs,
-    sourceKey: `${item.workspaceId}::${SUMMARY_PROMPT_VERSION}::${summaryLanguage}::mineru-markdown::blocks::${blocks.length}`,
+    sourceKey,
+    legacySourceKeys,
     documentText,
     errorMessage: '',
   };
@@ -441,20 +487,39 @@ export async function readSavedPreviewSummary({
   item,
   mineruCacheDir,
   sourceKey,
+  legacySourceKeys = [],
 }: {
   item: WorkspaceItem;
   mineruCacheDir: string;
   sourceKey: string;
-}): Promise<PaperSummary | null> {
-  if (!mineruCacheDir.trim() || !sourceKey.trim()) {
+  legacySourceKeys?: string[];
+}): Promise<{ summary: PaperSummary; matchedSourceKey: string } | null> {
+  if (!mineruCacheDir.trim()) {
     return null;
   }
 
-  const candidatePaths = buildMineruSummaryCachePathCandidates(
-    mineruCacheDir.trim(),
-    item,
-    sourceKey,
-  );
+  const sourceKeyCandidates = [sourceKey, ...legacySourceKeys]
+    .map((key) => key.trim())
+    .filter(Boolean);
+
+  if (sourceKeyCandidates.length === 0) {
+    return null;
+  }
+
+  const acceptedKeys = new Set(sourceKeyCandidates);
+  const candidatePaths: string[] = [];
+  const seenPaths = new Set<string>();
+
+  for (const key of sourceKeyCandidates) {
+    for (const path of buildMineruSummaryCachePathCandidates(mineruCacheDir.trim(), item, key)) {
+      if (seenPaths.has(path)) {
+        continue;
+      }
+
+      seenPaths.add(path);
+      candidatePaths.push(path);
+    }
+  }
 
   for (const candidatePath of candidatePaths) {
     try {
@@ -462,17 +527,18 @@ export async function readSavedPreviewSummary({
       if (!raw) continue;
 
       const parsed = JSON.parse(raw) as Partial<SummaryCacheEnvelope>;
+      const matchedSourceKey = typeof parsed?.sourceKey === 'string' ? parsed.sourceKey : '';
 
       if (
         !parsed ||
         typeof parsed !== 'object' ||
-        parsed.sourceKey !== sourceKey ||
+        !acceptedKeys.has(matchedSourceKey) ||
         !parsed.summary
       ) {
         continue;
       }
 
-      return parsed.summary as PaperSummary;
+      return { summary: parsed.summary as PaperSummary, matchedSourceKey };
     } catch {
       continue;
     }

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import {
   BookOpenText,
   Cloud,
@@ -5,6 +6,7 @@ import {
   FolderOpen,
   Languages,
   Library,
+  Loader2,
   RefreshCw,
   Settings2,
   Sparkles,
@@ -12,6 +14,7 @@ import {
 import clsx from 'clsx';
 
 import { openExternalUrl } from '../../services/desktop';
+import { testRagEmbeddingEndpoint } from '../../services/rag';
 import { resolveSummaryOutputLanguage } from '../../services/summarySource';
 import type { LibraryImportMode, LibrarySettings } from '../../types/library';
 import type { ReaderSettings } from '../../types/reader';
@@ -262,6 +265,53 @@ export function ReaderPreferencesContent({
     value: LibrarySettings[Key],
   ) => {
     onNativeLibrarySettingsChange({ [key]: value } as Partial<LibrarySettings>);
+  };
+
+  const [embeddingTestState, setEmbeddingTestState] = useState<{
+    status: 'idle' | 'testing' | 'ok' | 'fail';
+    message: string;
+  }>({ status: 'idle', message: '' });
+  const embeddingConfigured = Boolean(
+    settings.embeddingBaseUrl.trim() && settings.embeddingModel.trim() && embeddingApiKey.trim(),
+  );
+  const handleTestEmbeddingConnection = async () => {
+    setEmbeddingTestState({
+      status: 'testing',
+      message: l('正在测试 Embedding 接口连接…', 'Testing the embedding endpoint...'),
+    });
+
+    try {
+      const result = await testRagEmbeddingEndpoint({
+        baseUrl: settings.embeddingBaseUrl,
+        apiKey: embeddingApiKey.trim(),
+        model: settings.embeddingModel,
+        dimensions: settings.embeddingDimensions,
+        timeoutSeconds: settings.embeddingRequestTimeoutSeconds,
+      });
+
+      setEmbeddingTestState({
+        status: result.ok ? 'ok' : 'fail',
+        message: result.ok
+          ? l(
+            `连接成功：${result.model} 返回 ${result.dimensions} 维向量，耗时 ${result.latencyMs}ms。`,
+            `Connected: ${result.model} returned a ${result.dimensions}-dim vector in ${result.latencyMs}ms.`,
+          )
+          : l('接口已响应，但未返回有效向量。', 'The endpoint responded without a valid vector.'),
+      });
+    } catch (testError) {
+      const rawMessage = testError instanceof Error ? testError.message : String(testError);
+      const is404 = /\b404\b/.test(rawMessage);
+
+      setEmbeddingTestState({
+        status: 'fail',
+        message: is404
+          ? l(
+            `连接失败：${rawMessage}。该服务没有 /v1/embeddings 端点——请改用提供 embeddings 接口的服务（例如 OpenAI text-embedding-3-small、硅基流动 bge-m3），不要直接填 chat 模型地址。`,
+            `Failed: ${rawMessage}. This provider has no /v1/embeddings endpoint — switch to a service that offers embeddings (e.g. OpenAI text-embedding-3-small or bge-m3) instead of a chat model endpoint.`,
+          )
+          : l(`连接失败：${rawMessage}`, `Failed: ${rawMessage}`),
+      });
+    }
   };
 
   return (
@@ -928,6 +978,34 @@ export function ReaderPreferencesContent({
               )}
             </div>
           ) : null}
+
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={() => void handleTestEmbeddingConnection()}
+              disabled={!embeddingConfigured || embeddingTestState.status === 'testing'}
+              className="pq-button inline-flex items-center gap-2 px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {embeddingTestState.status === 'testing' ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={1.8} />
+              ) : null}
+              {l('测试 Embedding 连接', 'Test Embedding Connection')}
+            </button>
+            {embeddingTestState.message ? (
+              <div
+                className={clsx(
+                  'min-w-0 flex-1 rounded-2xl border px-3 py-2 text-xs leading-5',
+                  embeddingTestState.status === 'ok'
+                    ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                    : embeddingTestState.status === 'fail'
+                      ? 'border-rose-200 bg-rose-50 text-rose-700'
+                      : 'border-slate-200 bg-slate-50 text-slate-500',
+                )}
+              >
+                {embeddingTestState.message}
+              </div>
+            ) : null}
+          </div>
         </SettingsField>
       ) : null}
 

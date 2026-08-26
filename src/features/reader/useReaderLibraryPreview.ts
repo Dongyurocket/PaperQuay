@@ -522,11 +522,12 @@ export function useReaderLibraryPreview({
   );
 
   const tryLoadSavedPreviewSummary = useCallback(
-    async (item: WorkspaceItem, sourceKey: string) =>
+    async (item: WorkspaceItem, sourceKey: string, legacySourceKeys: string[] = []) =>
       readSavedPreviewSummary({
         item,
         mineruCacheDir: settings.mineruCacheDir,
         sourceKey,
+        legacySourceKeys,
       }),
     [settings.mineruCacheDir],
   );
@@ -620,6 +621,7 @@ export function useReaderLibraryPreview({
         const {
           summaryInputs,
           sourceKey,
+          legacySourceKeys,
           documentText,
           errorMessage,
         } = summaryRequest;
@@ -627,7 +629,10 @@ export function useReaderLibraryPreview({
           loadPaperHistory(item.workspaceId)?.paperSummarySourceKey === sourceKey
             ? loadPaperHistory(item.workspaceId)?.paperSummary ?? null
             : null;
-        const cachedSummary = force ? null : await tryLoadSavedPreviewSummary(item, sourceKey);
+        const cachedSummaryResult = force
+          ? null
+          : await tryLoadSavedPreviewSummary(item, sourceKey, legacySourceKeys);
+        const cachedSummary = cachedSummaryResult?.summary ?? null;
 
         if (libraryPreviewRequestIdRef.current[item.workspaceId] !== requestId) {
           return 'skipped';
@@ -707,6 +712,15 @@ export function useReaderLibraryPreview({
             },
           }));
           void persistNativeLibraryOverview(item, cachedSummary, sourceKey).catch(() => undefined);
+
+          if (
+            cachedSummaryResult &&
+            cachedSummaryResult.matchedSourceKey !== sourceKey &&
+            sourceKey.trim()
+          ) {
+            void savePreviewSummary(item, sourceKey, cachedSummary).catch(() => undefined);
+          }
+
           return 'loaded';
         }
 

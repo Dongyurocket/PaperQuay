@@ -14,9 +14,13 @@ Download the native installer for your operating system from the Assets section 
 
 ## Highlights
 
-- Bilingual paper titles: papers can carry a Chinese title alongside the original. Edit it manually or generate it with your translation model, and switch the library between bilingual, Chinese-only, and original-only display modes. Chinese titles are searchable.
-- Translated PDF attachments and PDF compare reading: attach a retainpdf-translated PDF to a local library paper and read it side by side with the original, with bidirectional page-by-page scroll sync that can be toggled off. Attach, replace, or remove the translated copy from either the library details panel or the reader itself.
-- Translated PDFs are included in WebDAV backups, and restores across devices or data directories now fix up attachment paths so the translated copy stays openable.
+- Multi-select in the library: Ctrl/Cmd-click to toggle, Shift-click for ranges, or use row checkboxes. A batch toolbar appears for the selection, with batch delete, move-to-category, and favorite actions, and the details panel switches to a batch summary view.
+- Batch title translation: translate selected papers' titles with your translation model using the library's batch concurrency setting; Chinese titles are written directly to paper records, and papers that already have one are skipped.
+- Batch Bib export: export selected papers as a single merged .bib file or one .bib per paper, with deduplicated citation keys and heuristic entry types for journals, conferences, and preprints.
+- New max reasoning effort tier, and the QA reasoning picker in the reader sidebar no longer disappears at medium-compact widths.
+- New "Test Embedding Connection" in Settings: reports vector dimensions and latency on success, and clearly explains when the provider has no embeddings endpoint.
+- Fixed: paper overviews generated from the library preview were regenerated again in the reader because the two sides used different cache keys. The cache key is now unified with silent migration of existing caches.
+- Fixed: Agent answers no longer silently fall back to full text when local RAG retrieval fails; a visible notice now matches the sidebar QA behavior.
 
 ## Notes
 
@@ -41,9 +45,13 @@ PaperQuay 是一个开源 AI 论文工作台，覆盖文献管理、PDF 阅读�
 
 ## 本次更新
 
-- 文献支持中英双语标题：可手工编辑中文标题，或用翻译模型一键生成；文献库支持“中英 / 中文 / 原文”三种显示模式，中文标题可搜索。
-- 支持为本地文献附加 retainpdf 翻译版 PDF，阅读器新增“PDF 对照”模式：左侧原版、右侧翻译版，按页码双向同步滚动，可随时关闭；文献库详情和阅读器内均可附加、替换、移除。
-- 翻译版 PDF 随 WebDAV 备份上传；跨设备或跨数据目录恢复时自动修正附件路径，保证恢复后可直接打开。
+- 文库页支持多选文献：Ctrl/Cmd 点选、Shift 范围选择或行首复选框；多选后列表顶部出现批量工具栏，支持批量删除、移动分类和收藏，详情面板切换为批量摘要视图。
+- 批量标题翻译：按文库批量并发设置对多选文献逐篇调用翻译模型，中文标题直接写入文献信息，已有中文标题的文献自动跳过。
+- 批量导出 Bib：多选文献可导出为合并的单个 .bib 文件或每篇一个 .bib 文件，自动生成去重 citation key，并按期刊/会议/预印本启发式推断条目类型。
+- 思考强度新增“最高（max）”档；阅读器侧栏问答的思考强度选择器在窄宽度下不再消失。
+- 设置页新增“测试 Embedding 连接”：成功显示向量维度与耗时，并在服务缺少 embeddings 端点时给出明确提示。
+- 修复：文库预览中已生成的概览在打开文献时被重复生成——两侧此前使用不同的缓存键，现已统一并自动迁移旧缓存。
+- 修复：本地 RAG 检索失败时 Agent 回答不再静默回退，现在会显示与侧栏问答一致的未命中提示。
 
 ## 备注
 

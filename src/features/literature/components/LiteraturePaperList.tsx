@@ -11,6 +11,7 @@ import {
 } from 'react';
 import {
   BookOpenText,
+  Check,
   FilePlus2,
   GripVertical,
   RefreshCw,
@@ -54,6 +55,8 @@ interface LiteraturePaperListProps {
   showReadingHeatmap?: boolean;
   storageDir?: string;
   selectedPaper: LiteraturePaper | null;
+  /** 多选集合（P1）：为空数组时与普通单选模式行为一致。 */
+  multiSelectedPaperIds?: string[];
   searchQuery: string;
   sortBy: LiteraturePaperListSortBy;
   sortDirection: LiteraturePaperListSortDirection;
@@ -65,7 +68,7 @@ interface LiteraturePaperListProps {
   onTitleDisplayModeChange: (mode: PaperTitleDisplayMode) => void;
   onImportPdfs: () => void;
   onRefresh: () => void;
-  onSelectPaper: (paperId: string) => void;
+  onSelectPaper: (paperId: string, modifiers?: { ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean }) => void;
   onOpenPaper: (paper: LiteraturePaper) => void;
   onPaperDragStart: (
     event: DragEvent<HTMLDivElement>,
@@ -92,6 +95,7 @@ export default function LiteraturePaperList({
   showReadingHeatmap = true,
   storageDir = '',
   selectedPaper,
+  multiSelectedPaperIds = [],
   searchQuery,
   sortBy,
   sortDirection,
@@ -139,6 +143,8 @@ export default function LiteraturePaperList({
   const [heatmapRevision, setHeatmapRevision] = useState(0);
   const manualSortingEnabled = sortBy === 'manual';
   const sortValue = `${sortBy}:${sortDirection}`;
+  const multiSelectedSet = useMemo(() => new Set(multiSelectedPaperIds), [multiSelectedPaperIds]);
+  const multiSelectActive = multiSelectedPaperIds.length > 0;
   const heatmapsByPaperId = useMemo(() => {
     if (!showReadingHeatmap || papers.length === 0) {
       return {} as Record<string, PdfReadingHeatmap | null>;
@@ -419,7 +425,11 @@ export default function LiteraturePaperList({
 
     if (event.key === ' ') {
       event.preventDefault();
-      onSelectPaper(paper.id);
+      onSelectPaper(paper.id, {
+        ctrlKey: event.ctrlKey || event.metaKey,
+        metaKey: event.metaKey,
+        shiftKey: event.shiftKey,
+      });
     }
   };
 
@@ -535,6 +545,7 @@ export default function LiteraturePaperList({
           <div className="space-y-2">
             {papers.map((paper) => {
               const active = selectedPaper?.id === paper.id;
+              const multiSelected = multiSelectedSet.has(paper.id);
               const titleDisplay = resolvePaperTitleDisplay(paper, titleDisplayMode);
               const pdfPath = paperPdfPath(paper, storageDir);
               const showBeforeIndicator =
@@ -572,12 +583,16 @@ export default function LiteraturePaperList({
                     }}
                     onDrop={(event) => handlePaperDrop(event, paper)}
                     onContextMenu={(event) => onPaperContextMenu(event, paper)}
-                    onClick={() => {
+                    onClick={(event) => {
                       if (suppressClickPaperId === paper.id) {
                         return;
                       }
 
-                      onSelectPaper(paper.id);
+                      onSelectPaper(paper.id, {
+                        ctrlKey: event.ctrlKey,
+                        metaKey: event.metaKey,
+                        shiftKey: event.shiftKey,
+                      });
                     }}
                     onDoubleClick={() => onOpenPaper(paper)}
                     onKeyDown={(event) => handleRowKeyDown(event, paper)}
@@ -589,34 +604,57 @@ export default function LiteraturePaperList({
                         : 'grid-cols-[28px_minmax(0,1fr)_100px_110px]',
                       active
                         ? 'border-[var(--pq-accent-border-strong)] bg-[var(--pq-accent-soft)] ring-1 ring-[var(--pq-accent-ring)]'
-                        : dropIndicator?.paperId === paper.id
-                          ? 'border-[var(--pq-accent-border-strong)] bg-[var(--pq-accent-soft)]'
-                          : 'hover:border-[var(--pq-accent-border)] hover:bg-white/92',
+                        : multiSelected
+                          ? 'border-[var(--pq-accent-border)] bg-[var(--pq-accent-soft)]/60'
+                          : dropIndicator?.paperId === paper.id
+                            ? 'border-[var(--pq-accent-border-strong)] bg-[var(--pq-accent-soft)]'
+                            : 'hover:border-[var(--pq-accent-border)] hover:bg-white/92',
                       sortDraggingPaperId === paper.id && 'opacity-60 ring-2 ring-teal-300/60',
                       categoryDraggingPaperId === paper.id && 'opacity-70 ring-2 ring-teal-300/70',
                     )}
                   >
-                    <span
-                      data-paper-sort-handle
-                      draggable={false}
-                      title={
-                        manualSortingEnabled
-                          ? l('拖拽排序', 'Drag to reorder')
-                          : l('切换到手动排序后可拖拽排序', 'Switch to manual order to drag-sort')
-                      }
-                      onPointerDown={(event) => handleSortPointerDown(event, paper)}
-                      onPointerMove={handleSortPointerMove}
-                      onPointerUp={handleSortPointerUp}
-                      onPointerCancel={resetSortDrag}
-                      className={clsx(
-                        'mt-0.5 flex h-8 w-7 items-center justify-center rounded-lg text-[var(--pq-text-faint)] transition',
-                        manualSortingEnabled
-                          ? 'cursor-grab hover:bg-[var(--pq-accent-soft)] hover:text-[var(--pq-accent)] active:cursor-grabbing'
-                          : 'cursor-not-allowed opacity-45',
-                      )}
-                    >
-                      <GripVertical className="h-4 w-4" strokeWidth={1.8} />
-                    </span>
+                    {multiSelectActive ? (
+                      <span
+                        role="checkbox"
+                        aria-checked={multiSelected}
+                        aria-label={multiSelected ? l('取消选中该文献', 'Deselect this paper') : l('选中该文献', 'Select this paper')}
+                        title={multiSelected ? l('取消选中', 'Deselect') : l('选中', 'Select')}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onSelectPaper(paper.id, { ctrlKey: true });
+                        }}
+                        className={clsx(
+                          'mt-0.5 flex h-8 w-7 cursor-pointer items-center justify-center rounded-lg border transition',
+                          multiSelected
+                            ? 'border-[var(--pq-accent-border-strong)] bg-[var(--pq-accent)] text-white'
+                            : 'border-[var(--pq-border)] bg-white/70 text-transparent hover:border-[var(--pq-accent-border)]',
+                        )}
+                      >
+                        <Check className="h-4 w-4" strokeWidth={2.4} />
+                      </span>
+                    ) : (
+                      <span
+                        data-paper-sort-handle
+                        draggable={false}
+                        title={
+                          manualSortingEnabled
+                            ? l('拖拽排序', 'Drag to reorder')
+                            : l('切换到手动排序后可拖拽排序', 'Switch to manual order to drag-sort')
+                        }
+                        onPointerDown={(event) => handleSortPointerDown(event, paper)}
+                        onPointerMove={handleSortPointerMove}
+                        onPointerUp={handleSortPointerUp}
+                        onPointerCancel={resetSortDrag}
+                        className={clsx(
+                          'mt-0.5 flex h-8 w-7 items-center justify-center rounded-lg text-[var(--pq-text-faint)] transition',
+                          manualSortingEnabled
+                            ? 'cursor-grab hover:bg-[var(--pq-accent-soft)] hover:text-[var(--pq-accent)] active:cursor-grabbing'
+                            : 'cursor-not-allowed opacity-45',
+                        )}
+                      >
+                        <GripVertical className="h-4 w-4" strokeWidth={1.8} />
+                      </span>
+                    )}
                     <span className="min-w-0">
                       <span className="flex min-w-0 items-center gap-2">
                         {paper.isFavorite ? (

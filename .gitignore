@@ -176,3 +176,6 @@ $RECYCLE.BIN/
 
 # Local AI assistant instructions
 AGENTS.md
+
+# codegraph 索引缓存
+.codegraph/

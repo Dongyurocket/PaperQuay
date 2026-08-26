@@ -3,6 +3,7 @@ const {
   QA_STREAM_EVENT,
   completionEndpoint,
   embedTexts,
+  embeddingsEndpoint,
   listOpenAiModels,
   mergeOpenAiStreamChunks,
   openAiChat,
@@ -961,6 +962,23 @@ function createAiCommands(context) {
     async rag_embed_chunks({ request }) {
       const vectors = await embedTexts((request.chunks ?? []).map((chunk) => chunk.text), request.embedding);
       return (request.chunks ?? []).map((chunk, index) => ({ ...chunk, embedding: vectors[index] ?? [] }));
+    },
+
+    async rag_test_embedding({ request }) {
+      const embedding = request?.embedding ?? {};
+      const startedAt = Date.now();
+      const [vector] = await embedTexts(['PaperQuay embedding connectivity test'], {
+        ...embedding,
+        timeoutSeconds: Math.min(Math.max(Number(embedding.timeoutSeconds) || 30, 10), 60),
+      });
+
+      return {
+        ok: Array.isArray(vector) && vector.length > 0,
+        endpoint: embeddingsEndpoint(embedding.baseUrl ?? ''),
+        model: typeof embedding.model === 'string' ? embedding.model : '',
+        dimensions: Array.isArray(vector) ? vector.length : 0,
+        latencyMs: Date.now() - startedAt,
+      };
     },
 
     async rag_index_document({ request }) {

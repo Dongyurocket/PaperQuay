@@ -646,6 +646,15 @@ const CHAT_COMPOSER_ULTRA_COMPACT_WIDTH = 360;
 const CHAT_COMPOSER_MAX_TEXTAREA_HEIGHT = 240;
 const CHAT_AUTO_SCROLL_BOTTOM_THRESHOLD = 96;
 
+const REASONING_EFFORT_LABELS: Record<ModelReasoningEffort, { zh: string; en: string }> = {
+  auto: { zh: '自动', en: 'Auto' },
+  low: { zh: '低', en: 'Low' },
+  medium: { zh: '中', en: 'Medium' },
+  high: { zh: '高', en: 'High' },
+  xhigh: { zh: '极高', en: 'XHigh' },
+  max: { zh: '最高', en: 'Max' },
+};
+
 function isNearScrollBottom(element: HTMLElement, threshold = CHAT_AUTO_SCROLL_BOTTOM_THRESHOLD) {
   return element.scrollHeight - element.scrollTop - element.clientHeight <= threshold;
 }
@@ -831,9 +840,12 @@ export function ChatWorkspacePanel({
   const reasoningAction = {
     key: 'reasoning',
     icon: Bot,
-    label: l('思考强度', 'Reasoning effort'),
+    label: `${l('思考强度', 'Reasoning effort')}: ${l(
+      REASONING_EFFORT_LABELS[qaReasoningEffort]?.zh ?? '自动',
+      REASONING_EFFORT_LABELS[qaReasoningEffort]?.en ?? 'Auto',
+    )}`,
     onClick: () => {
-      const order: ModelReasoningEffort[] = ['auto', 'low', 'medium', 'high', 'xhigh'];
+      const order: ModelReasoningEffort[] = ['auto', 'low', 'medium', 'high', 'xhigh', 'max'];
       const currentIndex = order.indexOf(qaReasoningEffort);
       onQaReasoningEffortChange(order[(currentIndex + 1) % order.length] ?? 'auto');
     },
@@ -1574,15 +1586,13 @@ export function ChatWorkspacePanel({
                   })
                 ) : null}
 
-                {!compactComposer || ultraCompactComposer ? (
-                  <ReasoningEffortPicker
-                    l={l}
-                    value={qaReasoningEffort}
-                    onChange={onQaReasoningEffortChange}
-                    title={l('问答思考强度', 'QA reasoning effort')}
-                    compact={ultraCompactComposer}
-                  />
-                ) : null}
+                <ReasoningEffortPicker
+                  l={l}
+                  value={qaReasoningEffort}
+                  onChange={onQaReasoningEffortChange}
+                  title={l('问答思考强度', 'QA reasoning effort')}
+                  compact={compactComposer || ultraCompactComposer}
+                />
               </div>
 
               <button

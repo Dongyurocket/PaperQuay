@@ -261,16 +261,29 @@ export function formatQaContextHint(
         `本次未命中本地 RAG：未检索到相关片段，已回退到${originLabel}。`,
         `RAG was attempted, but no relevant chunks were retrieved. Fell back to ${originLabel}.`,
       );
-    case 'failed':
-      return context.errorMessage?.trim()
+    case 'failed': {
+      const rawError = context.errorMessage?.trim() ?? '';
+      const is404 = /\b404\b/.test(rawError);
+      const guidance = is404
         ? l(
-            `本次未命中本地 RAG：检索失败，已回退到${originLabel}。错误：${context.errorMessage.trim()}`,
-            `RAG failed and fell back to ${originLabel}: ${context.errorMessage.trim()}`,
+          '该 Embedding 服务没有 /v1/embeddings 端点，请在设置中改用一个提供 embeddings 接口的模型（不是 chat 模型），并用「测试 Embedding 连接」验证。',
+          'This embedding provider has no /v1/embeddings endpoint. In Settings, switch to a model that offers an embeddings API (not a chat model) and verify with "Test Embedding Connection".',
+        )
+        : l(
+          '请到设置中检查 Embedding 配置（Base URL / API Key / 模型），可用「测试 Embedding 连接」验证。',
+          'Check the embedding settings (Base URL / API key / model); you can verify with "Test Embedding Connection".',
+        );
+
+      return rawError
+        ? l(
+            `本次未命中本地 RAG：检索失败，已回退到${originLabel}。错误：${rawError}。${guidance}`,
+            `RAG failed and fell back to ${originLabel}. Error: ${rawError}. ${guidance}`,
           )
         : l(
-            `本次未命中本地 RAG：检索失败，已回退到${originLabel}。`,
-            `RAG failed and fell back to ${originLabel}.`,
+            `本次未命中本地 RAG：检索失败，已回退到${originLabel}。${guidance}`,
+            `RAG failed and fell back to ${originLabel}. ${guidance}`,
           );
+    }
   }
 }
 

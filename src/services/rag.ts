@@ -143,4 +143,29 @@ export async function ragRetrieveDocumentChunks(
   }
 }
 
+export interface RagEmbeddingTestResult {
+  ok: boolean;
+  endpoint: string;
+  model: string;
+  dimensions: number;
+  latencyMs: number;
+}
+
+export async function testRagEmbeddingEndpoint(
+  options: RagEmbeddingOptions,
+): Promise<RagEmbeddingTestResult> {
+  try {
+    return await invoke<RagEmbeddingTestResult>('rag_test_embedding', {
+      request: {
+        embedding: {
+          ...options,
+          baseUrl: normalizeBaseUrl(options.baseUrl) ?? options.baseUrl.trim(),
+        },
+      },
+    });
+  } catch (error) {
+    throw new Error(toErrorMessage(error, 'Embedding 接口连接测试失败'));
+  }
+}
+
 export type { RagEmbeddingOptions, RagRetrieveRequest };

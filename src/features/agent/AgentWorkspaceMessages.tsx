@@ -421,6 +421,11 @@ export function AssistantMessageCard({
               l={l}
               onOpenCitation={onOpenRagCitation}
             />
+            {message.ragNotice ? (
+              <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-700 dark:border-amber-300/25 dark:bg-amber-300/10 dark:text-amber-200">
+                {message.ragNotice}
+              </div>
+            ) : null}
             {message.choices && message.choices.length > 0 ? (
               <div className="mt-4 grid gap-2">
                 {message.choices.map((choice) => (

@@ -16,6 +16,11 @@ type SummaryCacheEnvelope = {
   summary: PaperSummary;
 };
 
+export interface SavedSummaryCacheResult {
+  summary: PaperSummary;
+  matchedSourceKey: string;
+}
+
 export interface SavedMineruPagesResult {
   pages: MineruPage[];
   path: string;
@@ -38,35 +43,55 @@ export async function loadSavedSummaryCache({
   item,
   mineruCacheDir,
   sourceKey,
+  legacySourceKeys = [],
   readText,
 }: {
   item: WorkspaceItem;
   mineruCacheDir: string;
   sourceKey: string;
+  legacySourceKeys?: string[];
   readText: ReadLocalTextFileIfExists;
-}): Promise<PaperSummary | null> {
-  if (!mineruCacheDir.trim() || !sourceKey.trim()) {
+}): Promise<SavedSummaryCacheResult | null> {
+  if (!mineruCacheDir.trim()) {
     return null;
   }
 
-  const candidatePaths = buildMineruSummaryCachePathCandidates(
-    mineruCacheDir.trim(),
-    item,
-    sourceKey,
-  );
+  const sourceKeyCandidates = [sourceKey, ...legacySourceKeys]
+    .map((key) => key.trim())
+    .filter(Boolean);
+
+  if (sourceKeyCandidates.length === 0) {
+    return null;
+  }
+
+  const acceptedKeys = new Set(sourceKeyCandidates);
+  const candidatePaths: string[] = [];
+  const seenPaths = new Set<string>();
+
+  for (const key of sourceKeyCandidates) {
+    for (const path of buildMineruSummaryCachePathCandidates(mineruCacheDir.trim(), item, key)) {
+      if (seenPaths.has(path)) {
+        continue;
+      }
+
+      seenPaths.add(path);
+      candidatePaths.push(path);
+    }
+  }
 
   for (const candidatePath of candidatePaths) {
     try {
       const raw = await readText(candidatePath);
       if (!raw) continue;
 
-      const parsed = JSON.parse(raw);
+      const parsed = JSON.parse(raw) as Partial<SummaryCacheEnvelope>;
+      const matchedSourceKey = typeof parsed?.sourceKey === 'string' ? parsed.sourceKey : '';
 
-      if (!isMatchingSummaryCacheEnvelope(parsed, sourceKey)) {
+      if (!parsed || typeof parsed !== 'object' || !acceptedKeys.has(matchedSourceKey) || !parsed.summary) {
         continue;
       }
 
-      return parsed.summary;
+      return { summary: parsed.summary as PaperSummary, matchedSourceKey };
     } catch {
       continue;
     }
