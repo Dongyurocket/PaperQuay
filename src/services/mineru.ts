@@ -15,6 +15,27 @@ import {
 } from '../utils/markdown.ts';
 import { joinReadableText } from '../utils/text.ts';
 
+// MinerU content 对象中的结构性字段：资产路径、几何与排版元数据。
+// 文本提取与 Markdown fallback 都必须忽略它们，避免把 images/<hash>.jpg
+// 之类的资源路径当作正文、图注或翻译输入。
+const STRUCTURAL_CONTENT_KEYS = new Set([
+  'type',
+  'bbox',
+  'path',
+  'img_path',
+  'image_path',
+  'image_source',
+  'table_type',
+  'table_nest_level',
+  'level',
+  'text_level',
+  'math_type',
+  'list_type',
+  'item_type',
+  'bboxCoordinateSystem',
+  'bboxPageSize',
+]);
+
 function collectTextParts(input: unknown): string[] {
   if (input == null) {
     return [];
@@ -34,24 +55,9 @@ function collectTextParts(input: unknown): string[] {
 
   if (typeof input === 'object') {
     const record = input as Record<string, unknown>;
-    const ignoredKeys = new Set([
-      'type',
-      'bbox',
-      'path',
-      'image_source',
-      'table_type',
-      'table_nest_level',
-      'level',
-      'text_level',
-      'math_type',
-      'list_type',
-      'item_type',
-      'bboxCoordinateSystem',
-      'bboxPageSize',
-    ]);
 
     return Object.entries(record).flatMap(([key, value]) => {
-      if (ignoredKeys.has(key)) {
+      if (STRUCTURAL_CONTENT_KEYS.has(key)) {
         return [];
       }
 
@@ -124,17 +130,26 @@ function joinPath(basePath: string, ...segments: string[]): string {
 function extractTypedContentText(
   block: PositionedMineruBlock,
   preferredKeys: string[],
+  options: { allowFallback?: boolean } = {},
 ): string {
   const content = getRecord(block.content);
 
   if (!content) {
-    return joinReadableText(collectTextParts(block.content));
+    return options.allowFallback === false
+      ? ''
+      : joinReadableText(collectTextParts(block.content));
   }
 
   const preferredParts = preferredKeys.flatMap((key) => collectTextParts(content[key]));
 
   if (preferredParts.length > 0) {
     return joinReadableText(preferredParts);
+  }
+
+  // 图注等语义字段必须支持严格模式：空 caption 不能回退到整个 content，
+  // 否则 table 的 html / chart 的资源字段会被误当作图注文本。
+  if (options.allowFallback === false) {
+    return '';
   }
 
   return joinReadableText(collectTextParts(block.content));
@@ -153,6 +168,12 @@ function normalizeRawBlockType(rawType: unknown): string {
   }
 
   if (lowerType.includes('image')) {
+    return 'image';
+  }
+
+  // MinerU v2 会把图表/插图输出为 chart（部分版本为 figure）；它们带有
+  // image_source 本地资产，应统一走图片渲染分支，而不是普通 Markdown 文本。
+  if (lowerType.includes('chart') || lowerType.includes('figure')) {
     return 'image';
   }
 
@@ -231,7 +252,11 @@ function renderInlineMarkdownContent(input: unknown): string {
     'caption_content',
     'table_caption',
     'image_caption',
+    'chart_caption',
     'caption',
+    'table_footnote',
+    'image_footnote',
+    'chart_footnote',
     'content',
     'value',
   ]) {
@@ -246,8 +271,11 @@ function renderInlineMarkdownContent(input: unknown): string {
     }
   }
 
+  // fallback 只拼接可读文本字段；结构性资产字段（image_source / img_path / path
+  // 等）与表格 html 都不应进入 Markdown，避免渲染或翻译出 images/<hash>.jpg、
+  // <table> 源码之类的噪声。
   return Object.entries(record)
-    .filter(([key]) => key !== 'type' && key !== 'math_type')
+    .filter(([key]) => !STRUCTURAL_CONTENT_KEYS.has(key) && key !== 'html')
     .map(([, value]) => renderInlineMarkdownContent(value))
     .join('');
 }
@@ -378,9 +406,15 @@ export function resolveMineruAssetPath(
 export function extractCaptionFromMineruBlock(block: PositionedMineruBlock): string {
   switch (block.type) {
     case 'table':
-      return extractTypedContentText(block, ['table_caption', 'caption']);
+      // 严格提取：table_caption 为空时不得回退到整个 content，
+      // 否则 html 表格源码会被当作图注显示。
+      return extractTypedContentText(block, ['table_caption', 'caption'], {
+        allowFallback: false,
+      });
     case 'image':
-      return extractTypedContentText(block, ['image_caption', 'caption']);
+      return extractTypedContentText(block, ['image_caption', 'chart_caption', 'caption'], {
+        allowFallback: false,
+      });
     default:
       return '';
   }
@@ -403,10 +437,16 @@ function toMarkdownFragment(block: PositionedMineruBlock, plainText: string): st
       const mathText = extractMathText(block.content);
       return mathText ? `$$\n${mathText}\n$$` : structuredMarkdown || safeText;
     }
-    case 'image':
-      return `**图片说明** ${structuredMarkdown || safeText}`;
-    case 'table':
-      return `**表格说明** ${structuredMarkdown || safeText}`;
+    case 'image': {
+      // 无图注且无 OCR 正文的视觉块不产生文本片段：纯资源路径不应成为
+      // 翻译单元，界面也不需要“未提取到文本”之类的占位说明。
+      const imageText = structuredMarkdown || plainText;
+      return imageText ? `**图片说明** ${imageText}` : '';
+    }
+    case 'table': {
+      const tableText = structuredMarkdown || plainText;
+      return tableText ? `**表格说明** ${tableText}` : '';
+    }
     case 'caption':
       return `> ${structuredMarkdown || safeText}`;
     default:
@@ -502,6 +542,10 @@ function mapFlatContentType(rawBlock: Record<string, unknown>): string {
     return 'image';
   }
 
+  if (lowerType.includes('chart') || lowerType.includes('figure')) {
+    return 'image';
+  }
+
   if (lowerType.includes('list')) {
     return 'list';
   }
@@ -518,6 +562,8 @@ function pickFlatContent(rawBlock: Record<string, unknown>): Record<string, unkn
     'table_footnote',
     'image_caption',
     'image_footnote',
+    'chart_caption',
+    'chart_footnote',
     'img_path',
     'code_body',
     'code_caption',
@@ -1007,7 +1053,13 @@ export function extractTextFromMineruBlock(block: PositionedMineruBlock): string
   }
 
   if (block.type === 'image') {
-    return extractTypedContentText(block, ['image_caption', 'image_footnote', 'caption']);
+    return extractTypedContentText(block, [
+      'image_caption',
+      'chart_caption',
+      'image_footnote',
+      'chart_footnote',
+      'caption',
+    ]);
   }
 
   if (block.type === 'equation') {

@@ -57,6 +57,12 @@ function toErrorMessage(error: unknown): string {
   return '';
 }
 
+// 定点失效：历史版本曾把 MinerU 资产路径拼进翻译输入，产生的污染译文以
+// images/<hash>.<ext> 开头（可能带“图片说明”等前缀）。这类条目不是有效译文，
+// 在缓存读取与写入归一化时直接丢弃；对应块会重新进入待翻译列表，下次翻译自动重翻。
+const ASSET_PATH_TRANSLATION_PATTERN =
+  /^[*_\s>]*(?:(?:图片|表格|图像)说明)?[*_\s]*images\/[^\s)]+\.(?:jpe?g|png|webp|gif|bmp)/i;
+
 export function normalizeTranslationMap(translations: TranslationMap | null | undefined): TranslationMap {
   const normalized: TranslationMap = {};
 
@@ -69,6 +75,10 @@ export function normalizeTranslationMap(translations: TranslationMap | null | un
     const nextTranslatedText = translatedText.trim();
 
     if (!nextBlockId || !nextTranslatedText) {
+      continue;
+    }
+
+    if (ASSET_PATH_TRANSLATION_PATTERN.test(nextTranslatedText)) {
       continue;
     }
 
