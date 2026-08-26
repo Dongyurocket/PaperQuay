@@ -14,13 +14,10 @@ Download the native installer for your operating system from the Assets section 
 
 ## Highlights
 
-- Multi-select in the library: Ctrl/Cmd-click to toggle, Shift-click for ranges, or use row checkboxes. A batch toolbar appears for the selection, with batch delete, move-to-category, and favorite actions, and the details panel switches to a batch summary view.
-- Batch title translation: translate selected papers' titles with your translation model using the library's batch concurrency setting; Chinese titles are written directly to paper records, and papers that already have one are skipped.
-- Batch Bib export: export selected papers as a single merged .bib file or one .bib per paper, with deduplicated citation keys and heuristic entry types for journals, conferences, and preprints.
-- New max reasoning effort tier, and the QA reasoning picker in the reader sidebar no longer disappears at medium-compact widths.
-- New "Test Embedding Connection" in Settings: reports vector dimensions and latency on success, and clearly explains when the provider has no embeddings endpoint.
-- Fixed: paper overviews generated from the library preview were regenerated again in the reader because the two sides used different cache keys. The cache key is now unified with silent migration of existing caches.
-- Fixed: Agent answers no longer silently fall back to full text when local RAG retrieval fails; a visible notice now matches the sidebar QA behavior.
+- Fixed: MinerU chart and figure blocks (for example Fig. 7/8 curve plots) now render as image blocks with their local snapshots, using `chart_caption` for captions.
+- Fixed: tables without a MinerU caption no longer show escaped `<table>` HTML as caption text; caption extraction is now strict while the structured HTML table still renders normally.
+- Fixed: full-text translation input no longer includes local image asset paths or table HTML; visual blocks without a caption or OCR text are skipped.
+- Fixed: previously polluted cached translations starting with an `images/` asset path are dropped automatically and retranslated on the next run; no manual cache cleanup is required.
 
 ## Notes
 
