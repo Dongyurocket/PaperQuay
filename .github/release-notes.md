@@ -14,14 +14,13 @@ Download the native installer for your operating system from the Assets section 
 
 ## Highlights
 
-- New: the Agent now runs a ReAct multi-turn tool loop — it can autonomously call read-only tools (library search, paper metadata, overview, RAG search, paper context, figure reading, memory) across multiple turns before answering; write operations still produce a reviewable plan; a legacy-mode toggle in Settings can temporarily restore the old pipeline.
-- New: Agent messages include a collapsible execution trace showing each turn's tool calls, result previews, and timing.
-- New: hybrid local RAG retrieval — FTS5 keyword search fused with vector search via RRF, greatly improving hits for proper nouns, model numbers, and acronyms; graceful fallback to vector-only when FTS5 is unavailable.
-- New: long-session context compaction at user-turn boundaries with a structured progress summary; cross-session three-layer memory (trace log, topics, synthesis) stored as human-readable files under `agent-memory/`, manageable from Settings.
-- New: run observability — every Agent run persists turns, tool calls, and token usage; the composer shows live run tokens and the session list shows per-session totals.
-- New: session recovery after interruption (resume from the last completed turn) and message-level forking ("branch from here").
-- New: comparative survey capability — a four-stage pipeline (rephrase, decompose, research, report) over selected papers with staged progress and cancellation.
-- New: Agent vision context — figures/tables hit by RAG are compressed and attached to the model request (max 4 images / 8 MB per turn); enable "supports vision" on a model preset to turn it on.
+- Fixed: startup no longer stalls for seconds — the knowledge graph is now built only when its workspace is first opened, and semantic similarity edges are computed from a cached per-document vector table instead of decoding every chunk embedding on the main process (measured 6.4s → a few milliseconds; existing databases are backfilled once on first launch).
+- Fixed: a hidden bug where semantic similarity edges were silently always empty — sqlite-vec returns float32 raw bytes under node:sqlite, and the old decoder never matched; embeddings are now decoded correctly.
+- Fixed: startup no longer rewrites the whole library on every launch; MinerU artifact checks now use a single batched IPC instead of one call per paper.
+- New: interrupted Agent runs restore recovered content (including full tool-call arguments) into the composer for you to confirm and send, instead of re-running automatically without confirmation; declined recoveries are clearly marked aborted.
+- Fixed: comparative-survey capability token usage is now counted in run totals without double-counting.
+- Improved: Agent backend hardening — per-turn limits of 80 messages / 800k characters / 4 images / 8 MB; backend Agent turns are cancellable; streamed token usage is merged correctly; request timeout and manual cancellation signals compose properly.
+- Improved: Agent memory trace size limits are enforced by bytes instead of characters, and the "organize memory" button now uses a distinct BrainCog icon.
 
 ## Notes
 
@@ -46,14 +45,13 @@ PaperQuay 是一个开源 AI 论文工作台，覆盖文献管理、PDF 阅读�
 
 ## 本次更新
 
-- 新增：Agent 升级为 ReAct 多轮工具调用循环，可自主多轮调用只读工具（文库搜索、元数据、概览、RAG 检索、请求上下文、读图、读记忆）后综合回答；写操作仍生成计划走审批；设置页保留「旧版 Agent 模式」开关。
-- 新增：Agent 消息附带可折叠执行轨迹，逐轮展示工具调用、结果摘要与耗时。
-- 新增：本地 RAG 混合检索——FTS5 关键词通道与向量检索按 RRF 融合，显著改善专有名词、型号、缩写等查询命中；FTS5 不可用时自动降级为纯向量。
-- 新增：长会话上下文在用户轮边界自动压缩为结构化进度摘要；跨会话三层记忆（trace 日志、主题、综合）以人类可读文件存于 `agent-memory/`，设置页可管理。
-- 新增：运行可观测——每次 Agent 运行的轮次、工具调用与 token 用量落库；输入框旁实时显示本次运行 token，会话列表显示各会话总量。
-- 新增：运行中断后可从最近完整轮次恢复；任意消息可「从此处分支」复制新会话。
-- 新增：对比调研 Capability——对选中论文执行改写、分解、逐题检索、综合成文四阶段流水线，显示阶段进度，可取消续跑。
-- 新增：Agent 视觉上下文——RAG 命中的论文图表压缩后随行人模型请求（单轮最多 4 张、共 8MB）；在模型 preset 上开启「支持视觉」即可启用。
+- 修复：应用启动不再卡顿数秒——知识图谱改为切换到图谱工作区时才首次构建；语义相似边不再全量解码 chunk 向量（实测阻塞主进程 6.4 秒），改用文档级平均向量缓存表，计算降至毫秒级；旧库首次启动一次性回填缓存（仅一次）。
+- 修复：语义相似边一直静默为空的隐藏 bug——sqlite-vec 在 node:sqlite 下返回 float32 原始字节，旧解码逻辑永不成立，现已正确解码。
+- 修复：启动不再每次全库重写文献；MinerU 产物状态检查改为单次批量 IPC，不再逐篇调用。
+- 新增：Agent 中断恢复改为把恢复内容（含完整工具调用参数）回填到输入框，确认发送后继续，不再未经确认自动重跑；放弃恢复时明确标记为已取消。
+- 修复：对比调研 Capability 的 token 用量计入运行总量且不再重复计数。
+- 优化：Agent 后端加固——单轮限制 80 条消息 / 80 万字符 / 4 张图片 / 8MB；后端 Agent 轮次支持取消；流式 token 用量正确合并；超时与手动取消信号正确组合。
+- 优化：Agent 记忆 trace 大小限制按字节执行；「整理 Agent 记忆」按钮改用 BrainCog 图标，与思考强度选择器区分。
 
 ## 备注
 
