@@ -2,10 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  forkAgentHistorySession,
   patchAgentHistorySessionMessage,
   upsertAgentHistorySession,
 } from '../src/features/agent/agentSessionState.ts';
 import type { AgentChatMessage, AgentHistorySession } from '../src/features/agent/AgentWorkspace.types.ts';
+import { applyAgentLoopEventToTrace } from '../src/features/agent/AgentWorkspace.model.ts';
 
 function message(id: string, role: AgentChatMessage['role'], content: string): AgentChatMessage {
   return {
@@ -99,4 +101,62 @@ test('upsertAgentHistorySession marks a session as running when the latest assis
   });
 
   assert.equal(sessions[0]?.status, 'running');
+});
+
+test('Agent tool traces resolve the same call from running to a terminal result', () => {
+  const started = applyAgentLoopEventToTrace([], {
+    kind: 'tool_call',
+    turn: 1,
+    callId: 'call-1',
+    name: 'search_library',
+    args: { query: 'paper' },
+  });
+  const completed = applyAgentLoopEventToTrace(started, {
+    kind: 'tool_result',
+    turn: 1,
+    callId: 'call-1',
+    name: 'search_library',
+    ok: true,
+    preview: 'Found one result.',
+  });
+
+  assert.equal(completed.length, 1);
+  assert.equal(completed[0]?.type, 'tool-result');
+  assert.equal(completed[0]?.status, 'success');
+  assert.equal(completed[0]?.detail, 'Found one result.');
+});
+
+test('forkAgentHistorySession copies a message prefix without sharing mutable message arrays', () => {
+  const source = session('source', [
+    message('m1', 'user', 'first'),
+    {
+      ...message('m2', 'assistant', 'second'),
+      attachments: [{
+        id: 'image-1',
+        kind: 'image',
+        name: 'figure.png',
+        mimeType: 'image/png',
+        size: 12,
+        dataUrl: 'data:image/png;base64,not-persisted',
+      }],
+      paperScopeIds: ['paper-a'],
+    },
+    message('m3', 'user', 'third'),
+  ]);
+  source.selectedPaperIds = ['paper-a'];
+  source.lastInstruction = 'compare papers';
+
+  const fork = forkAgentHistorySession({
+    source,
+    messageId: 'm2',
+    forkSessionId: 'fork',
+    locale: 'en-US',
+  });
+
+  assert.equal(fork?.id, 'fork');
+  assert.deepEqual(fork?.messages.map((item) => item.id), ['m1', 'm2']);
+  assert.deepEqual(fork?.selectedPaperIds, ['paper-a']);
+  assert.equal(fork?.messages[1]?.attachments?.[0]?.dataUrl, undefined);
+  fork?.messages[1]?.paperScopeIds?.push('paper-b');
+  assert.deepEqual(source.messages[1]?.paperScopeIds, ['paper-a']);
 });

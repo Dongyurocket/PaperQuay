@@ -24,6 +24,7 @@ import {
   SettingsField,
   SettingsInput,
   SettingsSelect,
+  ToggleRow,
 } from './readerPreferencesPrimitives';
 import type {
   ReaderPreferencesLocalizer,
@@ -413,6 +414,34 @@ export function ReaderPreferencesModelsSection({
                     )}
                   />
                 </div>
+                <div className="space-y-2">
+                  <div className="text-xs font-medium text-slate-500">
+                    {l('上下文窗口', 'Context Window')}
+                  </div>
+                  <SettingsInput
+                    type="number"
+                    min={4096}
+                    max={2000000}
+                    step={1024}
+                    value={preset.contextWindow ?? ''}
+                    onChange={(event) => onQaModelPresetChange(preset.id, {
+                      contextWindow: event.target.value ? Number(event.target.value) : undefined,
+                    })}
+                    placeholder="128000"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <div className="text-xs font-medium text-slate-500">{l('视觉能力', 'Vision Capability')}</div>
+                  <label className="flex min-h-11 cursor-pointer items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-700 dark:border-white/10 dark:bg-[var(--pq-surface-2)] dark:text-[var(--pq-text-muted)]">
+                    <span>{l('支持图片输入', 'Supports image input')}</span>
+                    <input
+                      type="checkbox"
+                      checked={preset.supportsVision === true}
+                      onChange={(event) => onQaModelPresetChange(preset.id, { supportsVision: event.target.checked })}
+                      className="h-4 w-4 accent-[var(--pq-accent)]"
+                    />
+                  </label>
+                </div>
               </div>
 
               {!preset.baseUrl.trim() || !preset.model.trim() || !preset.apiKey.trim() ? (
@@ -463,8 +492,8 @@ export function ReaderPreferencesModelsSection({
                       l('Unavailable', 'Unavailable')}
                   </div>
                   <div className="mt-1 whitespace-pre-wrap">
-                    {presetTestResultMap[preset.id]?.message}
-                  </div>
+                {presetTestResultMap[preset.id]?.message}
+              </div>
                 </div>
               ) : null}
               </div>
@@ -590,6 +619,24 @@ export function ReaderPreferencesModelsSection({
             );
           })}
         </div>
+      </SettingsField>
+
+      <SettingsField
+        label={l('Agent 兼容模式', 'Agent Compatibility')}
+        description={l(
+          '默认使用多轮 ReAct 工具循环。仅在排查兼容问题时切回旧的一次性 Agent 路径。',
+          'The multi-turn ReAct loop is used by default. Switch back to the previous one-shot Agent path only for compatibility troubleshooting.',
+        )}
+      >
+        <ToggleRow
+          title={l('使用旧版 Agent 路径', 'Use legacy Agent path')}
+          description={l(
+            '旧路径保留现有审批语义，但不使用多轮只读工具、运行轨迹或 token 用量。',
+            'The legacy path keeps existing approval semantics but does not use multi-turn read tools, run traces, or token accounting.',
+          )}
+          checked={settings.agentLegacyMode}
+          onChange={(agentLegacyMode) => onSettingChange('agentLegacyMode', agentLegacyMode)}
+        />
       </SettingsField>
     </>
   );

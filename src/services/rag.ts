@@ -22,6 +22,8 @@ interface RagRetrieveRequest {
   documentKey: string;
   sourceType?: Exclude<RagSourceMode, 'off' | 'hybrid'> | null;
   queryEmbedding: number[];
+  /** The original retrieval text used by the FTS5 keyword channel. */
+  queryText?: string;
   topK: number;
 }
 

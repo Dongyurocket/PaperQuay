@@ -72,3 +72,13 @@ test("review writing runtime config is normalized independently", async () => {
     reasoningEffort: "high",
   });
 });
+
+test("Agent P3 settings default conservatively and preserve explicit capability flags", async () => {
+  const { createQaPreset, normalizeReaderSettings } = await loadReaderShared();
+
+  assert.equal(normalizeReaderSettings().agentLegacyMode, false);
+  assert.equal(normalizeReaderSettings({ agentLegacyMode: true }).agentLegacyMode, true);
+  assert.equal(createQaPreset({ model: "vision-test" }).supportsVision, false);
+  assert.equal(createQaPreset({ model: "vision-test", supportsVision: true, contextWindow: 256000 }).supportsVision, true);
+  assert.equal(createQaPreset({ model: "vision-test", contextWindow: 256000 }).contextWindow, 256000);
+});

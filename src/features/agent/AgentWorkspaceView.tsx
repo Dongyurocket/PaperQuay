@@ -29,6 +29,7 @@ import {
 import { ModelPresetPicker } from '../../components/ModelPresetPicker';
 import { isImeComposing, useImeSafeTextareaValue } from '../../hooks/useImeSafeTextareaValue';
 import type { LibraryAgentPlan, LibraryAgentRagCitation } from '../../services/libraryAgent';
+import type { AgentMemoryWritePlan } from '../../services/agentMemory';
 import type { LiteraturePaper } from '../../types/library';
 import type { DocumentChatAttachment, ModelReasoningEffort, QaModelPreset, UiLanguage } from '../../types/reader';
 import type {
@@ -49,6 +50,8 @@ interface AgentWorkspaceViewProps {
   approvedItemIds: Set<string>;
   chatScrollRef: Ref<HTMLDivElement>;
   composerValue: string;
+  currentRunTokens: { promptTokens: number; completionTokens: number };
+  sessionTokenUsage: Record<string, number>;
   conversationPanelRef: Ref<HTMLElement>;
   error: string;
   expandedStepKeys: Set<string>;
@@ -74,8 +77,10 @@ interface AgentWorkspaceViewProps {
   localizedToolLabel: (tool: LibraryAgentPlan['tool']) => string;
   messages: AgentChatMessage[];
   onApplyPlan: () => void;
+  onApplyMemoryPlan: (memoryPlan: AgentMemoryWritePlan) => void;
   onAgentPresetChange: (presetId: string) => void;
   onAgentReasoningEffortChange: (reasoningEffort: ModelReasoningEffort) => void;
+  onCancelAgentRun: () => void;
   onCancelPlan: () => void;
   onCaptureScreenshot: () => void;
   onClearSelection: () => void;
@@ -83,8 +88,10 @@ interface AgentWorkspaceViewProps {
   onCopyToolParameters: (toolCall: AgentToolCallView) => void;
   onHistorySidebarCollapsedChange: (collapsed: boolean) => void;
   onInlinePaperSelectionContinue: (instruction: string, paperIds: string[]) => void;
+  onForkFromMessage: (messageId: string) => void;
   onInspectPlanItem: (itemId: string, paperTitle: string) => void;
   onOpenRagCitation: (citation: LibraryAgentRagCitation) => void;
+  onOrganizeMemory: () => void;
   onPaperSearchQueryChange: (value: string) => void;
   onRefreshPapers: () => void;
   onRemoveAttachment: (attachmentId: string) => void;
@@ -123,6 +130,14 @@ const agentToolbarPrimaryButtonClass = 'pq-button-primary px-3 py-1.5 text-xs';
 const agentTagClass = 'pq-chip px-2 py-0.5 text-[11px] font-semibold';
 const agentComposerIconButtonClass =
   'pq-icon-button h-10 w-10 shrink-0 border border-[var(--pq-border)] bg-white/60 disabled:cursor-not-allowed disabled:opacity-50';
+
+function compactTokenCount(value: number): string {
+  if (value >= 1000) {
+    return `${(value / 1000).toFixed(value >= 10_000 ? 0 : 1)}k`;
+  }
+
+  return String(Math.max(0, Math.trunc(value)));
+}
 const agentReasoningOptions: Array<{ value: ModelReasoningEffort; labelZh: string; labelEn: string }> = [
   { value: 'auto', labelZh: '自动', labelEn: 'Auto' },
   { value: 'low', labelZh: '低', labelEn: 'Low' },
@@ -262,6 +277,8 @@ export default function AgentWorkspaceView({
   approvedItemIds,
   chatScrollRef,
   composerValue,
+  currentRunTokens,
+  sessionTokenUsage,
   conversationPanelRef,
   error,
   expandedStepKeys,
@@ -287,8 +304,10 @@ export default function AgentWorkspaceView({
   localizedToolLabel,
   messages,
   onApplyPlan,
+  onApplyMemoryPlan,
   onAgentPresetChange,
   onAgentReasoningEffortChange,
+  onCancelAgentRun,
   onCancelPlan,
   onCaptureScreenshot,
   onClearSelection,
@@ -296,8 +315,10 @@ export default function AgentWorkspaceView({
   onCopyToolParameters,
   onHistorySidebarCollapsedChange,
   onInlinePaperSelectionContinue,
+  onForkFromMessage,
   onInspectPlanItem,
   onOpenRagCitation,
+  onOrganizeMemory,
   onPaperSearchQueryChange,
   onRefreshPapers,
   onRemoveAttachment,
@@ -482,6 +503,11 @@ export default function AgentWorkspaceView({
                                   {l(`${session.selectedPaperIds.length} 篇`, `${session.selectedPaperIds.length} papers`)}
                                 </span>
                               ) : null}
+                              {sessionTokenUsage[session.id] ? (
+                                <span className="shrink-0" title={l('累计 token 用量', 'Cumulative token usage')}>
+                                  {compactTokenCount(sessionTokenUsage[session.id])} tok
+                                </span>
+                              ) : null}
                             </span>
                           </span>
                           <button
@@ -549,9 +575,11 @@ export default function AgentWorkspaceView({
                       localizedToolLabel={localizedToolLabel}
                       message={message}
                       onApplyPlan={onApplyPlan}
+                      onApplyMemoryPlan={onApplyMemoryPlan}
                       onCancelPlan={onCancelPlan}
                   onCopyToolParameters={onCopyToolParameters}
                   onContinueWithSelectedPapers={onInlinePaperSelectionContinue}
+                  onForkFromMessage={onForkFromMessage}
                   onOpenRagCitation={onOpenRagCitation}
                   onInspectPlanItem={onInspectPlanItem}
                       onTogglePlanItem={onTogglePlanItem}
@@ -882,6 +910,16 @@ export default function AgentWorkspaceView({
                       </button>
                       <button
                         type="button"
+                        onClick={onOrganizeMemory}
+                        disabled={activeSessionRunning}
+                        title={l('整理 Agent 记忆', 'Organize Agent memory')}
+                        aria-label={l('整理 Agent 记忆', 'Organize Agent memory')}
+                        className={agentComposerIconButtonClass}
+                      >
+                        <Brain className="h-4 w-4" strokeWidth={1.8} />
+                      </button>
+                      <button
+                        type="button"
                         onClick={onToggleAgentRag}
                         title={agentRagEnabled ? l('关闭 RAG', 'Disable RAG') : l('开启 RAG', 'Enable RAG')}
                         aria-label={agentRagEnabled ? l('关闭 RAG', 'Disable RAG') : l('开启 RAG', 'Enable RAG')}
@@ -911,6 +949,14 @@ export default function AgentWorkspaceView({
                           ? l(`${selectedPaperIds.size} 篇`, `${selectedPaperIds.size} papers`)
                           : l('选择文献', 'Select Papers')}
                       </button>
+                      {currentRunTokens.promptTokens + currentRunTokens.completionTokens > 0 ? (
+                        <span
+                          className="shrink-0 rounded-md border border-[var(--pq-border)] bg-[var(--pq-surface-2)] px-2 py-1 text-[11px] font-medium text-[var(--pq-text-muted)]"
+                          title={l('本次运行累计 token 用量', 'Current run token usage')}
+                        >
+                          {compactTokenCount(currentRunTokens.promptTokens + currentRunTokens.completionTokens)} tok
+                        </span>
+                      ) : null}
                       <ModelPresetPicker
                         l={l}
                         presets={agentModelPresets}
@@ -926,16 +972,19 @@ export default function AgentWorkspaceView({
                     </div>
 
                     <button
-                      type="submit"
-                      disabled={!canSubmitPrompt}
-                      className="pq-button-primary h-11 shrink-0 px-5 text-sm disabled:opacity-50"
+                      type={activeSessionRunning ? 'button' : 'submit'}
+                      onClick={activeSessionRunning ? onCancelAgentRun : undefined}
+                      disabled={activeSessionRunning ? false : !canSubmitPrompt}
+                      className={activeSessionRunning
+                        ? 'pq-button h-11 shrink-0 border-rose-200 px-5 text-sm text-rose-600 dark:border-rose-300/20 dark:text-rose-300'
+                        : 'pq-button-primary h-11 shrink-0 px-5 text-sm disabled:opacity-50'}
                     >
                       {activeSessionRunning ? (
-                        <Loader2 className="h-4 w-4 animate-spin" strokeWidth={2} />
+                        <X className="h-4 w-4" strokeWidth={2} />
                       ) : (
                         <Send className="h-4 w-4" strokeWidth={2} />
                       )}
-                      {l('发送', 'Send')}
+                      {activeSessionRunning ? l('取消', 'Cancel') : l('发送', 'Send')}
                     </button>
                   </div>
                 </form>

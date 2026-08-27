@@ -280,6 +280,8 @@
 | **P2 Bib 导出** | Q3 bibtex 生成器 + 两种导出形态 + 后端保存对话框泛化 | 中（1-2 天） | Q1 |
 | **P3 Agent 优化** | Q7 路线图 1→2→3（状态透传已在 P0 完成则顺延 ReAct 化与混合检索） | 大（按子项拆分） | P0 |
 
+> P3 已展开为独立详案：[`2026-08-26-agent-architecture-p3-plan.md`](./2026-08-26-agent-architecture-p3-plan.md)（含工具注册表、ReAct 循环、FTS5 混合检索、上下文压缩与三层记忆、运行事件日志、分阶段顺序与风险回退）。
+
 **验证基线**：每阶段完成执行 `npm run build` + `npm test`；涉及渲染层交互的按 `docs/DEVELOPMENT.zh-CN.md` 做桌面端手工回归；用户可感知变更追加 `docs/changes/` 记录。
 
 **文档位置说明**：本文件为计划与问答记录；各项目落地完成后，按 `docs/changes/README.md` 格式（现象/根因/修改/验证）分别补变更记录。

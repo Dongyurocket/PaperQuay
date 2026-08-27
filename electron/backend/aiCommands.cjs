@@ -590,6 +590,166 @@ async function readAgentStreamResponse({ requestId, options, response, sender })
   });
 }
 
+function buildAgentSystemPreamble() {
+  return [
+    'You are PaperQuay library agent.',
+    'Use read tools to inspect the local library before making evidence-based claims when they are available.',
+    'For every write tool call, PaperQuay will create a reviewable plan and require user approval before any local write.',
+    'Never claim a library write has already happened until the user approves and PaperQuay reports completion.',
+    'Keep paper citations and page references when tool results provide them.',
+    'Return a direct helpful answer when no further tool call is needed.',
+  ].join(' ');
+}
+
+function normalizeAgentChatTurnMessages(messages) {
+  const supportedRoles = new Set(['system', 'assistant', 'user', 'tool']);
+
+  return (Array.isArray(messages) ? messages : [])
+    .slice(-80)
+    .map((message) => {
+      const role = supportedRoles.has(message?.role) ? message.role : 'user';
+      const content = typeof message?.content === 'string' ? message.content.slice(0, 240_000) : '';
+      const toolCallId = typeof message?.toolCallId === 'string'
+        ? message.toolCallId.slice(0, 180)
+        : typeof message?.tool_call_id === 'string'
+          ? message.tool_call_id.slice(0, 180)
+          : undefined;
+      const attachments = role === 'user' && Array.isArray(message?.attachments)
+        ? message.attachments.slice(0, 4).map((attachment) => ({
+          id: typeof attachment?.id === 'string' ? attachment.id.slice(0, 180) : undefined,
+          kind: typeof attachment?.kind === 'string' ? attachment.kind.slice(0, 40) : undefined,
+          name: typeof attachment?.name === 'string' ? attachment.name.slice(0, 500) : undefined,
+          mimeType: typeof attachment?.mimeType === 'string' ? attachment.mimeType.slice(0, 160) : undefined,
+          size: Number.isFinite(Number(attachment?.size)) ? Math.max(0, Math.trunc(Number(attachment.size))) : undefined,
+          summary: typeof attachment?.summary === 'string' ? attachment.summary.slice(0, 4000) : undefined,
+          textContent: typeof attachment?.textContent === 'string' ? attachment.textContent.slice(0, 20_000) : undefined,
+          dataUrl: typeof attachment?.dataUrl === 'string' ? attachment.dataUrl : undefined,
+        }))
+        : undefined;
+      const toolCalls = role === 'assistant' && Array.isArray(message?.toolCalls)
+        ? message.toolCalls.slice(0, 24).map((toolCall) => ({
+          id: typeof toolCall?.id === 'string' ? toolCall.id.slice(0, 180) : '',
+          name: typeof toolCall?.name === 'string' ? toolCall.name.slice(0, 120) : '',
+          arguments: toolCall?.arguments && typeof toolCall.arguments === 'object' && !Array.isArray(toolCall.arguments)
+            ? toolCall.arguments
+            : {},
+        })).filter((toolCall) => toolCall.id && toolCall.name)
+        : undefined;
+
+      return { role, content, toolCallId, toolCalls, attachments };
+    });
+}
+
+function normalizeAgentTokenUsage(data) {
+  const usage = data?.usage && typeof data.usage === 'object'
+    ? data.usage
+    : data?.response?.usage && typeof data.response.usage === 'object'
+      ? data.response.usage
+      : {};
+  const number = (value) => Number.isFinite(Number(value)) ? Math.max(0, Math.trunc(Number(value))) : 0;
+
+  return {
+    promptTokens: number(usage.prompt_tokens ?? usage.input_tokens ?? usage.promptTokens),
+    completionTokens: number(usage.completion_tokens ?? usage.output_tokens ?? usage.completionTokens),
+  };
+}
+
+function agentChatTurnResult(data) {
+  const finishReason = typeof data?.choices?.[0]?.finish_reason === 'string'
+    ? data.choices[0].finish_reason
+    : typeof data?.status === 'string'
+      ? data.status
+      : 'stop';
+
+  return {
+    content: pickChatText(data),
+    thinking: pickChatThinking(data) || null,
+    toolCalls: pickToolCalls(data).map((call) => ({
+      id: call.id || `agent-tool:${Math.random().toString(36).slice(2, 10)}`,
+      name: call.name,
+      arguments: call.arguments && typeof call.arguments === 'object' && !Array.isArray(call.arguments)
+        ? call.arguments
+        : {},
+    })),
+    finishReason,
+    usage: normalizeAgentTokenUsage(data),
+  };
+}
+
+function agentStreamSafeError(error) {
+  return String(error instanceof Error && error.message ? error.message : error ?? 'Agent stream failed')
+    .replace(/Bearer\s+[^\s,;]+/gi, 'Bearer [redacted]')
+    .replace(/(api[_-]?key|token|password)\s*[=:]\s*[^\s,;]+/gi, '$1=[redacted]')
+    .slice(0, 1000);
+}
+
+async function runAgentChatTurn(request, event) {
+  const options = request?.options && typeof request.options === 'object' ? request.options : {};
+  const requestId = typeof request?.requestId === 'string' && request.requestId.trim()
+    ? request.requestId.trim().slice(0, 180)
+    : crypto.randomUUID();
+  const messages = [
+    { role: 'system', content: buildAgentSystemPreamble() },
+    ...normalizeAgentChatTurnMessages(request?.messages),
+  ];
+  const tools = Array.isArray(request?.tools) ? request.tools.slice(0, 24) : undefined;
+  const toolChoice = request?.toolChoice === 'none' ? 'none' : 'auto';
+  const requestExtras = {
+    tools: tools?.length ? tools : undefined,
+    toolChoice: tools?.length ? toolChoice : undefined,
+    reasoningSummary: 'auto',
+  };
+  const supportsToolFallback = Boolean(requestExtras.tools?.length);
+
+  if (request?.stream === false) {
+    const data = await openAiChatWithAgentFallback(options, messages, requestExtras, supportsToolFallback);
+    return agentChatTurnResult(data);
+  }
+
+  const sender = event?.sender;
+
+  try {
+    const response = await openAiChatAgentStreamWithFallback(
+      options,
+      messages,
+      requestExtras,
+      supportsToolFallback,
+    );
+    const data = await readOpenAiStreamResponse({
+      requestId,
+      options,
+      response,
+      sender: {
+        send(_channel, eventName, payload) {
+          if (sender) {
+            sender.send('paperquay:event', eventName, payload);
+          }
+        },
+      },
+    });
+    const result = agentChatTurnResult(data);
+
+    if (sender) {
+      sender.send('paperquay:event', AGENT_STREAM_EVENT, {
+        requestId,
+        kind: 'tool_calls',
+        toolCalls: result.toolCalls,
+      });
+      sender.send('paperquay:event', AGENT_STREAM_EVENT, { requestId, kind: 'done' });
+    }
+
+    return result;
+  } catch (error) {
+    const message = agentStreamSafeError(error);
+
+    if (sender) {
+      sender.send('paperquay:event', AGENT_STREAM_EVENT, { requestId, kind: 'error', error: message });
+    }
+
+    throw new Error(message);
+  }
+}
+
 function parseLibraryAgentModelOutput(data, options) {
   const thinking = pickChatThinking(data);
   const contextToolRequest = pickToolCalls(data)
@@ -811,7 +971,7 @@ function buildHtmlVisualQaPrompt(options) {
 }
 
 function createAiCommands(context) {
-  const { ragStore } = context;
+  const { agentMemoryStore, ragStore } = context;
 
   function documentContext(options) {
     return options.documentText || (options.blocks ?? []).map((block) => block.text).join('\n\n');
@@ -995,6 +1155,62 @@ function createAiCommands(context) {
 
     async rag_retrieve_document_chunks({ request }) {
       return ragStore.retrieveDocumentChunks(request);
+    },
+
+    async agent_run_start({ request }) {
+      return ragStore.createAgentRun(request);
+    },
+
+    async agent_run_event_append({ request }) {
+      const record = ragStore.appendAgentRunEvent(request);
+
+      try {
+        agentMemoryStore?.appendTrace(record);
+      } catch (error) {
+        console.warn('[paperquay] Failed to append Agent memory trace.', agentStreamSafeError(error));
+      }
+
+      return record;
+    },
+
+    async agent_run_finish({ request }) {
+      return ragStore.finishAgentRun(request);
+    },
+
+    async agent_run_get({ request }) {
+      return ragStore.getAgentRun(request);
+    },
+
+    async agent_run_events_get({ request }) {
+      return ragStore.getAgentRunEvents(request);
+    },
+
+    async agent_run_list_interrupted({ request }) {
+      return ragStore.listInterruptedAgentRuns(request);
+    },
+
+    async agent_run_usage_by_session({ request }) {
+      return ragStore.listAgentRunUsageBySession(request);
+    },
+
+    async agent_memory_list({ request }) {
+      return agentMemoryStore.listMemory(request);
+    },
+
+    async agent_memory_read({ request }) {
+      return agentMemoryStore.readMemory(request);
+    },
+
+    async agent_memory_write({ request }) {
+      return agentMemoryStore.writeMemory(request);
+    },
+
+    async agent_memory_clear({ request }) {
+      return agentMemoryStore.clearMemory(request);
+    },
+
+    async agent_chat_turn({ request }, event) {
+      return runAgentChatTurn(request, event);
     },
 
     async decide_library_agent_paper_context_openai_compatible({ options }) {

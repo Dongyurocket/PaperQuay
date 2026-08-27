@@ -26,6 +26,7 @@ export interface ReaderRagContextDocument {
   documentText: string;
   sectionCount: number;
   citations: DocumentChatCitation[];
+  retrievals: RagRetrievalResult[];
 }
 
 const DEFAULT_CHUNK_SIZE = 900;
@@ -527,13 +528,15 @@ export function buildRagContextText(input: {
   mineruBlocks: PositionedMineruBlock[];
   preparedSources: ReaderRagPreparedSource[];
 }): ReaderRagContextDocument {
-  const seeds = input.results.slice(0, input.topK);
+  const results = input.results.slice(0, input.topK);
+  const seeds = results;
 
   if (seeds.length === 0) {
     return {
       documentText: '',
       sectionCount: 0,
       citations: [],
+      retrievals: [],
     };
   }
 
@@ -593,5 +596,6 @@ export function buildRagContextText(input: {
     documentText: sections.join('\n\n').trim(),
     sectionCount: sections.length,
     citations,
+    retrievals: results,
   };
 }

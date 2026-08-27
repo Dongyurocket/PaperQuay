@@ -2,6 +2,7 @@ import { FileSearch, FolderTree, Sparkles, Tags, WandSparkles } from 'lucide-rea
 import type { LibraryAgentPlan, LibraryAgentTool } from '../../services/libraryAgent';
 import type { LiteraturePaper } from '../../types/library';
 import type { DocumentChatAttachment, UiLanguage } from '../../types/reader';
+import type { AgentLoopEvent } from '../../services/agentLoop';
 import type {
   AgentCapability,
   AgentChatMessage,
@@ -112,10 +113,18 @@ function sessionStatusFromMessages(messages: AgentChatMessage[]): AgentStepStatu
     return 'error';
   }
 
-  const trace = latestAssistant?.trace;
-  const latestTraceStatus = trace?.[trace.length - 1]?.status;
+  const trace = latestAssistant?.trace ?? [];
 
-  return latestTraceStatus ?? 'success';
+  if (trace.some((step) => step.status === 'running')) {
+    return 'running';
+  }
+
+  if (trace.some((step) => step.status === 'error')) {
+    return 'error';
+  }
+
+  const latestTraceStatus = trace.length > 0 ? trace[trace.length - 1]?.status : undefined;
+  return latestTraceStatus === 'waiting' ? 'waiting' : 'success';
 }
 
 export function hasAgentConversationHistory(messages: AgentChatMessage[]): boolean {
@@ -132,6 +141,8 @@ export function hasAgentConversationHistory(messages: AgentChatMessage[]): boole
         message.content.trim() ||
         message.thinking?.trim() ||
         message.plan ||
+        message.memoryPlan ||
+        message.capability ||
         message.toolCall ||
         message.choices?.length ||
         message.paperSelectionRequest ||
@@ -207,12 +218,32 @@ export function loadAgentHistorySessions(): AgentHistorySession[] {
   }
 }
 
+function stripAgentAttachmentForHistory(attachment: DocumentChatAttachment): DocumentChatAttachment {
+  return {
+    ...attachment,
+    dataUrl: undefined,
+  };
+}
+
+function stripAgentMessageForHistory(message: AgentChatMessage): AgentChatMessage {
+  return {
+    ...message,
+    attachments: message.attachments?.map(stripAgentAttachmentForHistory),
+    ragFigures: message.ragFigures?.map(({ dataUrl: _dataUrl, ...figure }) => figure),
+  };
+}
+
 export function saveAgentHistorySessions(sessions: AgentHistorySession[]) {
   const normalized = sessions
     .filter((session) => hasAgentConversationHistory(session.messages))
     .slice()
     .sort((left, right) => right.updatedAt - left.updatedAt)
-    .slice(0, MAX_AGENT_HISTORY_SESSIONS);
+    .slice(0, MAX_AGENT_HISTORY_SESSIONS)
+    .map((session) => ({
+      ...session,
+      messages: session.messages.map(stripAgentMessageForHistory),
+      attachments: session.attachments?.map(stripAgentAttachmentForHistory),
+    }));
 
   window.localStorage.setItem(AGENT_HISTORY_STORAGE_KEY, JSON.stringify(normalized));
 }
@@ -351,6 +382,134 @@ export function buildRunningTrace(
       status: 'waiting',
     },
   ];
+}
+
+export function applyAgentLoopEventToTrace(
+  trace: AgentTraceStep[] | undefined,
+  event: AgentLoopEvent,
+  locale: UiLanguage = 'zh-CN',
+): AgentTraceStep[] {
+  const next = [...(trace ?? [])];
+  const update = (id: string, patch: Partial<AgentTraceStep>) => {
+    const index = next.findIndex((step) => step.id === id);
+
+    if (index >= 0) {
+      next[index] = { ...next[index], ...patch };
+    }
+  };
+  const add = (step: AgentTraceStep) => {
+    if (!next.some((item) => item.id === step.id)) {
+      next.push(step);
+    }
+  };
+
+  if (event.kind === 'turn_start') {
+    update('plan', { status: 'success' });
+    add({
+      id: `turn-${event.turn}`,
+      type: 'intent',
+      title: pickLocaleText(locale, `第 ${event.turn} 轮`, `Turn ${event.turn}`),
+      summary: pickLocaleText(locale, '正在请求模型决定下一步。', 'Requesting the model for the next step.'),
+      status: 'running',
+    });
+    return next;
+  }
+
+  if (event.kind === 'tool_call') {
+    const id = `tool-call-${event.callId}`;
+    add({
+      id,
+      type: 'tool-call',
+      title: event.name,
+      summary: pickLocaleText(locale, '正在执行工具。', 'Running tool.'),
+      detail: JSON.stringify(event.args, null, 2),
+      status: 'running',
+    });
+    return next;
+  }
+
+  if (event.kind === 'tool_result') {
+    const id = `tool-call-${event.callId}`;
+    const summary = event.ok
+      ? pickLocaleText(locale, '工具已返回结果。', 'Tool result received.')
+      : pickLocaleText(locale, '工具返回错误，模型可在下一轮修正。', 'The tool returned an error; the model may correct it next turn.');
+
+    if (next.some((step) => step.id === id)) {
+      update(id, {
+        type: 'tool-result',
+        summary,
+        detail: event.preview,
+        status: event.ok ? 'success' : 'error',
+      });
+    } else {
+      add({
+        id,
+        type: 'tool-result',
+        title: event.name,
+        summary,
+        detail: event.preview,
+        status: event.ok ? 'success' : 'error',
+      });
+    }
+    return next;
+  }
+
+  if (event.kind === 'context_compacted') {
+    add({
+      id: `context-compacted-${next.length}`,
+      type: 'thought-summary',
+      title: pickLocaleText(locale, '上下文压缩', 'Context Compaction'),
+      summary: pickLocaleText(
+        locale,
+        `已压缩 ${event.droppedMessages} 条完整历史消息。`,
+        `Compacted ${event.droppedMessages} complete historical messages.`,
+      ),
+      detail: event.fallback
+        ? pickLocaleText(locale, '摘要调用失败，已保留最近完整消息。', 'Summary request failed; recent complete messages were retained.')
+        : pickLocaleText(locale, '已在用户轮次边界生成会话摘要。', 'A conversation summary was created at a user-turn boundary.'),
+      status: 'success',
+    });
+    return next;
+  }
+
+  if (event.kind === 'answer_delta') {
+    add({
+      id: 'react-final',
+      type: 'final',
+      title: pickLocaleText(locale, '最终回答', 'Final Answer'),
+      summary: pickLocaleText(locale, '正在生成最终回答。', 'Generating the final answer.'),
+      status: 'running',
+    });
+    return next;
+  }
+
+  if (event.kind === 'turn_end') {
+    update(`turn-${event.turn}`, {
+      status: 'success',
+      summary: pickLocaleText(
+        locale,
+        `第 ${event.turn} 轮完成：${event.finishReason}。`,
+        `Turn ${event.turn} completed: ${event.finishReason}.`,
+      ),
+    });
+    if (event.finishReason !== 'tool_calls') {
+      update('react-final', { status: 'success' });
+    }
+    return next;
+  }
+
+  if (event.kind === 'error') {
+    add({
+      id: `error-${event.turn ?? 'run'}-${next.length}`,
+      type: 'final',
+      title: pickLocaleText(locale, '执行错误', 'Execution Error'),
+      summary: event.message,
+      detail: event.message,
+      status: 'error',
+    });
+  }
+
+  return next;
 }
 
 export function buildSuccessTrace(

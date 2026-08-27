@@ -415,8 +415,48 @@ function messagePlainTextWithAttachments(message) {
 
 function messagesToChatCompletionsMessages(messages) {
   return (Array.isArray(messages) ? messages : []).map((message) => {
-    const role = message?.role === 'assistant' ? 'assistant' : message?.role === 'system' ? 'system' : 'user';
+    const role = message?.role === 'assistant'
+      ? 'assistant'
+      : message?.role === 'system'
+        ? 'system'
+        : message?.role === 'tool'
+          ? 'tool'
+          : 'user';
     const text = messagePlainTextWithAttachments(message);
+
+    if (role === 'tool') {
+      const toolCallId = cleanString(message?.toolCallId || message?.tool_call_id);
+
+      return toolCallId
+        ? { role, tool_call_id: toolCallId, content: text || '{}' }
+        : { role: 'user', content: `[Tool result]\n${text || '{}'}` };
+    }
+
+    const toolCalls = role === 'assistant' && Array.isArray(message?.toolCalls)
+      ? message.toolCalls
+        .map((toolCall) => {
+          const id = cleanString(toolCall?.id);
+          const name = cleanString(toolCall?.name);
+
+          if (!id || !name) return null;
+          return {
+            id,
+            type: 'function',
+            function: {
+              name,
+              arguments: JSON.stringify(toolCall?.arguments && typeof toolCall.arguments === 'object'
+                ? toolCall.arguments
+                : {}),
+            },
+          };
+        })
+        .filter(Boolean)
+      : [];
+
+    if (role === 'assistant' && toolCalls.length > 0) {
+      return { role, content: text || null, tool_calls: toolCalls };
+    }
+
     const imageParts = (Array.isArray(message?.attachments) ? message.attachments : [])
       .map(attachmentToImageUrl)
       .filter(Boolean)
@@ -466,27 +506,67 @@ function messagesToResponseInput(messages) {
   const inputItems = [];
 
   for (const message of messages ?? []) {
-    const role = message?.role === 'assistant' ? 'assistant' : message?.role === 'system' ? 'system' : 'user';
+    const role = message?.role === 'assistant'
+      ? 'assistant'
+      : message?.role === 'system'
+        ? 'system'
+        : message?.role === 'tool'
+          ? 'tool'
+          : 'user';
     const content = messagePlainTextWithAttachments(message);
 
     if (role === 'system') {
       if (content) instructions.push(content);
-    } else {
-      const parts = [];
-      if (content) {
-        parts.push({ type: role === 'assistant' ? 'output_text' : 'input_text', text: content });
-      }
+      continue;
+    }
 
-      for (const attachment of Array.isArray(message?.attachments) ? message.attachments : []) {
-        const imageUrl = attachmentToImageUrl(attachment);
-        if (imageUrl && role === 'user') {
-          parts.push({ type: 'input_image', image_url: imageUrl });
+    if (role === 'tool') {
+      const callId = cleanString(message?.toolCallId || message?.tool_call_id);
+
+      if (callId) {
+        inputItems.push({
+          type: 'function_call_output',
+          call_id: callId,
+          output: content || '{}',
+        });
+      } else if (content) {
+        inputItems.push({ role: 'user', content: [{ type: 'input_text', text: `[Tool result]\n${content}` }] });
+      }
+      continue;
+    }
+
+    if (role === 'assistant' && Array.isArray(message?.toolCalls)) {
+      for (const toolCall of message.toolCalls) {
+        const callId = cleanString(toolCall?.id);
+        const name = cleanString(toolCall?.name);
+
+        if (callId && name) {
+          inputItems.push({
+            type: 'function_call',
+            call_id: callId,
+            name,
+            arguments: JSON.stringify(toolCall?.arguments && typeof toolCall.arguments === 'object'
+              ? toolCall.arguments
+              : {}),
+          });
         }
       }
+    }
 
-      if (parts.length > 0) {
-        inputItems.push({ role, content: parts });
+    const parts = [];
+    if (content) {
+      parts.push({ type: role === 'assistant' ? 'output_text' : 'input_text', text: content });
+    }
+
+    for (const attachment of Array.isArray(message?.attachments) ? message.attachments : []) {
+      const imageUrl = attachmentToImageUrl(attachment);
+      if (imageUrl && role === 'user') {
+        parts.push({ type: 'input_image', image_url: imageUrl });
       }
+    }
+
+    if (parts.length > 0) {
+      inputItems.push({ role, content: parts });
     }
   }
 

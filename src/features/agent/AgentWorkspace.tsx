@@ -10,21 +10,41 @@ import {
   type LibraryAgentRagCitation,
   type LibraryAgentStreamHandlers,
 } from '../../services/libraryAgent';
+import {
+  appendAgentRunEvent,
+  finishAgentRun,
+  getAgentRunEvents,
+  listAgentRunUsageBySession,
+  listInterruptedAgentRuns,
+  startAgentRun,
+} from '../../services/agentRuns';
+import {
+  writeAgentMemory,
+  type AgentMemoryWritePlan,
+} from '../../services/agentMemory';
+import type { AgentLoopEvent, AgentLoopMessage } from '../../services/agentLoop';
+import type { ComparativeSurveyArtifacts, ComparativeSurveyEvent } from '../../services/agentCapability';
 import { listLibraryCategories, listLibraryPapers } from '../../services/library';
 import type { LiteratureCategory, LiteraturePaper } from '../../types/library';
 import type { DocumentChatAttachment, ModelReasoningEffort, QaModelPreset } from '../../types/reader';
 import {
+  forkAgentHistorySession,
   patchAgentHistorySessionMessage,
   upsertAgentHistorySession,
 } from './agentSessionState';
+import {
+  latestAgentRecoveryCheckpoint,
+  latestComparativeSurveyCheckpoint,
+  recoveryCheckpointToChatMessages,
+} from './agentRunRecovery';
 import {
   isAgentSessionRunning,
   updateAgentRunningSessions,
 } from './agentRunningSessions';
 import {
-  buildErrorTrace,
+  applyAgentLoopEventToTrace,
+  buildRunningTrace,
   buildAgentHistorySession,
-  buildSuccessTrace,
   buildToolCallView,
   durationLabel,
   formatPaperMeta,
@@ -68,6 +88,31 @@ function isNearScrollBottom(element: HTMLElement, threshold = AGENT_CHAT_AUTO_SC
 
 function createAgentRagCitationJumpRequestId(): string {
   return `agent-rag-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+}
+
+function createCapabilityView() {
+  return {
+    id: 'comparative-survey' as const,
+    status: 'running' as const,
+    activeStage: undefined,
+    stages: (['rephrase', 'decompose', 'research', 'report'] as const).map((id) => ({
+      id,
+      status: 'waiting' as const,
+    })),
+  };
+}
+
+function recoverySnapshotMessages(messages: AgentLoopMessage[]) {
+  return messages.slice(-32).map((message) => ({
+    role: message.role,
+    content: message.content.slice(0, 8000),
+    toolCallId: message.toolCallId,
+    toolCalls: message.toolCalls?.slice(0, 12).map((call) => ({
+      id: call.id,
+      name: call.name,
+      arguments: call.arguments,
+    })),
+  }));
 }
 
 const agentWelcomeText = {
@@ -140,6 +185,9 @@ function AgentWorkspace() {
   const activeSessionIdRef = useRef(activeSessionId);
   const [statusMessage, setStatusMessage] = useState('');
   const [error, setError] = useState('');
+  const [currentRunTokens, setCurrentRunTokens] = useState({ promptTokens: 0, completionTokens: 0 });
+  const [sessionTokenUsage, setSessionTokenUsage] = useState<Record<string, number>>({});
+  const abortControllersRef = useRef(new Map<string, AbortController>());
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const historySidebarRef = useRef<HTMLElement | null>(null);
   const conversationPanelRef = useRef<HTMLElement | null>(null);
@@ -383,6 +431,32 @@ function AgentWorkspace() {
 
   useEffect(() => {
     saveAgentHistorySessions(historySessions);
+  }, [historySessions]);
+
+  useEffect(() => {
+    const sessionIds = historySessions.map((session) => session.id);
+
+    if (sessionIds.length === 0) {
+      return;
+    }
+
+    let cancelled = false;
+    void listAgentRunUsageBySession(sessionIds)
+      .then((rows) => {
+        if (cancelled) return;
+        setSessionTokenUsage((current) => ({
+          ...current,
+          ...Object.fromEntries(rows.map((row) => [
+            row.sessionId,
+            row.promptTokens + row.completionTokens,
+          ])),
+        }));
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
   }, [historySessions]);
 
   useEffect(() => {
@@ -635,7 +709,11 @@ function AgentWorkspace() {
         attachments: message.attachments,
       }));
 
-  const runAgent = async (rawInstruction: string, inlinePaperIds?: string[]) => {
+  const runAgent = async (
+    rawInstruction: string,
+    inlinePaperIds?: string[],
+    capabilityResume?: Partial<ComparativeSurveyArtifacts>,
+  ) => {
     const instruction = rawInstruction.trim();
 
     if (!instruction) {
@@ -698,6 +776,7 @@ function AgentWorkspace() {
     const startedAt = performance.now();
     const assistantMessageId = newMessageId();
     const paperCount = selectedPapersSnapshot.length;
+    const capabilityRequested = /对比调研|比较调研|对比综述|比较综述|comparative survey|comparative review|comparison report/i.test(instruction) && paperCount >= 2;
     const historyMessages = buildConversationHistory();
     const attachmentsSnapshot = [...agentAttachments];
     const userMessage: AgentChatMessage = {
@@ -727,9 +806,112 @@ function AgentWorkspace() {
       content: l('Agent 正在回复...', 'Agent is replying...'),
       meta: l('执行中', 'Running'),
       createdAt: Date.now(),
+      trace: buildRunningTrace(instruction, paperCount, locale),
+      capability: capabilityRequested ? createCapabilityView() : undefined,
     };
     const nextMessages = [...messages, userMessage, pendingAssistantMessage];
     const isTargetSessionActive = () => activeSessionIdRef.current === sessionId;
+    const abortController = new AbortController();
+    abortControllersRef.current.set(sessionId, abortController);
+    let runId: string | null = null;
+    let runEventQueue: Promise<void> = Promise.resolve();
+    let runStatus: 'done' | 'error' | 'aborted' = 'done';
+    let runTurns = 0;
+    const runTokens = { promptTokens: 0, completionTokens: 0 };
+    const appendRunEvent = (event: AgentLoopEvent) => {
+      if (!runId || event.kind === 'thinking_delta') {
+        return;
+      }
+
+      const request = (() => {
+        switch (event.kind) {
+          case 'turn_start':
+            return { kind: 'turn_start', turn: event.turn, payload: { turn: event.turn } };
+          case 'tool_call':
+            return { kind: 'tool_call', turn: event.turn, payload: { turn: event.turn, callId: event.callId, name: event.name, args: event.args } };
+          case 'tool_result':
+            return { kind: 'tool_result', turn: event.turn, payload: { turn: event.turn, callId: event.callId, name: event.name, ok: event.ok, preview: event.preview } };
+          case 'answer_delta':
+            return { kind: 'answer_delta', payload: { characters: event.text.length } };
+          case 'context_compacted':
+            return {
+              kind: 'context_compacted',
+              payload: {
+                tokenEstimate: event.tokenEstimate,
+                droppedMessages: event.droppedMessages,
+                fallback: event.fallback,
+              },
+            };
+          case 'turn_end':
+            return {
+              kind: 'turn_end',
+              turn: event.turn,
+              promptTokens: event.promptTokens,
+              completionTokens: event.completionTokens,
+              payload: {
+                turn: event.turn,
+                finishReason: event.finishReason,
+                promptTokens: event.promptTokens,
+                completionTokens: event.completionTokens,
+              },
+            };
+          case 'error':
+            return { kind: 'error', turn: event.turn, payload: { message: event.message } };
+          default:
+            return null;
+        }
+      })();
+
+      if (!request) {
+        return;
+      }
+
+      const targetRunId = runId;
+      runEventQueue = runEventQueue
+        .then(() => appendAgentRunEvent({ runId: targetRunId, ...request }))
+        .then(() => undefined)
+        .catch(() => undefined);
+    };
+    const appendRecoveryCheckpoint = (checkpointMessages: AgentLoopMessage[], turn: number) => {
+      if (!runId) {
+        return;
+      }
+
+      const targetRunId = runId;
+      runEventQueue = runEventQueue
+        .then(() => appendAgentRunEvent({
+          runId: targetRunId,
+          kind: 'checkpoint',
+          turn,
+          payload: { messages: recoverySnapshotMessages(checkpointMessages) },
+        }))
+        .then(() => undefined)
+        .catch(() => undefined);
+    };
+    const handleAgentLoopEvent = (event: AgentLoopEvent) => {
+      appendRunEvent(event);
+      updateSessionMessage(sessionId, assistantMessageId, (message) => ({
+        ...message,
+        trace: applyAgentLoopEventToTrace(message.trace, event, locale),
+      }));
+
+      if (event.kind === 'turn_end') {
+        runTurns = Math.max(runTurns, event.turn);
+        runTokens.promptTokens += event.promptTokens;
+        runTokens.completionTokens += event.completionTokens;
+        if (isTargetSessionActive()) {
+          setCurrentRunTokens({ ...runTokens });
+        }
+        setSessionTokenUsage((current) => ({
+          ...current,
+          [sessionId]: (current[sessionId] ?? 0) + event.promptTokens + event.completionTokens,
+        }));
+      }
+
+      if (isTargetSessionActive() && event.kind === 'tool_call') {
+        setStatusMessage(l(`第 ${event.turn} 轮正在调用 ${event.name}...`, `Turn ${event.turn} is calling ${event.name}...`));
+      }
+    };
     let streamedAgentAnswer = '';
     let streamedAgentThinking = '';
     let streamCommitTimer: ReturnType<typeof window.setTimeout> | null = null;
@@ -766,6 +948,48 @@ function AgentWorkspace() {
         streamCommitTimer = window.setTimeout(commitStreamedAgentMessage, 120 - elapsedMs);
       }
     };
+    const handleCapabilityEvent = (event: ComparativeSurveyEvent) => {
+      if (runId) {
+        const targetRunId = runId;
+        const kind = event.kind === 'stage_start'
+          ? 'stage_start'
+          : event.kind === 'stage_end'
+            ? 'stage_end'
+            : 'stage_progress';
+        runEventQueue = runEventQueue
+          .then(() => appendAgentRunEvent({ runId: targetRunId, kind, payload: event }))
+          .then(() => undefined)
+          .catch(() => undefined);
+      }
+
+      updateSessionMessage(sessionId, assistantMessageId, (message) => {
+        const capability = message.capability ?? createCapabilityView();
+        const stages = capability.stages.map((stage) => {
+          if (stage.id !== event.stage) return stage;
+          if (event.kind === 'stage_start') return { ...stage, status: 'running' as const };
+          if (event.kind === 'stage_end') return { ...stage, status: 'success' as const };
+          if (event.kind === 'stage_retry') return { ...stage, status: 'running' as const, detail: event.error };
+          return { ...stage, status: 'running' as const, detail: event.detail };
+        });
+
+        return {
+          ...message,
+          capability: {
+            ...capability,
+            activeStage: event.kind === 'stage_end' ? capability.activeStage : event.stage,
+            stages,
+          },
+        };
+      });
+
+      if (isTargetSessionActive()) {
+        setStatusMessage(
+          event.kind === 'stage_retry'
+            ? l(`阶段 ${event.stage} 正在重试。`, `Retrying ${event.stage}.`)
+            : l(`对比调研：${event.stage}`, `Comparative survey: ${event.stage}`),
+        );
+      }
+    };
     const agentStreamHandlers: LibraryAgentStreamHandlers = {
       onDelta: (_delta, fullText) => {
         streamedAgentAnswer = fullText;
@@ -775,6 +999,29 @@ function AgentWorkspace() {
         streamedAgentThinking = fullText;
         scheduleStreamedAgentMessageCommit();
       },
+      onLoopEvent: handleAgentLoopEvent,
+      onCapabilityEvent: handleCapabilityEvent,
+      onCapabilityCheckpoint: (artifacts) => {
+        updateSessionMessage(sessionId, assistantMessageId, (message) => ({
+          ...message,
+          capability: {
+            ...(message.capability ?? createCapabilityView()),
+            artifacts,
+          },
+        }));
+        if (runId) {
+          const targetRunId = runId;
+          runEventQueue = runEventQueue
+            .then(() => appendAgentRunEvent({
+              runId: targetRunId,
+              kind: 'checkpoint',
+              payload: { capabilityId: 'comparative-survey', artifacts },
+            }))
+            .then(() => undefined)
+            .catch(() => undefined);
+        }
+      },
+      onRecoveryCheckpoint: appendRecoveryCheckpoint,
       onError: (message) => {
         if (isTargetSessionActive()) {
           setStatusMessage(message);
@@ -791,6 +1038,7 @@ function AgentWorkspace() {
     setError('');
     setPlan(null);
     setApprovedItemIds(new Set());
+    setCurrentRunTokens({ promptTokens: 0, completionTokens: 0 });
 
     try {
       const preset = await loadLibraryAgentModelPresetById(selectedAgentPresetId);
@@ -803,6 +1051,20 @@ function AgentWorkspace() {
         selectedAgentReasoningEffort === 'auto'
           ? preset
           : { ...preset, reasoningEffort: selectedAgentReasoningEffort };
+
+      try {
+        runId = crypto.randomUUID();
+        await startAgentRun({
+          runId,
+          sessionId,
+          model: runtimePreset.model,
+          presetId: runtimePreset.id,
+          instruction,
+        });
+      } catch {
+        // Observability must not prevent the user from receiving an Agent response.
+        runId = null;
+      }
 
       if (isTargetSessionActive()) {
         setStatusMessage(
@@ -839,8 +1101,42 @@ function AgentWorkspace() {
         paperScopes: paperScopesSnapshot,
         responseLanguage: locale === 'en-US' ? 'English' : 'Simplified Chinese',
         ragEnabled: agentRagEnabled,
+        attachments: attachmentsSnapshot,
+        signal: abortController.signal,
+        capabilityResume,
       });
       const durationMs = Math.round(performance.now() - startedAt);
+
+      if (result.kind === 'capability') {
+        updateSessionMessage(sessionId, assistantMessageId, (message) => ({
+          ...message,
+          content: result.result.markdown,
+          meta: `comparative-survey · ${durationLabel(durationMs, locale)}`,
+          ragCitations: result.citations,
+          ragFigures: result.figures,
+          visionNotice: result.visionNotice,
+          ragNotice: result.ragNotice,
+          capability: {
+            ...(message.capability ?? createCapabilityView()),
+            status: 'done',
+            activeStage: 'report',
+            stages: (message.capability ?? createCapabilityView()).stages.map((stage) => ({
+              ...stage,
+              status: 'success',
+            })),
+            artifacts: result.result.artifacts,
+          },
+          error: undefined,
+        }));
+        runTurns = 4;
+        runTokens.promptTokens += result.result.tokenUsage.promptTokens;
+        runTokens.completionTokens += result.result.tokenUsage.completionTokens;
+        if (isTargetSessionActive()) {
+          setCurrentRunTokens({ ...runTokens });
+          setStatusMessage(l('对比调研报告已完成。', 'Comparative survey report completed.'));
+        }
+        return;
+      }
 
       if (result.kind === 'answer') {
         updateSessionMessage(sessionId, assistantMessageId, (message) => ({
@@ -849,8 +1145,10 @@ function AgentWorkspace() {
           meta: `${result.contextLabel} · ${durationLabel(durationMs, locale)}`,
           thinking: result.thinking,
           ragCitations: result.citations,
+          ragFigures: result.figures,
+          visionNotice: result.visionNotice,
           ragNotice: result.ragNotice,
-          trace: undefined,
+          trace: message.trace,
           toolCall: undefined,
           plan: undefined,
           choices: undefined,
@@ -875,8 +1173,10 @@ function AgentWorkspace() {
           meta: `waiting for choice · ${durationLabel(durationMs, locale)}`,
           thinking: result.thinking,
           ragCitations: result.citations,
+          ragFigures: result.figures,
+          visionNotice: result.visionNotice,
           ragNotice: result.ragNotice,
-          trace: undefined,
+          trace: message.trace,
           toolCall: undefined,
           plan: undefined,
           choices: result.choices,
@@ -901,7 +1201,7 @@ function AgentWorkspace() {
           meta: `paper selection · ${durationLabel(durationMs, locale)}`,
           thinking: result.thinking,
           ragCitations: undefined,
-          trace: undefined,
+          trace: message.trace,
           toolCall: undefined,
           plan: undefined,
           choices: undefined,
@@ -915,6 +1215,33 @@ function AgentWorkspace() {
               'The Agent needs paper context. Select target papers in the chat picker and continue.',
             ),
           );
+        }
+        return;
+      }
+
+      if (result.kind === 'memory-plan') {
+        updateSessionMessage(sessionId, assistantMessageId, (message) => ({
+          ...message,
+          content: l(
+            '模型建议更新本地 Agent 记忆。请审核内容后确认写入。',
+            'The model proposed a local Agent memory update. Review it before applying.',
+          ),
+          meta: `memory approval · ${durationLabel(durationMs, locale)}`,
+          thinking: message.thinking,
+          ragCitations: result.citations,
+          ragFigures: result.figures,
+          visionNotice: result.visionNotice,
+          ragNotice: result.ragNotice,
+          trace: message.trace,
+          toolCall: undefined,
+          plan: undefined,
+          memoryPlan: result.memoryPlan,
+          choices: undefined,
+          paperSelectionRequest: undefined,
+          error: undefined,
+        }));
+        if (isTargetSessionActive()) {
+          setStatusMessage(result.memoryPlan.summary);
         }
         return;
       }
@@ -937,8 +1264,10 @@ function AgentWorkspace() {
         meta: `${toolFunctionName(nextPlan.tool)} · ${durationLabel(durationMs, locale)}`,
         thinking: result.thinking,
         ragCitations: result.citations,
+        ragFigures: result.figures,
+        visionNotice: result.visionNotice,
         ragNotice: result.ragNotice,
-        trace: buildSuccessTrace(instruction, paperCount, nextPlan, durationMs, locale),
+        trace: message.trace,
         toolCall: nextToolCall,
         plan: nextPlan,
         choices: undefined,
@@ -956,29 +1285,37 @@ function AgentWorkspace() {
         setStatusMessage(nextPlan.description);
       }
     } catch (nextError) {
+      runStatus = nextError instanceof Error && nextError.name === 'AbortError' ? 'aborted' : 'error';
       const message = nextError instanceof Error ? nextError.message : l('生成 Agent 计划失败', 'Failed to generate Agent plan');
       const durationMs = Math.round(performance.now() - startedAt);
 
       updateSessionMessage(sessionId, assistantMessageId, (chatMessage) => ({
         ...chatMessage,
-        content: message.includes('tool call')
+        content: runStatus === 'aborted'
+          ? l('已取消当前 Agent 运行。', 'The current Agent run was cancelled.')
+          : message.includes('tool call')
           ? l(
             '当前模型没有返回 tool call。请换用支持 OpenAI-compatible tools/function calling 的模型。',
             'The current model did not return a tool call. Use a model that supports OpenAI-compatible tools/function calling.',
           )
           : l(`生成计划失败：${message}`, `Plan generation failed: ${message}`),
         meta: `error · ${durationLabel(durationMs, locale)}`,
-        trace: buildErrorTrace(instruction, paperCount, message, durationMs, locale),
+        trace: applyAgentLoopEventToTrace(chatMessage.trace, { kind: 'error', message }, locale),
         ragCitations: undefined,
         toolCall: undefined,
         plan: undefined,
         choices: undefined,
         paperSelectionRequest: undefined,
-        error: message,
+        error: runStatus === 'aborted' ? undefined : message,
+        capability: chatMessage.capability
+          ? { ...chatMessage.capability, status: runStatus === 'aborted' ? 'aborted' : 'error' }
+          : undefined,
       }));
       if (isTargetSessionActive()) {
-        setError(message);
-        setStatusMessage(message);
+        if (runStatus !== 'aborted') {
+          setError(message);
+        }
+        setStatusMessage(runStatus === 'aborted' ? l('已取消当前运行。', 'Current run cancelled.') : message);
       }
     } finally {
       if (streamCommitTimer !== null) {
@@ -986,12 +1323,45 @@ function AgentWorkspace() {
       }
 
       commitStreamedAgentMessage();
+      if (runId) {
+        await runEventQueue;
+        try {
+          await finishAgentRun({
+            runId,
+            status: runStatus,
+            turns: runTurns,
+          });
+        } catch {
+          // The primary answer has already been delivered; avoid surfacing telemetry-only failures.
+        }
+      }
       setAgentSessionRunning(sessionId, false);
+      abortControllersRef.current.delete(sessionId);
     }
+  };
+
+  const handleCancelAgentRun = () => {
+    const controller = abortControllersRef.current.get(activeSessionId);
+
+    if (!controller) {
+      return;
+    }
+
+    controller.abort();
+    setStatusMessage(l('正在取消当前运行...', 'Cancelling the current run...'));
   };
 
   const submitPrompt = (value: string) => {
     void runAgent(value);
+  };
+
+  const handleOrganizeAgentMemory = () => {
+    const instruction = l(
+      '读取今天的 Agent trace 与现有 L2/L3 记忆，整理出可审核的 L2 或 L3 更新；如无可靠新事实则直接说明。',
+      'Read today\'s Agent trace and existing L2/L3 memory, then propose a reviewable L2 or L3 update. If no reliable new fact exists, explain that directly.',
+    );
+    setStatusMessage(l('正在整理 Agent 记忆。', 'Organizing Agent memory.'));
+    void runAgent(instruction);
   };
 
   const applyPlan = async () => {
@@ -1056,6 +1426,22 @@ function AgentWorkspace() {
       );
     } finally {
       setApplyingPlan(false);
+    }
+  };
+
+  const applyMemoryPlan = async (memoryPlan: AgentMemoryWritePlan) => {
+    try {
+      await writeAgentMemory(memoryPlan.file, memoryPlan.content);
+      appendAssistantMessageToSession(
+        activeSessionId,
+        l('已写入本地 Agent 记忆。', 'Local Agent memory was updated.'),
+        memoryPlan.summary,
+      );
+      setStatusMessage(l('已写入 Agent 记忆。', 'Agent memory updated.'));
+    } catch (nextError) {
+      const message = nextError instanceof Error ? nextError.message : l('写入 Agent 记忆失败', 'Failed to update Agent memory');
+      setError(message);
+      setStatusMessage(message);
     }
   };
 
@@ -1287,22 +1673,119 @@ function AgentWorkspace() {
     setStatusMessage(l('已创建新的 Agent 对话。', 'Created a new Agent chat.'));
   };
 
+  const handleForkFromMessage = (messageId: string) => {
+    const source = historySessions.find((session) => session.id === activeSessionId) ?? buildAgentHistorySession({
+      id: activeSessionId,
+      messages,
+      selectedPaperIds: [...selectedPaperIds],
+      lastInstruction,
+      ragEnabled: agentRagEnabled,
+      selectedModelPresetId: selectedAgentPresetId ?? undefined,
+      attachments: agentAttachments,
+      locale,
+    });
+    const fork = forkAgentHistorySession({
+      source,
+      messageId,
+      forkSessionId: newAgentSessionId(),
+      locale,
+    });
+
+    if (!fork) {
+      setStatusMessage(l('无法从该消息创建分支。', 'Unable to create a branch from this message.'));
+      return;
+    }
+
+    setHistorySessions((current) => [fork, ...current.filter((session) => session.id !== fork.id)].slice(0, 30));
+    setActiveSessionId(fork.id);
+    activeSessionIdRef.current = fork.id;
+    setMessages(fork.messages);
+    setSelectedPaperIds(new Set(fork.selectedPaperIds));
+    setLastInstruction(fork.lastInstruction);
+    setAgentRagEnabled(fork.ragEnabled !== false);
+    setSelectedAgentPresetId(fork.selectedModelPresetId ?? agentModelPresets[0]?.id ?? null);
+    setAgentAttachments(fork.attachments ?? []);
+    restoreDraftStateFromMessages(fork.messages);
+    setComposerValue('');
+    setPlan(null);
+    setApprovedItemIds(new Set());
+    setStatusMessage(l('已从该消息创建新分支。', 'Created a new branch from this message.'));
+  };
+
   const handleOpenHistorySession = (session: AgentHistorySession) => {
     setActiveSessionId(session.id);
+    activeSessionIdRef.current = session.id;
     setMessages(session.messages);
     setSelectedPaperIds(new Set(session.selectedPaperIds));
     setLastInstruction(session.lastInstruction);
     setAgentRagEnabled(session.ragEnabled !== false);
     setSelectedAgentPresetId(session.selectedModelPresetId ?? agentModelPresets[0]?.id ?? null);
-    const restoredPreset =
-      agentModelPresets.find((preset) => preset.id === session.selectedModelPresetId) ??
-      agentModelPresets[0] ??
-      null;
     setAgentAttachments(session.attachments ?? []);
     restoreDraftStateFromMessages(session.messages);
     setComposerValue('');
     setError('');
     setStatusMessage(l(`已打开历史对话：${session.title}`, `Opened history chat: ${session.title}`));
+
+    void (async () => {
+      try {
+        const [interruptedRun] = await listInterruptedAgentRuns(session.id);
+
+        if (!interruptedRun || activeSessionIdRef.current !== session.id) {
+          return;
+        }
+
+        const events = await getAgentRunEvents(interruptedRun.runId);
+        const checkpoint = latestAgentRecoveryCheckpoint(events);
+        const capabilityCheckpoint = latestComparativeSurveyCheckpoint(events);
+
+        if (capabilityCheckpoint && window.confirm(l(
+          '上次对比调研被中断。是否从最近完成的阶段继续？',
+          'The previous comparative survey was interrupted. Continue from the most recently completed stage?',
+        ))) {
+          await finishAgentRun({ runId: interruptedRun.runId, status: 'aborted' }).catch(() => {});
+          setStatusMessage(l('正在从对比调研检查点继续。', 'Continuing from the comparative-survey checkpoint.'));
+          await runAgent(
+            session.lastInstruction,
+            session.selectedPaperIds,
+            capabilityCheckpoint,
+          );
+          return;
+        }
+
+        if (!checkpoint || !window.confirm(l(
+          '上次 Agent 运行被中断。是否从最近完整轮次恢复到输入区继续？',
+          'The previous Agent run was interrupted. Restore the most recent complete turn to continue?',
+        ))) {
+          return;
+        }
+
+        const recoveredMessages = recoveryCheckpointToChatMessages(checkpoint);
+
+        if (recoveredMessages.length === 0 || activeSessionIdRef.current !== session.id) {
+          return;
+        }
+
+        setMessages(recoveredMessages);
+        setHistorySessions((current) => upsertAgentHistorySession(current, {
+          sessionId: session.id,
+          messages: recoveredMessages,
+          selectedPaperIds: session.selectedPaperIds,
+          lastInstruction: session.lastInstruction,
+          ragEnabled: session.ragEnabled,
+          selectedModelPresetId: session.selectedModelPresetId,
+          attachments: session.attachments,
+          locale,
+        }));
+        setComposerValue(session.lastInstruction);
+        setStatusMessage(l(
+          '已恢复到最近完整轮次；确认输入框中的指令后发送即可继续。',
+          'Restored the most recent complete turn. Review the prefilled instruction and send to continue.',
+        ));
+        await finishAgentRun({ runId: interruptedRun.runId, status: 'aborted' }).catch(() => {});
+      } catch {
+        // Recovery is optional; an unavailable trace must not prevent opening history.
+      }
+    })();
   };
 
   const handleDeleteHistorySession = (sessionId: string) => {
@@ -1360,6 +1843,8 @@ function AgentWorkspace() {
       approvedItemIds={approvedItemIds}
       chatScrollRef={chatScrollRef}
       composerValue={composerValue}
+      currentRunTokens={currentRunTokens}
+      sessionTokenUsage={sessionTokenUsage}
       conversationPanelRef={conversationPanelRef}
       error={error}
       expandedStepKeys={expandedStepKeys}
@@ -1387,6 +1872,10 @@ function AgentWorkspace() {
       onApplyPlan={() => {
         void applyPlan();
       }}
+      onApplyMemoryPlan={(memoryPlan) => {
+        void applyMemoryPlan(memoryPlan);
+      }}
+      onCancelAgentRun={handleCancelAgentRun}
       onCancelPlan={cancelPlan}
       onClearSelection={clearSelection}
       onComposerChange={setComposerValue}
@@ -1394,6 +1883,7 @@ function AgentWorkspace() {
         void copyToolParameters(toolCall);
       }}
       onOpenRagCitation={handleOpenRagCitation}
+      onOrganizeMemory={handleOrganizeAgentMemory}
       onAgentPresetChange={handleAgentPresetChange}
       onAgentReasoningEffortChange={setSelectedAgentReasoningEffort}
       onCaptureScreenshot={() => {
@@ -1401,6 +1891,7 @@ function AgentWorkspace() {
       }}
       onHistorySidebarCollapsedChange={setHistorySidebarCollapsed}
       onInlinePaperSelectionContinue={handleInlinePaperSelectionContinue}
+      onForkFromMessage={handleForkFromMessage}
       onInspectPlanItem={(_itemId, paperTitle) => {
         setStatusMessage(l(`正在查看计划项：${paperTitle}`, `Inspecting plan item: ${paperTitle}`));
       }}

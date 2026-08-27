@@ -259,6 +259,10 @@ export interface QaModelPreset {
   model: string;
   apiMode: OpenAICompatibleApiMode;
   labelCustomized?: boolean;
+  /** Optional provider-advertised context limit; P3 falls back to 128k. */
+  contextWindow?: number;
+  /** Opt-in because OpenAI-compatible providers do not expose a reliable capability probe. */
+  supportsVision?: boolean;
 }
 
 export type ModelReasoningEffort = "auto" | "low" | "medium" | "high" | "xhigh" | "max";
@@ -553,6 +557,8 @@ export interface ReaderSettings {
   summaryModelPresetId: string;
   reviewModelPresetId: string;
   agentModelPresetId: string;
+  /** Temporary P3 compatibility switch for the previous one-shot Agent path. */
+  agentLegacyMode: boolean;
   embeddingBaseUrl: string;
   embeddingModel: string;
   embeddingDimensions: number | null;

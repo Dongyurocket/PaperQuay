@@ -36,6 +36,7 @@ import {
   ToggleRow,
 } from './readerPreferencesPrimitives';
 import { ReaderPreferencesBackupSection } from './readerPreferencesBackupSection';
+import { AgentMemorySettingsSection } from './AgentMemorySettingsSection';
 import { ReaderPreferencesModelsSection } from './readerPreferencesModelsSection';
 import { ReaderPreferencesUpdateSection } from './readerPreferencesUpdateSection';
 import type {
@@ -841,6 +842,7 @@ export function ReaderPreferencesContent({
         onQaModelPresetRemove={onQaModelPresetRemove}
         onQaModelPresetChange={onQaModelPresetChange}
       />
+      <AgentMemorySettingsSection active={activeSection === 'models'} l={l} />
 
       <ReaderPreferencesBackupSection
         active={activeSection === 'backup'}
