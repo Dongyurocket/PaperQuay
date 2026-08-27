@@ -188,6 +188,14 @@ function AgentWorkspace() {
   const [currentRunTokens, setCurrentRunTokens] = useState({ promptTokens: 0, completionTokens: 0 });
   const [sessionTokenUsage, setSessionTokenUsage] = useState<Record<string, number>>({});
   const abortControllersRef = useRef(new Map<string, AbortController>());
+  const pendingCapabilityResumeRef = useRef(new Map<string, {
+    instruction: string;
+    artifacts: Partial<ComparativeSurveyArtifacts>;
+  }>());
+  const pendingLoopResumeRef = useRef(new Map<string, {
+    instruction: string;
+    messages: AgentLoopMessage[];
+  }>());
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const historySidebarRef = useRef<HTMLElement | null>(null);
   const conversationPanelRef = useRef<HTMLElement | null>(null);
@@ -448,7 +456,7 @@ function AgentWorkspace() {
           ...current,
           ...Object.fromEntries(rows.map((row) => [
             row.sessionId,
-            row.promptTokens + row.completionTokens,
+            Math.max(current[row.sessionId] ?? 0, row.promptTokens + row.completionTokens),
           ])),
         }));
       })
@@ -722,6 +730,18 @@ function AgentWorkspace() {
     }
 
     const sessionId = activeSessionId;
+    const pendingCapabilityResume = pendingCapabilityResumeRef.current.get(sessionId);
+    const effectiveCapabilityResume = capabilityResume ?? (
+      pendingCapabilityResume?.instruction.trim() === instruction
+        ? pendingCapabilityResume.artifacts
+        : undefined
+    );
+    pendingCapabilityResumeRef.current.delete(sessionId);
+    const pendingLoopResume = pendingLoopResumeRef.current.get(sessionId);
+    const effectiveLoopResumeMessages = pendingLoopResume?.instruction.trim() === instruction
+      ? pendingLoopResume.messages
+      : undefined;
+    pendingLoopResumeRef.current.delete(sessionId);
 
     if (isAgentSessionRunning(runningSessionIdsRef.current, sessionId)) {
       setStatusMessage(
@@ -1001,6 +1021,30 @@ function AgentWorkspace() {
       },
       onLoopEvent: handleAgentLoopEvent,
       onCapabilityEvent: handleCapabilityEvent,
+      onCapabilityUsage: (usage) => {
+        runTokens.promptTokens += usage.promptTokens;
+        runTokens.completionTokens += usage.completionTokens;
+        if (runId) {
+          const targetRunId = runId;
+          runEventQueue = runEventQueue
+            .then(() => appendAgentRunEvent({
+              runId: targetRunId,
+              kind: 'capability',
+              promptTokens: usage.promptTokens,
+              completionTokens: usage.completionTokens,
+              payload: { capabilityId: 'comparative-survey', usage },
+            }))
+            .then(() => undefined)
+            .catch(() => undefined);
+        }
+        setSessionTokenUsage((current) => ({
+          ...current,
+          [sessionId]: (current[sessionId] ?? 0) + usage.promptTokens + usage.completionTokens,
+        }));
+        if (isTargetSessionActive()) {
+          setCurrentRunTokens({ ...runTokens });
+        }
+      },
       onCapabilityCheckpoint: (artifacts) => {
         updateSessionMessage(sessionId, assistantMessageId, (message) => ({
           ...message,
@@ -1103,7 +1147,8 @@ function AgentWorkspace() {
         ragEnabled: agentRagEnabled,
         attachments: attachmentsSnapshot,
         signal: abortController.signal,
-        capabilityResume,
+        capabilityResume: effectiveCapabilityResume,
+        loopResumeMessages: effectiveLoopResumeMessages,
       });
       const durationMs = Math.round(performance.now() - startedAt);
 
@@ -1129,8 +1174,6 @@ function AgentWorkspace() {
           error: undefined,
         }));
         runTurns = 4;
-        runTokens.promptTokens += result.result.tokenUsage.promptTokens;
-        runTokens.completionTokens += result.result.tokenUsage.completionTokens;
         if (isTargetSessionActive()) {
           setCurrentRunTokens({ ...runTokens });
           setStatusMessage(l('对比调研报告已完成。', 'Comparative survey report completed.'));
@@ -1738,24 +1781,53 @@ function AgentWorkspace() {
         const checkpoint = latestAgentRecoveryCheckpoint(events);
         const capabilityCheckpoint = latestComparativeSurveyCheckpoint(events);
 
-        if (capabilityCheckpoint && window.confirm(l(
-          '上次对比调研被中断。是否从最近完成的阶段继续？',
-          'The previous comparative survey was interrupted. Continue from the most recently completed stage?',
-        ))) {
+        if (capabilityCheckpoint) {
+          const resumeCapability = window.confirm(l(
+            '上次对比调研被中断。是否从最近完成的阶段继续？',
+            'The previous comparative survey was interrupted. Continue from the most recently completed stage?',
+          ));
+
           await finishAgentRun({ runId: interruptedRun.runId, status: 'aborted' }).catch(() => {});
-          setStatusMessage(l('正在从对比调研检查点继续。', 'Continuing from the comparative-survey checkpoint.'));
-          await runAgent(
-            session.lastInstruction,
-            session.selectedPaperIds,
-            capabilityCheckpoint,
-          );
+
+          if (resumeCapability) {
+            pendingCapabilityResumeRef.current.set(session.id, {
+              instruction: session.lastInstruction,
+              artifacts: capabilityCheckpoint,
+            });
+            setComposerValue(session.lastInstruction);
+            setStatusMessage(l(
+              '已恢复对比调研阶段检查点；发送输入框中的原任务即可继续。',
+              'The comparative-survey stage checkpoint was restored. Send the original task in the composer to continue.',
+            ));
+          } else {
+            setStatusMessage(l(
+              '已放弃恢复上次对比调研，并将中断运行标记为已取消。',
+              'The previous comparative survey was not restored and its interrupted run was marked aborted.',
+            ));
+          }
           return;
         }
 
-        if (!checkpoint || !window.confirm(l(
+        if (!checkpoint) {
+          await finishAgentRun({ runId: interruptedRun.runId, status: 'aborted' }).catch(() => {});
+          setStatusMessage(l(
+            '上次运行没有可恢复的完整轮次，已将其标记为取消。',
+            'The previous run had no complete recoverable turn and was marked aborted.',
+          ));
+          return;
+        }
+
+        const resumeLoop = window.confirm(l(
           '上次 Agent 运行被中断。是否从最近完整轮次恢复到输入区继续？',
           'The previous Agent run was interrupted. Restore the most recent complete turn to continue?',
-        ))) {
+        ));
+        await finishAgentRun({ runId: interruptedRun.runId, status: 'aborted' }).catch(() => {});
+
+        if (!resumeLoop) {
+          setStatusMessage(l(
+            '已放弃恢复上次运行，并将其标记为取消。',
+            'The previous run was not restored and was marked aborted.',
+          ));
           return;
         }
 
@@ -1777,11 +1849,14 @@ function AgentWorkspace() {
           locale,
         }));
         setComposerValue(session.lastInstruction);
+        pendingLoopResumeRef.current.set(session.id, {
+          instruction: session.lastInstruction,
+          messages: checkpoint,
+        });
         setStatusMessage(l(
-          '已恢复到最近完整轮次；确认输入框中的指令后发送即可继续。',
-          'Restored the most recent complete turn. Review the prefilled instruction and send to continue.',
+          '已恢复到最近完整轮次；发送输入框中的原任务即可从检查点继续。',
+          'Restored the most recent complete turn. Send the original task in the composer to continue from the checkpoint.',
         ));
-        await finishAgentRun({ runId: interruptedRun.runId, status: 'aborted' }).catch(() => {});
       } catch {
         // Recovery is optional; an unavailable trace must not prevent opening history.
       }

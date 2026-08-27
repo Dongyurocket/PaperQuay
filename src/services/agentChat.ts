@@ -40,6 +40,7 @@ export async function runOpenAiCompatibleAgentChatTurn(input: {
   tools?: Array<Record<string, unknown>>;
   toolChoice: 'auto' | 'none';
   stream?: boolean;
+  signal?: AbortSignal;
   onAnswerDelta?: (text: string) => void;
   onThinkingDelta?: (text: string) => void;
 }): Promise<AgentChatTurnResponse> {
@@ -53,11 +54,26 @@ export async function runOpenAiCompatibleAgentChatTurn(input: {
     stream: input.stream !== false,
   };
 
+  if (input.signal?.aborted) {
+    const error = new Error('Agent chat turn aborted');
+    error.name = 'AbortError';
+    throw error;
+  }
+
+  const cancel = () => {
+    void invoke('agent_chat_turn_cancel', { requestId }).catch(() => {});
+  };
+  input.signal?.addEventListener('abort', cancel, { once: true });
+
   if (input.stream === false) {
     try {
       return await invoke<AgentChatTurnResponse>('agent_chat_turn', { request });
     } catch (error) {
-      throw new Error(toErrorMessage(error, 'Agent chat turn failed'));
+      const nextError = new Error(toErrorMessage(error, 'Agent chat turn failed'));
+      if (input.signal?.aborted) nextError.name = 'AbortError';
+      throw nextError;
+    } finally {
+      input.signal?.removeEventListener('abort', cancel);
     }
   }
 
@@ -110,8 +126,11 @@ export async function runOpenAiCompatibleAgentChatTurn(input: {
       }
     }
 
-    throw new Error(message);
+    const nextError = new Error(message);
+    if (input.signal?.aborted) nextError.name = 'AbortError';
+    throw nextError;
   } finally {
+    input.signal?.removeEventListener('abort', cancel);
     unlisten();
   }
 }

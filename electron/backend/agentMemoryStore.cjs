@@ -99,8 +99,9 @@ function createAgentMemoryStore(appPaths) {
     const date = file === 'trace' ? normalizeDate(request.date) : null;
     const content = typeof request.content === 'string' ? request.content : String(request.content ?? '');
     const maxChars = file === 'trace' ? MAX_TRACE_BYTES : MAX_MEMORY_CONTENT_CHARS;
+    const contentSize = file === 'trace' ? Buffer.byteLength(content) : content.length;
 
-    if (content.length > maxChars) {
+    if (contentSize > maxChars) {
       throw new Error(`Agent memory content exceeds the ${maxChars} character limit`);
     }
 

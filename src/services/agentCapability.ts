@@ -14,6 +14,7 @@ export interface ComparativeSurveyCitation {
   pageIndex?: number | null;
   blockId?: string | null;
   previewText?: string;
+  sourceType?: 'mineru-markdown' | 'pdf-text';
 }
 
 export interface ComparativeSurveyResult {

@@ -91,6 +91,7 @@ export interface AgentChatTurnRequest {
   tools?: Array<Record<string, unknown>>;
   toolChoice: 'auto' | 'none';
   stream: boolean;
+  signal?: AbortSignal;
   onAnswerDelta?: (text: string) => void;
   onThinkingDelta?: (text: string) => void;
 }
@@ -310,6 +311,7 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<LibraryAg
         tools: turnTools.length > 0 ? modelTools(turnTools) : undefined,
         toolChoice: turnTools.length > 0 ? 'auto' : 'none',
         stream: true,
+        signal: options.signal,
         onAnswerDelta: (text) => {
           if (!text) return;
           emittedAnswerDelta = true;
@@ -337,6 +339,37 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<LibraryAg
 
     if (!forceFinalAnswer && toolCalls.length > 0) {
       const writeCalls = toolCalls.filter((call) => toolByName.get(call.name)?.kind === 'write');
+      const readCalls = toolCalls.filter((call) => toolByName.get(call.name)?.kind !== 'write');
+
+      if (writeCalls.length > 0 && readCalls.length > 0) {
+        messages.push({
+          role: 'assistant',
+          content: response.content || '',
+          toolCalls: toolCalls.map((call) => ({
+            id: call.id,
+            name: call.name,
+            arguments: normalizeToolArguments(call.arguments),
+          })),
+        });
+        for (const call of toolCalls) {
+          const message = 'PaperQuay does not allow read and write tool calls in the same model turn. Call read tools first, then propose a write plan in a later turn.';
+          emit({ kind: 'tool_call', turn, callId: call.id, name: call.name, args: normalizeToolArguments(call.arguments) });
+          emit({ kind: 'tool_result', turn, callId: call.id, name: call.name, ok: false, preview: message });
+          messages.push({
+            role: 'tool',
+            toolCallId: call.id,
+            content: JSON.stringify({ name: call.name, isError: true, result: message }),
+          });
+        }
+        emit({
+          kind: 'turn_end',
+          turn,
+          finishReason: 'mixed_tool_calls_rejected',
+          ...usage,
+        });
+        checkpoint(turn);
+        continue;
+      }
 
       if (writeCalls.length > 0) {
         const plans: LibraryAgentPlan[] = [];
@@ -442,24 +475,9 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<LibraryAg
 
       let toolImageCount = 0;
       let toolImageBytes = 0;
+      const acceptedVisualAttachments: DocumentChatAttachment[] = [];
 
       for (const result of results) {
-        const acceptedAttachments = (result.attachments ?? []).filter((attachment) => {
-          const isImage = attachment.kind === 'image' || attachment.kind === 'screenshot' || attachment.mimeType.startsWith('image/');
-          if (!isImage) return true;
-          const bytes = toolAttachmentBytes(attachment);
-          if (
-            toolImageCount >= MAX_TOOL_IMAGES_PER_TURN ||
-            bytes <= 0 ||
-            toolImageBytes + bytes > MAX_TOOL_IMAGE_BYTES_PER_TURN
-          ) {
-            return false;
-          }
-          toolImageCount += 1;
-          toolImageBytes += bytes;
-          return true;
-        });
-
         messages.push({
           role: 'tool',
           toolCallId: result.call.id,
@@ -470,13 +488,32 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<LibraryAg
           }),
         });
 
-        if (acceptedAttachments.length) {
-          messages.push({
-            role: 'user',
-            content: `Visual content returned by ${result.call.name}.`,
-            attachments: acceptedAttachments,
-          });
+        for (const attachment of result.attachments ?? []) {
+          const isImage = attachment.kind === 'image' || attachment.kind === 'screenshot' || attachment.mimeType.startsWith('image/');
+          if (!isImage) {
+            acceptedVisualAttachments.push(attachment);
+            continue;
+          }
+          const bytes = toolAttachmentBytes(attachment);
+          if (
+            toolImageCount >= MAX_TOOL_IMAGES_PER_TURN ||
+            bytes <= 0 ||
+            toolImageBytes + bytes > MAX_TOOL_IMAGE_BYTES_PER_TURN
+          ) {
+            continue;
+          }
+          toolImageCount += 1;
+          toolImageBytes += bytes;
+          acceptedVisualAttachments.push(attachment);
         }
+      }
+
+      if (acceptedVisualAttachments.length) {
+        messages.push({
+          role: 'user',
+          content: 'Visual content returned by the preceding PaperQuay tool calls.',
+          attachments: acceptedVisualAttachments,
+        });
       }
 
       emit({

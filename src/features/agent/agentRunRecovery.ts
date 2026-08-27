@@ -8,6 +8,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value));
 }
 
+function recoveredToolCall(value: unknown) {
+  if (!isRecord(value) || typeof value.id !== 'string' || typeof value.name !== 'string') {
+    return null;
+  }
+
+  return {
+    id: value.id,
+    name: value.name,
+    arguments: isRecord(value.arguments) ? value.arguments : {},
+  };
+}
+
 function recoveredLoopMessage(value: unknown): AgentLoopMessage | null {
   if (!isRecord(value)) return null;
   const role = value.role;
@@ -24,6 +36,9 @@ function recoveredLoopMessage(value: unknown): AgentLoopMessage | null {
     role,
     content,
     toolCallId: typeof value.toolCallId === 'string' ? value.toolCallId : undefined,
+    toolCalls: Array.isArray(value.toolCalls)
+      ? value.toolCalls.map(recoveredToolCall).filter((call): call is NonNullable<typeof call> => Boolean(call))
+      : undefined,
   };
 }
 
@@ -44,6 +59,23 @@ export function latestComparativeSurveyCheckpoint(
           ? artifacts.subquestions.filter((value): value is string => typeof value === 'string')
           : undefined,
         researchNotes: typeof artifacts.researchNotes === 'string' ? artifacts.researchNotes : undefined,
+        citations: Array.isArray(artifacts.citations)
+          ? artifacts.citations.flatMap((value) => {
+            if (!isRecord(value) || typeof value.paperId !== 'string' || typeof value.paperTitle !== 'string') {
+              return [];
+            }
+            return [{
+              paperId: value.paperId,
+              paperTitle: value.paperTitle,
+              pageIndex: typeof value.pageIndex === 'number' || value.pageIndex === null ? value.pageIndex : undefined,
+              blockId: typeof value.blockId === 'string' || value.blockId === null ? value.blockId : undefined,
+              previewText: typeof value.previewText === 'string' ? value.previewText : undefined,
+              sourceType: value.sourceType === 'mineru-markdown' || value.sourceType === 'pdf-text'
+                ? value.sourceType
+                : undefined,
+            }];
+          })
+          : undefined,
         completedStages: Array.isArray(artifacts.completedStages)
           ? artifacts.completedStages.filter((value): value is ComparativeSurveyArtifacts['completedStages'][number] =>
             value === 'rephrase' || value === 'decompose' || value === 'research' || value === 'report',

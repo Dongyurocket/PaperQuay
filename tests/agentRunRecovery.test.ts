@@ -38,6 +38,7 @@ test('recovery chooses the newest complete checkpoint and preserves user/assista
     'complete answer',
     'tool record',
   ]);
+  assert.equal(checkpoint?.[3]?.toolCallId, 'call-1');
 
   const chat = recoveryCheckpointToChatMessages(checkpoint ?? []);
   assert.deepEqual(chat.map((message) => message.role), ['user', 'assistant']);
@@ -57,6 +58,14 @@ test('recovery extracts the newest comparative-survey stage checkpoint', () => {
       artifacts: {
         rephrasedQuestion: 'Saved question',
         subquestions: ['Q1'],
+        citations: [{
+          paperId: 'paper-a',
+          paperTitle: 'Paper A',
+          pageIndex: 2,
+          blockId: 'block-a',
+          previewText: 'Saved evidence',
+          sourceType: 'mineru-markdown',
+        }],
         completedStages: ['rephrase', 'decompose', 'invalid'],
       },
     }),
@@ -66,6 +75,14 @@ test('recovery extracts the newest comparative-survey stage checkpoint', () => {
     rephrasedQuestion: 'Saved question',
     subquestions: ['Q1'],
     researchNotes: undefined,
+    citations: [{
+      paperId: 'paper-a',
+      paperTitle: 'Paper A',
+      pageIndex: 2,
+      blockId: 'block-a',
+      previewText: 'Saved evidence',
+      sourceType: 'mineru-markdown',
+    }],
     completedStages: ['rephrase', 'decompose'],
   });
 });

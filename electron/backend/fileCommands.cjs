@@ -382,6 +382,18 @@ function createFileCommands(context) {
       return pathExists(filePath);
     },
 
+    // 批量路径存在性检查：供文献库 MinerU 状态检查等场景单次 IPC 完成，
+    // 避免每篇文献多次 IPC 往返形成启动期洪水。
+    async paths_exist({ paths }) {
+      if (!Array.isArray(paths)) {
+        throw new Error('paths must be an array of paths');
+      }
+
+      return paths
+        .slice(0, 10000)
+        .map((candidate) => (typeof candidate === 'string' && candidate ? pathExists(candidate) : false));
+    },
+
     async read_text_file({ path: filePath }) {
       await ensureFile(filePath);
       return fsp.readFile(filePath, 'utf8');

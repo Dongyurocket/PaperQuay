@@ -462,6 +462,7 @@ export interface LibraryAgentStreamHandlers {
   onThinkingDelta?: (text: string, fullText: string) => void;
   onLoopEvent?: (event: AgentLoopEvent) => void;
   onCapabilityEvent?: (event: ComparativeSurveyEvent) => void;
+  onCapabilityUsage?: (usage: { promptTokens: number; completionTokens: number }) => void;
   onCapabilityCheckpoint?: (artifacts: ComparativeSurveyArtifacts) => void;
   onRecoveryCheckpoint?: (messages: AgentLoopMessage[], turn: number) => void;
   onDone?: () => void;
@@ -2670,6 +2671,7 @@ export async function runConversationalLibraryAgent({
   attachments,
   signal,
   capabilityResume,
+  loopResumeMessages,
 }: {
   papers: LiteraturePaper[];
   categories?: LiteratureCategory[];
@@ -2684,6 +2686,7 @@ export async function runConversationalLibraryAgent({
   attachments?: DocumentChatAttachment[];
   signal?: AbortSignal;
   capabilityResume?: Partial<ComparativeSurveyArtifacts>;
+  loopResumeMessages?: AgentLoopMessage[];
 }): Promise<LibraryAgentRunResult> {
   if (!preset.baseUrl.trim() || !preset.apiKey.trim() || !preset.model.trim()) {
     throw new Error('请先在设置里配置支持 tool/function calling 的 OpenAI-compatible 模型。');
@@ -2701,23 +2704,35 @@ export async function runConversationalLibraryAgent({
     const citationAccumulator: LibraryAgentRagCitation[] = [];
     const ragErrors: string[] = [];
     const callModel = async (system: string, user: string) => {
-      const response = await runOpenAiCompatibleAgentChatTurn({
-        options: {
-          baseUrl: preset.baseUrl,
-          apiKey: preset.apiKey.trim(),
-          model: preset.model,
-          apiMode: preset.apiMode,
-          temperature: preset.temperature,
-          reasoningEffort: preset.reasoningEffort,
-        },
-        messages: [
-          { role: 'system', content: system },
-          { role: 'user', content: user },
-        ],
-        toolChoice: 'none',
-        stream: false,
-      });
-      return response;
+      const controller = new AbortController();
+      const abortFromParent = () => controller.abort();
+      signal?.addEventListener('abort', abortFromParent, { once: true });
+      try {
+        const response = await runOpenAiCompatibleAgentChatTurn({
+          options: {
+            baseUrl: preset.baseUrl,
+            apiKey: preset.apiKey.trim(),
+            model: preset.model,
+            apiMode: preset.apiMode,
+            temperature: preset.temperature,
+            reasoningEffort: preset.reasoningEffort,
+          },
+          messages: [
+            { role: 'system', content: system },
+            { role: 'user', content: user },
+          ],
+          toolChoice: 'none',
+          stream: false,
+          signal: controller.signal,
+        });
+        streamHandlers?.onCapabilityUsage?.({
+          promptTokens: response.usage?.promptTokens ?? 0,
+          completionTokens: response.usage?.completionTokens ?? 0,
+        });
+        return response;
+      } finally {
+        signal?.removeEventListener('abort', abortFromParent);
+      }
     };
     const survey = await runComparativeSurveyCapability({
       question: normalizedInstruction,
@@ -2795,6 +2810,7 @@ export async function runConversationalLibraryAgent({
               pageIndex: citation.pageIndex,
               blockId: citation.blockId,
               previewText: citation.previewText,
+              sourceType: citation.sourceType,
             })),
             usage: { promptTokens, completionTokens },
           };
@@ -2809,6 +2825,25 @@ export async function runConversationalLibraryAgent({
       },
     });
 
+    for (const citation of survey.citations) {
+      if (citationAccumulator.some((current) =>
+        current.paperId === citation.paperId &&
+        current.pageIndex === citation.pageIndex &&
+        current.blockId === citation.blockId
+      )) {
+        continue;
+      }
+      citationAccumulator.push({
+        id: `agent-rag:${citation.paperId}:recovered:${citation.pageIndex ?? 'na'}:${citation.blockId ?? 'na'}`,
+        label: String(citationAccumulator.length + 1),
+        sourceType: citation.sourceType ?? 'pdf-text',
+        pageIndex: citation.pageIndex ?? null,
+        blockId: citation.blockId ?? null,
+        previewText: citation.previewText,
+        paperId: citation.paperId,
+        paperTitle: citation.paperTitle,
+      });
+    }
     streamHandlers?.onDelta?.(survey.markdown, survey.markdown);
     streamHandlers?.onDone?.();
     return {
@@ -3049,17 +3084,22 @@ export async function runConversationalLibraryAgent({
       localLibraryMode: true,
     },
     runtimeContext: {},
-    messages: buildReActAgentMessages({
-      instruction: normalizedInstruction,
-      historyMessages,
-      responseLanguage,
-      papers: paperInputs,
-      categories: categoryPayload.categories,
-      currentPaperScopeIds,
-      paperScopes,
-      attachments: [...nonVisionAttachments, ...preparedVision.attachments],
-      memoryContext,
-    }),
+    messages: loopResumeMessages?.length
+      ? [
+        ...loopResumeMessages,
+        { role: 'user', content: normalizedInstruction, attachments },
+      ]
+      : buildReActAgentMessages({
+        instruction: normalizedInstruction,
+        historyMessages,
+        responseLanguage,
+        papers: paperInputs,
+        categories: categoryPayload.categories,
+        currentPaperScopeIds,
+        paperScopes,
+        attachments: [...nonVisionAttachments, ...preparedVision.attachments],
+        memoryContext,
+      }),
     contextLabel,
     citations,
     ragNotice: buildAgentRagNotice(ragErrors),

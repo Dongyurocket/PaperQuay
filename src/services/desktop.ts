@@ -216,6 +216,19 @@ export async function localPathExists(path: string): Promise<boolean> {
   }
 }
 
+export async function localPathsExist(paths: string[]): Promise<boolean[]> {
+  if (paths.length === 0) {
+    return [];
+  }
+
+  try {
+    const result = await invoke<boolean[]>('paths_exist', { paths });
+    return Array.isArray(result) ? result.map(Boolean) : paths.map(() => false);
+  } catch {
+    return paths.map(() => false);
+  }
+}
+
 export async function getAppDefaultPaths(): Promise<AppDefaultPaths> {
   try {
     return await invoke<AppDefaultPaths>('get_app_default_paths');

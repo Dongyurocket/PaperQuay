@@ -1,3 +1,4 @@
+const crypto = require('node:crypto');
 const {
   AGENT_STREAM_EVENT,
   QA_STREAM_EVENT,
@@ -17,6 +18,11 @@ const {
 } = require('./utils.cjs');
 
 const TEST_MODEL_TIMEOUT_MS = 20_000;
+const MAX_AGENT_TURN_MESSAGES = 80;
+const MAX_AGENT_TURN_TOTAL_CHARS = 800_000;
+const MAX_AGENT_TURN_IMAGES = 4;
+const MAX_AGENT_TURN_IMAGE_BYTES = 8 * 1024 * 1024;
+const activeAgentTurnControllers = new Map();
 
 const REQUEST_PAPER_CONTEXT_TOOL_NAME = 'request_paper_context';
 const PAPER_SKILL_DECISION_TOOL_NAME = 'paper_skill_decision';
@@ -601,21 +607,54 @@ function buildAgentSystemPreamble() {
   ].join(' ');
 }
 
-function normalizeAgentChatTurnMessages(messages) {
-  const supportedRoles = new Set(['system', 'assistant', 'user', 'tool']);
+function estimatedDataUrlBytes(dataUrl) {
+  const payload = String(dataUrl ?? '').split(',')[1] ?? '';
+  const padding = payload.endsWith('==') ? 2 : payload.endsWith('=') ? 1 : 0;
+  return Math.max(0, Math.floor(payload.length * 3 / 4) - padding);
+}
 
-  return (Array.isArray(messages) ? messages : [])
-    .slice(-80)
-    .map((message) => {
-      const role = supportedRoles.has(message?.role) ? message.role : 'user';
-      const content = typeof message?.content === 'string' ? message.content.slice(0, 240_000) : '';
-      const toolCallId = typeof message?.toolCallId === 'string'
-        ? message.toolCallId.slice(0, 180)
-        : typeof message?.tool_call_id === 'string'
-          ? message.tool_call_id.slice(0, 180)
-          : undefined;
-      const attachments = role === 'user' && Array.isArray(message?.attachments)
-        ? message.attachments.slice(0, 4).map((attachment) => ({
+function normalizeAgentChatTurnMessages(messages) {
+  let remainingCharacters = MAX_AGENT_TURN_TOTAL_CHARS;
+  let imageCount = 0;
+  let imageBytes = 0;
+  const normalizedMessages = [];
+
+  for (const message of (Array.isArray(messages) ? messages : []).slice(-MAX_AGENT_TURN_MESSAGES)) {
+    if (remainingCharacters <= 0) break;
+    const supportedRoles = new Set(['system', 'assistant', 'user', 'tool']);
+    const role = supportedRoles.has(message?.role) ? message.role : 'user';
+    const sourceContent = typeof message?.content === 'string' ? message.content : '';
+    const content = sourceContent.slice(0, Math.min(240_000, remainingCharacters));
+    remainingCharacters -= content.length;
+    const toolCallId = typeof message?.toolCallId === 'string'
+      ? message.toolCallId.slice(0, 180)
+      : typeof message?.tool_call_id === 'string'
+        ? message.tool_call_id.slice(0, 180)
+        : undefined;
+    const attachments = role === 'user' && Array.isArray(message?.attachments)
+      ? message.attachments.slice(0, MAX_AGENT_TURN_IMAGES).flatMap((attachment) => {
+        const dataUrl = typeof attachment?.dataUrl === 'string' ? attachment.dataUrl : undefined;
+        const isImage = Boolean(dataUrl) && (
+          attachment?.kind === 'image' ||
+          attachment?.kind === 'screenshot' ||
+          String(attachment?.mimeType ?? '').toLowerCase().startsWith('image/')
+        );
+        const bytes = isImage ? estimatedDataUrlBytes(dataUrl) : 0;
+
+        if (isImage && (
+          imageCount >= MAX_AGENT_TURN_IMAGES ||
+          bytes <= 0 ||
+          imageBytes + bytes > MAX_AGENT_TURN_IMAGE_BYTES
+        )) {
+          return [];
+        }
+
+        if (isImage) {
+          imageCount += 1;
+          imageBytes += bytes;
+        }
+
+        return [{
           id: typeof attachment?.id === 'string' ? attachment.id.slice(0, 180) : undefined,
           kind: typeof attachment?.kind === 'string' ? attachment.kind.slice(0, 40) : undefined,
           name: typeof attachment?.name === 'string' ? attachment.name.slice(0, 500) : undefined,
@@ -623,21 +662,24 @@ function normalizeAgentChatTurnMessages(messages) {
           size: Number.isFinite(Number(attachment?.size)) ? Math.max(0, Math.trunc(Number(attachment.size))) : undefined,
           summary: typeof attachment?.summary === 'string' ? attachment.summary.slice(0, 4000) : undefined,
           textContent: typeof attachment?.textContent === 'string' ? attachment.textContent.slice(0, 20_000) : undefined,
-          dataUrl: typeof attachment?.dataUrl === 'string' ? attachment.dataUrl : undefined,
-        }))
-        : undefined;
-      const toolCalls = role === 'assistant' && Array.isArray(message?.toolCalls)
-        ? message.toolCalls.slice(0, 24).map((toolCall) => ({
-          id: typeof toolCall?.id === 'string' ? toolCall.id.slice(0, 180) : '',
-          name: typeof toolCall?.name === 'string' ? toolCall.name.slice(0, 120) : '',
-          arguments: toolCall?.arguments && typeof toolCall.arguments === 'object' && !Array.isArray(toolCall.arguments)
-            ? toolCall.arguments
-            : {},
-        })).filter((toolCall) => toolCall.id && toolCall.name)
-        : undefined;
+          dataUrl,
+        }];
+      })
+      : undefined;
+    const toolCalls = role === 'assistant' && Array.isArray(message?.toolCalls)
+      ? message.toolCalls.slice(0, 24).map((toolCall) => ({
+        id: typeof toolCall?.id === 'string' ? toolCall.id.slice(0, 180) : '',
+        name: typeof toolCall?.name === 'string' ? toolCall.name.slice(0, 120) : '',
+        arguments: toolCall?.arguments && typeof toolCall.arguments === 'object' && !Array.isArray(toolCall.arguments)
+          ? toolCall.arguments
+          : {},
+      })).filter((toolCall) => toolCall.id && toolCall.name)
+      : undefined;
 
-      return { role, content, toolCallId, toolCalls, attachments };
-    });
+    normalizedMessages.push({ role, content, toolCallId, toolCalls, attachments });
+  }
+
+  return normalizedMessages;
 }
 
 function normalizeAgentTokenUsage(data) {
@@ -699,54 +741,67 @@ async function runAgentChatTurn(request, event) {
     toolChoice: tools?.length ? toolChoice : undefined,
     reasoningSummary: 'auto',
   };
+  const controller = new AbortController();
+  const previousController = activeAgentTurnControllers.get(requestId);
+  previousController?.abort();
+  activeAgentTurnControllers.set(requestId, controller);
+  requestExtras.signal = controller.signal;
   const supportsToolFallback = Boolean(requestExtras.tools?.length);
 
-  if (request?.stream === false) {
-    const data = await openAiChatWithAgentFallback(options, messages, requestExtras, supportsToolFallback);
-    return agentChatTurnResult(data);
-  }
-
-  const sender = event?.sender;
-
   try {
-    const response = await openAiChatAgentStreamWithFallback(
-      options,
-      messages,
-      requestExtras,
-      supportsToolFallback,
-    );
-    const data = await readOpenAiStreamResponse({
-      requestId,
-      options,
-      response,
-      sender: {
-        send(_channel, eventName, payload) {
-          if (sender) {
-            sender.send('paperquay:event', eventName, payload);
-          }
-        },
-      },
-    });
-    const result = agentChatTurnResult(data);
+    if (request?.stream === false) {
+      const data = await openAiChatWithAgentFallback(options, messages, requestExtras, supportsToolFallback);
+      return agentChatTurnResult(data);
+    }
 
-    if (sender) {
-      sender.send('paperquay:event', AGENT_STREAM_EVENT, {
+    const sender = event?.sender;
+
+    try {
+      const response = await openAiChatAgentStreamWithFallback(
+        options,
+        messages,
+        requestExtras,
+        supportsToolFallback,
+      );
+      const data = await readAgentStreamResponse({
         requestId,
-        kind: 'tool_calls',
-        toolCalls: result.toolCalls,
+        options,
+        response,
+        sender: {
+          send(_channel, eventName, payload) {
+            if (sender) {
+              sender.send('paperquay:event', eventName, payload);
+            }
+          },
+        },
       });
-      sender.send('paperquay:event', AGENT_STREAM_EVENT, { requestId, kind: 'done' });
+      const result = agentChatTurnResult(data);
+
+      if (sender) {
+        sender.send('paperquay:event', AGENT_STREAM_EVENT, {
+          requestId,
+          kind: 'tool_calls',
+          toolCalls: result.toolCalls,
+        });
+        sender.send('paperquay:event', AGENT_STREAM_EVENT, { requestId, kind: 'done' });
+      }
+
+      return result;
+    } catch (error) {
+      const message = agentStreamSafeError(error);
+
+      if (sender) {
+        sender.send('paperquay:event', AGENT_STREAM_EVENT, { requestId, kind: 'error', error: message });
+      }
+
+      const nextError = new Error(message);
+      if (controller.signal.aborted) nextError.name = 'AbortError';
+      throw nextError;
     }
-
-    return result;
-  } catch (error) {
-    const message = agentStreamSafeError(error);
-
-    if (sender) {
-      sender.send('paperquay:event', AGENT_STREAM_EVENT, { requestId, kind: 'error', error: message });
+  } finally {
+    if (activeAgentTurnControllers.get(requestId) === controller) {
+      activeAgentTurnControllers.delete(requestId);
     }
-
-    throw new Error(message);
   }
 }
 
@@ -1211,6 +1266,15 @@ function createAiCommands(context) {
 
     async agent_chat_turn({ request }, event) {
       return runAgentChatTurn(request, event);
+    },
+
+    async agent_chat_turn_cancel({ requestId }) {
+      const normalizedRequestId = typeof requestId === 'string' ? requestId.trim().slice(0, 180) : '';
+      const controller = activeAgentTurnControllers.get(normalizedRequestId);
+      if (!controller) return false;
+      controller.abort();
+      activeAgentTurnControllers.delete(normalizedRequestId);
+      return true;
     },
 
     async decide_library_agent_paper_context_openai_compatible({ options }) {

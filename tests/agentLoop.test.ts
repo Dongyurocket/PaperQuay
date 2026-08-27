@@ -76,6 +76,45 @@ test('agent loop executes read tools across turns and returns the final answer',
   assert.deepEqual(events.filter((kind) => kind === 'tool_result'), ['tool_result']);
 });
 
+test('agent loop rejects mixed read and write calls before creating a write plan', async () => {
+  let reads = 0;
+  let writes = 0;
+  const writeTool: AgentToolDefinition = {
+    name: 'rename',
+    description: 'Rename',
+    kind: 'write',
+    parameters: { type: 'object' },
+    async execute() {
+      writes += 1;
+      return { content: 'write' };
+    },
+  };
+  const calls: AgentChatTurnRequest[] = [];
+  const result = await runAgentLoop(loopOptions(
+    [readTool('search_library', async () => {
+      reads += 1;
+      return { content: 'read' };
+    }), writeTool],
+    async (request) => {
+      calls.push(request);
+      return calls.length === 1
+        ? {
+          content: '',
+          toolCalls: [
+            { id: 'read-1', name: 'search_library', arguments: {} },
+            { id: 'write-1', name: 'rename', arguments: {} },
+          ],
+        }
+        : { content: 'I will read first and propose a write later.' };
+    },
+  ));
+
+  assert.equal(result.kind, 'answer');
+  assert.equal(reads, 0);
+  assert.equal(writes, 0);
+  assert.match(calls[1]?.messages.at(-1)?.content ?? '', /same model turn/);
+});
+
 test('agent loop turns write calls into a reviewable plan without executing local writes', async () => {
   let executionCount = 0;
   const writeTool: AgentToolDefinition = {
@@ -246,4 +285,45 @@ test('agent loop compacts only completed history before the current user turn', 
     'active tool result',
   ]);
   assert.match(requests[0]?.messages[1]?.content ?? '', /Persistent Artifacts/);
+});
+
+test('agent loop caps parallel tool images to four and eight megabytes per turn', async () => {
+  const calls: AgentChatTurnRequest[] = [];
+  const imageTool = readTool('read_paper_figure', async (args) => ({
+    content: `figure ${args.index}`,
+    attachments: [{
+      id: `image-${args.index}`,
+      kind: 'image',
+      name: `figure-${args.index}`,
+      mimeType: 'image/jpeg',
+      size: 2 * 1024 * 1024,
+      dataUrl: 'data:image/jpeg;base64,AA==',
+    }],
+  }));
+  const result = await runAgentLoop(loopOptions(
+    [imageTool],
+    async (request) => {
+      calls.push(request);
+      return calls.length === 1
+        ? {
+          content: '',
+          toolCalls: Array.from({ length: 6 }, (_, index) => ({
+            id: `call-${index}`,
+            name: 'read_paper_figure',
+            arguments: { index },
+          })),
+        }
+        : { content: 'Compared the available figures.' };
+    },
+  ));
+
+  assert.equal(result.kind, 'answer');
+  const imageMessages = calls[1]?.messages.filter((message) => message.attachments?.length) ?? [];
+  assert.equal(imageMessages.length, 1);
+  assert.equal(imageMessages.flatMap((message) => message.attachments ?? []).length, 4);
+  const toolRoles = calls[1]?.messages
+    .slice(1)
+    .filter((message) => message.role === 'tool' || message.attachments?.length)
+    .map((message) => message.role);
+  assert.deepEqual(toolRoles, ['tool', 'tool', 'tool', 'tool', 'tool', 'tool', 'user']);
 });

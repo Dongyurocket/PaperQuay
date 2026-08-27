@@ -735,6 +735,10 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
   }, []);
 
   useEffect(() => {
+    // 工作区在 App.tsx 中常驻 hidden 挂载：激活前不构建图谱，
+    // 避免启动时全量相似边计算阻塞主进程、拖慢文献库等其它 IPC。
+    if (!workspaceActive) return undefined;
+
     let cancelled = false;
 
     async function loadGraph() {
@@ -780,6 +784,7 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
       cancelled = true;
     };
   }, [
+    workspaceActive,
     debouncedSearch,
     embeddingMinSimilarity,
     enabledEdgeTypes.ai_suggested,

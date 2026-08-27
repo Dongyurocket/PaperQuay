@@ -234,6 +234,10 @@ function mergeChatCompletionChunks(chunks) {
         finish_reason: choice.finish_reason ?? base.choices[index]?.finish_reason ?? null,
       };
     }
+
+    if (chunk.usage && typeof chunk.usage === 'object') {
+      base.usage = chunk.usage;
+    }
   }
 
   return base;
@@ -622,6 +626,10 @@ async function openAiChat(options, messages, extra = {}) {
     ? buildResponsesRequestBody(options, messages, extra)
     : buildChatRequestBody(options, messages, extra);
   const timeoutMs = Number.isFinite(extra.timeoutMs) ? Math.max(1, Math.trunc(extra.timeoutMs)) : 0;
+  const timeoutSignal = timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : undefined;
+  const signal = extra.signal && timeoutSignal && typeof AbortSignal.any === 'function'
+    ? AbortSignal.any([extra.signal, timeoutSignal])
+    : extra.signal ?? timeoutSignal;
 
   const response = await fetch(completionEndpoint(options), {
     method: 'POST',
@@ -630,7 +638,7 @@ async function openAiChat(options, messages, extra = {}) {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(body),
-    signal: timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : undefined,
+    signal,
   });
 
   if (extra.stream) return response;

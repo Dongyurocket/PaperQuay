@@ -11,7 +11,7 @@ import {
 import { createPortal } from 'react-dom';
 import { Sparkles, Star, Tag, Trash2 } from 'lucide-react';
 import { useLocaleText } from '../../i18n/uiLanguage';
-import { localPathExists } from '../../services/desktop';
+import { localPathsExist } from '../../services/desktop';
 import { lookupLiteratureMetadata } from '../../services/metadata';
 import { extractLocalPdfMetadataPreview } from '../../services/pdfMetadata';
 import {
@@ -103,13 +103,13 @@ import {
   buildInitialPaperStatuses,
   clampCategorySidebarWidth,
   filterDemoPapers,
-  hasMineruOutputForPaper,
   loadCategorySidebarWidth,
   loadDetailsPanelWidth,
   markPaperStatusesCheckingMineru,
   metadataFromDraft,
   metadataFromZoteroItem,
   metadataUpdateForPaper,
+  mineruOutputPathCandidatesForPaper,
   reorderPaperList,
   resolveSelectedPaperId,
   type LiteratureLibraryDemoState,
@@ -317,6 +317,8 @@ export default function LiteratureLibraryView({
   });
   const selectedCategoryIdRef = useRef<string | null>(null);
   const checkedMineruPaperIdsRef = useRef<Set<string>>(new Set());
+  // init/refreshAll 拉取的全量文献快照，供 MinerU 状态检查复用，避免启动时重复全库查询。
+  const allPapersSnapshotRef = useRef<LiteraturePaper[]>([]);
   const mineruStatusConfigKey = useMemo(
     () => `${mineruCacheDir.trim()}::${autoLoadSiblingJson ? 'auto-sibling' : 'cache-only'}`,
     [autoLoadSiblingJson, mineruCacheDir],
@@ -446,29 +448,70 @@ export default function LiteratureLibraryView({
         return;
       }
 
-      const entries = await Promise.all(
-        uncheckedPapers.map(async (paper): Promise<[string, LiteraturePaperListStatus]> => [
-          paper.id,
-          {
-            mineruParsed: await hasMineruOutputForPaper(
+      const entries: Array<[string, LiteraturePaperListStatus]> = [];
+
+      if (uncheckedPapers.length > 0) {
+        // 提前标记，避免并发重入时重复检查同一批文献。
+        for (const paper of uncheckedPapers) {
+          checkedMineruPaperIdsRef.current.add(paper.id);
+        }
+
+        try {
+          // 汇总全部候选路径，单次 IPC 批量检查，避免每篇文献多次 IPC 往返。
+          const candidatesByPaper = uncheckedPapers.map((paper) => ({
+            paper,
+            candidates: mineruOutputPathCandidatesForPaper(
               paper,
               mineruCacheDir,
               autoLoadSiblingJson,
-              localPathExists,
               libraryStorageDir,
             ),
-            overviewGenerated: Boolean(paper.aiSummary?.trim()),
-            checkingMineru: false,
-          },
-        ]),
-      );
+          }));
+          const uniquePaths = Array.from(
+            new Set(candidatesByPaper.flatMap((item) => item.candidates)),
+          );
+          const existence = await localPathsExist(uniquePaths);
 
-      if (shouldCancel()) {
-        return;
-      }
+          if (shouldCancel()) {
+            // 取消时回滚标记，让下一次运行重新检查，避免状态停在 checking。
+            for (const paper of uncheckedPapers) {
+              checkedMineruPaperIdsRef.current.delete(paper.id);
+            }
+            return;
+          }
 
-      for (const [paperId] of entries) {
-        checkedMineruPaperIdsRef.current.add(paperId);
+          const existsByPath = new Map(uniquePaths.map((candidate, index) => [candidate, existence[index] === true]));
+
+          for (const { paper, candidates } of candidatesByPaper) {
+            entries.push([
+              paper.id,
+              {
+                mineruParsed: candidates.some((candidate) => existsByPath.get(candidate) === true),
+                overviewGenerated: Boolean(paper.aiSummary?.trim()),
+                checkingMineru: false,
+              },
+            ]);
+          }
+        } catch {
+          // 检查失败时回滚标记并清除 checking 状态，允许后续重试。
+          for (const paper of uncheckedPapers) {
+            checkedMineruPaperIdsRef.current.delete(paper.id);
+          }
+
+          if (shouldCancel()) {
+            return;
+          }
+
+          setPaperStatuses((current) =>
+            Object.fromEntries(
+              Object.entries(current).map(([paperId, status]) => [
+                paperId,
+                uncheckedPaperIds.has(paperId) ? { ...status, checkingMineru: false } : status,
+              ]),
+            ),
+          );
+          return;
+        }
       }
 
       setPaperStatuses((current) => ({
@@ -525,6 +568,7 @@ export default function LiteratureLibraryView({
       }),
     ]);
 
+    allPapersSnapshotRef.current = allPapers;
     setCategories(nextCategories);
     void refreshMineruStatusesForPapers(allPapers);
   }, [demoLibrary, refreshMineruStatusesForPapers, refreshPapers, resolveDemoPapers]);
@@ -768,6 +812,7 @@ export default function LiteratureLibraryView({
         setPapers(snapshot.papers);
         setSelectedPaperId(snapshot.papers[0]?.id ?? null);
         setStatusMessage(l('文献库已就绪', 'Library is ready'));
+        allPapersSnapshotRef.current = snapshot.papers;
       } catch (nextError) {
         if (!cancelled) {
           const message =
@@ -865,14 +910,8 @@ export default function LiteratureLibraryView({
 
     let cancelled = false;
 
-    void (async () => {
-      const allPapers = await listLibraryPapers({
-        sortBy: 'manual',
-        sortDirection: 'asc',
-        limit: 5000,
-      });
-      await refreshMineruStatusesForPapers(allPapers, () => cancelled);
-    })();
+    // 复用 init/refreshAll 已拉取的全量文献快照，避免启动时额外一次全库查询。
+    void refreshMineruStatusesForPapers(allPapersSnapshotRef.current, () => cancelled);
 
     return () => {
       cancelled = true;

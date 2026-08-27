@@ -10,6 +10,7 @@ import {
 import { createPortal } from 'react-dom';
 import {
   Brain,
+  BrainCog,
   Camera,
   BookOpen,
   Check,
@@ -916,7 +917,7 @@ export default function AgentWorkspaceView({
                         aria-label={l('整理 Agent 记忆', 'Organize Agent memory')}
                         className={agentComposerIconButtonClass}
                       >
-                        <Brain className="h-4 w-4" strokeWidth={1.8} />
+                        <BrainCog className="h-4 w-4" strokeWidth={1.8} />
                       </button>
                       <button
                         type="button"

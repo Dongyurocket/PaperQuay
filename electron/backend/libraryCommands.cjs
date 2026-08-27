@@ -482,8 +482,9 @@ function createLibraryCommands(context) {
 
   const commands = {
     async library_init() {
+      // 只读取并规范化内存视图；不再每次启动全库 DELETE+重插
+      // （历史迁移遗留，随库规模线性阻塞主进程）。
       const library = store.load();
-      await store.save(library);
       return {
         settings: library.settings,
         categories: attachCategoryCounts(library),

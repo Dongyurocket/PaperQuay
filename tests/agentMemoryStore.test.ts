@@ -55,6 +55,10 @@ test('Agent memory store rejects arbitrary file names', () => {
     assert.throws(() => store.readMemory({ file: '../config' }), /Unsupported agent memory file/);
     const trace = store.writeMemory({ file: 'trace', date: '../escape', content: 'x' });
     assert.match(trace.date, /^\d{4}-\d{2}-\d{2}$/);
+    assert.throws(
+      () => store.writeMemory({ file: 'trace', date: '2026-08-27', content: '中'.repeat(3_000_000) }),
+      /exceeds/,
+    );
   } finally {
     rmSync(dataDir, { recursive: true, force: true });
   }
