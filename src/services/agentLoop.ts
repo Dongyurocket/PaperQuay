@@ -15,6 +15,8 @@ import type {
 
 export const DEFAULT_AGENT_LOOP_MAX_TURNS = 8;
 export const MAX_TOOL_RESULT_CHARS = 4000;
+const MAX_TOOL_IMAGES_PER_TURN = 4;
+const MAX_TOOL_IMAGE_BYTES_PER_TURN = 8 * 1024 * 1024;
 
 export interface AgentLoopMessage {
   role: 'system' | 'assistant' | 'user' | 'tool';
@@ -150,6 +152,16 @@ function throwIfAborted(signal: AbortSignal | undefined) {
   if (signal?.aborted) {
     throw abortError();
   }
+}
+
+function toolAttachmentBytes(attachment: DocumentChatAttachment): number {
+  if (Number.isFinite(attachment.size) && attachment.size > 0) {
+    return attachment.size;
+  }
+
+  const payload = attachment.dataUrl?.split(',')[1] ?? '';
+  const padding = payload.endsWith('==') ? 2 : payload.endsWith('=') ? 1 : 0;
+  return Math.max(0, Math.floor(payload.length * 3 / 4) - padding);
 }
 
 function truncateToolContent(value: string): string {
@@ -428,7 +440,26 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<LibraryAg
         }
       }));
 
+      let toolImageCount = 0;
+      let toolImageBytes = 0;
+
       for (const result of results) {
+        const acceptedAttachments = (result.attachments ?? []).filter((attachment) => {
+          const isImage = attachment.kind === 'image' || attachment.kind === 'screenshot' || attachment.mimeType.startsWith('image/');
+          if (!isImage) return true;
+          const bytes = toolAttachmentBytes(attachment);
+          if (
+            toolImageCount >= MAX_TOOL_IMAGES_PER_TURN ||
+            bytes <= 0 ||
+            toolImageBytes + bytes > MAX_TOOL_IMAGE_BYTES_PER_TURN
+          ) {
+            return false;
+          }
+          toolImageCount += 1;
+          toolImageBytes += bytes;
+          return true;
+        });
+
         messages.push({
           role: 'tool',
           toolCallId: result.call.id,
@@ -439,11 +470,11 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<LibraryAg
           }),
         });
 
-        if (result.attachments?.length) {
+        if (acceptedAttachments.length) {
           messages.push({
             role: 'user',
             content: `Visual content returned by ${result.call.name}.`,
-            attachments: result.attachments,
+            attachments: acceptedAttachments,
           });
         }
       }
