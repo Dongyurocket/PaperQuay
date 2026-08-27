@@ -207,6 +207,7 @@ export const DEFAULT_SETTINGS: ReaderSettings = {
   summaryModelPresetId: 'default',
   reviewModelPresetId: 'default',
   agentModelPresetId: 'default',
+  agentLegacyMode: false,
   embeddingBaseUrl: 'https://api.openai.com',
   embeddingModel: 'text-embedding-3-small',
   embeddingDimensions: null,
@@ -231,6 +232,7 @@ export const DEFAULT_QA_PRESET: QaModelPreset = {
   model: 'gpt-4o-mini',
   apiMode: 'chat_completions',
   labelCustomized: false,
+  supportsVision: false,
 };
 
 export const DEFAULT_SECRETS: ReaderSecrets = {
@@ -403,6 +405,11 @@ export function createQaPreset(partial?: Partial<QaModelPreset>): QaModelPreset 
     model: nextModel,
     apiMode: normalizeModelApiMode(partial?.apiMode),
     labelCustomized,
+    contextWindow:
+      typeof partial?.contextWindow === 'number' && Number.isFinite(partial.contextWindow)
+        ? Math.max(4096, Math.min(2_000_000, Math.trunc(partial.contextWindow)))
+        : undefined,
+    supportsVision: partial?.supportsVision === true,
   };
 }
 
@@ -762,6 +769,7 @@ export function normalizeReaderSettings(value?: Partial<ReaderSettings> | null):
     ...merged,
     uiLanguage: merged.uiLanguage === 'en-US' ? 'en-US' : 'zh-CN',
     localRagEnabled: merged.localRagEnabled !== false,
+    agentLegacyMode: merged.agentLegacyMode === true,
     localRagTopK: clampLocalRagTopK(merged.localRagTopK),
     ragSourceMode: normalizeRagSourceMode(merged.ragSourceMode),
     libraryBatchConcurrency: clampBatchConcurrency(merged.libraryBatchConcurrency),

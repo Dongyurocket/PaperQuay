@@ -353,10 +353,11 @@ export async function resolveLocalRag(input: {
   }
 
   let queryEmbedding: number[];
+  const queryText = buildRagRetrievalQuery(input.question, input.excerptText);
 
   try {
     queryEmbedding = await embedRagText(
-      buildRagRetrievalQuery(input.question, input.excerptText),
+      queryText,
       input.embedding,
     );
   } catch (error) {
@@ -383,6 +384,7 @@ export async function resolveLocalRag(input: {
           documentKey: preparedDocument.documentKey,
           sourceType: source.sourceType,
           queryEmbedding,
+          queryText,
           topK: input.settings.localRagTopK,
         }),
       ),
@@ -429,6 +431,7 @@ export async function resolveLocalRag(input: {
     documentText: contextDocument.documentText,
     retrievedChunkCount: contextDocument.sectionCount,
     citations: contextDocument.citations,
+    retrievals: contextDocument.retrievals,
     indexedChunkCount: statusSummary.indexedChunkCount,
     totalChunkCount: statusSummary.totalChunkCount,
   };

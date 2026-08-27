@@ -7,6 +7,27 @@ const { cleanString, toError } = require('./utils.cjs');
 
 const RAG_SOURCE_TYPES = new Set(['mineru-markdown', 'pdf-text']);
 const MAX_VECTOR_DIMENSION = 32768;
+const MAX_RAG_RETRIEVAL_TOP_K = 100;
+const MAX_AGENT_LOG_STRING_LENGTH = 4096;
+const MAX_AGENT_LOG_DEPTH = 6;
+const MAX_AGENT_LOG_ITEMS = 64;
+const AGENT_RUN_STATUSES = new Set(['running', 'done', 'error', 'aborted']);
+const AGENT_RUN_EVENT_KINDS = new Set([
+  'turn_start',
+  'tool_call',
+  'tool_result',
+  'answer_delta',
+  'turn_end',
+  'error',
+  'stage_start',
+  'stage_progress',
+  'stage_end',
+  'capability',
+  'memory',
+  'context_compacted',
+  'checkpoint',
+]);
+const AGENT_LOG_SENSITIVE_KEY = /(?:api[_-]?key|authorization|token|password|secret|dataurl|attachment)/i;
 
 function resolveSqliteVecLoadablePath() {
   const loadablePath = typeof sqliteVec.getLoadablePath === 'function'
@@ -62,6 +83,92 @@ function normalizeNullableInteger(value) {
   if (value === null || value === undefined) return null;
   const number = Number(value);
   return Number.isFinite(number) ? Math.trunc(number) : null;
+}
+
+function normalizeBoundedString(value, label, { required = false, maxLength = MAX_AGENT_LOG_STRING_LENGTH } = {}) {
+  const text = typeof value === 'string' ? value.trim() : '';
+
+  if (required && !text) {
+    throw new Error(`${label} is required`);
+  }
+
+  return text.slice(0, maxLength);
+}
+
+function normalizeAgentRunId(value, label = 'agent runId') {
+  return normalizeBoundedString(value, label, { required: true, maxLength: 180 });
+}
+
+function normalizeAgentRunStatus(value, fallback = 'running') {
+  const status = normalizeBoundedString(value, 'agent run status', { maxLength: 24 }) || fallback;
+
+  if (!AGENT_RUN_STATUSES.has(status)) {
+    throw new Error(`Unsupported agent run status: ${status}`);
+  }
+
+  return status;
+}
+
+function normalizeAgentEventKind(value) {
+  const kind = normalizeBoundedString(value, 'agent run event kind', { required: true, maxLength: 64 });
+
+  if (!AGENT_RUN_EVENT_KINDS.has(kind)) {
+    throw new Error(`Unsupported agent run event kind: ${kind}`);
+  }
+
+  return kind;
+}
+
+function redactAgentLogValue(value, key = '', depth = 0) {
+  if (AGENT_LOG_SENSITIVE_KEY.test(key)) {
+    return '[redacted]';
+  }
+
+  if (value === null || value === undefined) {
+    return value ?? null;
+  }
+
+  if (typeof value === 'string') {
+    if (value.startsWith('data:')) {
+      return '[redacted]';
+    }
+
+    return value.slice(0, MAX_AGENT_LOG_STRING_LENGTH);
+  }
+
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return value;
+  }
+
+  if (depth >= MAX_AGENT_LOG_DEPTH) {
+    return '[truncated]';
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .slice(0, MAX_AGENT_LOG_ITEMS)
+      .map((item) => redactAgentLogValue(item, '', depth + 1));
+  }
+
+  if (typeof value === 'object') {
+    const output = {};
+
+    for (const [entryKey, entryValue] of Object.entries(value).slice(0, MAX_AGENT_LOG_ITEMS)) {
+      output[entryKey] = redactAgentLogValue(entryValue, entryKey, depth + 1);
+    }
+
+    return output;
+  }
+
+  return String(value).slice(0, MAX_AGENT_LOG_STRING_LENGTH);
+}
+
+function parseJsonOrNull(value) {
+  try {
+    return JSON.parse(String(value ?? 'null'));
+  } catch {
+    return null;
+  }
 }
 
 function normalizeVectorDimension(value) {
@@ -221,7 +328,87 @@ function createSchema(db) {
     CREATE TABLE IF NOT EXISTS rag_vec_dimensions (
       dimension INTEGER PRIMARY KEY
     );
+
+    CREATE TABLE IF NOT EXISTS rag_store_meta (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS agent_runs (
+      run_id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      started_at INTEGER NOT NULL,
+      finished_at INTEGER,
+      status TEXT NOT NULL CHECK (status IN ('running', 'done', 'error', 'aborted')),
+      model TEXT,
+      preset_id TEXT,
+      instruction TEXT,
+      prompt_tokens INTEGER NOT NULL DEFAULT 0,
+      completion_tokens INTEGER NOT NULL DEFAULT 0,
+      turns INTEGER NOT NULL DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS agent_run_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      run_id TEXT NOT NULL,
+      ts INTEGER NOT NULL,
+      kind TEXT NOT NULL,
+      payload TEXT NOT NULL,
+      FOREIGN KEY (run_id) REFERENCES agent_runs(run_id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_agent_runs_session_started
+      ON agent_runs (session_id, started_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_agent_run_events_run
+      ON agent_run_events (run_id, id);
   `);
+}
+
+function initializeFtsSchema(db, { disabled = false } = {}) {
+  if (disabled) {
+    return false;
+  }
+
+  try {
+    db.exec(`
+      CREATE VIRTUAL TABLE IF NOT EXISTS rag_chunks_fts USING fts5(
+        text,
+        content='rag_chunks',
+        content_rowid='id',
+        tokenize='unicode61'
+      );
+
+      CREATE TRIGGER IF NOT EXISTS rag_chunks_ai AFTER INSERT ON rag_chunks BEGIN
+        INSERT INTO rag_chunks_fts(rowid, text) VALUES (new.id, new.text);
+      END;
+
+      CREATE TRIGGER IF NOT EXISTS rag_chunks_ad AFTER DELETE ON rag_chunks BEGIN
+        INSERT INTO rag_chunks_fts(rag_chunks_fts, rowid, text) VALUES ('delete', old.id, old.text);
+      END;
+
+      CREATE TRIGGER IF NOT EXISTS rag_chunks_au AFTER UPDATE ON rag_chunks BEGIN
+        INSERT INTO rag_chunks_fts(rag_chunks_fts, rowid, text) VALUES ('delete', old.id, old.text);
+        INSERT INTO rag_chunks_fts(rowid, text) VALUES (new.id, new.text);
+      END;
+    `);
+
+    const initialized = db
+      .prepare('SELECT value FROM rag_store_meta WHERE key = ?')
+      .get('rag_chunks_fts_v1');
+
+    if (!initialized) {
+      db.exec("INSERT INTO rag_chunks_fts(rag_chunks_fts) VALUES('rebuild')");
+      db.prepare('INSERT INTO rag_store_meta (key, value) VALUES (?, ?)').run(
+        'rag_chunks_fts_v1',
+        String(Date.now()),
+      );
+    }
+
+    return true;
+  } catch (error) {
+    console.warn('[paperquay] SQLite FTS5 is unavailable; local RAG will use vector retrieval only.', toError(error));
+    return false;
+  }
 }
 
 function openDatabase(databasePath) {
@@ -384,12 +571,88 @@ function indexedSourceRows(db, documentKey, sourceType, dimension) {
   return db.prepare(sql).all(...args);
 }
 
-function createRagStore(appPaths) {
+function buildFtsMatchQuery(value) {
+  const terms = String(value ?? '')
+    .trim()
+    .match(/[\p{L}\p{N}_]+/gu) ?? [];
+
+  return terms
+    .slice(0, 32)
+    .map((term) => `"${term.replace(/"/g, '""')}"`)
+    .join(' OR ');
+}
+
+function ragResultKey(row) {
+  return `${row.sourceType}::${row.chunkId}`;
+}
+
+function rrfFuse(vectorRows, ftsRows, { k = 60 } = {}) {
+  const normalizedK = Math.max(1, normalizeNonNegativeInteger(k, 60));
+  const fused = new Map();
+
+  const addRanks = (rows, source) => {
+    for (const [index, row] of rows.entries()) {
+      const key = ragResultKey(row);
+      const existing = fused.get(key) ?? { ...row, rrfScore: 0, sourceRanks: {} };
+      existing.rrfScore += 1 / (normalizedK + index + 1);
+      existing.sourceRanks[source] = index + 1;
+      fused.set(key, existing);
+    }
+  };
+
+  addRanks(vectorRows, 'vector');
+  addRanks(ftsRows, 'fts');
+
+  return [...fused.values()]
+    .sort((left, right) => right.rrfScore - left.rrfScore)
+    .map(({ rrfScore, sourceRanks, ...row }) => ({
+      ...row,
+      // Existing renderers expect lower scores to be more relevant, so invert the RRF score.
+      score: 1 - rrfScore,
+    }));
+}
+
+function rowToAgentRun(row) {
+  if (!row) {
+    return null;
+  }
+
+  return {
+    runId: row.run_id,
+    sessionId: row.session_id,
+    startedAt: Number(row.started_at) || 0,
+    finishedAt: row.finished_at === null || row.finished_at === undefined ? null : Number(row.finished_at),
+    status: row.status,
+    model: row.model ?? '',
+    presetId: row.preset_id ?? '',
+    instruction: row.instruction ?? '',
+    promptTokens: Number(row.prompt_tokens) || 0,
+    completionTokens: Number(row.completion_tokens) || 0,
+    turns: Number(row.turns) || 0,
+  };
+}
+
+function rowToAgentRunEvent(row) {
+  if (!row) {
+    return null;
+  }
+
+  return {
+    id: Number(row.id) || 0,
+    runId: row.run_id,
+    ts: Number(row.ts) || 0,
+    kind: row.kind,
+    payload: parseJsonOrNull(row.payload) ?? {},
+  };
+}
+
+function createRagStore(appPaths, options = {}) {
   if (!appPaths?.ragDatabasePath) {
     throw new Error('ragDatabasePath is required');
   }
 
   let db = openDatabase(appPaths.ragDatabasePath);
+  let ftsAvailable = initializeFtsSchema(db, { disabled: options.disableFts === true });
 
   function indexDocument(request) {
     const documentKey = normalizeDocumentKey(request?.documentKey);
@@ -556,18 +819,12 @@ function createRagStore(appPaths) {
     return getStatus(db, documentKey, sourceType);
   }
 
-  function retrieveDocumentChunks(request) {
-    const documentKey = normalizeDocumentKey(request?.documentKey);
-    const sourceType = request?.sourceType ? normalizeSourceType(request.sourceType) : null;
-    const topK = Math.max(1, normalizeNonNegativeInteger(request?.topK, 6));
-    const dimension = validateEmbedding(request?.queryEmbedding);
-
+  function retrieveVectorChunks({ documentKey, sourceType, queryEmbedding, dimension, limit }) {
     if (!hasVectorTable(db, dimension)) {
       return [];
     }
 
     const vectorTable = vectorTableName(dimension);
-    const queryEmbedding = toFloat32Array(request.queryEmbedding);
     const sourceRows = indexedSourceRows(db, documentKey, sourceType, dimension);
     const search = db.prepare(`
       SELECT
@@ -589,7 +846,7 @@ function createRagStore(appPaths) {
 
     for (const row of sourceRows) {
       results.push(
-        ...search.all(queryEmbedding, topK, documentKey, row.source_type).map((chunk) => ({
+        ...search.all(queryEmbedding, limit, documentKey, row.source_type).map((chunk) => ({
           chunkId: chunk.chunk_id,
           sourceType: chunk.source_type,
           pageIndex: chunk.page_index ?? null,
@@ -602,7 +859,261 @@ function createRagStore(appPaths) {
 
     return results
       .sort((left, right) => left.score - right.score)
-      .slice(0, topK);
+      .slice(0, limit);
+  }
+
+  function searchFts({ documentKey, sourceType, queryText, dimension, limit }) {
+    if (!ftsAvailable) {
+      return [];
+    }
+
+    const matchQuery = buildFtsMatchQuery(queryText);
+
+    if (!matchQuery) {
+      return [];
+    }
+
+    const sourceClause = sourceType ? 'AND c.source_type = ?' : '';
+    const args = [matchQuery, documentKey, dimension];
+
+    if (sourceType) {
+      args.push(sourceType);
+    }
+
+    args.push(limit);
+
+    try {
+      const rows = db.prepare(`
+        SELECT
+          c.chunk_id,
+          c.source_type,
+          c.page_index,
+          c.block_id,
+          c.text,
+          bm25(rag_chunks_fts) AS rank
+        FROM rag_chunks_fts
+        JOIN rag_chunks c ON c.id = rag_chunks_fts.rowid
+        JOIN rag_indexes i
+          ON i.document_key = c.document_key
+         AND i.source_type = c.source_type
+         AND i.status = 'ready'
+         AND i.embedding_dimension = ?
+        WHERE rag_chunks_fts MATCH ?
+          AND c.document_key = ?
+          ${sourceClause}
+        ORDER BY rank
+        LIMIT ?
+      `).all(dimension, matchQuery, documentKey, ...(sourceType ? [sourceType] : []), limit);
+
+      return rows.map((chunk) => ({
+        chunkId: chunk.chunk_id,
+        sourceType: chunk.source_type,
+        pageIndex: chunk.page_index ?? null,
+        blockId: chunk.block_id ?? null,
+        text: chunk.text,
+        score: Number(chunk.rank) || 0,
+      }));
+    } catch (error) {
+      console.warn('[paperquay] FTS retrieval failed; local RAG used vector retrieval only.', toError(error));
+      return [];
+    }
+  }
+
+  function retrieveDocumentChunks(request) {
+    const documentKey = normalizeDocumentKey(request?.documentKey);
+    const sourceType = request?.sourceType ? normalizeSourceType(request.sourceType) : null;
+    const topK = Math.min(
+      MAX_RAG_RETRIEVAL_TOP_K,
+      Math.max(1, normalizeNonNegativeInteger(request?.topK, 6)),
+    );
+    const dimension = validateEmbedding(request?.queryEmbedding);
+    const candidateLimit = Math.min(MAX_RAG_RETRIEVAL_TOP_K, Math.max(topK, topK * 2));
+    const vectorRows = retrieveVectorChunks({
+      documentKey,
+      sourceType,
+      queryEmbedding: toFloat32Array(request.queryEmbedding),
+      dimension,
+      limit: candidateLimit,
+    });
+    const ftsRows = searchFts({
+      documentKey,
+      sourceType,
+      queryText: normalizeBoundedString(request?.queryText, 'RAG queryText', { maxLength: 2000 }),
+      dimension,
+      limit: candidateLimit,
+    });
+
+    if (ftsRows.length === 0) {
+      return vectorRows.slice(0, topK);
+    }
+
+    return rrfFuse(vectorRows, ftsRows).slice(0, topK);
+  }
+
+  function createAgentRun(request) {
+    const runId = normalizeAgentRunId(request?.runId);
+    const sessionId = normalizeAgentRunId(request?.sessionId, 'agent sessionId');
+    const startedAt = normalizeNonNegativeInteger(request?.startedAt, Date.now());
+    const status = normalizeAgentRunStatus(request?.status, 'running');
+
+    db.prepare(`
+      INSERT INTO agent_runs (
+        run_id, session_id, started_at, finished_at, status, model, preset_id, instruction,
+        prompt_tokens, completion_tokens, turns
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      runId,
+      sessionId,
+      startedAt,
+      status === 'running' ? null : startedAt,
+      status,
+      normalizeBoundedString(request?.model, 'agent model', { maxLength: 256 }),
+      normalizeBoundedString(request?.presetId, 'agent presetId', { maxLength: 180 }),
+      normalizeBoundedString(request?.instruction, 'agent instruction', { maxLength: MAX_AGENT_LOG_STRING_LENGTH }),
+      normalizeNonNegativeInteger(request?.promptTokens),
+      normalizeNonNegativeInteger(request?.completionTokens),
+      normalizeNonNegativeInteger(request?.turns),
+    );
+
+    return rowToAgentRun(db.prepare('SELECT * FROM agent_runs WHERE run_id = ?').get(runId));
+  }
+
+  function appendAgentRunEvent(request) {
+    const runId = normalizeAgentRunId(request?.runId);
+    const kind = normalizeAgentEventKind(request?.kind);
+    const ts = normalizeNonNegativeInteger(request?.ts, Date.now());
+    const promptTokens = normalizeNonNegativeInteger(request?.promptTokens);
+    const completionTokens = normalizeNonNegativeInteger(request?.completionTokens);
+    const turns = normalizeNonNegativeInteger(request?.turn);
+    const payload = redactAgentLogValue(request?.payload ?? {});
+    const serializedPayload = JSON.stringify(payload);
+
+    if (!db.prepare('SELECT 1 FROM agent_runs WHERE run_id = ?').get(runId)) {
+      throw new Error(`Unknown agent run: ${runId}`);
+    }
+
+    return withTransaction(db, () => {
+      db.prepare(`
+        INSERT INTO agent_run_events (run_id, ts, kind, payload)
+        VALUES (?, ?, ?, ?)
+      `).run(runId, ts, kind, serializedPayload);
+      const id = Number(db.prepare('SELECT last_insert_rowid() AS id').get().id);
+
+      db.prepare(`
+        UPDATE agent_runs
+        SET prompt_tokens = prompt_tokens + ?,
+            completion_tokens = completion_tokens + ?,
+            turns = MAX(turns, ?)
+        WHERE run_id = ?
+      `).run(promptTokens, completionTokens, turns, runId);
+
+      return rowToAgentRunEvent(db.prepare('SELECT * FROM agent_run_events WHERE id = ?').get(id));
+    });
+  }
+
+  function finishAgentRun(request) {
+    const runId = normalizeAgentRunId(request?.runId);
+    const status = normalizeAgentRunStatus(request?.status, 'done');
+
+    if (status === 'running') {
+      throw new Error('A finished agent run cannot retain running status');
+    }
+
+    const result = db.prepare(`
+      UPDATE agent_runs
+      SET finished_at = ?,
+          status = ?,
+          prompt_tokens = prompt_tokens + ?,
+          completion_tokens = completion_tokens + ?,
+          turns = MAX(turns, ?)
+      WHERE run_id = ?
+    `).run(
+      normalizeNonNegativeInteger(request?.finishedAt, Date.now()),
+      status,
+      normalizeNonNegativeInteger(request?.promptTokens),
+      normalizeNonNegativeInteger(request?.completionTokens),
+      normalizeNonNegativeInteger(request?.turns),
+      runId,
+    );
+
+    if (Number(result.changes) === 0) {
+      throw new Error(`Unknown agent run: ${runId}`);
+    }
+
+    return rowToAgentRun(db.prepare('SELECT * FROM agent_runs WHERE run_id = ?').get(runId));
+  }
+
+  function getAgentRun(request) {
+    const runId = normalizeAgentRunId(request?.runId);
+    return rowToAgentRun(db.prepare('SELECT * FROM agent_runs WHERE run_id = ?').get(runId));
+  }
+
+  function getAgentRunEvents(request) {
+    const runId = normalizeAgentRunId(request?.runId);
+    const afterId = normalizeNonNegativeInteger(request?.afterId);
+    const limit = Math.min(500, Math.max(1, normalizeNonNegativeInteger(request?.limit, 200)));
+
+    return db.prepare(`
+      SELECT *
+      FROM agent_run_events
+      WHERE run_id = ? AND id > ?
+      ORDER BY id
+      LIMIT ?
+    `).all(runId, afterId, limit).map(rowToAgentRunEvent);
+  }
+
+  function listInterruptedAgentRuns(request = {}) {
+    const sessionId = normalizeBoundedString(request?.sessionId, 'agent sessionId', { maxLength: 180 });
+    const limit = Math.min(50, Math.max(1, normalizeNonNegativeInteger(request?.limit, 10)));
+    const rows = sessionId
+      ? db.prepare(`
+        SELECT * FROM agent_runs
+        WHERE status = 'running' AND session_id = ?
+        ORDER BY started_at DESC
+        LIMIT ?
+      `).all(sessionId, limit)
+      : db.prepare(`
+        SELECT * FROM agent_runs
+        WHERE status = 'running'
+        ORDER BY started_at DESC
+        LIMIT ?
+      `).all(limit);
+
+    return rows.map(rowToAgentRun);
+  }
+
+  function listAgentRunUsageBySession(request = {}) {
+    const sessionIds = Array.isArray(request?.sessionIds)
+      ? request.sessionIds
+        .map((sessionId) => normalizeBoundedString(sessionId, 'agent sessionId', { maxLength: 180 }))
+        .filter(Boolean)
+        .slice(0, 100)
+      : [];
+
+    const where = sessionIds.length > 0
+      ? `WHERE session_id IN (${sessionIds.map(() => '?').join(', ')})`
+      : '';
+
+    return db.prepare(`
+      SELECT
+        session_id,
+        COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+        COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
+        COUNT(*) AS run_count
+      FROM agent_runs
+      ${where}
+      GROUP BY session_id
+    `).all(...sessionIds).map((row) => ({
+      sessionId: row.session_id,
+      promptTokens: Number(row.prompt_tokens) || 0,
+      completionTokens: Number(row.completion_tokens) || 0,
+      runCount: Number(row.run_count) || 0,
+    }));
+  }
+
+  function isFtsAvailable() {
+    return ftsAvailable;
   }
 
   function listDocumentSimilarities(request = {}) {
@@ -770,10 +1281,18 @@ function createRagStore(appPaths) {
   }
 
   return {
+    appendAgentRunEvent,
     close,
+    createAgentRun,
+    finishAgentRun,
+    getAgentRun,
+    getAgentRunEvents,
     getDocumentIndexStatus,
     indexDocument,
+    isFtsAvailable,
+    listAgentRunUsageBySession,
     listDocumentSimilarities,
+    listInterruptedAgentRuns,
     migrateFromLibraryRagIndexes,
     reportFailure,
     retrieveDocumentChunks,
@@ -798,9 +1317,10 @@ function createRagStore(appPaths) {
       } finally {
         await fsp.rm(replacementPath, { force: true }).catch(() => {});
         db = openDatabase(appPaths.ragDatabasePath);
+        ftsAvailable = initializeFtsSchema(db, { disabled: options.disableFts === true });
       }
     },
   };
 }
 
-module.exports = { createRagStore };
+module.exports = { buildFtsMatchQuery, createRagStore, rrfFuse };

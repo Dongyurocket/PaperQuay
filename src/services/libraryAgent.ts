@@ -1,9 +1,39 @@
 import { invoke } from '../platform/electron/core';
 import { listen } from '../platform/electron/event';
+import { runOpenAiCompatibleAgentChatTurn } from './agentChat';
+import {
+  createAgentMemoryWritePlan,
+  readAgentMemory,
+  type AgentMemoryWritePlan,
+} from './agentMemory';
+import {
+  emptyAgentSessionArtifacts,
+  type AgentSessionArtifacts,
+} from './agentContextBudget';
+import {
+  runComparativeSurveyCapability,
+  type ComparativeSurveyArtifacts,
+  type ComparativeSurveyEvent,
+  type ComparativeSurveyResult,
+} from './agentCapability';
+import { isComparativeSurveyInstruction } from './agentCapabilityTrigger';
+import { selectLibraryAgentExecutionPath } from './agentExecutionMode';
+import {
+  runAgentLoop,
+  type AgentLoopEvent,
+  type AgentLoopMessage,
+} from './agentLoop';
+import { createLibraryAgentTools, type AgentPaperContextResult } from './agentTools';
 import {
   readLocalBinaryFile,
   readLocalTextFileIfExists,
 } from './desktop';
+import {
+  matchRagVisionCandidates,
+  prepareAgentVisionAttachments,
+  userAttachmentVisionCandidates,
+  type AgentVisionCandidate,
+} from './agentVision';
 import { resolveLocalRag } from './localRag';
 import {
   paperAuthors,
@@ -235,6 +265,12 @@ export interface LibraryPaperReviewFigure {
   kind: 'image' | 'table' | string;
 }
 
+export interface LibraryAgentFigureReference extends LibraryPaperReviewFigure {
+  paperId: string;
+  paperTitle: string;
+  dataUrl?: string;
+}
+
 export type LibraryAgentRunResult =
   | {
     kind: 'answer';
@@ -242,6 +278,8 @@ export type LibraryAgentRunResult =
     contextLabel: string;
     thinking?: string | null;
     citations?: LibraryAgentRagCitation[];
+    figures?: LibraryAgentFigureReference[];
+    visionNotice?: string | null;
     /** RAG 检索失败时的用户可见提示（已回退到全文/摘要上下文）。 */
     ragNotice?: string | null;
   }
@@ -251,6 +289,8 @@ export type LibraryAgentRunResult =
     choices: LibraryAgentUserChoice[];
     thinking?: string | null;
     citations?: LibraryAgentRagCitation[];
+    figures?: LibraryAgentFigureReference[];
+    visionNotice?: string | null;
     ragNotice?: string | null;
   }
   | {
@@ -260,10 +300,29 @@ export type LibraryAgentRunResult =
     thinking?: string | null;
   }
   | {
+    kind: 'capability';
+    capabilityId: 'comparative-survey';
+    result: ComparativeSurveyResult;
+    citations?: LibraryAgentRagCitation[];
+    figures?: LibraryAgentFigureReference[];
+    visionNotice?: string | null;
+    ragNotice?: string | null;
+  }
+  | {
+    kind: 'memory-plan';
+    memoryPlan: AgentMemoryWritePlan;
+    citations?: LibraryAgentRagCitation[];
+    figures?: LibraryAgentFigureReference[];
+    visionNotice?: string | null;
+    ragNotice?: string | null;
+  }
+  | {
     kind: 'plan';
     plan: LibraryAgentPlan;
     thinking?: string | null;
     citations?: LibraryAgentRagCitation[];
+    figures?: LibraryAgentFigureReference[];
+    visionNotice?: string | null;
     ragNotice?: string | null;
   };
 
@@ -286,6 +345,7 @@ interface PaperContextPayload {
   text: string;
   citations?: LibraryAgentRagCitation[];
   figures?: LibraryPaperReviewFigure[];
+  visionCandidates?: AgentVisionCandidate[];
   /** RAG 检索失败时的错误信息（已回退到全文/摘要），用于向用户透传状态。 */
   ragError?: string | null;
 }
@@ -387,6 +447,8 @@ const AGENT_STREAM_EVENT = 'paperquay://agent-stream';
 const SETTINGS_STORAGE_KEY = 'paper-reader-settings-v3';
 const SECRETS_STORAGE_KEY = 'paper-reader-secrets-v1';
 const AUTO_CLASSIFY_PARENT_NAME = 'Agent 自动归类';
+const MAX_REACT_INITIAL_PAPERS = 80;
+const MAX_REACT_INITIAL_CONTEXT_CHARS = 48_000;
 
 interface LibraryAgentStreamEventPayload {
   requestId: string;
@@ -398,6 +460,10 @@ interface LibraryAgentStreamEventPayload {
 export interface LibraryAgentStreamHandlers {
   onDelta?: (text: string, fullText: string) => void;
   onThinkingDelta?: (text: string, fullText: string) => void;
+  onLoopEvent?: (event: AgentLoopEvent) => void;
+  onCapabilityEvent?: (event: ComparativeSurveyEvent) => void;
+  onCapabilityCheckpoint?: (artifacts: ComparativeSurveyArtifacts) => void;
+  onRecoveryCheckpoint?: (messages: AgentLoopMessage[], turn: number) => void;
   onDone?: () => void;
   onError?: (message: string) => void;
 }
@@ -611,6 +677,90 @@ function buildAgentInstructionWithHistory(
     'Current user request. This request has priority over the history above:',
     instruction,
   ].join('\n');
+}
+
+function stripAgentHistoryAttachmentData(
+  attachments: DocumentChatAttachment[] | undefined,
+): DocumentChatAttachment[] | undefined {
+  if (!attachments?.length) {
+    return undefined;
+  }
+
+  return attachments.map(({ dataUrl: _dataUrl, ...attachment }) => attachment);
+}
+
+function buildReActAgentMessages({
+  instruction,
+  historyMessages,
+  responseLanguage,
+  papers,
+  categories,
+  currentPaperScopeIds,
+  paperScopes,
+  attachments,
+  memoryContext,
+}: {
+  instruction: string;
+  historyMessages: LibraryAgentConversationMessage[];
+  responseLanguage?: string;
+  papers: LibraryAgentPaperInput[];
+  categories: LibraryAgentCategoryInput[];
+  currentPaperScopeIds: string[];
+  paperScopes: LibraryAgentPaperScopeInput[];
+  attachments?: DocumentChatAttachment[];
+  memoryContext?: { topics: string; synthesis: string };
+}): AgentLoopMessage[] {
+  const scopedPaperIds = new Set(currentPaperScopeIds);
+  const orderedPapers = [
+    ...papers.filter((paper) => scopedPaperIds.has(paper.id)),
+    ...papers.filter((paper) => !scopedPaperIds.has(paper.id)),
+  ].slice(0, MAX_REACT_INITIAL_PAPERS);
+  let remainingContextChars = MAX_REACT_INITIAL_CONTEXT_CHARS;
+  const payloadPapers = orderedPapers.map((paper) => {
+    const contextText = paper.contextText?.slice(0, Math.max(0, remainingContextChars)) ?? null;
+    remainingContextChars -= contextText?.length ?? 0;
+
+    return {
+      ...paper,
+      contextText,
+    };
+  });
+  const context = {
+    responseLanguage,
+    currentPaperScopeIds,
+    paperScopes,
+    categories,
+    papers: payloadPapers,
+    truncatedPaperCount: Math.max(0, papers.length - payloadPapers.length),
+  };
+
+  return [
+    {
+      role: 'system',
+      content: [
+        'Use the PaperQuay tools as needed. Prefer evidence from paper context and preserve page citations.',
+        'For write requests, call exactly one matching write tool with reviewable items. The user must approve before application.',
+        memoryContext?.topics || memoryContext?.synthesis
+          ? `[Local Agent memory]\nL2 topics:\n${memoryContext.topics.slice(0, 2000)}\n\nL3 synthesis:\n${memoryContext.synthesis.slice(0, 2000)}`
+          : '',
+        `[PaperQuay library payload]\n${JSON.stringify(context)}`,
+      ].join('\n\n'),
+    },
+    ...historyMessages
+      .filter((message) => message.content.trim())
+      .slice(-12)
+      .map((message): AgentLoopMessage => ({
+        role: message.role,
+        content: message.content.trim(),
+        toolCallId: undefined,
+        attachments: stripAgentHistoryAttachmentData(message.attachments),
+      })),
+    {
+      role: 'user',
+      content: instruction,
+      attachments,
+    },
+  ];
 }
 
 function fallbackSummaryContext(paper: LiteraturePaper): PaperContextPayload {
@@ -891,11 +1041,18 @@ async function loadPaperContext(
         });
 
         if (ragResolution.kind === 'retrieved' && ragResolution.documentText.trim()) {
+          const figures = mineruContext?.figures ?? [];
           return {
             source: `${mineruContext?.source ?? 'pdf-text'}-rag`,
             text: normalizeAgentContext(ragResolution.documentText),
             citations: buildAgentRagCitations(paper, ragResolution.citations),
-            figures: mineruContext?.figures ?? [],
+            figures,
+            visionCandidates: matchRagVisionCandidates({
+              paperId: paper.id,
+              paperTitle: paper.title,
+              figures,
+              retrievals: ragResolution.retrievals,
+            }),
           };
         }
 
@@ -969,7 +1126,13 @@ async function buildPapersWithRequestedContext(
     ragEnabled?: boolean;
     categoryPathById?: Map<string, string>;
   },
-): Promise<{ inputs: LibraryAgentPaperInput[]; label: string; citations: LibraryAgentRagCitation[]; ragErrors: string[] }> {
+): Promise<{
+  inputs: LibraryAgentPaperInput[];
+  label: string;
+  citations: LibraryAgentRagCitation[];
+  ragErrors: string[];
+  contexts: Map<string, PaperContextPayload>;
+}> {
   const requestedIds = new Set((Array.isArray(request.paperIds) ? request.paperIds : []).filter(Boolean));
   const requestedPapers = requestedIds.size > 0
     ? papers.filter((paper) => requestedIds.has(paper.id))
@@ -1031,6 +1194,7 @@ async function buildPapersWithRequestedContext(
     label,
     citations,
     ragErrors,
+    contexts: normalizedContextByPaperId,
   };
 }
 
@@ -2127,7 +2291,7 @@ export async function buildToolUseLibraryAgentPlan({
   return convertGeneratedAgentPlan(tool, papers, generatedPlan);
 }
 
-export async function runConversationalLibraryAgent({
+async function runLegacyConversationalLibraryAgent({
   papers,
   categories = [],
   instruction,
@@ -2448,4 +2612,581 @@ export async function runConversationalLibraryAgent({
     plan: convertGeneratedAgentPlan(generatedResponse.plan.tool ?? 'classify', papers, generatedResponse.plan),
     thinking: normalizeModelThinking(generatedResponse.thinking),
   };
+}
+
+function addUniqueAgentCitations(
+  target: LibraryAgentRagCitation[],
+  next: LibraryAgentRagCitation[] | undefined,
+) {
+  const known = new Set(target.map((citation) => citation.id));
+
+  for (const citation of next ?? []) {
+    if (!known.has(citation.id)) {
+      target.push(citation);
+      known.add(citation.id);
+    }
+  }
+}
+
+function recordAgentCitations(
+  artifacts: AgentSessionArtifacts,
+  citations: LibraryAgentRagCitation[] | undefined,
+) {
+  for (const citation of citations ?? []) {
+    const page = citation.pageIndex === null || citation.pageIndex === undefined
+      ? citation.paperId
+      : `${citation.paperId}#${citation.pageIndex + 1}`;
+
+    if (!artifacts.citedPages.includes(page)) {
+      artifacts.citedPages.push(page);
+    }
+  }
+}
+
+function recordToolPaperIds(artifacts: AgentSessionArtifacts, args: Record<string, unknown>) {
+  const paperIds = [
+    typeof args.paperId === 'string' ? args.paperId : '',
+    ...(Array.isArray(args.paperIds) ? args.paperIds.filter((value): value is string => typeof value === 'string') : []),
+  ].map((paperId) => paperId.trim()).filter(Boolean);
+
+  for (const paperId of paperIds) {
+    if (!artifacts.readPaperIds.includes(paperId)) {
+      artifacts.readPaperIds.push(paperId);
+    }
+  }
+}
+
+export async function runConversationalLibraryAgent({
+  papers,
+  categories = [],
+  instruction,
+  preset,
+  streamHandlers,
+  historyMessages = [],
+  currentPaperScopeIds = [],
+  paperScopes = [],
+  responseLanguage,
+  ragEnabled = true,
+  attachments,
+  signal,
+  capabilityResume,
+}: {
+  papers: LiteraturePaper[];
+  categories?: LiteratureCategory[];
+  instruction: string;
+  preset: LibraryAgentModelPreset;
+  streamHandlers?: LibraryAgentStreamHandlers;
+  historyMessages?: LibraryAgentConversationMessage[];
+  currentPaperScopeIds?: string[];
+  paperScopes?: LibraryAgentPaperScopeInput[];
+  responseLanguage?: string;
+  ragEnabled?: boolean;
+  attachments?: DocumentChatAttachment[];
+  signal?: AbortSignal;
+  capabilityResume?: Partial<ComparativeSurveyArtifacts>;
+}): Promise<LibraryAgentRunResult> {
+  if (!preset.baseUrl.trim() || !preset.apiKey.trim() || !preset.model.trim()) {
+    throw new Error('请先在设置里配置支持 tool/function calling 的 OpenAI-compatible 模型。');
+  }
+
+  const normalizedInstruction = instruction.trim();
+
+  if (!normalizedInstruction) {
+    throw new Error('请输入要让 Agent 执行的文库整理指令。');
+  }
+
+  const persisted = await loadAgentSettingsAndSecrets();
+
+  if (isComparativeSurveyInstruction(normalizedInstruction, papers.length)) {
+    const citationAccumulator: LibraryAgentRagCitation[] = [];
+    const ragErrors: string[] = [];
+    const callModel = async (system: string, user: string) => {
+      const response = await runOpenAiCompatibleAgentChatTurn({
+        options: {
+          baseUrl: preset.baseUrl,
+          apiKey: preset.apiKey.trim(),
+          model: preset.model,
+          apiMode: preset.apiMode,
+          temperature: preset.temperature,
+          reasoningEffort: preset.reasoningEffort,
+        },
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: user },
+        ],
+        toolChoice: 'none',
+        stream: false,
+      });
+      return response;
+    };
+    const survey = await runComparativeSurveyCapability({
+      question: normalizedInstruction,
+      resume: capabilityResume,
+      signal,
+      onEvent: streamHandlers?.onCapabilityEvent,
+      onCheckpoint(artifacts) {
+        streamHandlers?.onCapabilityCheckpoint?.(artifacts);
+      },
+      handlers: {
+        async rephrase({ question }) {
+          const response = await callModel(
+            'Rewrite the comparative research question into one precise academic question. Return only the rewritten question.',
+            question,
+          );
+          return { text: response.content, usage: response.usage };
+        },
+        async decompose({ question }) {
+          const response = await callModel(
+            'Decompose the research question into 2 to 6 concise subquestions. Return one subquestion per line and no extra prose.',
+            question,
+          );
+          return {
+            questions: response.content.split(/\r?\n/).map((line) => line.replace(/^[-*\d.)\s]+/, '').trim()).filter(Boolean),
+            usage: response.usage,
+          };
+        },
+        async research({ subquestions, onProgress }) {
+          const notes: string[] = [];
+          let promptTokens = 0;
+          let completionTokens = 0;
+
+          for (let index = 0; index < subquestions.length; index += 1) {
+            if (signal?.aborted) {
+              const error = new Error('Comparative survey cancelled');
+              error.name = 'AbortError';
+              throw error;
+            }
+            const subquestion = subquestions[index] ?? normalizedInstruction;
+            onProgress(index, subquestions.length, subquestion);
+            const contexts = await Promise.all(papers.map((paper) => loadPaperContext(
+              paper,
+              'pdf-text',
+              subquestion,
+              { ragEnabled },
+            )));
+            for (const context of contexts) {
+              addUniqueAgentCitations(citationAccumulator, context.citations);
+              if (context.ragError?.trim() && !ragErrors.includes(context.ragError.trim())) {
+                ragErrors.push(context.ragError.trim());
+              }
+            }
+            const response = await callModel(
+              'Synthesize evidence for one comparative-survey subquestion. Preserve paper IDs and source citation labels. Return compact research notes, not a final report.',
+              JSON.stringify({
+                subquestion,
+                papers: papers.map((paper, paperIndex) => ({
+                  id: paper.id,
+                  title: paper.title,
+                  context: contexts[paperIndex]?.text.slice(0, 16_000) ?? '',
+                })),
+              }),
+            );
+            promptTokens += response.usage?.promptTokens ?? 0;
+            completionTokens += response.usage?.completionTokens ?? 0;
+            notes.push(`## ${subquestion}\n${response.content}`);
+            onProgress(index + 1, subquestions.length, subquestion);
+          }
+
+          return {
+            notes: notes.join('\n\n'),
+            citations: citationAccumulator.map((citation) => ({
+              paperId: citation.paperId,
+              paperTitle: citation.paperTitle,
+              pageIndex: citation.pageIndex,
+              blockId: citation.blockId,
+              previewText: citation.previewText,
+            })),
+            usage: { promptTokens, completionTokens },
+          };
+        },
+        async report({ question, subquestions, researchNotes }) {
+          const response = await callModel(
+            'Write a comparative academic survey in Markdown. Start with the conclusion, compare methods and evidence, cite available [n] labels, state limitations and research gaps, and do not invent sources.',
+            JSON.stringify({ question, subquestions, researchNotes }),
+          );
+          return { markdown: response.content, usage: response.usage };
+        },
+      },
+    });
+
+    streamHandlers?.onDelta?.(survey.markdown, survey.markdown);
+    streamHandlers?.onDone?.();
+    return {
+      kind: 'capability',
+      capabilityId: 'comparative-survey',
+      result: survey,
+      citations: citationAccumulator,
+      figures: [],
+      visionNotice: preset.supportsVision === true ? null : '当前模型未标记为支持视觉，调研阶段未发送论文图片。',
+      ragNotice: buildAgentRagNotice(ragErrors),
+    };
+  }
+
+  if (selectLibraryAgentExecutionPath(persisted.settings) === 'legacy') {
+    return runLegacyConversationalLibraryAgent({
+      papers,
+      categories,
+      instruction: normalizedInstruction,
+      preset,
+      streamHandlers,
+      historyMessages,
+      currentPaperScopeIds,
+      paperScopes,
+      responseLanguage,
+      ragEnabled,
+    });
+  }
+
+  const categoryPayload = buildAgentCategoryPayload(categories);
+  const instructionForRouter = buildAgentInstructionWithHistory(normalizedInstruction, historyMessages);
+  const metadataContextLabel = papers.length > 0 ? 'metadata only' : 'general chat';
+  let contextLabel = metadataContextLabel;
+  let paperInputs = papers.map((paper) => paperToAgentInput(
+    paper,
+    undefined,
+    categoryPayload.categoryPathById,
+  ));
+  const citations: LibraryAgentRagCitation[] = [];
+  const ragErrors: string[] = [];
+  const artifacts = emptyAgentSessionArtifacts();
+  const contexts = new Map<string, PaperContextPayload>();
+  const contextModes = new Map<string, LibraryAgentContextRequest['mode']>();
+  const paperContextDecision = await decideLibraryAgentPaperContextOpenAICompatible({
+    baseUrl: preset.baseUrl,
+    apiKey: preset.apiKey.trim(),
+    model: preset.model,
+    apiMode: preset.apiMode,
+    temperature: preset.temperature,
+    reasoningEffort: preset.reasoningEffort,
+    responseLanguage,
+    allowContextRequest: true,
+    tool: 'auto',
+    instruction: instructionForRouter,
+    messages: historyMessages,
+    currentPaperScopeIds,
+    paperScopes,
+    categories: categoryPayload.categories,
+    papers: paperInputs,
+  });
+
+  if (paperContextDecision?.action === 'ask-user-to-select-papers' && paperContextDecision.paperIds.length === 0) {
+    return paperSelectionResultFromContextRequest(
+      {
+        summary: paperContextDecision.summary,
+        mode: paperContextDecision.mode,
+        reason: paperContextDecision.reason,
+        paperIds: [],
+      },
+      normalizedInstruction,
+      normalizeModelThinking(paperContextDecision.thinking),
+    );
+  }
+
+  if (paperContextDecision?.action === 'load-context') {
+    const effectiveRequest = buildEffectiveContextRequest({
+      summary: paperContextDecision.summary,
+      mode: paperContextDecision.mode,
+      reason: paperContextDecision.reason,
+      paperIds: paperContextDecision.paperIds,
+    }, papers, currentPaperScopeIds);
+
+    if (!effectiveRequest) {
+      return paperSelectionResultFromContextRequest(null, normalizedInstruction, normalizeModelThinking(paperContextDecision.thinking));
+    }
+
+    const contextPapers = currentScopePapers(papers, effectiveRequest.paperIds ?? currentPaperScopeIds);
+
+    if (contextPapers.length === 0) {
+      return paperSelectionResultFromContextRequest(effectiveRequest, normalizedInstruction, normalizeModelThinking(paperContextDecision.thinking));
+    }
+
+    const enriched = await buildPapersWithRequestedContext(contextPapers, effectiveRequest, {
+      ragEnabled,
+      categoryPathById: categoryPayload.categoryPathById,
+    });
+    paperInputs = enriched.inputs;
+    contextLabel = enriched.label;
+    addUniqueAgentCitations(citations, enriched.citations);
+    recordAgentCitations(artifacts, enriched.citations);
+    ragErrors.push(...enriched.ragErrors);
+    for (const [paperId, context] of enriched.contexts) {
+      contexts.set(paperId, context);
+      contextModes.set(paperId, effectiveRequest.mode);
+    }
+  }
+
+  const getPaperContext = async (
+    paper: LiteraturePaper,
+    input: { mode: 'summary' | 'pdf-text'; query: string },
+  ): Promise<AgentPaperContextResult> => {
+    const current = contexts.get(paper.id);
+    const loadedMode = contextModes.get(paper.id);
+    const shouldReload = !current || (input.mode === 'pdf-text' && loadedMode !== 'pdf-text');
+    const context = shouldReload
+      ? await loadPaperContext(paper, input.mode, input.query || normalizedInstruction, { ragEnabled })
+      : current;
+
+    if (!context) {
+      throw new Error(`Unable to load context for ${paper.title}.`);
+    }
+
+    if (shouldReload) {
+      contexts.set(paper.id, context);
+      contextModes.set(paper.id, input.mode);
+    }
+
+    addUniqueAgentCitations(citations, context.citations);
+    recordAgentCitations(artifacts, context.citations);
+    if (context.ragError?.trim() && !ragErrors.includes(context.ragError.trim())) {
+      ragErrors.push(context.ragError.trim());
+    }
+
+    return context;
+  };
+
+  const tools = createLibraryAgentTools({
+    papers,
+    getPaperContext,
+    memory: {
+      read: async (file) => (await readAgentMemory(file)).content,
+      createWritePlan(input) {
+        return createAgentMemoryWritePlan(input);
+      },
+    },
+    getFigure: preset.supportsVision
+      ? async (paper, input) => {
+        const context = await getPaperContext(paper, {
+          mode: 'pdf-text',
+          query: `Read paper figure ${input.blockId ?? ''} ${input.pageIndex ?? ''}`,
+        });
+        const figure = context.figures?.find((candidate) =>
+          input.blockId
+            ? candidate.blockId === input.blockId
+            : input.pageIndex !== undefined
+              ? candidate.pageIndex === input.pageIndex
+              : false,
+        );
+
+        if (!figure) return null;
+        const prepared = await prepareAgentVisionAttachments({
+          supportsVision: true,
+          candidates: [{
+            id: `${paper.id}:${figure.id}`,
+            source: 'tool',
+            paperId: paper.id,
+            paperTitle: paper.title,
+            caption: figure.caption,
+            path: figure.path,
+            pageIndex: figure.pageIndex,
+            blockId: figure.blockId,
+            kind: figure.kind,
+            score: 0,
+          }],
+        });
+        const attachment = prepared.attachments[0];
+
+        return attachment?.dataUrl ? { ...figure, dataUrl: attachment.dataUrl } : null;
+      }
+      : undefined,
+    createWritePlan(tool, args) {
+      const generatedPlan: LibraryAgentGeneratedPlan = {
+        tool,
+        summary: typeof args.summary === 'string' ? args.summary : `${tool} plan`,
+        items: Array.isArray(args.items) ? args.items as LibraryAgentGeneratedItem[] : [],
+      };
+      const plan = convertGeneratedAgentPlan(tool, papers, generatedPlan);
+
+      if (plan.items.length === 0) {
+        throw new Error('The write tool did not contain any valid paper changes for review.');
+      }
+
+      return plan;
+    },
+  });
+  let streamedAnswer = '';
+  let streamedThinking = '';
+  const ragSettings = normalizeStoredReaderSettings(persisted.settings);
+  const ragReady = Boolean(
+    ragEnabled &&
+    persisted.secrets.embeddingApiKey?.trim() &&
+    ragSettings.embeddingBaseUrl.trim() &&
+    ragSettings.embeddingModel.trim(),
+  );
+  let memoryContext = { topics: '', synthesis: '' };
+  const nonVisionAttachments = (attachments ?? []).filter((attachment) =>
+    attachment.kind !== 'image' &&
+    attachment.kind !== 'screenshot' &&
+    !attachment.mimeType.startsWith('image/'),
+  );
+  const visionCandidates = [
+    ...userAttachmentVisionCandidates(attachments),
+    ...[...contexts.values()].flatMap((context) => context.visionCandidates ?? []),
+  ];
+  let preparedVision = await prepareAgentVisionAttachments({
+    candidates: visionCandidates,
+    supportsVision: preset.supportsVision === true,
+  });
+
+  try {
+    const [topics, synthesis] = await Promise.all([
+      readAgentMemory('topics'),
+      readAgentMemory('synthesis'),
+    ]);
+    memoryContext = {
+      topics: topics.content,
+      synthesis: synthesis.content,
+    };
+  } catch {
+    // Missing or unreadable memory must not block ordinary Agent requests.
+  }
+  const result = await runAgentLoop({
+    maxTurns: 8,
+    tools,
+    mountContext: {
+      papersCount: papers.length,
+      hasOpenDocument: papers.some((paper) => Boolean(paperPdfPath(paper))),
+      ragReady,
+      localLibraryMode: true,
+    },
+    runtimeContext: {},
+    messages: buildReActAgentMessages({
+      instruction: normalizedInstruction,
+      historyMessages,
+      responseLanguage,
+      papers: paperInputs,
+      categories: categoryPayload.categories,
+      currentPaperScopeIds,
+      paperScopes,
+      attachments: [...nonVisionAttachments, ...preparedVision.attachments],
+      memoryContext,
+    }),
+    contextLabel,
+    citations,
+    ragNotice: buildAgentRagNotice(ragErrors),
+    contextCompaction: {
+      contextWindow: preset.contextWindow,
+      artifacts,
+      async compact({ messages: messagesToCompact, artifacts: currentArtifacts }) {
+        const summary = await runOpenAiCompatibleAgentChatTurn({
+          options: {
+            baseUrl: preset.baseUrl,
+            apiKey: preset.apiKey.trim(),
+            model: preset.model,
+            apiMode: preset.apiMode,
+            temperature: 0,
+            reasoningEffort: 'low',
+          },
+          messages: [
+            {
+              role: 'system',
+              content: [
+                'Summarize the prior PaperQuay Agent conversation using exactly these headings:',
+                '## 会话进度摘要',
+                '- 目标:',
+                '- 已完成:',
+                '- 关键决定:',
+                '- 引用的论文与页码:',
+                '- 下一步:',
+                'Do not include hidden reasoning or credentials.',
+              ].join('\n'),
+            },
+            {
+              role: 'user',
+              content: JSON.stringify({
+                messages: messagesToCompact.map((message) => ({ role: message.role, content: message.content })),
+                artifacts: currentArtifacts,
+              }),
+            },
+          ],
+          toolChoice: 'none',
+          stream: false,
+        });
+
+        if (!summary.content.trim()) {
+          throw new Error('Compaction model returned no summary.');
+        }
+
+        return summary.content;
+      },
+    },
+    signal,
+    chatTurn: (turnRequest) => runOpenAiCompatibleAgentChatTurn({
+      options: {
+        baseUrl: preset.baseUrl,
+        apiKey: preset.apiKey.trim(),
+        model: preset.model,
+        apiMode: preset.apiMode,
+        temperature: preset.temperature,
+        reasoningEffort: preset.reasoningEffort,
+      },
+      ...turnRequest,
+    }),
+    onEvent(event) {
+      streamHandlers?.onLoopEvent?.(event);
+
+      if (event.kind === 'answer_delta') {
+        streamedAnswer += event.text;
+        streamHandlers?.onDelta?.(event.text, streamedAnswer);
+      } else if (event.kind === 'thinking_delta') {
+        streamedThinking += event.text;
+        streamHandlers?.onThinkingDelta?.(event.text, streamedThinking);
+      } else if (event.kind === 'tool_call') {
+        recordToolPaperIds(artifacts, event.args);
+      } else if (event.kind === 'error') {
+        streamHandlers?.onError?.(event.message);
+      }
+    },
+    onCheckpoint(checkpoint) {
+      streamHandlers?.onRecoveryCheckpoint?.(checkpoint.messages, checkpoint.turn);
+    },
+  });
+
+  streamHandlers?.onDone?.();
+  const ragNotice = buildAgentRagNotice(ragErrors);
+  const figureReferences: LibraryAgentFigureReference[] = preparedVision.included
+    .filter((candidate) => candidate.source === 'rag' && candidate.paperId && candidate.paperTitle)
+    .map((candidate) => ({
+      id: candidate.id,
+      paperId: candidate.paperId ?? '',
+      paperTitle: candidate.paperTitle ?? '',
+      caption: candidate.caption,
+      path: candidate.path ?? '',
+      pageIndex: candidate.pageIndex,
+      blockId: candidate.blockId,
+      kind: candidate.kind,
+    }));
+  const visionNotice = preparedVision.notice;
+
+  if (result.kind === 'answer') {
+    return {
+      ...result,
+      citations,
+      figures: figureReferences,
+      visionNotice,
+      ragNotice,
+      thinking: result.thinking || streamedThinking || null,
+    };
+  }
+
+  if (result.kind === 'memory-plan') {
+    return {
+      ...result,
+      citations,
+      figures: figureReferences,
+      visionNotice,
+      ragNotice,
+    };
+  }
+
+  if (result.kind === 'plan') {
+    return {
+      ...result,
+      citations,
+      figures: figureReferences,
+      visionNotice,
+      ragNotice,
+    };
+  }
+
+  return result;
 }

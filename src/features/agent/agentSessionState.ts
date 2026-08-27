@@ -67,3 +67,48 @@ export function patchAgentHistorySessionMessage(
     locale,
   });
 }
+
+function stripAttachmentData(attachments: DocumentChatAttachment[] | undefined) {
+  return attachments?.map(({ dataUrl: _dataUrl, ...attachment }) => ({ ...attachment }));
+}
+
+function cloneForkMessage(message: AgentChatMessage): AgentChatMessage {
+  return {
+    ...message,
+    attachments: stripAttachmentData(message.attachments),
+    paperScopeIds: message.paperScopeIds ? [...message.paperScopeIds] : undefined,
+    ragCitations: message.ragCitations ? message.ragCitations.map((citation) => ({ ...citation })) : undefined,
+    trace: message.trace ? message.trace.map((step) => ({ ...step })) : undefined,
+    plan: message.plan
+      ? { ...message.plan, items: message.plan.items.map((item) => ({ ...item, updateRequest: item.updateRequest ? { ...item.updateRequest } : undefined })) }
+      : undefined,
+    memoryPlan: message.memoryPlan ? { ...message.memoryPlan } : undefined,
+    choices: message.choices ? message.choices.map((choice) => ({ ...choice })) : undefined,
+  };
+}
+
+export function forkAgentHistorySession(input: {
+  source: AgentHistorySession;
+  messageId: string;
+  forkSessionId: string;
+  locale: UiLanguage;
+}): AgentHistorySession | null {
+  const messageIndex = input.source.messages.findIndex((message) => message.id === input.messageId);
+
+  if (messageIndex < 0) {
+    return null;
+  }
+
+  const messages = input.source.messages.slice(0, messageIndex + 1).map(cloneForkMessage);
+
+  return buildAgentHistorySession({
+    id: input.forkSessionId,
+    messages,
+    selectedPaperIds: [...input.source.selectedPaperIds],
+    lastInstruction: input.source.lastInstruction,
+    ragEnabled: input.source.ragEnabled,
+    selectedModelPresetId: input.source.selectedModelPresetId,
+    attachments: stripAttachmentData(input.source.attachments),
+    locale: input.locale,
+  });
+}

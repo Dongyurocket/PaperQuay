@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Bot,
   Camera,
@@ -6,6 +6,7 @@ import {
   ChevronDown,
   Check,
   Clipboard,
+  GitFork,
   ImagePlus,
   Loader2,
   Paperclip,
@@ -15,12 +16,15 @@ import {
   User,
   X,
 } from 'lucide-react';
-import type { LibraryAgentPlan, LibraryAgentRagCitation } from '../../services/libraryAgent';
+import type { LibraryAgentFigureReference, LibraryAgentPlan, LibraryAgentRagCitation } from '../../services/libraryAgent';
+import type { AgentMemoryWritePlan } from '../../services/agentMemory';
+import type { AgentCapabilityView } from './AgentWorkspace.types';
 import type { LiteraturePaper } from '../../types/library';
 import type { UiLanguage } from '../../types/reader';
 import type { AgentChatMessage, AgentToolCallView } from './AgentWorkspace.types';
 import AgentMarkdown from './AgentMarkdown';
 import { PlanDiffCard, ToolCallCard, TraceTimeline } from './AgentExecutionCards';
+import { loadLocalAssetDataUrl } from '../../services/assets';
 import { formatFileSize } from '../../utils/files';
 
 const agentPlanPrimaryActionClass =
@@ -287,6 +291,120 @@ function AgentRagCitationChips({
   );
 }
 
+function AgentFigureReferences({
+  figures,
+  l,
+}: {
+  figures?: LibraryAgentFigureReference[];
+  l: (zh: string, en: string) => string;
+}) {
+  const [urls, setUrls] = useState<Record<string, string>>({});
+  const [preview, setPreview] = useState<LibraryAgentFigureReference | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    void Promise.all((figures ?? []).map(async (figure) => {
+      try {
+        return [figure.id, await loadLocalAssetDataUrl(figure.path)] as const;
+      } catch {
+        return [figure.id, ''] as const;
+      }
+    })).then((entries) => {
+      if (!cancelled) setUrls(Object.fromEntries(entries));
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [figures]);
+
+  if (!figures?.length) return null;
+
+  return (
+    <>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {figures.map((figure) => (
+          <button
+            key={figure.id}
+            type="button"
+            onClick={() => setPreview(figure)}
+            className="flex max-w-[260px] items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 p-2 text-left dark:border-white/10 dark:bg-chrome-950"
+          >
+            {urls[figure.id] ? (
+              <img src={urls[figure.id]} alt={figure.caption} className="h-12 w-16 shrink-0 rounded-lg object-cover" />
+            ) : (
+              <span className="flex h-12 w-16 shrink-0 items-center justify-center rounded-lg bg-slate-200 text-[10px] text-slate-500 dark:bg-white/10 dark:text-chrome-400">
+                {figure.kind === 'table' ? l('表', 'Table') : l('图', 'Figure')}
+              </span>
+            )}
+            <span className="min-w-0">
+              <span className="block truncate text-xs font-semibold text-slate-700 dark:text-chrome-200">{figure.paperTitle}</span>
+              <span className="mt-0.5 block line-clamp-2 text-[10px] leading-4 text-slate-500 dark:text-chrome-400">{figure.caption}</span>
+            </span>
+          </button>
+        ))}
+      </div>
+      {preview && urls[preview.id] ? (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/80 p-6" onClick={() => setPreview(null)}>
+          <div className="max-h-full max-w-5xl overflow-auto" onClick={(event) => event.stopPropagation()}>
+            <img src={urls[preview.id]} alt={preview.caption} className="max-h-[80vh] max-w-full object-contain" />
+            <div className="bg-white p-3 text-sm text-slate-700 dark:bg-chrome-900 dark:text-chrome-200">{preview.caption}</div>
+          </div>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+function CapabilityProgress({
+  capability,
+  l,
+}: {
+  capability: AgentCapabilityView;
+  l: (zh: string, en: string) => string;
+}) {
+  const labels: Record<AgentCapabilityView['stages'][number]['id'], [string, string]> = {
+    rephrase: ['改写问题', 'Rephrase'],
+    decompose: ['分解子题', 'Decompose'],
+    research: ['逐题调研', 'Research'],
+    report: ['综合报告', 'Report'],
+  };
+
+  return (
+    <div className="mt-4 rounded-[20px] border border-slate-200 bg-slate-50/70 p-4 dark:border-white/10 dark:bg-chrome-950/60">
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-sm font-bold text-slate-950 dark:text-white">
+          {l('对比调研', 'Comparative Survey')}
+        </div>
+        <span className="text-xs font-semibold text-slate-500 dark:text-chrome-400">{capability.status}</span>
+      </div>
+      <div className="mt-3 grid gap-2 sm:grid-cols-4">
+        {capability.stages.map((stage, index) => (
+          <div key={stage.id} className="rounded-xl border border-slate-200 bg-white px-3 py-2 dark:border-white/10 dark:bg-chrome-900">
+            <div className="flex items-center gap-2">
+              <span className={[
+                'flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold',
+                stage.status === 'success'
+                  ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-300/15 dark:text-emerald-200'
+                  : stage.status === 'running'
+                    ? 'bg-sky-100 text-sky-700 dark:bg-sky-300/15 dark:text-sky-200'
+                    : stage.status === 'error'
+                      ? 'bg-rose-100 text-rose-700 dark:bg-rose-300/15 dark:text-rose-200'
+                      : 'bg-slate-100 text-slate-500 dark:bg-white/10 dark:text-chrome-400',
+              ].join(' ')}>{index + 1}</span>
+              <span className="text-xs font-semibold text-slate-700 dark:text-chrome-200">
+                {l(labels[stage.id][0], labels[stage.id][1])}
+              </span>
+            </div>
+            {stage.detail ? <div className="mt-1 line-clamp-2 text-[10px] text-slate-400">{stage.detail}</div> : null}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function UserMessageCard({ message }: { message: AgentChatMessage }) {
   return (
     <article className="flex items-start justify-end gap-3">
@@ -345,9 +463,11 @@ export function AssistantMessageCard({
   localizedToolLabel,
   message,
   onApplyPlan,
+  onApplyMemoryPlan,
   onCancelPlan,
   onCopyToolParameters,
   onContinueWithSelectedPapers,
+  onForkFromMessage,
   onOpenRagCitation,
   onInspectPlanItem,
   onTogglePlanItem,
@@ -374,9 +494,11 @@ export function AssistantMessageCard({
   localizedToolLabel: (tool: LibraryAgentPlan['tool']) => string;
   message: AgentChatMessage;
   onApplyPlan: () => void;
+  onApplyMemoryPlan: (memoryPlan: AgentMemoryWritePlan) => void;
   onCancelPlan: () => void;
   onCopyToolParameters: (toolCall: AgentToolCallView) => void;
   onContinueWithSelectedPapers: (instruction: string, paperIds: string[]) => void;
+  onForkFromMessage: (messageId: string) => void;
   onOpenRagCitation?: (citation: LibraryAgentRagCitation) => void;
   onInspectPlanItem: (itemId: string, paperTitle: string) => void;
   onTogglePlanItem: (itemId: string) => void;
@@ -386,6 +508,7 @@ export function AssistantMessageCard({
   setStatusMessage: (message: string) => void;
 }) {
   const messagePlan = message.plan;
+  const memoryPlan = message.memoryPlan;
   const toolCall = message.toolCall;
 
   return (
@@ -421,9 +544,40 @@ export function AssistantMessageCard({
               l={l}
               onOpenCitation={onOpenRagCitation}
             />
+            <AgentFigureReferences figures={message.ragFigures} l={l} />
+            {message.visionNotice ? (
+              <div className="mt-3 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs leading-5 text-sky-700 dark:border-sky-300/20 dark:bg-sky-300/10 dark:text-sky-200">
+                {message.visionNotice}
+              </div>
+            ) : null}
             {message.ragNotice ? (
               <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-700 dark:border-amber-300/25 dark:bg-amber-300/10 dark:text-amber-200">
                 {message.ragNotice}
+              </div>
+            ) : null}
+            {message.capability ? <CapabilityProgress capability={message.capability} l={l} /> : null}
+            {memoryPlan ? (
+              <div className="mt-4 rounded-[20px] border border-sky-200 bg-sky-50/70 p-4 dark:border-sky-300/25 dark:bg-sky-300/10">
+                <div className="text-sm font-bold text-slate-950 dark:text-white">
+                  {l('Agent 记忆更新', 'Agent Memory Update')}
+                </div>
+                <div className="mt-1 text-xs leading-5 text-slate-600 dark:text-chrome-300">
+                  {memoryPlan.summary}
+                </div>
+                <pre className="mt-3 max-h-52 overflow-auto whitespace-pre-wrap rounded-xl border border-sky-200/80 bg-white/80 p-3 text-xs leading-5 text-slate-700 dark:border-sky-300/20 dark:bg-chrome-950 dark:text-chrome-200">
+                  {memoryPlan.content}
+                </pre>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => onApplyMemoryPlan(memoryPlan)}
+                    disabled={activeSessionRunning}
+                    className={agentPlanPrimaryActionClass}
+                  >
+                    <Check className="h-4 w-4" />
+                    {l('确认写入', 'Apply Update')}
+                  </button>
+                </div>
               </div>
             ) : null}
             {message.choices && message.choices.length > 0 ? (
@@ -452,6 +606,15 @@ export function AssistantMessageCard({
               </div>
             ) : null}
           </div>
+          <button
+            type="button"
+            onClick={() => onForkFromMessage(message.id)}
+            className="pq-icon-button h-8 w-8 shrink-0 border border-[var(--pq-border)] bg-[var(--pq-surface-1)]"
+            title={l('从此处分支', 'Fork from here')}
+            aria-label={l('从此处分支', 'Fork from here')}
+          >
+            <GitFork className="h-3.5 w-3.5" strokeWidth={1.8} />
+          </button>
           {messagePlan ? (
             <div className="shrink-0 rounded-[22px] border border-slate-200 bg-slate-50/80 px-4 py-3 dark:border-white/10 dark:bg-chrome-950/70">
               <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400">

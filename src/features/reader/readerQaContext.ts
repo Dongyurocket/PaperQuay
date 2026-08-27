@@ -4,6 +4,7 @@ import type {
   DocumentChatQaContextOrigin,
   DocumentChatQaContextState,
   RagDocumentIndexStatus,
+  RagRetrievalResult,
 } from '../../types/reader';
 
 export interface QaRequestContextResolution {
@@ -23,6 +24,7 @@ export interface LocalRagResolutionSuccess {
   documentText: string;
   retrievedChunkCount: number;
   citations: DocumentChatCitation[];
+  retrievals: RagRetrievalResult[];
   indexedChunkCount?: number;
   totalChunkCount?: number;
 }

@@ -1,4 +1,5 @@
 const { createAiCommands } = require('./backend/aiCommands.cjs');
+const { createAgentMemoryStore } = require('./backend/agentMemoryStore.cjs');
 const { createAppPaths, createLibraryStore } = require('./backend/libraryStore.cjs');
 const { createFileCommands } = require('./backend/fileCommands.cjs');
 const { createIntegrationCommands } = require('./backend/integrationCommands.cjs');
@@ -34,6 +35,13 @@ function createUnavailableRagStore(error) {
     reportFailure: fail,
     getDocumentIndexStatus: fail,
     retrieveDocumentChunks: fail,
+    createAgentRun: fail,
+    appendAgentRunEvent: fail,
+    finishAgentRun: fail,
+    getAgentRun: fail,
+    getAgentRunEvents: fail,
+    listInterruptedAgentRuns: fail,
+    listAgentRunUsageBySession: fail,
     snapshotTo: fail,
     replaceWithSnapshot: fail,
   };
@@ -57,6 +65,7 @@ function createBackend({ app }) {
   const appPaths = createAppPaths(app);
   const store = createLibraryStore(appPaths);
   const noteStore = createNoteStore(appPaths);
+  const agentMemoryStore = createAgentMemoryStore(appPaths);
   const ragStore = createRagStoreSafely(appPaths);
   const legacyRagIndexes = store.loadLegacyRagIndexes();
 
@@ -73,6 +82,7 @@ function createBackend({ app }) {
   const context = {
     app,
     appPaths,
+    agentMemoryStore,
     noteStore,
     approvedWritePaths: new Set(),
     ragStore,
