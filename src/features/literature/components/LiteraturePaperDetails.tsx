@@ -62,6 +62,15 @@ interface LiteraturePaperDetailsProps {
 interface PaperEditDraft {
   title: string;
   titleZh: string;
+  itemType: string;
+  publisher: string;
+  institution: string;
+  reportNumber: string;
+  volume: string;
+  issue: string;
+  pages: string;
+  isbn: string;
+  issn: string;
   authors: string;
   year: string;
   publication: string;
@@ -239,6 +248,18 @@ function splitOverviewListItems(content: string, key: OverviewSectionKey): strin
     .filter(Boolean);
 }
 
+function itemTypeLabel(type: string | null | undefined, l: (zh: string, en: string) => string): string {
+  const t = (type ?? 'journalArticle').toLowerCase();
+  if (t === 'book') return l('书籍', 'Book');
+  if (t === 'booksection' || t === 'chapter') return l('书籍章节', 'Book Section');
+  if (t === 'thesis' || t === 'dissertation') return l('学位论文', 'Thesis');
+  if (t === 'report' || t === 'techreport') return l('报告', 'Report');
+  if (t === 'conferencepaper' || t === 'conference') return l('会议论文', 'Conference Paper');
+  if (t === 'preprint') return l('预印本', 'Preprint');
+  if (t === 'misc') return l('其他文献', 'Misc');
+  return l('期刊论文', 'Journal Article');
+}
+
 function latestReadingHeatmapForPaper(paperId: string | null | undefined): PdfReadingHeatmap | null {
   if (!paperId) {
     return null;
@@ -255,6 +276,15 @@ function draftFromPaper(paper: LiteraturePaper | null): PaperEditDraft {
   return {
     title: paper?.title ?? '',
     titleZh: paper?.titleZh ?? '',
+    itemType: paper?.itemType ?? 'journalArticle',
+    publisher: paper?.publisher ?? '',
+    institution: paper?.institution ?? '',
+    reportNumber: paper?.reportNumber ?? '',
+    volume: paper?.volume ?? '',
+    issue: paper?.issue ?? '',
+    pages: paper?.pages ?? '',
+    isbn: paper?.isbn ?? '',
+    issn: paper?.issn ?? '',
     authors: paper?.authors.map((author) => author.name).join(', ') ?? '',
     year: paper?.year ?? '',
     publication: paper?.publication ?? '',
@@ -539,6 +569,15 @@ export default function LiteraturePaperDetails({
       paperId: selectedPaper.id,
       title: draft.title.trim() || selectedPaper.title,
       titleZh: inputValue(draft.titleZh),
+      itemType: draft.itemType || 'journalArticle',
+      publisher: inputValue(draft.publisher),
+      institution: inputValue(draft.institution),
+      reportNumber: inputValue(draft.reportNumber),
+      volume: inputValue(draft.volume),
+      issue: inputValue(draft.issue),
+      pages: inputValue(draft.pages),
+      isbn: inputValue(draft.isbn),
+      issn: inputValue(draft.issn),
       authors: splitList(draft.authors),
       year: inputValue(draft.year),
       publication: inputValue(draft.publication),
@@ -834,6 +873,112 @@ export default function LiteraturePaperDetails({
                   />
                 </div>
 
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label>
+                    <FieldLabel>{l('文献类型', 'Entry Type')}</FieldLabel>
+                    <select
+                      value={draft.itemType}
+                      onChange={(event) => patchDraft({ itemType: event.target.value })}
+                      className="pq-input h-10 w-full px-3 text-sm"
+                    >
+                      <option value="journalArticle">{l('期刊论文 (Journal Article)', 'Journal Article')}</option>
+                      <option value="book">{l('书籍 (Book)', 'Book')}</option>
+                      <option value="bookSection">{l('书籍章节 (Book Section)', 'Book Section')}</option>
+                      <option value="conferencePaper">{l('会议论文 (Conference Paper)', 'Conference Paper')}</option>
+                      <option value="thesis">{l('学位论文 (Thesis / Dissertation)', 'Thesis / Dissertation')}</option>
+                      <option value="report">{l('研究/技术报告 (Report)', 'Report')}</option>
+                      <option value="preprint">{l('预印本 (Preprint / arXiv)', 'Preprint')}</option>
+                      <option value="misc">{l('其他文献 (Misc)', 'Misc')}</option>
+                    </select>
+                  </label>
+
+                  <label>
+                    <FieldLabel>
+                      {draft.itemType === 'book' || draft.itemType === 'bookSection'
+                        ? l('出版社', 'Publisher')
+                        : draft.itemType === 'thesis'
+                          ? l('授予单位 / 大学', 'University / School')
+                          : draft.itemType === 'report'
+                            ? l('发布机构 / 单位', 'Institution / Agency')
+                            : l('出版社 / 机构', 'Publisher / Institution')}
+                    </FieldLabel>
+                    <TextInput
+                      value={draft.publisher || draft.institution}
+                      placeholder={
+                        draft.itemType === 'thesis'
+                          ? l('例如：清华大学、MIT', 'e.g. Tsinghua University, MIT')
+                          : draft.itemType === 'report'
+                            ? l('例如：OpenAI、NASA', 'e.g. OpenAI, NASA')
+                            : l('例如：Springer、O\'Reilly', 'e.g. Springer, O\'Reilly')
+                      }
+                      onChange={(value) => {
+                        if (draft.itemType === 'thesis' || draft.itemType === 'report') {
+                          patchDraft({ institution: value, publisher: value });
+                        } else {
+                          patchDraft({ publisher: value });
+                        }
+                      }}
+                    />
+                  </label>
+                </div>
+
+                {draft.itemType === 'report' ? (
+                  <label>
+                    <FieldLabel>{l('报告编号', 'Report Number')}</FieldLabel>
+                    <TextInput
+                      value={draft.reportNumber}
+                      placeholder={l('例如：TR-2024-01、arXiv:2305.18290', 'e.g. TR-2024-01, arXiv:2305.18290')}
+                      onChange={(value) => patchDraft({ reportNumber: value })}
+                    />
+                  </label>
+                ) : null}
+
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <label>
+                    <FieldLabel>{l('卷号', 'Volume')}</FieldLabel>
+                    <TextInput
+                      value={draft.volume}
+                      placeholder="12"
+                      onChange={(value) => patchDraft({ volume: value })}
+                    />
+                  </label>
+                  <label>
+                    <FieldLabel>{l('期号', 'Issue / No.')}</FieldLabel>
+                    <TextInput
+                      value={draft.issue}
+                      placeholder="3"
+                      onChange={(value) => patchDraft({ issue: value })}
+                    />
+                  </label>
+                  <label>
+                    <FieldLabel>{l('页码范围', 'Pages')}</FieldLabel>
+                    <TextInput
+                      value={draft.pages}
+                      placeholder="123-145"
+                      onChange={(value) => patchDraft({ pages: value })}
+                    />
+                  </label>
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label>
+                    <FieldLabel>ISBN</FieldLabel>
+                    <TextInput
+                      value={draft.isbn}
+                      placeholder="978-3-16-148410-0"
+                      onChange={(value) => patchDraft({ isbn: value })}
+                    />
+                  </label>
+                  <label>
+                    <FieldLabel>ISSN</FieldLabel>
+                    <TextInput
+                      value={draft.issn}
+                      placeholder="1234-5678"
+                      onChange={(value) => patchDraft({ issn: value })}
+                    />
+                  </label>
+                </div>
+
                 <label>
                   <FieldLabel>{l('作者', 'Authors')}</FieldLabel>
                   <TextInput
@@ -946,14 +1091,53 @@ export default function LiteraturePaperDetails({
             ) : (
               <>
                 <dl className="pq-card p-4 text-sm">
-                  <div>
-                    <dt className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400 dark:text-[#8d8d8d]">
-                      {l('期刊 / 会议', 'Journal / Conference')}
-                    </dt>
-                    <dd className="mt-2 text-slate-700 dark:text-[#e0e0e0]">
-                      {selectedPaper.publication || l('未设置', 'Not set')}
-                    </dd>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div>
+                      <dt className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400 dark:text-[#8d8d8d]">
+                        {l('文献类型', 'Entry Type')}
+                      </dt>
+                      <dd className="mt-1 font-medium text-slate-700 dark:text-[#e0e0e0]">
+                        {itemTypeLabel(selectedPaper.itemType, l)}
+                      </dd>
+                    </div>
+
+                    <div>
+                      <dt className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400 dark:text-[#8d8d8d]">
+                        {selectedPaper.itemType === 'thesis'
+                          ? l('学位授予机构', 'Institution / School')
+                          : selectedPaper.itemType === 'report'
+                            ? l('发布单位', 'Institution / Agency')
+                            : l('期刊 / 会议 / 出版社', 'Publication / Publisher')}
+                      </dt>
+                      <dd className="mt-1 text-slate-700 dark:text-[#e0e0e0]">
+                        {selectedPaper.institution || selectedPaper.publisher || selectedPaper.publication || l('未设置', 'Not set')}
+                      </dd>
+                    </div>
                   </div>
+
+                  {selectedPaper.volume || selectedPaper.issue || selectedPaper.pages || selectedPaper.reportNumber ? (
+                    <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 border-t border-[var(--pq-border)] pt-2.5 text-xs text-slate-600 dark:text-[#c0c0c0]">
+                      {selectedPaper.reportNumber ? (
+                        <span><strong className="font-semibold">{l('报告号:', 'Report No:')}</strong> {selectedPaper.reportNumber}</span>
+                      ) : null}
+                      {selectedPaper.volume ? (
+                        <span><strong className="font-semibold">{l('卷:', 'Vol:')}</strong> {selectedPaper.volume}</span>
+                      ) : null}
+                      {selectedPaper.issue ? (
+                        <span><strong className="font-semibold">{l('期:', 'Issue:')}</strong> {selectedPaper.issue}</span>
+                      ) : null}
+                      {selectedPaper.pages ? (
+                        <span><strong className="font-semibold">{l('页码:', 'Pages:')}</strong> {selectedPaper.pages}</span>
+                      ) : null}
+                    </div>
+                  ) : null}
+
+                  {selectedPaper.isbn || selectedPaper.issn ? (
+                    <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500 dark:text-[#9c9c9c]">
+                      {selectedPaper.isbn ? <span>ISBN: {selectedPaper.isbn}</span> : null}
+                      {selectedPaper.issn ? <span>ISSN: {selectedPaper.issn}</span> : null}
+                    </div>
+                  ) : null}
                 </dl>
 
                 <LiteratureReadingTimeChart heatmap={readingHeatmap} />

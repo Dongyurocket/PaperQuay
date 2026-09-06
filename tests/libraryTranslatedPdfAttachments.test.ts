@@ -104,6 +104,7 @@ test('translated PDF attachments can be added, replaced, and removed', async () 
       (item: AttachmentResult) => item.kind === 'translated-pdf',
     ) as AttachmentResult | undefined;
     assert.ok(firstAttachment);
+    assert.equal(firstAttachment.storedPath.includes('translated-pdfs'), true);
     assert.equal(existsSync(firstAttachment.storedPath), true);
     assert.equal(readFileSync(firstAttachment.storedPath, 'utf8'), '%PDF-1.7\ntranslated-v1\n');
     await assert.rejects(
@@ -344,6 +345,101 @@ test('translated PDF removal never deletes shared or library-external files', as
     assert.equal(updated.attachments.some((item) => item.id === 'att-translated-shared'), false);
     assert.equal(existsSync(sharedPdfPath), true);
     assert.equal(readFileSync(sharedPdfPath, 'utf8'), '%PDF-1.7\nshared\n');
+  } finally {
+    store?.close();
+    rmSync(appPaths.dataDir, { recursive: true, force: true });
+  }
+});
+
+test('translated PDF directory can be configured to custom location and migrated', async () => {
+  const appPaths = createAppPaths();
+  let store: ReturnType<typeof createLibraryStore> | null = null;
+
+  try {
+    const storageDir = path.join(appPaths.dataDir, 'papers');
+    const customTranslatedDir = path.join(appPaths.dataDir, 'custom-translations');
+    const migratedTranslatedDir = path.join(appPaths.dataDir, 'migrated-translations');
+    const sourceDir = path.join(appPaths.dataDir, 'source');
+    const primaryPdfPath = path.join(storageDir, 'primary.pdf');
+    const sourcePath = path.join(sourceDir, 'sample-translated.pdf');
+
+    await mkdir(storageDir, { recursive: true });
+    await mkdir(customTranslatedDir, { recursive: true });
+    await mkdir(sourceDir, { recursive: true });
+    writeFileSync(primaryPdfPath, '%PDF-1.7\nprimary\n');
+    writeFileSync(sourcePath, '%PDF-1.7\ntranslated-content\n');
+
+    store = createLibraryStore(appPaths);
+    const library = store.load();
+    library.settings.storageDir = storageDir;
+    library.settings.translatedPdfDir = customTranslatedDir;
+    library.papers.push({
+      id: 'paper-custom-dir',
+      title: 'Custom Dir Paper',
+      titleZh: null,
+      year: null,
+      publication: null,
+      doi: null,
+      url: null,
+      abstractText: null,
+      keywords: [],
+      importedAt: 1,
+      updatedAt: 1,
+      lastReadAt: null,
+      readingProgress: 0,
+      isFavorite: false,
+      userNote: null,
+      aiSummary: null,
+      citation: null,
+      source: 'local',
+      sortOrder: 0,
+      authors: [],
+      tags: [],
+      categoryIds: [],
+      attachments: [{
+        id: 'att-p1',
+        paperId: 'paper-custom-dir',
+        kind: 'pdf',
+        originalPath: primaryPdfPath,
+        storedPath: primaryPdfPath,
+        relativePath: 'primary.pdf',
+        fileName: 'primary.pdf',
+        mimeType: 'application/pdf',
+        fileSize: readFileSync(primaryPdfPath).length,
+        contentHash: null,
+        createdAt: 1,
+        missing: false,
+      }],
+    });
+    await store.save(library);
+
+    const commands = createLibraryCommands({ appPaths, store });
+    const added = await commands.library_add_attachment({
+      request: {
+        paperId: 'paper-custom-dir',
+        sourcePath,
+        kind: 'translated-pdf',
+      },
+    });
+
+    const addedAttachment = added.attachments.find((item: AttachmentResult) => item.kind === 'translated-pdf') as AttachmentResult;
+    assert.ok(addedAttachment);
+    assert.equal(addedAttachment.storedPath.startsWith(customTranslatedDir), true);
+    assert.equal(existsSync(addedAttachment.storedPath), true);
+
+    // 修改设置，迁移到 migratedTranslatedDir
+    await commands.library_update_settings({
+      settings: {
+        translatedPdfDir: migratedTranslatedDir,
+      },
+    });
+
+    const reloaded = store.load().papers.find((p: { id: string }) => p.id === 'paper-custom-dir');
+    const migratedAttachment = reloaded?.attachments.find((item: { kind: string }) => item.kind === 'translated-pdf');
+    assert.ok(migratedAttachment);
+    assert.equal(migratedAttachment.storedPath.startsWith(migratedTranslatedDir), true);
+    assert.equal(existsSync(migratedAttachment.storedPath), true);
+    assert.equal(readFileSync(migratedAttachment.storedPath, 'utf8'), '%PDF-1.7\ntranslated-content\n');
   } finally {
     store?.close();
     rmSync(appPaths.dataDir, { recursive: true, force: true });

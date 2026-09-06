@@ -61,6 +61,7 @@ interface ReaderPreferencesContentProps
     | 'onSettingChange'
     | 'onNativeLibrarySettingsChange'
     | 'onSelectLibraryStorageDir'
+    | 'onSelectTranslatedPdfStorageDir'
     | 'onZoteroLocalDataDirChange'
     | 'onMineruApiTokenChange'
     | 'onEmbeddingApiKeyChange'
@@ -214,6 +215,7 @@ export function ReaderPreferencesContent({
   onSettingChange,
   onNativeLibrarySettingsChange,
   onSelectLibraryStorageDir,
+  onSelectTranslatedPdfStorageDir,
   onZoteroLocalDataDirChange,
   onMineruApiTokenChange,
   onEmbeddingApiKeyChange,
@@ -370,6 +372,41 @@ export function ReaderPreferencesContent({
                 <Database className="mr-2 inline h-4 w-4" strokeWidth={1.8} />
                 {l('解析全部元数据', 'Parse All Metadata')}
               </button>
+            </div>
+          </SettingsField>
+
+          <SettingsField
+            label={l('统一译文 PDF 存放文件夹', 'Unified translated PDF folder')}
+            description={l(
+              '附加的翻译版 PDF 会集中复制到此文件夹管理；留空时默认存放于文献库目录下的 translated-pdfs 文件夹。',
+              'Attached translated PDFs are centralized in this folder; leaves empty to use <library storage>/translated-pdfs by default.',
+            )}
+          >
+            <SettingsInput
+              value={activeLibrarySettings.translatedPdfDir ?? ''}
+              onChange={(event) => updateLibrarySetting('translatedPdfDir', event.target.value)}
+              placeholder={l('留空默认保存在 <文献库目录>/translated-pdfs', 'Leave empty to use <library storage>/translated-pdfs by default')}
+            />
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={onSelectTranslatedPdfStorageDir}
+                disabled={libraryLoading}
+                className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 disabled:opacity-60 dark:border-white/10 dark:bg-[var(--pq-surface-2)] dark:text-[var(--pq-text)] dark:hover:bg-[var(--pq-hover)]"
+              >
+                <FolderOpen className="mr-2 inline h-4 w-4" strokeWidth={1.8} />
+                {l('选择目录', 'Select Directory')}
+              </button>
+              {activeLibrarySettings.translatedPdfDir ? (
+                <button
+                  type="button"
+                  onClick={() => updateLibrarySetting('translatedPdfDir', '')}
+                  disabled={libraryLoading}
+                  className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600 transition hover:bg-slate-100 disabled:opacity-60 dark:border-white/10 dark:bg-[var(--pq-surface-2)] dark:text-[var(--pq-text-muted)] dark:hover:bg-[var(--pq-hover)]"
+                >
+                  {l('恢复默认', 'Reset to Default')}
+                </button>
+              ) : null}
             </div>
           </SettingsField>
 

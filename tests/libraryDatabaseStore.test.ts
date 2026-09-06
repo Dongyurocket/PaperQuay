@@ -405,3 +405,110 @@ test('library SQLite store upgrades early author and tag tables with global ids'
     rmSync(appPaths.dataDir, { recursive: true, force: true });
   }
 });
+
+test('library SQLite store persists and reloads extended academic citation fields', async () => {
+  const appPaths = createAppPaths();
+  let store: ReturnType<typeof createLibraryStore> | null = null;
+
+  try {
+    store = createLibraryStore(appPaths);
+    const library = store.load();
+
+    library.papers.push(
+      {
+        id: 'paper-book',
+        title: 'Deep Learning Book',
+        titleZh: '深度学习',
+        year: '2016',
+        publication: null,
+        doi: null,
+        url: 'https://www.deeplearningbook.org/',
+        abstractText: 'An introduction to deep learning.',
+        itemType: 'book',
+        publisher: 'MIT Press',
+        institution: null,
+        reportNumber: null,
+        volume: '1',
+        issue: null,
+        pages: '1-775',
+        isbn: '978-0262035613',
+        issn: null,
+        keywords: ['deep learning', 'ai'],
+        importedAt: 10,
+        updatedAt: 20,
+        lastReadAt: null,
+        readingProgress: 0,
+        isFavorite: true,
+        userNote: null,
+        aiSummary: null,
+        citation: null,
+        source: 'local',
+        sortOrder: 0,
+        authors: [{
+          id: 'auth-goodfellow',
+          name: 'Ian Goodfellow',
+          givenName: 'Ian',
+          familyName: 'Goodfellow',
+          sortOrder: 0,
+        }],
+        tags: [],
+        categoryIds: [],
+        attachments: [],
+      },
+      {
+        id: 'paper-report',
+        title: 'Tech Report on Alignment',
+        titleZh: null,
+        year: '2024',
+        publication: null,
+        doi: null,
+        url: null,
+        abstractText: null,
+        itemType: 'report',
+        publisher: null,
+        institution: 'Safety Institute',
+        reportNumber: 'NIST-AI-100-2',
+        volume: null,
+        issue: null,
+        pages: null,
+        isbn: null,
+        issn: null,
+        keywords: [],
+        importedAt: 11,
+        updatedAt: 21,
+        lastReadAt: null,
+        readingProgress: 0,
+        isFavorite: false,
+        userNote: null,
+        aiSummary: null,
+        citation: null,
+        source: 'local',
+        sortOrder: 1,
+        authors: [],
+        tags: [],
+        categoryIds: [],
+        attachments: [],
+      },
+    );
+
+    await store.save(library);
+
+    const reloaded = store.load();
+    const book = reloaded.papers.find((p: { id: string }) => p.id === 'paper-book');
+    assert.ok(book);
+    assert.equal(book.itemType, 'book');
+    assert.equal(book.publisher, 'MIT Press');
+    assert.equal(book.isbn, '978-0262035613');
+    assert.equal(book.volume, '1');
+    assert.equal(book.pages, '1-775');
+
+    const report = reloaded.papers.find((p: { id: string }) => p.id === 'paper-report');
+    assert.ok(report);
+    assert.equal(report.itemType, 'report');
+    assert.equal(report.institution, 'Safety Institute');
+    assert.equal(report.reportNumber, 'NIST-AI-100-2');
+  } finally {
+    store?.close();
+    rmSync(appPaths.dataDir, { recursive: true, force: true });
+  }
+});

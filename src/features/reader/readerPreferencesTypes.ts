@@ -43,6 +43,7 @@ export interface ReaderPreferencesWindowProps {
   onSettingChange: ReaderSettingsChangeHandler;
   onNativeLibrarySettingsChange: (patch: Partial<LibrarySettings>) => void;
   onSelectLibraryStorageDir: () => void;
+  onSelectTranslatedPdfStorageDir: () => void;
   onZoteroLocalDataDirChange: (value: string) => void;
   onMineruApiTokenChange: (value: string) => void;
   onTranslationApiKeyChange: (value: string) => void;

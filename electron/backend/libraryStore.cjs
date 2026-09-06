@@ -33,6 +33,7 @@ function createDefaultLibrary(appPaths) {
     version: 1,
     settings: {
       storageDir: path.join(appPaths.dataDir, 'paperquay-data'),
+      translatedPdfDir: '',
       zoteroLocalDataDir: '',
       importMode: 'copy',
       autoRenameFiles: true,

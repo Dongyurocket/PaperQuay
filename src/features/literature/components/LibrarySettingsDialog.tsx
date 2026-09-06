@@ -155,6 +155,33 @@ export default function LibrarySettingsDialog({
 
           <section className="pq-card p-4">
             <SettingLabel
+              title={l('统一译文 PDF 存放文件夹', 'Unified Translated PDF Folder')}
+              description={l(
+                '附加的翻译版 PDF 会集中复制到此文件夹管理；留空时默认存放于文献库目录下的 translated-pdfs 文件夹。',
+                'Attached translated PDFs are centralized in this folder; leaves empty to use <library storage>/translated-pdfs by default.',
+              )}
+            />
+            <div className="mt-3 flex gap-2">
+              <input
+                value={settings.translatedPdfDir ?? ''}
+                onChange={(event) => patch({ translatedPdfDir: event.target.value })}
+                placeholder={l('留空默认保存在 <文献库目录>/translated-pdfs', 'Leave empty to use <library storage>/translated-pdfs by default')}
+                className="pq-input h-11 min-w-0 flex-1 px-3 text-sm"
+              />
+              {settings.translatedPdfDir ? (
+                <button
+                  type="button"
+                  onClick={() => patch({ translatedPdfDir: '' })}
+                  className="pq-button h-11 px-3 text-sm text-[var(--pq-text-muted)]"
+                >
+                  {l('恢复默认', 'Reset')}
+                </button>
+              ) : null}
+            </div>
+          </section>
+
+          <section className="pq-card p-4">
+            <SettingLabel
               title={l('Zotero 本地数据目录', 'Zotero Local Data Directory')}
               description={l(
                 '选择包含 zotero.sqlite 的 Zotero 数据目录。导入时会读取 Zotero 分类树，并把分类下的 PDF 导入当前本地文献库。',

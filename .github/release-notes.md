@@ -14,13 +14,9 @@ Download the native installer for your operating system from the Assets section 
 
 ## Highlights
 
-- Fixed: startup no longer stalls for seconds — the knowledge graph is now built only when its workspace is first opened, and semantic similarity edges are computed from a cached per-document vector table instead of decoding every chunk embedding on the main process (measured 6.4s → a few milliseconds; existing databases are backfilled once on first launch).
-- Fixed: a hidden bug where semantic similarity edges were silently always empty — sqlite-vec returns float32 raw bytes under node:sqlite, and the old decoder never matched; embeddings are now decoded correctly.
-- Fixed: startup no longer rewrites the whole library on every launch; MinerU artifact checks now use a single batched IPC instead of one call per paper.
-- New: interrupted Agent runs restore recovered content (including full tool-call arguments) into the composer for you to confirm and send, instead of re-running automatically without confirmation; declined recoveries are clearly marked aborted.
-- Fixed: comparative-survey capability token usage is now counted in run totals without double-counting.
-- Improved: Agent backend hardening — per-turn limits of 80 messages / 800k characters / 4 images / 8 MB; backend Agent turns are cancellable; streamed token usage is merged correctly; request timeout and manual cancellation signals compose properly.
-- Improved: Agent memory trace size limits are enforced by bytes instead of characters, and the "organize memory" button now uses a distinct BrainCog icon.
+- **Knowledge Base MCP Server**: Standard Model Context Protocol (MCP) stdio service (`bin/paperquay-mcp.cjs` / `npm run mcp`) allowing external AI coding agents such as Proma, Pi, Codex, and Claude Code to search your literature and grounded RAG evidence chunks with citation locations (page numbers and block IDs). Built on native `node:sqlite` in read-only mode for zero-lock, conflict-free background access even when the desktop client is closed.
+- **Unified Translated PDF Folder**: Organize and centralize retainpdf translated PDF attachments into a designated directory (defaults to `<storageDir>/translated-pdfs` or any custom folder). Supports seamless automatic migration and backwards compatibility with legacy library files.
+- **Expanded Academic Item Types & Citation Metadata**: Comprehensive support for scholarly types beyond journal papers, including Books (`book`), Book Sections (`bookSection`), Theses/Dissertations (`thesis`), and Technical Reports (`report`). Adds structured citation fields: Publisher, Institution/University, Report Number, Volume, Issue, Pages, ISBN, and ISSN, complete with idempotent SQLite migration, interactive details editing, and authentic BibTeX generation (`@book`, `@techreport`, `@phdthesis`, `@incollection`).
 
 ## Notes
 
@@ -45,13 +41,9 @@ PaperQuay 是一个开源 AI 论文工作台，覆盖文献管理、PDF 阅读�
 
 ## 本次更新
 
-- 修复：应用启动不再卡顿数秒——知识图谱改为切换到图谱工作区时才首次构建；语义相似边不再全量解码 chunk 向量（实测阻塞主进程 6.4 秒），改用文档级平均向量缓存表，计算降至毫秒级；旧库首次启动一次性回填缓存（仅一次）。
-- 修复：语义相似边一直静默为空的隐藏 bug——sqlite-vec 在 node:sqlite 下返回 float32 原始字节，旧解码逻辑永不成立，现已正确解码。
-- 修复：启动不再每次全库重写文献；MinerU 产物状态检查改为单次批量 IPC，不再逐篇调用。
-- 新增：Agent 中断恢复改为把恢复内容（含完整工具调用参数）回填到输入框，确认发送后继续，不再未经确认自动重跑；放弃恢复时明确标记为已取消。
-- 修复：对比调研 Capability 的 token 用量计入运行总量且不再重复计数。
-- 优化：Agent 后端加固——单轮限制 80 条消息 / 80 万字符 / 4 张图片 / 8MB；后端 Agent 轮次支持取消；流式 token 用量正确合并；超时与手动取消信号正确组合。
-- 优化：Agent 记忆 trace 大小限制按字节执行；「整理 Agent 记忆」按钮改用 BrainCog 图标，与思考强度选择器区分。
+- **知识库 MCP stdio 服务**：新增符合标准 Model Context Protocol (MCP) 的知识库服务（`bin/paperquay-mcp.cjs` / `npm run mcp`），让 Proma、Pi、Codex、Claude Code 等外部 Agent 能够直接检索本地论文库和 RAG 正文证据切片并获得精准页码与段落定位。基于 `node:sqlite` 原生只读模式直连数据库，无锁且无需桌面端持续运行即可独立使用。
+- **译文 PDF 统一文件夹归档**：文库偏好设置支持配置统一译文 PDF 存放目录（默认保存在 `<storageDir>/translated-pdfs`，亦可自定义外部路径）。附加 retainpdf 对照 PDF 时自动复制到统一文件夹；更改存储目录时自动平滑迁移已有译文，安全策略防止误删外部文件，同时向下兼容旧版根目录文件。
+- **学术元数据与常用引用扩展**：全面支持学术常用的非期刊文献类型，包括书籍（Book）、书籍章节（Book Section）、学位论文（Thesis / Dissertation）、研究报告（Report）、会议论文（Conference Paper）与预印本（Preprint）；新增出版社、高校/授予单位、报告号、卷号、期号、页码、ISBN、ISSN 等学术引用核心字段；SQLite 自动无损列迁移；详情面板支持动态表单与展示卡片；BibTeX 导出支持精准生成 `@book`、`@techreport`、`@phdthesis`、`@incollection` 条目。
 
 ## 备注
 

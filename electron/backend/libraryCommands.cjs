@@ -38,8 +38,18 @@ function isSubPath(root, candidate) {
   return Boolean(relative) && !relative.startsWith('..') && !path.isAbsolute(relative);
 }
 
-function canDeleteLibraryOwnedFile(library, attachment, storageDir) {
-  if (!attachment?.storedPath || !storageDir || !isSubPath(storageDir, attachment.storedPath)) {
+function canDeleteLibraryOwnedFile(library, attachment, allowedDirs) {
+  if (!attachment?.storedPath) {
+    return false;
+  }
+
+  const dirs = (Array.isArray(allowedDirs) ? allowedDirs : [allowedDirs])
+    .filter(Boolean)
+    .map(cleanString)
+    .filter(Boolean);
+
+  const isInsideAllowed = dirs.some((dir) => isSubPath(dir, attachment.storedPath));
+  if (!isInsideAllowed) {
     return false;
   }
 
@@ -48,6 +58,16 @@ function canDeleteLibraryOwnedFile(library, attachment, storageDir) {
       other.id !== attachment.id && isSamePath(other.storedPath, attachment.storedPath),
     ),
   );
+}
+
+function resolveTranslatedPdfStorageDir(settings, appPaths) {
+  const custom = cleanString(settings?.translatedPdfDir);
+  if (custom) {
+    return path.resolve(custom);
+  }
+
+  const base = cleanString(settings?.storageDir) || path.join(appPaths.dataDir, 'paperquay-data');
+  return path.join(base, 'translated-pdfs');
 }
 
 function pathExists(filePath) {
@@ -113,6 +133,54 @@ async function migrateLibraryStorageDirectory(library, previousStorageDir, nextS
         attachment.storedPath = nextPath;
         attachment.relativePath = relativePath;
         attachment.fileName = attachment.fileName || fileNameFromPath(nextPath);
+        attachment.missing = !(await pathExists(nextPath));
+        updatedAttachments += 1;
+        paper.updatedAt = now();
+      }
+    }
+  }
+
+  return { copiedFiles, updatedAttachments };
+}
+
+async function migrateTranslatedPdfDirectory(library, previousDir, nextDir, storageDir) {
+  const prev = cleanString(previousDir);
+  const next = cleanString(nextDir);
+
+  if (!prev || !next || isSamePath(prev, next)) {
+    return { copiedFiles: 0, updatedAttachments: 0 };
+  }
+
+  await fsp.mkdir(next, { recursive: true });
+  let copiedFiles = 0;
+  let updatedAttachments = 0;
+
+  for (const paper of library.papers) {
+    for (const attachment of paper.attachments ?? []) {
+      if (attachment?.kind !== 'translated-pdf' || !attachment?.storedPath) {
+        continue;
+      }
+
+      const storedPath = attachment.storedPath;
+      if (!isSubPath(prev, storedPath) && !isSamePath(path.dirname(storedPath), prev)) {
+        continue;
+      }
+
+      const fileName = fileNameFromPath(storedPath);
+      const nextPath = path.join(next, fileName);
+
+      if (!isSamePath(storedPath, nextPath)) {
+        if (await pathExists(storedPath)) {
+          copiedFiles += (await copyFileIfNeeded(storedPath, nextPath)) ? 1 : 0;
+        }
+
+        attachment.storedPath = nextPath;
+        if (storageDir && isSubPath(storageDir, nextPath)) {
+          attachment.relativePath = path.relative(storageDir, nextPath).replace(/\\/g, '/');
+        } else {
+          attachment.relativePath = null;
+        }
+        attachment.fileName = attachment.fileName || fileName;
         attachment.missing = !(await pathExists(nextPath));
         updatedAttachments += 1;
         paper.updatedAt = now();
@@ -499,19 +567,33 @@ function createLibraryCommands(context) {
     async library_update_settings({ settings }) {
       const library = store.load();
       const previousStorageDir = library.settings.storageDir;
+      const previousTranslatedDir = resolveTranslatedPdfStorageDir(library.settings, appPaths);
       library.settings = {
         ...library.settings,
         ...settings,
         importMode: settings.importMode || library.settings.importMode,
       };
-      if (library.settings.storageDir) {
+      const nextStorageDir = library.settings.storageDir;
+      const nextTranslatedDir = resolveTranslatedPdfStorageDir(library.settings, appPaths);
+
+      if (nextStorageDir) {
         await migrateLibraryStorageDirectory(
           library,
           previousStorageDir,
-          library.settings.storageDir,
+          nextStorageDir,
         );
-        await fsp.mkdir(library.settings.storageDir, { recursive: true });
+        await fsp.mkdir(nextStorageDir, { recursive: true });
       }
+
+      if (!isSamePath(previousTranslatedDir, nextTranslatedDir)) {
+        await migrateTranslatedPdfDirectory(
+          library,
+          previousTranslatedDir,
+          nextTranslatedDir,
+          nextStorageDir,
+        );
+      }
+
       await store.save(library);
       return library.settings;
     },
@@ -652,6 +734,15 @@ function createLibraryCommands(context) {
             doi: metadata.doi ?? null,
             url: metadata.url ?? null,
             abstractText: metadata.abstractText ?? null,
+            itemType: metadata.itemType || 'journalArticle',
+            publisher: metadata.publisher ?? null,
+            institution: metadata.institution ?? null,
+            reportNumber: metadata.reportNumber ?? null,
+            volume: metadata.volume ?? null,
+            issue: metadata.issue ?? null,
+            pages: metadata.pages ?? null,
+            isbn: metadata.isbn ?? null,
+            issn: metadata.issn ?? null,
             keywords: Array.isArray(metadata.keywords) ? metadata.keywords : [],
             importedAt: now(),
             updatedAt: now(),
@@ -723,7 +814,27 @@ function createLibraryCommands(context) {
       const paper = library.papers.find((item) => item.id === request.paperId);
       if (!paper) throw new Error('Paper does not exist');
 
-      for (const key of ['title', 'titleZh', 'year', 'publication', 'doi', 'url', 'abstractText', 'userNote', 'aiSummary', 'citation']) {
+      for (const key of [
+        'title',
+        'titleZh',
+        'year',
+        'publication',
+        'doi',
+        'url',
+        'abstractText',
+        'itemType',
+        'publisher',
+        'institution',
+        'reportNumber',
+        'volume',
+        'issue',
+        'pages',
+        'isbn',
+        'issn',
+        'userNote',
+        'aiSummary',
+        'citation',
+      ]) {
         if (request[key] !== undefined) paper[key] = request[key];
       }
       if (request.keywords) paper.keywords = request.keywords.map(cleanString).filter(Boolean);
@@ -786,13 +897,14 @@ function createLibraryCommands(context) {
       await ensureFile(sourcePath);
 
       const storageDir = library.settings.storageDir || path.join(appPaths.dataDir, 'paperquay-data');
-      await fsp.mkdir(storageDir, { recursive: true });
+      const targetDir = resolveTranslatedPdfStorageDir(library.settings, appPaths);
+      await fsp.mkdir(targetDir, { recursive: true });
 
       const bytes = await fsp.readFile(sourcePath);
       const contentHash = hashBytes(bytes);
       const fileName = safeFileName(fileNameFromPath(sourcePath));
       const attachmentId = id('att');
-      const storedPath = path.join(storageDir, `${paper.id}-translated-${attachmentId}-${fileName}`);
+      const storedPath = path.join(targetDir, `${paper.id}-translated-${attachmentId}-${fileName}`);
       const replaced = paper.attachments.filter((attachment) => attachment.kind === kind);
       const copiedToLibrary = !isSamePath(sourcePath, storedPath);
 
@@ -809,7 +921,9 @@ function createLibraryCommands(context) {
           kind,
           originalPath: sourcePath,
           storedPath,
-          relativePath: path.relative(storageDir, storedPath),
+          relativePath: isSubPath(storageDir, storedPath)
+            ? path.relative(storageDir, storedPath).replace(/\\/g, '/')
+            : null,
           fileName,
           mimeType: 'application/pdf',
           fileSize: stat.size,
@@ -829,11 +943,12 @@ function createLibraryCommands(context) {
 
       // Commit metadata before deleting superseded copies. A cleanup failure may leave an
       // orphaned file, but it cannot leave the database pointing at a file removed early.
+      const allowedDirs = [storageDir, targetDir];
       for (const attachment of replaced) {
         if (
           attachment.storedPath &&
           !isSamePath(attachment.storedPath, storedPath) &&
-          canDeleteLibraryOwnedFile(library, attachment, storageDir)
+          canDeleteLibraryOwnedFile(library, attachment, allowedDirs)
         ) {
           await fsp.rm(attachment.storedPath, { force: true }).catch(() => {});
         }
@@ -845,6 +960,7 @@ function createLibraryCommands(context) {
     async library_remove_attachment({ request }) {
       const library = store.load();
       const storageDir = library.settings.storageDir || path.join(appPaths.dataDir, 'paperquay-data');
+      const targetDir = resolveTranslatedPdfStorageDir(library.settings, appPaths);
       const paper = library.papers.find((item) =>
         item.attachments.some((attachment) => attachment.id === request.attachmentId),
       );
@@ -860,9 +976,10 @@ function createLibraryCommands(context) {
 
       await store.save(library);
 
+      const allowedDirs = [storageDir, targetDir];
       if (
         request.deleteFile !== false &&
-        canDeleteLibraryOwnedFile(library, attachment, storageDir)
+        canDeleteLibraryOwnedFile(library, attachment, allowedDirs)
       ) {
         await fsp.rm(attachment.storedPath, { force: true }).catch(() => {});
       }

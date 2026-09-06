@@ -137,9 +137,13 @@ function createFileCommands(context) {
     const absolute = path.resolve(filePath);
     const comparableAbsolute = comparablePath(absolute);
     const library = store.load();
+    const translatedPdfDir = library.settings?.translatedPdfDir
+      ? path.resolve(library.settings.translatedPdfDir)
+      : null;
     const roots = [
       path.resolve(appPaths.dataDir),
       path.resolve(library.settings.storageDir || path.join(appPaths.dataDir, 'paperquay-data')),
+      ...(translatedPdfDir ? [translatedPdfDir] : []),
     ];
 
     if (roots.some((root) => {

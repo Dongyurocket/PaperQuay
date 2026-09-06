@@ -2,6 +2,7 @@ import type {
   ImportPdfMetadata,
   LibrarySettings,
   LiteratureCategory,
+  LiteratureItemType,
   LiteraturePaper,
   LiteraturePaperTaskState,
   UpdatePaperRequest,
@@ -145,8 +146,21 @@ export function splitAuthors(value: string): string[] {
     .filter(Boolean);
 }
 
+export function normalizeItemType(rawType?: string | null): LiteratureItemType {
+  const type = (rawType || '').trim().toLowerCase();
+  if (!type) return 'journalArticle';
+  if (type.includes('booksection') || type.includes('chapter')) return 'bookSection';
+  if (type.includes('book') || type.includes('monograph')) return 'book';
+  if (type.includes('thesis') || type.includes('dissertation')) return 'thesis';
+  if (type.includes('report') || type.includes('whitepaper')) return 'report';
+  if (type.includes('conference') || type.includes('proceedings') || type.includes('inproceedings')) return 'conferencePaper';
+  if (type.includes('preprint') || type.includes('arxiv')) return 'preprint';
+  if (type.includes('journal') || type.includes('article')) return 'journalArticle';
+  return rawType?.trim() || 'journalArticle';
+}
+
 export function metadataFromDraft(draft: ImportDraftItem): ImportPdfMetadata {
-  return {
+  const metadata: ImportPdfMetadata = {
     title: draft.title.trim() || titleFromPdfPath(draft.path),
     authors: splitAuthors(draft.authors),
     year: draft.year.trim() || null,
@@ -155,18 +169,35 @@ export function metadataFromDraft(draft: ImportDraftItem): ImportPdfMetadata {
     url: draft.url.trim() || null,
     abstractText: draft.abstractText.trim() || null,
   };
+
+  if (draft.itemType) metadata.itemType = normalizeItemType(draft.itemType);
+  if (draft.publisher?.trim()) metadata.publisher = draft.publisher.trim();
+  if (draft.institution?.trim()) metadata.institution = draft.institution.trim();
+  if (draft.reportNumber?.trim()) metadata.reportNumber = draft.reportNumber.trim();
+  if (draft.volume?.trim()) metadata.volume = draft.volume.trim();
+  if (draft.issue?.trim()) metadata.issue = draft.issue.trim();
+  if (draft.pages?.trim()) metadata.pages = draft.pages.trim();
+  if (draft.isbn?.trim()) metadata.isbn = draft.isbn.trim();
+  if (draft.issn?.trim()) metadata.issn = draft.issn.trim();
+
+  return metadata;
 }
 
 export function metadataFromZoteroItem(item: ZoteroLibraryItem): ImportPdfMetadata {
   const year = item.year.trim();
-
-  return {
+  const metadata: ImportPdfMetadata = {
     title: item.title.trim() || item.attachmentFilename || item.itemKey,
     authors: splitAuthors(item.creators).filter((author) => author !== 'Unknown Authors'),
     year: year && year !== '未知年份' && year !== 'Unknown Year' ? year : null,
     publication: null,
     doi: null,
   };
+
+  if (item.itemType && item.itemType !== 'journalArticle') {
+    metadata.itemType = normalizeItemType(item.itemType);
+  }
+
+  return metadata;
 }
 
 export function categorySignature(name: string, parentId: string | null): string {

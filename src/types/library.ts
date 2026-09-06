@@ -2,6 +2,7 @@ export type LibraryImportMode = 'copy' | 'move' | 'keep';
 
 export interface LibrarySettings {
   storageDir: string;
+  translatedPdfDir?: string;
   zoteroLocalDataDir: string;
   importMode: LibraryImportMode;
   autoRenameFiles: boolean;
@@ -56,6 +57,17 @@ export interface LiteratureAttachment {
   missing: boolean;
 }
 
+export type LiteratureItemType =
+  | 'journalArticle'
+  | 'book'
+  | 'bookSection'
+  | 'conferencePaper'
+  | 'thesis'
+  | 'report'
+  | 'preprint'
+  | 'misc'
+  | string;
+
 export interface LiteraturePaper {
   id: string;
   title: string;
@@ -65,6 +77,15 @@ export interface LiteraturePaper {
   doi: string | null;
   url: string | null;
   abstractText: string | null;
+  itemType?: LiteratureItemType | null;
+  publisher?: string | null;
+  institution?: string | null;
+  reportNumber?: string | null;
+  volume?: string | null;
+  issue?: string | null;
+  pages?: string | null;
+  isbn?: string | null;
+  issn?: string | null;
   keywords: string[];
   importedAt: number;
   updatedAt: number;
@@ -163,6 +184,15 @@ export interface ImportPdfMetadata {
   doi?: string | null;
   url?: string | null;
   abstractText?: string | null;
+  itemType?: LiteratureItemType | null;
+  publisher?: string | null;
+  institution?: string | null;
+  reportNumber?: string | null;
+  volume?: string | null;
+  issue?: string | null;
+  pages?: string | null;
+  isbn?: string | null;
+  issn?: string | null;
   keywords?: string[] | null;
   authors?: string[] | null;
 }
@@ -213,6 +243,15 @@ export interface UpdatePaperRequest {
   doi?: string | null;
   url?: string | null;
   abstractText?: string | null;
+  itemType?: LiteratureItemType | null;
+  publisher?: string | null;
+  institution?: string | null;
+  reportNumber?: string | null;
+  volume?: string | null;
+  issue?: string | null;
+  pages?: string | null;
+  isbn?: string | null;
+  issn?: string | null;
   keywords?: string[] | null;
   tags?: string[] | null;
   authors?: string[] | null;

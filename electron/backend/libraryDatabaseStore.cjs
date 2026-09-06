@@ -50,6 +50,15 @@ function createSchema(db) {
       doi TEXT,
       url TEXT,
       abstract_text TEXT,
+      item_type TEXT,
+      publisher TEXT,
+      institution TEXT,
+      report_number TEXT,
+      volume TEXT,
+      issue TEXT,
+      pages TEXT,
+      isbn TEXT,
+      issn TEXT,
       imported_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL,
       last_read_at INTEGER,
@@ -170,6 +179,15 @@ function createSchema(db) {
   `);
 
   ensureColumn(db, 'papers', 'title_zh', 'TEXT');
+  ensureColumn(db, 'papers', 'item_type', 'TEXT');
+  ensureColumn(db, 'papers', 'publisher', 'TEXT');
+  ensureColumn(db, 'papers', 'institution', 'TEXT');
+  ensureColumn(db, 'papers', 'report_number', 'TEXT');
+  ensureColumn(db, 'papers', 'volume', 'TEXT');
+  ensureColumn(db, 'papers', 'issue', 'TEXT');
+  ensureColumn(db, 'papers', 'pages', 'TEXT');
+  ensureColumn(db, 'papers', 'isbn', 'TEXT');
+  ensureColumn(db, 'papers', 'issn', 'TEXT');
 }
 
 function ensureColumn(db, tableName, columnName, columnDefinition) {
@@ -328,6 +346,15 @@ function loadLibraryFromDb(db, appPaths, normalizeLibrary) {
       doi,
       url,
       abstract_text AS abstractText,
+      item_type AS itemType,
+      publisher,
+      institution,
+      report_number AS reportNumber,
+      volume,
+      issue,
+      pages,
+      isbn,
+      issn,
       imported_at AS importedAt,
       updated_at AS updatedAt,
       last_read_at AS lastReadAt,
@@ -544,6 +571,15 @@ function saveLibraryToDb(db, appPaths, normalizeLibrary, library) {
         doi,
         url,
         abstract_text,
+        item_type,
+        publisher,
+        institution,
+        report_number,
+        volume,
+        issue,
+        pages,
+        isbn,
+        issn,
         imported_at,
         updated_at,
         last_read_at,
@@ -555,7 +591,7 @@ function saveLibraryToDb(db, appPaths, normalizeLibrary, library) {
         source,
         sort_order
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const insertKeyword = db.prepare(`
       INSERT INTO paper_keywords (paper_id, keyword, sort_order)
@@ -614,6 +650,15 @@ function saveLibraryToDb(db, appPaths, normalizeLibrary, library) {
         paper.doi ?? null,
         paper.url ?? null,
         paper.abstractText ?? null,
+        paper.itemType ?? 'journalArticle',
+        paper.publisher ?? null,
+        paper.institution ?? null,
+        paper.reportNumber ?? null,
+        paper.volume ?? null,
+        paper.issue ?? null,
+        paper.pages ?? null,
+        paper.isbn ?? null,
+        paper.issn ?? null,
         Number(paper.importedAt) || 0,
         Number(paper.updatedAt) || 0,
         paper.lastReadAt ?? null,

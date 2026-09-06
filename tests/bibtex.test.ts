@@ -29,6 +29,15 @@ function paper(overrides: Partial<LiteraturePaper> = {}): LiteraturePaper {
     userNote: null,
     aiSummary: null,
     citation: null,
+    itemType: overrides.itemType ?? null,
+    publisher: overrides.publisher ?? null,
+    institution: overrides.institution ?? null,
+    reportNumber: overrides.reportNumber ?? null,
+    volume: overrides.volume ?? null,
+    issue: overrides.issue ?? null,
+    pages: overrides.pages ?? null,
+    isbn: overrides.isbn ?? null,
+    issn: overrides.issn ?? null,
     source: 'local',
     sortOrder: 0,
     authors: overrides.authors ?? [
@@ -63,7 +72,12 @@ test('buildCitationKey deduplicates with letter suffixes', () => {
   assert.equal(second, 'chen2026electricb');
 });
 
-test('inferBibtexEntryType heuristics', () => {
+test('inferBibtexEntryType heuristics and itemType support', () => {
+  assert.equal(inferBibtexEntryType(paper({ itemType: 'book' })), 'book');
+  assert.equal(inferBibtexEntryType(paper({ itemType: 'bookSection' })), 'incollection');
+  assert.equal(inferBibtexEntryType(paper({ itemType: 'thesis', title: 'Deep Learning on Edge' })), 'phdthesis');
+  assert.equal(inferBibtexEntryType(paper({ itemType: 'thesis', title: 'Master Thesis in Robotics' })), 'mastersthesis');
+  assert.equal(inferBibtexEntryType(paper({ itemType: 'report' })), 'techreport');
   assert.equal(inferBibtexEntryType(paper({ publication: 'Journal of Aircraft' })), 'article');
   assert.equal(inferBibtexEntryType(paper({ publication: 'NeurIPS 2025' })), 'inproceedings');
   assert.equal(inferBibtexEntryType(paper({ publication: 'arXiv preprint' })), 'misc');
@@ -83,6 +97,50 @@ test('paperToBibtexEntry renders fields and forced citation key', () => {
   assert.match(entry, /doi = \{10\.1234\/vtol\}/);
   // bibtex 方言下中文标题进入 note 字段
   assert.match(entry, /note = \{电动垂直起降设计探索\}/);
+});
+
+test('paperToBibtexEntry renders books, reports, and theses with academic fields', () => {
+  const bookEntry = paperToBibtexEntry(
+    paper({
+      itemType: 'book',
+      title: 'Reinforcement Learning: An Introduction',
+      publisher: 'MIT Press',
+      year: '2018',
+      isbn: '978-0262039246',
+      volume: '2',
+    }),
+    { citationKey: 'sutton2018reinforcement' },
+  );
+  assert.match(bookEntry, /^@book\{sutton2018reinforcement,/);
+  assert.match(bookEntry, /publisher = \{MIT Press\}/);
+  assert.match(bookEntry, /isbn = \{978-0262039246\}/);
+  assert.match(bookEntry, /volume = \{2\}/);
+
+  const reportEntry = paperToBibtexEntry(
+    paper({
+      itemType: 'report',
+      title: 'GPT-4 Technical Report',
+      institution: 'OpenAI',
+      reportNumber: 'arXiv:2303.08774',
+      year: '2023',
+    }),
+    { citationKey: 'openai2023gpt4' },
+  );
+  assert.match(reportEntry, /^@techreport\{openai2023gpt4,/);
+  assert.match(reportEntry, /institution = \{OpenAI\}/);
+  assert.match(reportEntry, /number = \{arXiv:2303\.08774\}/);
+
+  const thesisEntry = paperToBibtexEntry(
+    paper({
+      itemType: 'thesis',
+      title: 'Graph Representation Learning',
+      institution: 'Stanford University',
+      year: '2021',
+    }),
+    { citationKey: 'leskovec2021graph' },
+  );
+  assert.match(thesisEntry, /^@phdthesis\{leskovec2021graph,/);
+  assert.match(thesisEntry, /school = \{Stanford University\}/);
 });
 
 test('papersToBibtex joins entries with blank lines and deduplicates keys', () => {

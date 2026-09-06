@@ -582,6 +582,21 @@ function Reader({ workspaceActive = true }: ReaderProps) {
     );
   }, [l, updateNativeLibrarySettings]);
 
+  const handleSelectTranslatedPdfStorageDir = useCallback(async () => {
+    const directory = await selectDirectory(
+      l('选择统一译文 PDF 存放文件夹', 'Select the unified folder for translated PDFs'),
+    );
+
+    if (!directory) {
+      return;
+    }
+
+    await updateNativeLibrarySettings(
+      { translatedPdfDir: directory },
+      'reader-translated-pdf-dir',
+    );
+  }, [l, updateNativeLibrarySettings]);
+
   const handleBridgeStateChange = useCallback((tabId: string, bridge: ReaderTabBridgeState | null) => {
     setReaderBridges((current) => {
       if (!bridge) {
@@ -1044,6 +1059,7 @@ function Reader({ workspaceActive = true }: ReaderProps) {
           onSettingChange={updateSetting}
           onNativeLibrarySettingsChange={(patch) => void updateNativeLibrarySettings(patch)}
           onSelectLibraryStorageDir={() => void handleSelectLibraryStorageDir()}
+          onSelectTranslatedPdfStorageDir={() => void handleSelectTranslatedPdfStorageDir()}
           onZoteroLocalDataDirChange={setZoteroLocalDataDir}
           onMineruApiTokenChange={(value) => updateReaderSecret('mineruApiToken', value)}
           onTranslationApiKeyChange={(value) => updateReaderSecret('translationApiKey', value)}

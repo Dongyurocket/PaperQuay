@@ -104,8 +104,36 @@ const CONFERENCE_PATTERN =
 const BOOK_PATTERN = /book|monograph|handbook|springer|press\b/i;
 const PREPRINT_PATTERN = /arxiv|preprint|biorxiv|medrxiv|ssrn|chemrxiv/i;
 
-/** 由 publication 字段启发式推断 BibTeX entry 类型。 */
+/** 由 itemType 或 publication 字段推断 BibTeX entry 类型。 */
 export function inferBibtexEntryType(paper: LiteraturePaper): string {
+  const itemType = (paper.itemType ?? '').trim().toLowerCase();
+
+  if (itemType === 'book') {
+    return 'book';
+  }
+  if (itemType === 'booksection' || itemType === 'chapter') {
+    return 'incollection';
+  }
+  if (itemType === 'thesis' || itemType === 'dissertation') {
+    const text = `${paper.title} ${paper.publication ?? ''}`.toLowerCase();
+    return text.includes('master') || text.includes('硕士') ? 'mastersthesis' : 'phdthesis';
+  }
+  if (itemType === 'report' || itemType === 'techreport') {
+    return 'techreport';
+  }
+  if (itemType === 'conferencepaper' || itemType === 'conference') {
+    return 'inproceedings';
+  }
+  if (itemType === 'journalarticle') {
+    return 'article';
+  }
+  if (itemType === 'preprint') {
+    return 'misc';
+  }
+  if (itemType === 'misc') {
+    return 'misc';
+  }
+
   const publication = (paper.publication ?? '').trim();
 
   if (publication) {
@@ -183,15 +211,66 @@ export function paperToBibtexEntry(
   const publication = (paper.publication ?? '').trim();
 
   if (publication) {
-    if (entryType === 'inproceedings') {
+    if (entryType === 'inproceedings' || entryType === 'incollection') {
       fields.push(['booktitle', escapeBibtexValue(publication)]);
     } else if (entryType === 'article') {
       fields.push(['journal', escapeBibtexValue(publication)]);
     } else if (entryType === 'book') {
-      fields.push(['publisher', escapeBibtexValue(publication)]);
+      fields.push(['publisher', escapeBibtexValue(paper.publisher?.trim() || publication)]);
+    } else if (entryType === 'techreport') {
+      fields.push(['institution', escapeBibtexValue(paper.institution?.trim() || publication)]);
+    } else if (entryType === 'phdthesis' || entryType === 'mastersthesis') {
+      fields.push(['school', escapeBibtexValue(paper.institution?.trim() || publication)]);
     } else {
       fields.push(['howpublished', escapeBibtexValue(publication)]);
     }
+  }
+
+  // 针对非 publication 覆盖到的出版者与学术机构字段
+  const publisher = paper.publisher?.trim();
+  if (publisher && (entryType === 'book' || entryType === 'incollection' || entryType === 'misc')) {
+    if (!fields.some(([k]) => k === 'publisher')) {
+      fields.push(['publisher', escapeBibtexValue(publisher)]);
+    }
+  }
+
+  const institution = paper.institution?.trim();
+  if (institution) {
+    if (entryType === 'techreport' && !fields.some(([k]) => k === 'institution')) {
+      fields.push(['institution', escapeBibtexValue(institution)]);
+    } else if ((entryType === 'phdthesis' || entryType === 'mastersthesis') && !fields.some(([k]) => k === 'school')) {
+      fields.push(['school', escapeBibtexValue(institution)]);
+    }
+  }
+
+  const reportNumber = paper.reportNumber?.trim();
+  if (reportNumber) {
+    fields.push(['number', escapeBibtexValue(reportNumber)]);
+  }
+
+  const volume = paper.volume?.trim();
+  if (volume) {
+    fields.push(['volume', escapeBibtexValue(volume)]);
+  }
+
+  const issue = paper.issue?.trim();
+  if (issue && !fields.some(([k]) => k === 'number')) {
+    fields.push(['number', escapeBibtexValue(issue)]);
+  }
+
+  const pages = paper.pages?.trim();
+  if (pages) {
+    fields.push(['pages', escapeBibtexValue(pages)]);
+  }
+
+  const isbn = paper.isbn?.trim();
+  if (isbn) {
+    fields.push(['isbn', escapeBibtexValue(isbn)]);
+  }
+
+  const issn = paper.issn?.trim();
+  if (issn) {
+    fields.push(['issn', escapeBibtexValue(issn)]);
   }
 
   const doi = paper.doi?.trim();

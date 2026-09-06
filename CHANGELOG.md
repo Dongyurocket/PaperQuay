@@ -4,6 +4,19 @@
 
 各平台安装包见 [GitHub Releases](https://github.com/Dongyurocket/PaperQuay/releases)。
 
+## [0.1.32] - 2026-09-06
+
+### 新增
+
+- 知识库 MCP stdio 服务：内置独立的标准 MCP stdio 知识库服务（`bin/paperquay-mcp.cjs`），提供给 Proma、Pi、Codex、Claude Code 等外部 Agent 免侵入直连调用。基于 `node:sqlite` 原生只读模式直连本地 SQLite 数据库（文献库、RAG 分块、笔记），无锁且无需桌面端持续运行即可查询；支持文献检索（`search_papers`）、单篇详情（`get_paper_details`）、RAG 知识库切片证据检索（`search_knowledge_base`，含页码与段落定位）、正文切片阅读（`read_paper_content`）与笔记搜索（`search_notes`）；在旧版数据库上具备动态列自适应与平滑向下兼容。
+- 译文 PDF 统一文件夹管理：文库偏好设置新增「统一译文 PDF 存放文件夹」（默认存放在 `<storageDir>/translated-pdfs`，亦支持自定义外部独立路径）。附加 retainpdf 对照 PDF 时自动复制到统一目录集中管理；修改存储目录时自动平滑迁移已有译文，且安全策略保证不误删共享或外部文件，向前兼容旧版根目录文件。
+- 学术元数据与常用引用扩展：文献数据模型扩展支持书籍（Book）、书籍章节（Book Section）、学位论文（Thesis / Dissertation）、研究报告（Report）、会议论文（Conference Paper）、预印本（Preprint）等常用学术类型；新增出版社、授予单位/高校、报告号、卷号、期号、页码、ISBN、ISSN 等标准引用字段；SQLite 数据库自动无损列迁移；详情面板支持类型选择与动态字段编辑及卡片展示；BibTeX 导出支持生成标准的 `@book`、`@techreport`、`@phdthesis`、`@incollection` 条目。
+
+### 优化
+
+- 安全写路径白名单自动将自定义译文 PDF 存储目录纳入允许范围，防止跨盘符写入被拦截。
+- Zotero 导入自动继承并规范化原始条目类型（书籍、学位论文、报告等）。
+
 ## [0.1.31] - 2026-08-27
 
 ### 修复
