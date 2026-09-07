@@ -44,6 +44,8 @@ export interface UseReaderLibraryActionsOptions {
   allKnownItems: WorkspaceItem[];
   appWindow: AppWindowLike;
   configHydrated: boolean;
+  /** embedding 服务 API Key（来自 readerSecrets），用于解析后自动纳入本地知识库索引。 */
+  embeddingApiKey: string;
   createPaperTaskState: CreatePaperTaskState;
   findExistingMineruJson: (
     item: WorkspaceItem,

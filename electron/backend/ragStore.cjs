@@ -579,44 +579,113 @@ function createSchema(db) {
   `);
 }
 
+const FTS_TABLE_NAME = 'rag_chunks_fts';
+const FTS_TRIGGER_NAMES = ['rag_chunks_ai', 'rag_chunks_ad', 'rag_chunks_au'];
+const FTS_TRIGRAM_META_KEY = 'rag_chunks_fts_v2_trigram';
+const FTS_UNICODE61_META_KEY = 'rag_chunks_fts_v1';
+
+function existingFtsTokenizer(db) {
+  try {
+    const row = db
+      .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?")
+      .get(FTS_TABLE_NAME);
+    const sql = typeof row?.sql === 'string' ? row.sql.toLowerCase() : '';
+
+    if (!sql) {
+      return null;
+    }
+
+    if (sql.includes('trigram')) {
+      return 'trigram';
+    }
+
+    return 'unicode61';
+  } catch {
+    return null;
+  }
+}
+
+function dropFtsObjects(db) {
+  for (const triggerName of FTS_TRIGGER_NAMES) {
+    db.exec(`DROP TRIGGER IF EXISTS ${triggerName}`);
+  }
+
+  db.exec(`DROP TABLE IF EXISTS ${FTS_TABLE_NAME}`);
+}
+
+function createFtsObjects(db, tokenizer) {
+  db.exec(`
+    CREATE VIRTUAL TABLE IF NOT EXISTS ${FTS_TABLE_NAME} USING fts5(
+      text,
+      content='rag_chunks',
+      content_rowid='id',
+      tokenize='${tokenizer}'
+    );
+
+    CREATE TRIGGER IF NOT EXISTS rag_chunks_ai AFTER INSERT ON rag_chunks BEGIN
+      INSERT INTO rag_chunks_fts(rowid, text) VALUES (new.id, new.text);
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS rag_chunks_ad AFTER DELETE ON rag_chunks BEGIN
+      INSERT INTO rag_chunks_fts(rag_chunks_fts, rowid, text) VALUES ('delete', old.id, old.text);
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS rag_chunks_au AFTER UPDATE ON rag_chunks BEGIN
+      INSERT INTO rag_chunks_fts(rag_chunks_fts, rowid, text) VALUES ('delete', old.id, old.text);
+      INSERT INTO rag_chunks_fts(rowid, text) VALUES (new.id, new.text);
+    END;
+  `);
+}
+
+function rebuildFtsIndex(db, metaKey) {
+  db.exec(`INSERT INTO ${FTS_TABLE_NAME}(${FTS_TABLE_NAME}) VALUES('rebuild')`);
+  db.prepare('INSERT OR REPLACE INTO rag_store_meta (key, value) VALUES (?, ?)').run(
+    metaKey,
+    String(Date.now()),
+  );
+}
+
+// 中文全文检索依赖 FTS5 trigram 分词：unicode61 会把整段中文当成一个 token，
+// 导致中文关键词完全无法命中；trigram 按 3 字滑窗索引，天然支持中文子串匹配，
+// 对英文则退化为子串匹配（召回更高）。旧库使用 unicode61 时自动重建为 trigram。
 function initializeFtsSchema(db, { disabled = false } = {}) {
   if (disabled) {
     return false;
   }
 
   try {
-    db.exec(`
-      CREATE VIRTUAL TABLE IF NOT EXISTS rag_chunks_fts USING fts5(
-        text,
-        content='rag_chunks',
-        content_rowid='id',
-        tokenize='unicode61'
+    const existingTokenizer = existingFtsTokenizer(db);
+    let activeTokenizer = 'trigram';
+    let recreated = false;
+
+    try {
+      if (existingTokenizer !== 'trigram') {
+        dropFtsObjects(db);
+        createFtsObjects(db, 'trigram');
+        recreated = true;
+      }
+    } catch (trigramError) {
+      // 运行环境 SQLite 过旧不支持 trigram 时回退到 unicode61，保持英文检索可用。
+      // 无条件重建：进入本分支时 FTS 对象可能已被 drop，按 existingTokenizer 条件跳过
+      // 会留下缺失 FTS 表的坏状态。
+      console.warn(
+        '[paperquay] FTS5 trigram tokenizer unavailable; falling back to unicode61.',
+        toError(trigramError),
       );
+      activeTokenizer = 'unicode61';
+      dropFtsObjects(db);
+      createFtsObjects(db, 'unicode61');
+      recreated = true;
+    }
 
-      CREATE TRIGGER IF NOT EXISTS rag_chunks_ai AFTER INSERT ON rag_chunks BEGIN
-        INSERT INTO rag_chunks_fts(rowid, text) VALUES (new.id, new.text);
-      END;
-
-      CREATE TRIGGER IF NOT EXISTS rag_chunks_ad AFTER DELETE ON rag_chunks BEGIN
-        INSERT INTO rag_chunks_fts(rag_chunks_fts, rowid, text) VALUES ('delete', old.id, old.text);
-      END;
-
-      CREATE TRIGGER IF NOT EXISTS rag_chunks_au AFTER UPDATE ON rag_chunks BEGIN
-        INSERT INTO rag_chunks_fts(rag_chunks_fts, rowid, text) VALUES ('delete', old.id, old.text);
-        INSERT INTO rag_chunks_fts(rowid, text) VALUES (new.id, new.text);
-      END;
-    `);
-
+    const metaKey =
+      activeTokenizer === 'trigram' ? FTS_TRIGRAM_META_KEY : FTS_UNICODE61_META_KEY;
     const initialized = db
       .prepare('SELECT value FROM rag_store_meta WHERE key = ?')
-      .get('rag_chunks_fts_v1');
+      .get(metaKey);
 
-    if (!initialized) {
-      db.exec("INSERT INTO rag_chunks_fts(rag_chunks_fts) VALUES('rebuild')");
-      db.prepare('INSERT INTO rag_store_meta (key, value) VALUES (?, ?)').run(
-        'rag_chunks_fts_v1',
-        String(Date.now()),
-      );
+    if (recreated || !initialized) {
+      rebuildFtsIndex(db, metaKey);
     }
 
     return true;

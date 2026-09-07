@@ -22,6 +22,7 @@ const MAX_AGENT_TURN_MESSAGES = 80;
 const MAX_AGENT_TURN_TOTAL_CHARS = 800_000;
 const MAX_AGENT_TURN_IMAGES = 4;
 const MAX_AGENT_TURN_IMAGE_BYTES = 8 * 1024 * 1024;
+const MAX_METADATA_EXCERPT_CHARS = 6_000;
 const activeAgentTurnControllers = new Map();
 
 const REQUEST_PAPER_CONTEXT_TOOL_NAME = 'request_paper_context';
@@ -980,6 +981,94 @@ function buildPaperSummaryPrompt(options) {
   ].join(' ');
 }
 
+// 文献元数据提取：主要为中文文献服务。中文论文普遍不在 Crossref/OpenAlex 覆盖范围内，
+// 远程检索未命中时，用 LLM 从论文首页/开头文本直接抽取书目字段作为兑底。
+function buildMetadataExtractionPrompt() {
+  return [
+    'You are PaperQuay\'s bibliographic metadata extractor for academic papers, specialized in Chinese-language literature (中文文献).',
+    'Extract bibliographic metadata from the provided document excerpt (usually the first page or the opening of a paper).',
+    'Return compact JSON only. Keep JSON object keys exactly as: title, authors, year, publication, doi, abstractText, keywords, publisher, volume, issue, pages, issn, itemType.',
+    'title: the paper title in its original language.',
+    'authors: array of author names in original form, without affiliation markers or superscripts.',
+    'year: 4-digit publication year string.',
+    'publication: journal, conference, or publisher name (e.g. 计算机学报).',
+    'doi: bare DOI without URL prefix, when visible.',
+    'abstractText: the abstract (摘要/Abstract) copied verbatim when present.',
+    'keywords: array of keyword strings (关键词/Keywords).',
+    'publisher, volume, issue, pages, issn: strings when visible, otherwise null.',
+    'itemType: one of journalArticle, conferencePaper, thesis, report, preprint, book, misc.',
+    'Use null for unknown scalar fields and [] for unknown arrays. Do not invent values. Do not include Markdown fences, comments, role labels, or hidden reasoning.',
+  ].join(' ');
+}
+
+function cleanMetadataString(value) {
+  const normalized = typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : '';
+  return normalized || null;
+}
+
+function cleanMetadataStringArray(value, maxItems = 20) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item) => cleanMetadataString(item))
+    .filter(Boolean)
+    .slice(0, maxItems);
+}
+
+const METADATA_EXTRACTION_TIMEOUT_MS = 60_000;
+
+const METADATA_ITEM_TYPES = new Set([
+  'journalArticle',
+  'conferencePaper',
+  'thesis',
+  'report',
+  'preprint',
+  'book',
+  'bookSection',
+  'misc',
+]);
+
+function normalizeExtractedMetadata(parsed) {
+  const rawDoi = cleanMetadataString(parsed?.doi);
+  const doi = rawDoi?.replace(/^https?:\/\/(?:dx\.)?doi\.org\//i, '').replace(/^doi:\s*/i, '') || null;
+  const rawYear = cleanMetadataString(parsed?.year);
+  const yearMatch = rawYear?.match(/(?:19|20)\d{2}/);
+  const rawItemType = cleanMetadataString(parsed?.itemType);
+
+  const normalized = {
+    source: 'llm-extract',
+    doi,
+    title: cleanMetadataString(parsed?.title),
+    authors: cleanMetadataStringArray(parsed?.authors),
+    year: yearMatch ? yearMatch[0] : rawYear,
+    publication: cleanMetadataString(parsed?.publication),
+    url: null,
+    abstractText: cleanMetadataString(parsed?.abstractText),
+    keywords: cleanMetadataStringArray(parsed?.keywords, 12),
+    publisher: cleanMetadataString(parsed?.publisher),
+    volume: cleanMetadataString(parsed?.volume),
+    issue: cleanMetadataString(parsed?.issue),
+    pages: cleanMetadataString(parsed?.pages),
+    issn: cleanMetadataString(parsed?.issn),
+    itemType: rawItemType && METADATA_ITEM_TYPES.has(rawItemType) ? rawItemType : null,
+  };
+
+  // 模型返回了合法 JSON 但没有任何有效字段时视为未提取到，避免调用方计入“已匹配”。
+  if (
+    !normalized.title &&
+    !normalized.doi &&
+    !normalized.publication &&
+    !normalized.abstractText &&
+    normalized.authors.length === 0
+  ) {
+    return null;
+  }
+
+  return normalized;
+}
+
 function buildHtmlVisualQaPrompt(options) {
   const responseLanguage = options.responseLanguage || 'English';
 
@@ -1101,6 +1190,30 @@ function createAiCommands(context) {
       }
 
       return results;
+    },
+
+    async extract_literature_metadata_openai_compatible({ options }) {
+      const excerptText =
+        typeof options?.excerptText === 'string'
+          ? options.excerptText.slice(0, MAX_METADATA_EXCERPT_CHARS).trim()
+          : '';
+
+      if (!excerptText) {
+        throw new Error('Missing document excerpt text for metadata extraction');
+      }
+
+      const data = await openAiChat(options, [
+        { role: 'system', content: buildMetadataExtractionPrompt() },
+        {
+          role: 'user',
+          content: JSON.stringify({
+            knownTitle: typeof options?.title === 'string' ? options.title : '',
+            excerptText,
+          }),
+        },
+      ], { responseFormat: { type: 'json_object' }, timeoutMs: METADATA_EXTRACTION_TIMEOUT_MS });
+
+      return normalizeExtractedMetadata(parseJsonObject(pickChatText(data)));
     },
 
     async summarize_document_openai_compatible({ options }) {
@@ -1321,4 +1434,4 @@ function createAiCommands(context) {
   return commands;
 }
 
-module.exports = { createAiCommands, buildPaperSummaryPrompt };
+module.exports = { createAiCommands, buildPaperSummaryPrompt, normalizeExtractedMetadata };

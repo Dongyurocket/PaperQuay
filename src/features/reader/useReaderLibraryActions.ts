@@ -28,6 +28,7 @@ import {
 import type {
   OpenAICompatibleModelListResult,
   OpenAICompatibleTestResult,
+  PositionedMineruBlock,
   QaModelPreset,
   TranslationMap,
   WorkspaceItem,
@@ -37,6 +38,11 @@ import type {
   LiteraturePaperTaskState,
 } from '../../types/library';
 import { getFileNameFromPath, truncateMiddle } from '../../utils/text';
+import {
+  isChineseDominant,
+  isChineseLanguage,
+  isChineseText,
+} from '../../utils/languageDetect';
 import { buildMineruCachePaths } from '../../utils/mineruCache';
 import {
   createNativeLibraryWorkspaceItem,
@@ -60,6 +66,7 @@ import {
   translateBlocksBestEffort,
 } from './readerTranslation';
 import { readTranslationCache } from './readerTranslationCache';
+import { indexLibraryPaperMineruSource } from './libraryRagIndexing';
 import type { UseReaderLibraryActionsOptions } from './readerLibraryActionTypes';
 import { useReaderLibraryBatchActions } from './useReaderLibraryBatchActions';
 
@@ -104,6 +111,7 @@ export function useReaderLibraryActions({
   appWindow,
   configHydrated,
   createPaperTaskState,
+  embeddingApiKey,
   findExistingMineruJson,
   generateLibraryPreview,
   itemParseStatusMap,
@@ -210,6 +218,42 @@ export function useReaderLibraryActions({
     [settings.mineruCacheDir, settings.translationTargetLanguage],
   );
 
+  // MinerU 解析成功后，把文献的 markdown 源后台纳入本地 RAG 知识库，
+  // 让文献不打开阅读器也能被知识库检索。索引依赖用户已启用本地 RAG
+  // 且配置了 embedding 服务；不满足条件或失败时静默跳过，不影响解析结果。
+  const scheduleLibraryItemRagIndexing = useCallback(
+    (
+      item: WorkspaceItem,
+      parsedState: { blocks: PositionedMineruBlock[] },
+      mineruPath: string,
+      markdownText?: string | null,
+    ) => {
+      void indexLibraryPaperMineruSource({
+        item,
+        settings,
+        embeddingApiKey,
+        blocks: parsedState.blocks,
+        mineruPath,
+        markdownText,
+        l,
+      })
+        .then((outcome) => {
+          if (outcome === 'indexed') {
+            setStatusMessage(
+              l(
+                `已纳入本地知识库索引：${item.title}`,
+                `Indexed into the local knowledge base: ${item.title}`,
+              ),
+            );
+          }
+        })
+        .catch((indexError) => {
+          console.warn('Failed to index parsed paper into local RAG', indexError);
+        });
+    },
+    [embeddingApiKey, l, setStatusMessage, settings],
+  );
+
   const runLibraryItemMineruParse = useCallback(
     async (item: WorkspaceItem) => {
       const pdfPath = item.localPdfPath?.trim() ?? '';
@@ -283,6 +327,7 @@ export function useReaderLibraryActions({
             }),
           );
           setStatusMessage(l('已复用已有的 MinerU 解析结果', 'Reused the existing MinerU parse result'));
+          scheduleLibraryItemRagIndexing(item, parsedState, existingParse.path);
           return;
         }
 
@@ -384,6 +429,12 @@ export function useReaderLibraryActions({
               )
             : l('已完成 MinerU 解析', 'MinerU parsing finished'),
         );
+        scheduleLibraryItemRagIndexing(
+          item,
+          parsedState,
+          resolvedJsonPath,
+          result.markdownText,
+        );
         updateLibraryPreviewOperation(
           item,
           createPaperTaskState(
@@ -432,6 +483,7 @@ export function useReaderLibraryActions({
       l,
       mineruApiToken,
       saveLibraryMineruParseCache,
+      scheduleLibraryItemRagIndexing,
       setError,
       setLibraryPreviewStates,
       setPreferencesOpen,
@@ -446,24 +498,8 @@ export function useReaderLibraryActions({
 
   const runLibraryItemTranslation = useCallback(
     async (item: WorkspaceItem) => {
-      if (!translationModelPreset?.apiKey.trim() || !translationModelPreset.baseUrl.trim()) {
-        setPreferredPreferencesSection('models');
-        setPreferencesOpen(true);
-        const message = l('请先配置可用的翻译模型', 'Configure an available translation model first');
-        setError(message);
-        setStatusMessage(message);
-        updateLibraryPreviewOperation(
-          item,
-          createPaperTaskState('translation', 'error', message, 100, 100),
-          {
-            loading: false,
-            error: message,
-            statusMessage: message,
-          },
-        );
-        return;
-      }
-
+      // 注意：翻译模型检查放在中文跳过判定之后——中文文献无需翻译，
+      // 未配置模型的用户点翻译时不应被弹设置页。
       setError('');
       setLibraryPreviewStates((current) => ({
         ...current,
@@ -499,6 +535,64 @@ export function useReaderLibraryActions({
               'There is no structured text to translate. Run MinerU parsing first.',
             ),
           );
+        }
+
+        // 中文文献不需要翻译：正文以中文为主体且目标语言同为中文时直接跳过，
+        // 避免对中文论文浪费整篇翻译调用。
+        const combinedSourceText = blocksToTranslate
+          .map((block) => block.text)
+          .join('\n')
+          .slice(0, 20_000);
+
+        if (
+          isChineseDominant(combinedSourceText) &&
+          isChineseLanguage(settings.translationTargetLanguage)
+        ) {
+          const skipMessage = l(
+            '检测到该文献为中文，目标语言同为中文，无需翻译。如需翻译，请在设置中将目标语言改为其他语言。',
+            'This paper appears to be written in Chinese and the target language is also Chinese; translation skipped. To translate anyway, change the target language in Settings.',
+          );
+
+          setLibraryPreviewStates((current) => ({
+            ...current,
+            [item.workspaceId]: {
+              ...(current[item.workspaceId] ?? EMPTY_LIBRARY_PREVIEW_STATE),
+              loading: false,
+              error: '',
+              operation: createPaperTaskState(
+                'translation',
+                'success',
+                skipMessage,
+                blocksToTranslate.length,
+                blocksToTranslate.length,
+              ),
+              hasBlocks: previewContext.blocks.length > 0,
+              blockCount: previewContext.blocks.length,
+              currentPdfName: previewContext.currentPdfName,
+              currentJsonName: previewContext.currentJsonName,
+              statusMessage: skipMessage,
+            },
+          }));
+          setStatusMessage(skipMessage);
+          return;
+        }
+
+        if (!translationModelPreset?.apiKey.trim() || !translationModelPreset.baseUrl.trim()) {
+          setPreferredPreferencesSection('models');
+          setPreferencesOpen(true);
+          const message = l('请先配置可用的翻译模型', 'Configure an available translation model first');
+          setError(message);
+          setStatusMessage(message);
+          updateLibraryPreviewOperation(
+            item,
+            createPaperTaskState('translation', 'error', message, 100, 100),
+            {
+              loading: false,
+              error: message,
+              statusMessage: message,
+            },
+          );
+          return;
         }
 
         updateLibraryPreviewOperation(
@@ -724,6 +818,7 @@ export function useReaderLibraryActions({
   } = useReaderLibraryBatchActions({
     allKnownItems,
     configHydrated,
+    embeddingApiKey,
     findExistingMineruJson,
     generateLibraryPreview,
     itemParseStatusMap,
@@ -886,6 +981,14 @@ export function useReaderLibraryActions({
         return null;
       }
 
+      // 中文标题无需翻译，直接把原标题作为中文标题返回。
+      if (isChineseText(sourceTitle)) {
+        setStatusMessage(
+          l('标题已是中文，无需翻译。', 'The title is already in Chinese; no translation needed.'),
+        );
+        return sourceTitle;
+      }
+
       if (!translationModelPreset?.apiKey.trim() || !translationModelPreset.baseUrl.trim()) {
         setPreferredPreferencesSection('models');
         setPreferencesOpen(true);
@@ -967,7 +1070,14 @@ export function useReaderLibraryActions({
         return;
       }
 
-      if (!translationModelPreset?.apiKey.trim() || !translationModelPreset.baseUrl.trim()) {
+      // 中文标题不需要翻译：直接把原标题落库为中文标题，不占用翻译接口。
+      const chineseCandidates = candidates.filter((paper) => isChineseText(paper.title));
+      const foreignCandidates = candidates.filter((paper) => !isChineseText(paper.title));
+
+      if (
+        foreignCandidates.length > 0 &&
+        (!translationModelPreset?.apiKey.trim() || !translationModelPreset.baseUrl.trim())
+      ) {
         setPreferredPreferencesSection('models');
         setPreferencesOpen(true);
         const message = l('请先配置可用的翻译模型', 'Configure an available translation model first');
@@ -976,8 +1086,27 @@ export function useReaderLibraryActions({
         return;
       }
 
+      // 通过上面的检查后固定到局部常量，供 runWorker 闭包使用（TS 窄化不跨闭包传播）。
+      const activeTranslationPreset = foreignCandidates.length > 0 ? translationModelPreset : null;
+
       setBatchTitleTranslationRunning(true);
       setError('');
+
+      let adoptedCount = 0;
+      let adoptFailedCount = 0;
+
+      for (const paper of chineseCandidates) {
+        try {
+          const updatedPaper = await updateLibraryPaper({
+            paperId: paper.id,
+            titleZh: paper.title.trim(),
+          });
+          emitNativePaperUpdated(updatedPaper);
+          adoptedCount += 1;
+        } catch {
+          adoptFailedCount += 1;
+        }
+      }
 
       const concurrency = clampBatchConcurrency(settings.libraryBatchConcurrency);
       let cursor = 0;
@@ -989,25 +1118,25 @@ export function useReaderLibraryActions({
           const currentIndex = cursor;
           cursor += 1;
 
-          if (currentIndex >= candidates.length) {
+          if (currentIndex >= foreignCandidates.length) {
             return;
           }
 
-          const paper = candidates[currentIndex];
+          const paper = foreignCandidates[currentIndex];
           setStatusMessage(
             l(
-              `批量翻译标题中：${currentIndex + 1}/${candidates.length} ${truncateMiddle(paper.title, 48)}`,
-              `Translating titles: ${currentIndex + 1}/${candidates.length} ${truncateMiddle(paper.title, 48)}`,
+              `批量翻译标题中：${currentIndex + 1}/${foreignCandidates.length} ${truncateMiddle(paper.title, 48)}`,
+              `Translating titles: ${currentIndex + 1}/${foreignCandidates.length} ${truncateMiddle(paper.title, 48)}`,
             ),
           );
 
           try {
             const translated = (
               await translateTextOpenAICompatible({
-                baseUrl: translationModelPreset.baseUrl,
-                apiKey: translationModelPreset.apiKey.trim(),
-                model: translationModelPreset.model,
-                apiMode: translationModelPreset.apiMode,
+                baseUrl: activeTranslationPreset!.baseUrl,
+                apiKey: activeTranslationPreset!.apiKey.trim(),
+                model: activeTranslationPreset!.model,
+                apiMode: activeTranslationPreset!.apiMode,
                 sourceLanguage: settings.translationSourceLanguage,
                 targetLanguage: 'Simplified Chinese',
                 text: paper.title.trim(),
@@ -1030,15 +1159,43 @@ export function useReaderLibraryActions({
       try {
         await Promise.all(Array.from({ length: concurrency }, () => runWorker()));
 
-        const doneMessage = failedCount > 0
-          ? l(
-            `标题翻译完成：成功 ${succeededCount} 篇，失败 ${failedCount} 篇，跳过 ${skippedCount} 篇。`,
-            `Title translation finished: ${succeededCount} succeeded, ${failedCount} failed, ${skippedCount} skipped.`,
-          )
-          : l(
-            `标题翻译完成：成功 ${succeededCount} 篇，跳过 ${skippedCount} 篇。`,
-            `Title translation finished: ${succeededCount} succeeded, ${skippedCount} skipped.`,
+        const summaryParts: string[] = [];
+
+        if (foreignCandidates.length > 0) {
+          summaryParts.push(
+            failedCount > 0
+              ? l(
+                  `标题翻译完成：成功 ${succeededCount} 篇，失败 ${failedCount} 篇。`,
+                  `Title translation finished: ${succeededCount} succeeded, ${failedCount} failed.`,
+                )
+              : l(
+                  `标题翻译完成：成功 ${succeededCount} 篇。`,
+                  `Title translation finished: ${succeededCount} succeeded.`,
+                ),
           );
+        }
+
+        if (adoptedCount > 0 || adoptFailedCount > 0) {
+          summaryParts.push(
+            adoptFailedCount > 0
+              ? l(
+                  `中文标题已直接采用原标题 ${adoptedCount} 篇，失败 ${adoptFailedCount} 篇。`,
+                  `Adopted the original Chinese title for ${adoptedCount} paper(s), ${adoptFailedCount} failed.`,
+                )
+              : l(
+                  `中文标题已直接采用原标题 ${adoptedCount} 篇。`,
+                  `Adopted the original Chinese title for ${adoptedCount} paper(s).`,
+                ),
+          );
+        }
+
+        if (skippedCount > 0) {
+          summaryParts.push(
+            l(`跳过 ${skippedCount} 篇。`, `Skipped ${skippedCount} paper(s).`),
+          );
+        }
+
+        const doneMessage = summaryParts.join(' ') || l('没有需要处理的标题。', 'No titles needed processing.');
         setStatusMessage(doneMessage);
 
         if (failedCount > 0) {
