@@ -14,9 +14,10 @@ Download the native installer for your operating system from the Assets section 
 
 ## Highlights
 
-- **Knowledge Base MCP Server**: Standard Model Context Protocol (MCP) stdio service (`bin/paperquay-mcp.cjs` / `npm run mcp`) allowing external AI coding agents such as Proma, Pi, Codex, and Claude Code to search your literature and grounded RAG evidence chunks with citation locations (page numbers and block IDs). Built on native `node:sqlite` in read-only mode for zero-lock, conflict-free background access even when the desktop client is closed.
-- **Unified Translated PDF Folder**: Organize and centralize retainpdf translated PDF attachments into a designated directory (defaults to `<storageDir>/translated-pdfs` or any custom folder). Supports seamless automatic migration and backwards compatibility with legacy library files.
-- **Expanded Academic Item Types & Citation Metadata**: Comprehensive support for scholarly types beyond journal papers, including Books (`book`), Book Sections (`bookSection`), Theses/Dissertations (`thesis`), and Technical Reports (`report`). Adds structured citation fields: Publisher, Institution/University, Report Number, Volume, Issue, Pages, ISBN, and ISSN, complete with idempotent SQLite migration, interactive details editing, and authentic BibTeX generation (`@book`, `@techreport`, `@phdthesis`, `@incollection`).
+- **Chinese Literature Support**: Chinese papers no longer waste translation calls — full-text translation is skipped automatically when the document is Chinese-dominant and the target language is Chinese, and Chinese titles are adopted as-is instead of being machine-translated. Japanese text (kana) is excluded from detection to avoid false positives.
+- **Chinese Full-Text Search in Local RAG**: The FTS5 tokenizer migrated from unicode61 to trigram, enabling substring keyword matching for Chinese content in the local knowledge base (previously an entire Chinese paragraph was treated as a single token, making Chinese search completely ineffective). Existing databases are rebuilt automatically on launch; English retrieval degrades gracefully to substring matching with even better recall.
+- **Auto-Indexing After Parsing**: Once MinerU parsing completes (single paper or batch, fresh parse or cached result), the paper's markdown source is indexed into the local RAG knowledge base in the background — papers become searchable without opening the reader first. Silently skipped when local RAG or the embedding service is not configured.
+- **AI Metadata Enrichment for Chinese Papers**: Crossref/OpenAlex have limited coverage of Chinese literature. A new LLM fallback extracts title, authors, year, journal, DOI, abstract, keywords, volume, issue, pages, and ISSN from the paper's first page, reusing the Paper Overview model preset. Available in the import dialog (manual auto-fill), bulk metadata enrichment, and the per-paper metadata dialog whenever remote lookups miss; English papers never trigger the model call.
 
 ## Notes
 
@@ -41,9 +42,10 @@ PaperQuay 是一个开源 AI 论文工作台，覆盖文献管理、PDF 阅读�
 
 ## 本次更新
 
-- **知识库 MCP stdio 服务**：新增符合标准 Model Context Protocol (MCP) 的知识库服务（`bin/paperquay-mcp.cjs` / `npm run mcp`），让 Proma、Pi、Codex、Claude Code 等外部 Agent 能够直接检索本地论文库和 RAG 正文证据切片并获得精准页码与段落定位。基于 `node:sqlite` 原生只读模式直连数据库，无锁且无需桌面端持续运行即可独立使用。
-- **译文 PDF 统一文件夹归档**：文库偏好设置支持配置统一译文 PDF 存放目录（默认保存在 `<storageDir>/translated-pdfs`，亦可自定义外部路径）。附加 retainpdf 对照 PDF 时自动复制到统一文件夹；更改存储目录时自动平滑迁移已有译文，安全策略防止误删外部文件，同时向下兼容旧版根目录文件。
-- **学术元数据与常用引用扩展**：全面支持学术常用的非期刊文献类型，包括书籍（Book）、书籍章节（Book Section）、学位论文（Thesis / Dissertation）、研究报告（Report）、会议论文（Conference Paper）与预印本（Preprint）；新增出版社、高校/授予单位、报告号、卷号、期号、页码、ISBN、ISSN 等学术引用核心字段；SQLite 自动无损列迁移；详情面板支持动态表单与展示卡片；BibTeX 导出支持精准生成 `@book`、`@techreport`、`@phdthesis`、`@incollection` 条目。
+- **中文文献支持**：中文文献免翻译——检测到正文以中文为主且目标语言为中文时自动跳过全文翻译；中文标题直接采用原标题作为中文标题，不再占用翻译接口；语言检测排除日文假名，避免日文文献误入中文流程。
+- **中文全文检索**：本地 RAG 知识库的全文检索分词器从 unicode61 迁移到 trigram，中文关键词可按子串命中正文切片（旧版把整段中文当成单个词，中文检索完全失效）；旧版数据库启动时自动重建索引，环境不支持时安全回退；英文检索在 trigram 下退化为子串匹配，召回能力更高。
+- **解析后自动入库**：MinerU 解析完成（单篇/批量、新解析/缓存复用）后，自动将文献的 markdown 源后台纳入本地 RAG 索引，文献无需打开阅读器即可被知识库检索；未启用本地 RAG 或未配置 Embedding 服务时静默跳过。
+- **中文文献元数据智能补全**：Crossref/OpenAlex 对中文论文覆盖有限，新增 LLM 兑底提取——从文献首页文本抽取标题、作者、年份、期刊、DOI、摘要、关键词、卷号、期号、页码、ISSN 等字段，复用「论文概览」模型预设；导入对话框（手动点「自动补全」时）、批量「解析元数据」与单篇「解析元数据」对话框均在远程检索未命中时自动兑底，英文文献不会触发模型调用。
 
 ## 备注
 
