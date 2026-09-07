@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.1.28-2563eb?style=flat-square" alt="Version v0.1.28">
+  <img src="https://img.shields.io/badge/version-v0.1.33-2563eb?style=flat-square" alt="Version v0.1.33">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-4b5563?style=flat-square" alt="Windows macOS Linux">
   <img src="https://img.shields.io/badge/built%20with-Electron-47848f?style=flat-square" alt="Electron">
   <img src="https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-0f766e?style=flat-square" alt="React TypeScript">
@@ -51,15 +51,14 @@
 
 ## Latest Update
 
-The v0.1.28 release brings batch library operations and reliability fixes:
+The v0.1.33 release brings first-class support for Chinese literature:
 
-- Multi-select in the library (Ctrl/Cmd-click, Shift ranges, row checkboxes) with a batch toolbar for delete, move-to-category, and favorite actions.
-- Batch title translation that writes Chinese titles directly into paper records, and batch Bib export as one merged .bib file or one file per paper.
-- New max reasoning effort tier and a "Test Embedding Connection" button in Settings.
-- Fixed overviews being regenerated when opening a paper after they were already generated in the library preview (cache keys are now unified with silent migration).
-- Fixed Agent answers silently falling back to full text when local RAG retrieval fails; a visible notice now matches the sidebar QA behavior.
+- No translation needed for Chinese papers: full-text translation is skipped automatically when the document is Chinese-dominant and the target language is Chinese, and Chinese titles are adopted as-is instead of consuming translation calls. Japanese text (kana) is excluded from detection to avoid false positives.
+- Chinese full-text search: the local RAG tokenizer migrated from unicode61 to trigram, so Chinese keywords match content by substring; existing databases are rebuilt automatically on launch.
+- Auto-indexing after parsing: once MinerU parsing completes, the paper's markdown source is indexed into the local RAG knowledge base in the background — papers become searchable without opening the reader first.
+- AI metadata enrichment for Chinese papers: when Crossref/OpenAlex lookups miss, an LLM extracts title, authors, year, journal, DOI, abstract, keywords, volume, issue, and pages from the paper's first page, reusing the Paper Overview model preset.
 
-v0.1.27 added bilingual paper titles and side-by-side reading with a retainpdf-translated PDF; v0.1.26 fixed the knowledge graph layout and switched to the fcose engine. See [CHANGELOG](./CHANGELOG.md) for earlier releases.
+v0.1.28 brought batch library operations and reliability fixes (multi-select toolbar, batch title translation, and Bib export); v0.1.27 added bilingual paper titles and side-by-side reading with a retainpdf-translated PDF. See [CHANGELOG](./CHANGELOG.md) for earlier releases.
 
 ---
 
@@ -165,17 +164,17 @@ These items are implemented in the current desktop app.
 
 | Area              | Completed capabilities                                                                                                                        |
 | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| Local library     | Local SQLite storage for papers, authors, categories, tags, attachments, notes, annotations, import records, settings, and RAG indexes, with multi-select and batch operations (delete, move to category, favorite) |
+| Local library     | Local SQLite storage for papers, authors, categories, tags, attachments, notes, annotations, import records, settings, and RAG indexes, with trigram-powered Chinese full-text search and automatic indexing after MinerU parsing; multi-select and batch operations (delete, move to category, favorite) |
 | PDF import        | File picker and drag-and-drop import with a confirmation screen before files enter the library                                                  |
 | File management   | Configurable storage folder, copy / move / keep-path import modes, naming rules, original-path tracking, and private local file handling        |
-| Metadata          | OpenAlex enrichment by DOI or title, optional OpenAlex API key / mailto settings, Crossref fallback, and manual editing before import           |
+| Metadata          | OpenAlex enrichment by DOI or title, optional OpenAlex API key / mailto settings, Crossref fallback, LLM-based extraction for Chinese papers when remote lookups miss, and manual editing before import |
 | Categories        | System categories, custom categories, nested subcategories, collapsible branches, context menus, drag sorting, hierarchy changes, and favorites |
 | Paper details     | Title, authors, year, venue, DOI, URL, abstract, keywords, tags, notes, citation, favorite state, and a reading-time chart                      |
 | Notes workspace   | Dedicated Tiptap notes workspace with folders, search, tags, pinned notes, favorites, outline, backlinks, and local autosave                    |
 | Notes editor      | Rich text, headings, lists, task lists, code blocks, tables, images, math, highlights, links, component blocks, and slash-style insertions       |
 | Inline note links | `[[note]]` wiki links, `#tag` references, `@paper` references, autocomplete menus, and inline navigation across notes and papers                 |
 | Reader            | PDF reader with MinerU structured block views, region-based linkage, reading heat progress, reading-time recording, and annotation tools         |
-| Translation       | Full-text translation, cached block translations, and selection translation through OpenAI-compatible models, plus batch paper title translation   |
+| Translation       | Full-text translation, cached block translations, and selection translation through OpenAI-compatible models, plus batch paper title translation; Chinese-dominant papers skip translation automatically and Chinese titles are adopted directly |
 | Citation export   | Batch Bib export for selected papers as one merged .bib file or one file per paper, with deduplicated citation keys and heuristic entry types       |
 | Paper overview    | AI-generated screening fields for background, research questions, methods, experiment setup, findings, conclusions, and limitations              |
 | Agent workspace   | Conversation UI with execution traces, tool call cards, paper selection, metadata tools, rename tools, tagging, classification, and summaries    |
