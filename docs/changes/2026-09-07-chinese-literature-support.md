@@ -40,9 +40,24 @@
 - `LiteratureLibraryView` 三个元数据入口在远程检索未命中时对中文文献走 LLM 兜底：导入对话框（复用本地首页提取的 firstPageText）、批量「解析元数据」（标题含中文时现场读取首页文本）、单篇「解析元数据」对话框；LLM 预设复用总结模型预设（`metadataLlmPreset` prop，由 Reader 注入），未配置或文献非中文时不触发；
 - `metadataUpdateForPaper` / `buildManualMetadataUpdateRequest` 支持合并 keywords（仅当论文无关键词时）、publisher/volume/issue/pages/issn/itemType；导入草稿合并（`mergeRemoteMetadataIntoDraft`）同步支持这些字段。
 
+## 审查与二次修复
+
+经独立子代理对抗性审查后修复：
+
+- 导入对话框打开后的静默自动补全不再触发 LLM 调用（LLM 兑底仅在用户手动点击「自动补全」时启用），避免打开对话框即产生模型费用；LLM 提取命令增加 60s 超时；
+- 批量「解析元数据」与单篇「解析元数据」对话框的 LLM 兑底取消标题含中文的外层粗筛，统一由内部根据标题与正文判定，覆盖「标题为英文但正文为中文」的文献；英文文献仍不会产生模型调用；
+- 全文翻译的中文跳过判定移到翻译模型配置检查之前，中文文献不再被误弹「请配置翻译模型」；跳过提示补充「如需翻译可切换目标语言」；
+- 语言检测排除日文假名，日文文献不会被误判为中文进入免翻译与标题直填流程；
+- trigram 回退分支（环境不支持 trigram 时）无条件重建 unicode61 FTS 对象，消除旧库迁移中途失败留下缺失 FTS 表的死角；
+- `normalizeExtractedMetadata` 在无任何有效字段时返回 null（不计入「智能提取成功」），itemType 按白名单校验；
+- 批量中文标题直填增加失败计数并体现在汇总消息中。
+
+已知行为说明：trigram 分词下 1–2 字符的查询词（如英文缩写 "AI"）不参与全文匹配（不报错，仅该词无贡献），≥3 字符的词与中文检索正常；向量检索不受分词器影响，短词查询仍可通过向量召回。
+
 ## 验证
 
 - `npx tsc --noEmit` 通过；
-- `npm run check`（构建 + 测试）通过：251 个测试全部通过；
-- 新增 `tests/languageDetect.test.ts`：中文主体判定（含中英混合、误判边界）、语言码归一化；
-- `tests/ragStore.test.ts` 新增：中文 chunk 在向量距离劣势下经 trigram FTS 命中并进入 RRF 融合结果；旧 unicode61 库自动迁移到 trigram 后中文检索可用。
+- `npm run check`（构建 + 测试）通过：254 个测试全部通过；
+- 新增 `tests/languageDetect.test.ts`：中文主体判定（含中英混合、日文排除、误判边界）、语言码归一化；
+- `tests/ragStore.test.ts` 新增：中文 chunk 在向量距离劣势下经 trigram FTS 命中并进入 RRF 融合结果；旧 unicode61 库自动迁移到 trigram 后中文检索可用；
+- 新增 `tests/metadataExtraction.test.ts`：LLM 元数据归一化（字段清洗、全空返回 null、itemType 白名单）。

@@ -666,17 +666,16 @@ function initializeFtsSchema(db, { disabled = false } = {}) {
       }
     } catch (trigramError) {
       // 运行环境 SQLite 过旧不支持 trigram 时回退到 unicode61，保持英文检索可用。
+      // 无条件重建：进入本分支时 FTS 对象可能已被 drop，按 existingTokenizer 条件跳过
+      // 会留下缺失 FTS 表的坏状态。
       console.warn(
         '[paperquay] FTS5 trigram tokenizer unavailable; falling back to unicode61.',
         toError(trigramError),
       );
       activeTokenizer = 'unicode61';
-
-      if (existingTokenizer !== 'unicode61') {
-        dropFtsObjects(db);
-        createFtsObjects(db, 'unicode61');
-        recreated = true;
-      }
+      dropFtsObjects(db);
+      createFtsObjects(db, 'unicode61');
+      recreated = true;
     }
 
     const metaKey =

@@ -1017,13 +1017,27 @@ function cleanMetadataStringArray(value, maxItems = 20) {
     .slice(0, maxItems);
 }
 
+const METADATA_EXTRACTION_TIMEOUT_MS = 60_000;
+
+const METADATA_ITEM_TYPES = new Set([
+  'journalArticle',
+  'conferencePaper',
+  'thesis',
+  'report',
+  'preprint',
+  'book',
+  'bookSection',
+  'misc',
+]);
+
 function normalizeExtractedMetadata(parsed) {
   const rawDoi = cleanMetadataString(parsed?.doi);
   const doi = rawDoi?.replace(/^https?:\/\/(?:dx\.)?doi\.org\//i, '').replace(/^doi:\s*/i, '') || null;
   const rawYear = cleanMetadataString(parsed?.year);
   const yearMatch = rawYear?.match(/(?:19|20)\d{2}/);
+  const rawItemType = cleanMetadataString(parsed?.itemType);
 
-  return {
+  const normalized = {
     source: 'llm-extract',
     doi,
     title: cleanMetadataString(parsed?.title),
@@ -1038,8 +1052,21 @@ function normalizeExtractedMetadata(parsed) {
     issue: cleanMetadataString(parsed?.issue),
     pages: cleanMetadataString(parsed?.pages),
     issn: cleanMetadataString(parsed?.issn),
-    itemType: cleanMetadataString(parsed?.itemType),
+    itemType: rawItemType && METADATA_ITEM_TYPES.has(rawItemType) ? rawItemType : null,
   };
+
+  // 模型返回了合法 JSON 但没有任何有效字段时视为未提取到，避免调用方计入“已匹配”。
+  if (
+    !normalized.title &&
+    !normalized.doi &&
+    !normalized.publication &&
+    !normalized.abstractText &&
+    normalized.authors.length === 0
+  ) {
+    return null;
+  }
+
+  return normalized;
 }
 
 function buildHtmlVisualQaPrompt(options) {
@@ -1184,7 +1211,7 @@ function createAiCommands(context) {
             excerptText,
           }),
         },
-      ], { responseFormat: { type: 'json_object' } });
+      ], { responseFormat: { type: 'json_object' }, timeoutMs: METADATA_EXTRACTION_TIMEOUT_MS });
 
       return normalizeExtractedMetadata(parseJsonObject(pickChatText(data)));
     },
@@ -1407,4 +1434,4 @@ function createAiCommands(context) {
   return commands;
 }
 
-module.exports = { createAiCommands, buildPaperSummaryPrompt };
+module.exports = { createAiCommands, buildPaperSummaryPrompt, normalizeExtractedMetadata };

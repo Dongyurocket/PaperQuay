@@ -6,6 +6,8 @@
 
 const CJK_PATTERN = /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/g;
 const LATIN_PATTERN = /[A-Za-z]/g;
+// 日文假名：日文论文含大量汉字，仅靠汉字会把日文误判为中文。
+const JAPANESE_KANA_PATTERN = /[\u3040-\u30ff]/;
 
 export interface ScriptComposition {
   cjk: number;
@@ -27,6 +29,16 @@ export function containsCjk(text: string | null | undefined): boolean {
   return Boolean(text) && /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/.test(text as string);
 }
 
+/** 含日文假名时视为日文文献，不进入中文专属流程（免翻译、中文标题直填等）。 */
+export function containsJapaneseKana(text: string | null | undefined): boolean {
+  return Boolean(text) && JAPANESE_KANA_PATTERN.test(text as string);
+}
+
+/** 标题级中文判定：含汉字且不含日文假名（避免把日文标题误当中文直填）。 */
+export function isChineseText(text: string | null | undefined): boolean {
+  return containsCjk(text) && !containsJapaneseKana(text);
+}
+
 /**
  * 判断文本是否以中文为主体。阈值说明：
  * - 至少 8 个 CJK 字符，避免把夹杂个别中文术语的英文文献误判为中文；
@@ -34,6 +46,10 @@ export function containsCjk(text: string | null | undefined): boolean {
  */
 export function isChineseDominant(text: string | null | undefined): boolean {
   if (!text) {
+    return false;
+  }
+
+  if (containsJapaneseKana(text)) {
     return false;
   }
 

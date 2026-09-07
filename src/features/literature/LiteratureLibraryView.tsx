@@ -17,7 +17,7 @@ import {
   lookupLiteratureMetadata,
 } from '../../services/metadata';
 import { extractLocalPdfMetadataPreview } from '../../services/pdfMetadata';
-import { containsCjk, isChineseDominant } from '../../utils/languageDetect';
+import { isChineseDominant, isChineseText } from '../../utils/languageDetect';
 import {
   addLibraryAttachment,
   assignPaperToLibraryCategory,
@@ -1302,7 +1302,7 @@ export default function LiteratureLibraryView({
         return null;
       }
 
-      if (!containsCjk(input.title) && !isChineseDominant(excerptText)) {
+      if (!isChineseText(input.title) && !isChineseDominant(excerptText)) {
         return null;
       }
 
@@ -1319,7 +1319,9 @@ export default function LiteratureLibraryView({
   );
 
   const handleAutoFillImportMetadata = useCallback(
-    async (targetDrafts = importDrafts, silent = false) => {
+    // allowLlm=false 用于对话框打开后的静默自动补全：免费远程检索照跑，
+    // 但可能产生模型费用的 LLM 兑底只在用户手动点击「自动补全」时启用。
+    async (targetDrafts = importDrafts, silent = false, allowLlm = true) => {
       if (demoMode) {
         showDemoLockedMessage();
         return;
@@ -1347,7 +1349,7 @@ export default function LiteratureLibraryView({
           });
 
           // 中文文献在 Crossref/OpenAlex 中通常检索不到，用 LLM 从首页文本提取作为兑底。
-          if (!metadata) {
+          if (!metadata && allowLlm) {
             metadata = await resolveLlmMetadataFallback({
               title: draft.title || titleFromPdfPath(draft.path),
               excerptText: importFirstPageTextRef.current.get(draft.path),
@@ -1428,7 +1430,7 @@ export default function LiteratureLibraryView({
       nextDrafts.forEach((draft) => next.add(draft.path));
       return next;
     });
-    void handleAutoFillImportMetadata(nextDrafts, true);
+    void handleAutoFillImportMetadata(nextDrafts, true, false);
   }, [
     handleAutoFillImportMetadata,
     importDialogOpen,
@@ -1449,6 +1451,7 @@ export default function LiteratureLibraryView({
     setImportDrafts([]);
     setMetadataAttemptedPaths(new Set());
     setLocalImportMetadataWorking(false);
+    importFirstPageTextRef.current.clear();
   };
 
   const handleConfirmImportDrafts = async () => {
@@ -1502,6 +1505,7 @@ export default function LiteratureLibraryView({
       await refreshAll();
       setImportDialogOpen(false);
       setImportDrafts([]);
+      importFirstPageTextRef.current.clear();
       setMetadataAttemptedPaths(new Set());
       setLocalImportMetadataWorking(false);
       const duplicateSummary =
@@ -1573,8 +1577,10 @@ export default function LiteratureLibraryView({
             path: paperPdfPath(paper, libraryStorageDir),
           });
 
-          // 中文文献在远程数据库中通常检索不到：标题含中文时，用 LLM 从首页文本提取兑底。
-          if (!metadata && containsCjk(paper.title)) {
+          // 中文文献在远程数据库中通常检索不到：读取首页文本后用 LLM 提取兑底。
+          // 是否为中文文献由 resolveLlmMetadataFallback 内部根据标题与正文判定，
+          // 以覆盖标题为英文但正文为中文的文献；英文文献不会产生模型调用。
+          if (!metadata) {
             const pdfPath = paperPdfPath(paper, libraryStorageDir);
             const firstPageText = pdfPath
               ? (await extractLocalPdfMetadataPreview(pdfPath).catch(() => null))?.firstPageText
@@ -2285,8 +2291,9 @@ export default function LiteratureLibraryView({
         path: paperPdfPath(metadataDialog.paper, libraryStorageDir),
       });
 
-      // 中文文献远程检索通常未命中，用 LLM 从首页文本提取兑底。
-      if (!metadata && (containsCjk(title) || containsCjk(metadataDialog.paper.title))) {
+      // 中文文献远程检索通常未命中，用 LLM 从首页文本提取兑底；
+      // 是否为中文文献由 resolveLlmMetadataFallback 内部判定，英文文献不会产生模型调用。
+      if (!metadata) {
         const pdfPath = paperPdfPath(metadataDialog.paper, libraryStorageDir);
         const firstPageText = pdfPath
           ? (await extractLocalPdfMetadataPreview(pdfPath).catch(() => null))?.firstPageText

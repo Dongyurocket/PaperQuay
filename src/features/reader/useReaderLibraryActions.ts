@@ -39,9 +39,9 @@ import type {
 } from '../../types/library';
 import { getFileNameFromPath, truncateMiddle } from '../../utils/text';
 import {
-  containsCjk,
   isChineseDominant,
   isChineseLanguage,
+  isChineseText,
 } from '../../utils/languageDetect';
 import { buildMineruCachePaths } from '../../utils/mineruCache';
 import {
@@ -498,24 +498,8 @@ export function useReaderLibraryActions({
 
   const runLibraryItemTranslation = useCallback(
     async (item: WorkspaceItem) => {
-      if (!translationModelPreset?.apiKey.trim() || !translationModelPreset.baseUrl.trim()) {
-        setPreferredPreferencesSection('models');
-        setPreferencesOpen(true);
-        const message = l('请先配置可用的翻译模型', 'Configure an available translation model first');
-        setError(message);
-        setStatusMessage(message);
-        updateLibraryPreviewOperation(
-          item,
-          createPaperTaskState('translation', 'error', message, 100, 100),
-          {
-            loading: false,
-            error: message,
-            statusMessage: message,
-          },
-        );
-        return;
-      }
-
+      // 注意：翻译模型检查放在中文跳过判定之后——中文文献无需翻译，
+      // 未配置模型的用户点翻译时不应被弹设置页。
       setError('');
       setLibraryPreviewStates((current) => ({
         ...current,
@@ -565,8 +549,8 @@ export function useReaderLibraryActions({
           isChineseLanguage(settings.translationTargetLanguage)
         ) {
           const skipMessage = l(
-            '检测到该文献为中文，目标语言同为中文，无需翻译。',
-            'This paper is written in Chinese and the target language is also Chinese; translation skipped.',
+            '检测到该文献为中文，目标语言同为中文，无需翻译。如需翻译，请在设置中将目标语言改为其他语言。',
+            'This paper appears to be written in Chinese and the target language is also Chinese; translation skipped. To translate anyway, change the target language in Settings.',
           );
 
           setLibraryPreviewStates((current) => ({
@@ -590,6 +574,24 @@ export function useReaderLibraryActions({
             },
           }));
           setStatusMessage(skipMessage);
+          return;
+        }
+
+        if (!translationModelPreset?.apiKey.trim() || !translationModelPreset.baseUrl.trim()) {
+          setPreferredPreferencesSection('models');
+          setPreferencesOpen(true);
+          const message = l('请先配置可用的翻译模型', 'Configure an available translation model first');
+          setError(message);
+          setStatusMessage(message);
+          updateLibraryPreviewOperation(
+            item,
+            createPaperTaskState('translation', 'error', message, 100, 100),
+            {
+              loading: false,
+              error: message,
+              statusMessage: message,
+            },
+          );
           return;
         }
 
@@ -980,7 +982,7 @@ export function useReaderLibraryActions({
       }
 
       // 中文标题无需翻译，直接把原标题作为中文标题返回。
-      if (isChineseDominant(sourceTitle) || containsCjk(sourceTitle)) {
+      if (isChineseText(sourceTitle)) {
         setStatusMessage(
           l('标题已是中文，无需翻译。', 'The title is already in Chinese; no translation needed.'),
         );
@@ -1069,8 +1071,8 @@ export function useReaderLibraryActions({
       }
 
       // 中文标题不需要翻译：直接把原标题落库为中文标题，不占用翻译接口。
-      const chineseCandidates = candidates.filter((paper) => containsCjk(paper.title));
-      const foreignCandidates = candidates.filter((paper) => !containsCjk(paper.title));
+      const chineseCandidates = candidates.filter((paper) => isChineseText(paper.title));
+      const foreignCandidates = candidates.filter((paper) => !isChineseText(paper.title));
 
       if (
         foreignCandidates.length > 0 &&
@@ -1091,6 +1093,7 @@ export function useReaderLibraryActions({
       setError('');
 
       let adoptedCount = 0;
+      let adoptFailedCount = 0;
 
       for (const paper of chineseCandidates) {
         try {
@@ -1101,7 +1104,7 @@ export function useReaderLibraryActions({
           emitNativePaperUpdated(updatedPaper);
           adoptedCount += 1;
         } catch {
-          // 单篇直填失败不中断整体批次，计数后由汇总消息呈现。
+          adoptFailedCount += 1;
         }
       }
 
@@ -1172,12 +1175,17 @@ export function useReaderLibraryActions({
           );
         }
 
-        if (adoptedCount > 0) {
+        if (adoptedCount > 0 || adoptFailedCount > 0) {
           summaryParts.push(
-            l(
-              `中文标题已直接采用原标题 ${adoptedCount} 篇。`,
-              `Adopted the original Chinese title for ${adoptedCount} paper(s).`,
-            ),
+            adoptFailedCount > 0
+              ? l(
+                  `中文标题已直接采用原标题 ${adoptedCount} 篇，失败 ${adoptFailedCount} 篇。`,
+                  `Adopted the original Chinese title for ${adoptedCount} paper(s), ${adoptFailedCount} failed.`,
+                )
+              : l(
+                  `中文标题已直接采用原标题 ${adoptedCount} 篇。`,
+                  `Adopted the original Chinese title for ${adoptedCount} paper(s).`,
+                ),
           );
         }
 
