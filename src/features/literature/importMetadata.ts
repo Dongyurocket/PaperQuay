@@ -108,6 +108,8 @@ export function mergeRemoteMetadataIntoDraft(
   metadata: MetadataLookupResult,
 ): ImportDraftItem {
   const nextAuthors = normalizeAuthors(metadata.authors);
+  const fillString = (current: string, next: string | null | undefined): string =>
+    current.trim() || normalizeWhitespace(next ?? '') || current;
 
   return {
     ...draft,
@@ -124,5 +126,10 @@ export function mergeRemoteMetadataIntoDraft(
       draftText(draft.abstractText).trim() ||
       normalizeWhitespace(metadata.abstractText ?? '') ||
       draftText(draft.abstractText),
+    publisher: fillString(draft.publisher ?? '', metadata.publisher),
+    volume: fillString(draft.volume ?? '', metadata.volume),
+    issue: fillString(draft.issue ?? '', metadata.issue),
+    pages: fillString(draft.pages ?? '', metadata.pages),
+    issn: fillString(draft.issn ?? '', metadata.issn),
   };
 }

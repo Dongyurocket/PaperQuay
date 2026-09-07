@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { runMineruCloudParse } from '../../services/desktop';
 import { resolveSummaryOutputLanguage } from '../../services/summarySource';
 import { buildMineruCachePaths } from '../../utils/mineruCache';
+import { indexLibraryPaperMineruSource } from './libraryRagIndexing';
 import {
   clampBatchConcurrency,
   EMPTY_BATCH_PROGRESS,
@@ -18,6 +19,7 @@ interface UseReaderLibraryBatchActionsOptions
     UseReaderLibraryActionsOptions,
     | 'allKnownItems'
     | 'configHydrated'
+    | 'embeddingApiKey'
     | 'findExistingMineruJson'
     | 'generateLibraryPreview'
     | 'itemParseStatusMap'
@@ -50,6 +52,7 @@ export interface UseReaderLibraryBatchActionsResult {
 export function useReaderLibraryBatchActions({
   allKnownItems,
   configHydrated,
+  embeddingApiKey,
   findExistingMineruJson,
   generateLibraryPreview,
   itemParseStatusMap,
@@ -209,12 +212,20 @@ export function useReaderLibraryBatchActions({
               const existingParse = await findExistingMineruJson(item);
 
               if (existingParse) {
-                syncLibraryParsedState(
+                const reusedState = syncLibraryParsedState(
                   item,
                   existingParse.jsonText,
                   existingParse.path,
                   l('已复用已有的 MinerU 结果', 'Reused the existing MinerU result'),
                 );
+                void indexLibraryPaperMineruSource({
+                  item,
+                  settings,
+                  embeddingApiKey,
+                  blocks: reusedState.blocks,
+                  mineruPath: existingParse.path,
+                  l,
+                }).catch(() => {});
                 existingCount += 1;
                 successCount += 1;
                 continue;
@@ -282,7 +293,16 @@ export function useReaderLibraryBatchActions({
                   )
                 : l('已完成 MinerU 解析', 'MinerU parsing finished');
 
-              syncLibraryParsedState(item, jsonText, resolvedJsonPath, status);
+              const parsedState = syncLibraryParsedState(item, jsonText, resolvedJsonPath, status);
+              void indexLibraryPaperMineruSource({
+                item,
+                settings,
+                embeddingApiKey,
+                blocks: parsedState.blocks,
+                mineruPath: resolvedJsonPath,
+                markdownText: result.markdownText,
+                l,
+              }).catch(() => {});
               parsedCount += 1;
               successCount += 1;
             } catch (nextError) {
@@ -352,6 +372,7 @@ export function useReaderLibraryBatchActions({
     },
     [
       allKnownItems,
+      embeddingApiKey,
       findExistingMineruJson,
       l,
       mineruApiToken,
@@ -359,9 +380,16 @@ export function useReaderLibraryBatchActions({
       setError,
       setPreferencesOpen,
       setStatusMessage,
+      settings.embeddingBaseUrl,
+      settings.embeddingBatchSize,
+      settings.embeddingDimensions,
+      settings.embeddingModel,
+      settings.embeddingRequestTimeoutSeconds,
       settings.libraryBatchConcurrency,
+      settings.localRagEnabled,
       settings.mineruCacheDir,
       settings.mineruApiBaseUrl,
+      settings.ragSourceMode,
       syncLibraryParsedState,
     ],
   );

@@ -470,6 +470,7 @@ function Reader({ workspaceActive = true }: ReaderProps) {
     appWindow,
     configHydrated,
     createPaperTaskState,
+    embeddingApiKey,
     findExistingMineruJson,
     generateLibraryPreview,
     itemParseStatusMap,
@@ -924,6 +925,7 @@ function Reader({ workspaceActive = true }: ReaderProps) {
                   batchTitleTranslationRunning={batchTitleTranslationRunning}
                   onBatchExportBib={(papers, mode) => void handleBatchExportBib(papers, mode)}
                   paperActionStates={nativePaperActionStates}
+                  metadataLlmPreset={summaryModelPreset ?? translationModelPreset}
                 />
               </div>
 

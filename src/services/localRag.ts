@@ -116,7 +116,7 @@ function filterRelevantRetrievals(
   return (filtered.length > 0 ? filtered : sorted).slice(0, topK);
 }
 
-async function ensurePreparedSourceIndexed(input: {
+export async function ensurePreparedSourceIndexed(input: {
   documentKey: string;
   title: string;
   sourceType: 'mineru-markdown' | 'pdf-text';

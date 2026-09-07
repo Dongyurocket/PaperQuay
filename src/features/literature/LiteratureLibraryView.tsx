@@ -12,8 +12,12 @@ import { createPortal } from 'react-dom';
 import { Sparkles, Star, Tag, Trash2 } from 'lucide-react';
 import { useLocaleText } from '../../i18n/uiLanguage';
 import { localPathsExist } from '../../services/desktop';
-import { lookupLiteratureMetadata } from '../../services/metadata';
+import {
+  extractLiteratureMetadataWithLlm,
+  lookupLiteratureMetadata,
+} from '../../services/metadata';
 import { extractLocalPdfMetadataPreview } from '../../services/pdfMetadata';
+import { containsCjk, isChineseDominant } from '../../utils/languageDetect';
 import {
   addLibraryAttachment,
   assignPaperToLibraryCategory,
@@ -50,7 +54,9 @@ import type {
 import type {
   ZoteroCollection,
   ZoteroLibraryItem,
+  QaModelPreset,
 } from '../../types/reader';
+import type { MetadataLookupResult } from '../../types/metadata';
 import { getFileNameFromPath } from '../../utils/text';
 import ImportConfirmationDialog from './components/ImportConfirmationDialog';
 import LibraryConfirmDialog from './components/LibraryConfirmDialog';
@@ -131,6 +137,8 @@ interface LiteratureLibraryViewProps {
   /** 批量导出 Bib（P2）：由 Reader 层注入，作用于多选集合。mode=merged 合并单文件，separate 每篇一个文件。 */
   onBatchExportBib?: (papers: LiteraturePaper[], mode: 'merged' | 'separate') => void;
   batchTitleTranslationRunning?: boolean;
+  /** 元数据智能提取所用的 LLM 预设（通常复用总结模型预设）。 */
+  metadataLlmPreset?: QaModelPreset | null;
 }
 
 interface NativeSummaryUpdatedEventDetail {
@@ -165,8 +173,19 @@ function buildManualMetadataUpdateRequest(
   };
   let changed = false;
   const assignString = (
-    key: 'title' | 'year' | 'publication' | 'doi' | 'url' | 'abstractText',
-    currentValue: string | null,
+    key:
+      | 'title'
+      | 'year'
+      | 'publication'
+      | 'doi'
+      | 'url'
+      | 'abstractText'
+      | 'publisher'
+      | 'volume'
+      | 'issue'
+      | 'pages'
+      | 'issn',
+    currentValue: string | null | undefined,
     nextValue: string | null | undefined,
   ) => {
     const normalized = nextValue?.trim();
@@ -187,6 +206,11 @@ function buildManualMetadataUpdateRequest(
     assignString('publication', paper.publication, metadata.publication);
     assignString('url', paper.url, metadata.url);
     assignString('abstractText', paper.abstractText, metadata.abstractText);
+    assignString('publisher', paper.publisher ?? null, metadata.publisher);
+    assignString('volume', paper.volume ?? null, metadata.volume);
+    assignString('issue', paper.issue ?? null, metadata.issue);
+    assignString('pages', paper.pages ?? null, metadata.pages);
+    assignString('issn', paper.issn ?? null, metadata.issn);
 
     const nextAuthors = metadata.authors.map((author) => author.trim()).filter(Boolean);
 
@@ -197,6 +221,13 @@ function buildManualMetadataUpdateRequest(
         request.authors = nextAuthors;
         changed = true;
       }
+    }
+
+    const nextKeywords = (metadata.keywords ?? []).map((keyword) => keyword.trim()).filter(Boolean);
+
+    if (nextKeywords.length > 0 && paper.keywords.filter((keyword) => keyword.trim()).length === 0) {
+      request.keywords = nextKeywords;
+      changed = true;
     }
   }
 
@@ -260,6 +291,7 @@ export default function LiteratureLibraryView({
   onBatchTranslatePaperTitles,
   onBatchExportBib,
   batchTitleTranslationRunning = false,
+  metadataLlmPreset = null,
 }: LiteratureLibraryViewProps) {
   const l = useLocaleText();
   const demoMode = Boolean(demoLibrary);
@@ -278,6 +310,8 @@ export default function LiteratureLibraryView({
   const [working, setWorking] = useState(false);
   const [metadataWorking, setMetadataWorking] = useState(false);
   const [localImportMetadataWorking, setLocalImportMetadataWorking] = useState(false);
+  // 导入对话框中文献首页文本缓存（path -> firstPageText），供中文文献 LLM 元数据兜底使用。
+  const importFirstPageTextRef = useRef(new Map<string, string>());
   const [bulkMetadataWorking, setBulkMetadataWorking] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
   const [error, setError] = useState('');
@@ -587,6 +621,10 @@ export default function LiteratureLibraryView({
 
           if (!preview) {
             continue;
+          }
+
+          if (preview.firstPageText?.trim()) {
+            importFirstPageTextRef.current.set(draft.path, preview.firstPageText);
           }
 
           setImportDrafts((current) =>
@@ -1244,6 +1282,42 @@ export default function LiteratureLibraryView({
     setImportDrafts((current) => current.filter((draft) => draft.path !== path));
   };
 
+  // 中文文献元数据 LLM 兑底：Crossref/OpenAlex 对中文论文覆盖有限，远程检索未命中时，
+  // 使用配置的大模型从文献首页文本直接抽取标题、作者、期刊、摘要、关键词等字段。
+  // 只对中文文献启用，避免对英文文献的检索 miss 浪费模型调用。
+  const resolveLlmMetadataFallback = useCallback(
+    async (input: {
+      title: string;
+      excerptText: string | null | undefined;
+    }): Promise<MetadataLookupResult | null> => {
+      const preset = metadataLlmPreset;
+
+      if (!preset?.apiKey?.trim() || !preset.baseUrl?.trim() || !preset.model?.trim()) {
+        return null;
+      }
+
+      const excerptText = input.excerptText?.trim() ?? '';
+
+      if (!excerptText) {
+        return null;
+      }
+
+      if (!containsCjk(input.title) && !isChineseDominant(excerptText)) {
+        return null;
+      }
+
+      return extractLiteratureMetadataWithLlm({
+        baseUrl: preset.baseUrl.trim(),
+        apiKey: preset.apiKey.trim(),
+        model: preset.model.trim(),
+        apiMode: preset.apiMode,
+        title: input.title,
+        excerptText,
+      }).catch(() => null);
+    },
+    [metadataLlmPreset],
+  );
+
   const handleAutoFillImportMetadata = useCallback(
     async (targetDrafts = importDrafts, silent = false) => {
       if (demoMode) {
@@ -1262,14 +1336,27 @@ export default function LiteratureLibraryView({
 
       let filledCount = 0;
       let missedCount = 0;
+      let llmFilledCount = 0;
 
       try {
         for (const draft of draftsToLookup) {
-          const metadata = await lookupLiteratureMetadata({
+          let metadata = await lookupLiteratureMetadata({
             doi: draft.doi || null,
             title: draft.title || titleFromPdfPath(draft.path),
             path: draft.path,
           });
+
+          // 中文文献在 Crossref/OpenAlex 中通常检索不到，用 LLM 从首页文本提取作为兑底。
+          if (!metadata) {
+            metadata = await resolveLlmMetadataFallback({
+              title: draft.title || titleFromPdfPath(draft.path),
+              excerptText: importFirstPageTextRef.current.get(draft.path),
+            });
+
+            if (metadata) {
+              llmFilledCount += 1;
+            }
+          }
 
           if (!metadata) {
             missedCount += 1;
@@ -1302,8 +1389,8 @@ export default function LiteratureLibraryView({
         if (!silent) {
           setStatusMessage(
             l(
-              `元数据补全完成：匹配 ${filledCount}，未匹配 ${missedCount}。`,
-              `Metadata enrichment finished: ${filledCount} matched, ${missedCount} not matched.`,
+              `元数据补全完成：匹配 ${filledCount}（其中智能提取 ${llmFilledCount}），未匹配 ${missedCount}。`,
+              `Metadata enrichment finished: ${filledCount} matched (${llmFilledCount} via AI extraction), ${missedCount} not matched.`,
             ),
           );
         }
@@ -1316,7 +1403,7 @@ export default function LiteratureLibraryView({
         setMetadataWorking(false);
       }
     },
-    [demoMode, importDrafts, l, showDemoLockedMessage],
+    [demoMode, importDrafts, l, resolveLlmMetadataFallback, showDemoLockedMessage],
   );
 
   useEffect(() => {
@@ -1480,11 +1567,24 @@ export default function LiteratureLibraryView({
         );
 
         try {
-          const metadata = await lookupLiteratureMetadata({
+          let metadata = await lookupLiteratureMetadata({
             doi: paper.doi,
             title: paper.title,
             path: paperPdfPath(paper, libraryStorageDir),
           });
+
+          // 中文文献在远程数据库中通常检索不到：标题含中文时，用 LLM 从首页文本提取兑底。
+          if (!metadata && containsCjk(paper.title)) {
+            const pdfPath = paperPdfPath(paper, libraryStorageDir);
+            const firstPageText = pdfPath
+              ? (await extractLocalPdfMetadataPreview(pdfPath).catch(() => null))?.firstPageText
+              : null;
+
+            metadata = await resolveLlmMetadataFallback({
+              title: paper.title,
+              excerptText: firstPageText,
+            });
+          }
 
           if (!metadata) {
             missedCount += 1;
@@ -2179,11 +2279,25 @@ export default function LiteratureLibraryView({
     setError('');
 
     try {
-      const metadata = await lookupLiteratureMetadata({
+      let metadata = await lookupLiteratureMetadata({
         doi: doi || null,
         title: title || metadataDialog.paper.title,
         path: paperPdfPath(metadataDialog.paper, libraryStorageDir),
       });
+
+      // 中文文献远程检索通常未命中，用 LLM 从首页文本提取兑底。
+      if (!metadata && (containsCjk(title) || containsCjk(metadataDialog.paper.title))) {
+        const pdfPath = paperPdfPath(metadataDialog.paper, libraryStorageDir);
+        const firstPageText = pdfPath
+          ? (await extractLocalPdfMetadataPreview(pdfPath).catch(() => null))?.firstPageText
+          : null;
+
+        metadata = await resolveLlmMetadataFallback({
+          title: title || metadataDialog.paper.title,
+          excerptText: firstPageText,
+        });
+      }
+
       const updateRequest = buildManualMetadataUpdateRequest(
         metadataDialog.paper,
         metadata,

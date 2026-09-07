@@ -420,6 +420,11 @@ export function metadataUpdateForPaper(
   assignString('doi', paper.doi, metadata.doi);
   assignString('url', paper.url, metadata.url);
   assignString('abstractText', paper.abstractText, metadata.abstractText);
+  assignString('publisher', paper.publisher ?? null, metadata.publisher);
+  assignString('volume', paper.volume ?? null, metadata.volume);
+  assignString('issue', paper.issue ?? null, metadata.issue);
+  assignString('pages', paper.pages ?? null, metadata.pages);
+  assignString('issn', paper.issn ?? null, metadata.issn);
 
   if (metadata.authors.length > 0) {
     const currentAuthors = paper.authors.map((author) => author.name.trim()).filter(Boolean);
@@ -432,6 +437,21 @@ export function metadataUpdateForPaper(
       request.authors = nextAuthors;
       changed = true;
     }
+  }
+
+  // 关键词只在论文当前没有关键词时填充，避免覆盖用户手工维护的内容。
+  const nextKeywords = (metadata.keywords ?? []).map((keyword) => keyword.trim()).filter(Boolean);
+
+  if (nextKeywords.length > 0 && paper.keywords.filter((keyword) => keyword.trim()).length === 0) {
+    request.keywords = nextKeywords;
+    changed = true;
+  }
+
+  const nextItemType = metadata.itemType?.trim();
+
+  if (nextItemType && !paper.itemType?.trim()) {
+    request.itemType = nextItemType;
+    changed = true;
   }
 
   return changed ? request : null;

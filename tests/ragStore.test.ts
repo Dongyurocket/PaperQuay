@@ -369,3 +369,129 @@ test('Agent run storage redacts sensitive event fields and accumulates usage', (
     rmSync(dataDir, { recursive: true, force: true });
   }
 });
+
+test('RAG store retrieves Chinese chunks via trigram FTS keyword match', () => {
+  const { dataDir, store } = createStore();
+
+  try {
+    assert.equal(store.isFtsAvailable(), true);
+
+    store.indexDocument({
+      documentKey: 'doc-zh',
+      title: '中文文献',
+      sourceType: 'mineru-markdown',
+      sourceSignature: 'zh-signature',
+      embeddingModelKey: 'embedding-test',
+      totalChunkCount: 2,
+      chunks: [
+        {
+          chunkId: 'zh-body',
+          chunkIndex: 0,
+          pageIndex: 0,
+          text: '本文提出了一种基于深度学习的滚动轴承故障诊断方法，实验结果表明该方法有效。',
+          // 距离查询向量较远，仅靠向量检索不会排在前面。
+          embedding: [0, 1, 0, 0],
+        },
+        {
+          chunkId: 'en-near',
+          chunkIndex: 1,
+          pageIndex: 1,
+          text: 'unrelated english chunk about attention mechanisms',
+          embedding: [1, 0, 0, 0],
+        },
+      ],
+    });
+
+    const results = store.retrieveDocumentChunks({
+      documentKey: 'doc-zh',
+      sourceType: 'mineru-markdown',
+      queryEmbedding: [1, 0, 0, 0],
+      queryText: '故障诊断方法',
+      topK: 2,
+    });
+
+    // 中文关键词通过 trigram FTS 命中，与向量候选做 RRF 融合后进入结果。
+    assert.ok(results.some((result) => result.chunkId === 'zh-body'));
+  } finally {
+    store.close();
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('RAG store migrates a legacy unicode61 FTS table to trigram', () => {
+  const dataDir = mkdtempSync(path.join(tmpdir(), 'paperquay-rag-migration-'));
+  const databasePath = path.join(dataDir, 'paperquay-rag.sqlite');
+  const { DatabaseSync } = require('node:sqlite');
+
+  // 模拟旧版库结构：unicode61 分词的 FTS 表 + v1 初始化标记。
+  const legacyDb = new DatabaseSync(databasePath);
+  legacyDb.exec(`
+    CREATE TABLE rag_chunks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      document_key TEXT NOT NULL,
+      source_type TEXT NOT NULL,
+      chunk_id TEXT NOT NULL,
+      chunk_index INTEGER NOT NULL,
+      page_index INTEGER,
+      block_id TEXT,
+      text TEXT NOT NULL,
+      UNIQUE (document_key, source_type, chunk_id)
+    );
+    CREATE TABLE rag_store_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+    CREATE VIRTUAL TABLE rag_chunks_fts USING fts5(
+      text,
+      content='rag_chunks',
+      content_rowid='id',
+      tokenize='unicode61'
+    );
+    CREATE TRIGGER rag_chunks_ai AFTER INSERT ON rag_chunks BEGIN
+      INSERT INTO rag_chunks_fts(rowid, text) VALUES (new.id, new.text);
+    END;
+    CREATE TRIGGER rag_chunks_ad AFTER DELETE ON rag_chunks BEGIN
+      INSERT INTO rag_chunks_fts(rag_chunks_fts, rowid, text) VALUES ('delete', old.id, old.text);
+    END;
+    CREATE TRIGGER rag_chunks_au AFTER UPDATE ON rag_chunks BEGIN
+      INSERT INTO rag_chunks_fts(rag_chunks_fts, rowid, text) VALUES ('delete', old.id, old.text);
+      INSERT INTO rag_chunks_fts(rowid, text) VALUES (new.id, new.text);
+    END;
+    INSERT INTO rag_store_meta (key, value) VALUES ('rag_chunks_fts_v1', '1');
+  `);
+  legacyDb.close();
+
+  const store = createRagStore({ ragDatabasePath: databasePath });
+
+  try {
+    assert.equal(store.isFtsAvailable(), true);
+
+    store.indexDocument({
+      documentKey: 'doc-migrated',
+      title: '迁移后的中文文献',
+      sourceType: 'mineru-markdown',
+      sourceSignature: 'migration-signature',
+      embeddingModelKey: 'embedding-test',
+      totalChunkCount: 1,
+      chunks: [
+        {
+          chunkId: 'zh-migrated',
+          chunkIndex: 0,
+          pageIndex: 0,
+          text: '迁移后的中文段落，包含关键词剩余使用寿命预测。',
+          embedding: [0, 1, 0, 0],
+        },
+      ],
+    });
+
+    const results = store.retrieveDocumentChunks({
+      documentKey: 'doc-migrated',
+      sourceType: 'mineru-markdown',
+      queryEmbedding: [1, 0, 0, 0],
+      queryText: '剩余使用寿命预测',
+      topK: 1,
+    });
+
+    assert.ok(results.some((result) => result.chunkId === 'zh-migrated'));
+  } finally {
+    store.close();
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});
