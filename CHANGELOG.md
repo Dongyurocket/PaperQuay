@@ -4,6 +4,23 @@
 
 各平台安装包见 [GitHub Releases](https://github.com/Dongyurocket/PaperQuay/releases)。
 
+## [0.1.39] - 2026-09-08
+
+### 新增
+
+- **Zotero 本地文献库选择性同步能力**：打破过去只能整体无差别导入全部分类与条目的限制；底层支持按分类精准提取、多字段条件检索（标题、作者、年份、DOI）与按指定 itemKey 挑选入库。
+- **PaperQuay MCP 服务端 Zotero 工具链扩展**：在 `bin/paperquay-mcp.cjs` 与 `electron/mcp/knowledgeMcpService.cjs` 中新增 4 个标准 MCP 工具：
+  - `zotero_list_collections`：支持自动探测本地 Zotero 数据目录并列出完整分类树与条目数；
+  - `zotero_search_items`：支持条件模糊检索待同步文献并标明本地 PDF 附件状态；
+  - `zotero_preview_sync`：导入前安全预检与差量比对，精确区分「可同步就绪」、「已存在自动去重跳过」与「缺少本地 PDF 附件」；
+  - `paperquay_sync_from_zotero`：精准入库执行工具，支持自动同名分类创建/归属，本地 PDF 复制与 SQLite 并发安全事务写入。
+- **Proma 专属联动技能与全工作区部署**：定制发布 `paperquay-zotero-sync` 专属技能，确立了「意图解析 ➔ 检索预检 ➔ Markdown 差量清单确认 ➔ 批准后精准入库」的高可靠人机交互 SOP；已同步覆盖部署至全部 31 个 Proma 生产工作区，并在 10 个既有学术检索技能中全面补全 Zotero 工具协作指南。
+
+### 优化
+
+- **Zotero 元数据解析深度补全**：扩充本地 SQLite 解析管线，完整提取并结构化 `authors` 列表、`doi`、`publication`、`abstractNote` 与 `url` 等学术字段，确保同步入库后的文献具备完备的检索与引用能力。
+- **三层防重与文件哈希安全校验**：在比对与入库过程中严格执行 DOI 精确匹配、标题标准化比对与 PDF 内容 SHA-256 哈希校验，坚决杜绝重复文献入库。
+
 ## [0.1.38] - 2026-09-08
 
 ### 新增

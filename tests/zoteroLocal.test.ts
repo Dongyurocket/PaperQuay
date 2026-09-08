@@ -11,6 +11,8 @@ const {
   listLocalCollections,
   listLocalCollectionItems,
   listLocalLibraryItems,
+  getLocalItemsByKeys,
+  searchLocalLibraryItems,
 } = require('../electron/backend/zoteroLocal.cjs');
 
 function prefsString(value: string): string {
@@ -148,5 +150,36 @@ test('local Zotero queries resolve linked attachment base paths and pdf extensio
   } finally {
     rmSync(dataDir, { recursive: true, force: true });
     rmSync(linkedBaseDir, { recursive: true, force: true });
+  }
+});
+
+test('local Zotero queries support getLocalItemsByKeys and searchLocalLibraryItems', async () => {
+  const dataDir = await createZoteroFixture(20);
+
+  try {
+    const keysResult = await getLocalItemsByKeys({
+      dataDir,
+      itemKeys: ['PARENT_2', 'PARENT_5', 'UNKNOWN_KEY'],
+    });
+    assert.equal(keysResult.length, 2);
+    assert.ok(keysResult.some((item: any) => item.itemKey === 'PARENT_2'));
+    assert.ok(keysResult.some((item: any) => item.itemKey === 'PARENT_5'));
+
+    const searchResult = await searchLocalLibraryItems({
+      dataDir,
+      query: 'Paper 15',
+    });
+    assert.equal(searchResult.length, 1);
+    assert.equal(searchResult[0].title, 'Paper 15');
+
+    const collectionSearchResult = await searchLocalLibraryItems({
+      dataDir,
+      collectionKey: 'COLL',
+      query: 'Paper',
+      limit: 5,
+    });
+    assert.equal(collectionSearchResult.length, 5);
+  } finally {
+    rmSync(dataDir, { recursive: true, force: true });
   }
 });

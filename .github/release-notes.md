@@ -14,10 +14,10 @@ Download the native installer for your operating system from the Assets section 
 
 ## Highlights
 
-- **AI Block Re-parse & Formatting**: In BlockViewer, select any unsatisfactory structured block and trigger "AI Re-parse" from either the block header toolbar or context menu. Choose any configured AI model to re-parse and fix broken OCR or layout.
-- **Strict Anti-Filler Constraints & Defensive Sanitization**: Enforces strict zero-filler system prompts forbidding any greetings, conversational remarks, or markdown code fence wrappers. Automatically strips `<think>` tags, code fences, and introductory prefixes on both backend and client layers.
-- **Automatic Drop Cap Artifact Sanitization**: Automatically fixes Drop Cap letters erroneously classified as superscripts (e.g. `U<sup>RBAN ...</sup>` -> `Urban ...`), restoring natural paragraph flow and line wrapping.
-- **Automatic Nomenclature Table Reconstruction**: Automatically recovers collapsed and concatenated borderless symbol lists and Nomenclature sections, restoring missing delimiters, decoupling symbols from text, and reformatting them into clean Markdown tables with KaTeX math rendering.
+- **Selective Zotero Library Synchronization**: Breaks through the limitation of bulk-only synchronization. Users and Agents can now selectively discover, search, preview diffs, and import specific collections or items from the local Zotero library into PaperQuay.
+- **MCP Server Zotero Toolchain**: Extended the standard MCP server (`bin/paperquay-mcp.cjs`) with four specialized tools: `zotero_list_collections`, `zotero_search_items`, `zotero_preview_sync`, and `paperquay_sync_from_zotero`.
+- **Pre-sync Diff & Triple Deduplication**: Automated pre-sync checking comparing against the PaperQuay SQLite library, precisely identifying `ready` (available with local PDF), `alreadyExists` (deduplicated by DOI, title, or SHA-256 content hash), and `missingPdf` items.
+- **Dedicated Proma Agent Skill**: Ships with the `paperquay-zotero-sync` skill providing a standardized 4-stage ReAct workflow (Intent Resolution -> Pre-sync Diff -> User Confirmation -> Safe Ingestion).
 
 ## Notes
 
@@ -42,12 +42,12 @@ PaperQuay 是一个开源 AI 论文工作台，覆盖文献管理、PDF 阅读�
 
 ## 本次更新
 
-- **不满意区块 AI 大模型重新识别**：BlockViewer 结构块在悬浮操作栏（「✨ AI 重析」）和右键菜单中支持对任意识别不满意的区块调用大模型进行二次重构与排版修复；支持下拉自由选择用户配置的任意大模型，并提供「智能排版纠错」、「表格/术语表结构化」、「数学公式提取」三种模式及补充指令输入。
-- **无多余内容严格约束与双重防御剥离**：设计了极端严密的负向约束系统提示词（强制禁止任何问候、开场白、解释废话或代码块包裹），并在 Node.js 后端与渲染层配备双层防御性清洗机制，自动剔除思考标签（`<think>...</think>`）、外层代码块定界符与可能逃逸的前置/后置废话，确保输出 100% 纯净学术 Markdown。
-- **首字下沉（Drop Cap）伪上标自动修复**：针对学术论文常见的首字下沉排版（如段首大号 `U` 跨两行高度导致右侧文本被判定为偏高上标 `U<sup>RBAN ...</sup>` 或 `U^{RBAN ...}`），自动规约并还原为标准大小写词汇（如 `Urban`），同时修复单字母与大写词干之间空格截断缺陷，消除异常留白与错位换行。
-- **术语表（Nomenclature）无框表格自动重构**：彻底解决学术论文无框术语表被版面分析误判为普通文本段落、因“去除软换行”而压平坍缩为整团乱码的问题；智能解耦变量符号与描述之间的字符粘连（如 `Bnumber` $\to$ `$B$` 与 `number`、`C_Bbattery` $\to$ `$C_B$` 与 `battery`、`mmass` $\to$ `$m$` 与 `mass`、`cchord` $\to$ `$c$` 与 `chord`），自动将其重构为排版优雅的两列 Markdown 变量定义表，数学符号自动以 KaTeX 矢量公式呈现。
+- **Zotero 本地文献库选择性同步能力**：打破过去只能整体无差别全量同步的限制；底层支持按分类精准提取、多字段条件检索（标题、作者、年份、DOI）与按指定 itemKey 挑选入库。
+- **PaperQuay MCP 服务端 Zotero 工具链扩展**：在标准 MCP 服务中扩展了 4 个新工具（`zotero_list_collections`、`zotero_search_items`、`zotero_preview_sync`、`paperquay_sync_from_zotero`），外部 Agent 现可免侵入直接调度 Zotero 数据并安全写入 PaperQuay。
+- **同步前差量比对与三重去重保障**：在真正执行文件拷贝与入库前自动进行安全预检，严格基于 DOI、标题标准化及 PDF 内容 SHA-256 哈希进行查重，清晰区分为「待同步」、「已存在跳过」与「缺少本地 PDF」状态。
+- **Proma 专属联动技能发布**：提供 `paperquay-zotero-sync` 专属技能，确立了「意图解析 ➔ 检索预检 ➔ Markdown 差量清单确认 ➔ 批准后精准入库」的高可靠人机交互 SOP，并在全工作区完成分发部署。
 
 ## 备注
 
-- AI 功能需要在设置中自行配置兼容模型接口和 API Key。
-- Release 资源由 GitHub Actions 自动生成。
+- AI 特性需要在“设置”中配置你自己的兼容模型接口与 API 密钥。
+- 发布产物由 GitHub Actions 自动构建生成。

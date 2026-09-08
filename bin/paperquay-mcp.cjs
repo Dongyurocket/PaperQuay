@@ -31,7 +31,7 @@ const options = parseArgs();
 const service = new PaperQuayKnowledgeService({ dataDir: options.dataDir });
 
 const SERVER_NAME = 'paperquay-knowledge-mcp';
-const SERVER_VERSION = '0.1.32';
+const SERVER_VERSION = '0.1.39';
 
 const TOOLS = [
   {
@@ -143,6 +143,102 @@ const TOOLS = [
       },
     },
   },
+  {
+    name: 'zotero_list_collections',
+    description:
+      'List collections/folders from the local Zotero library, including item counts and hierarchical keys.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        dataDir: {
+          type: 'string',
+          description: 'Optional custom Zotero data directory. Omit to auto-detect.',
+        },
+      },
+    },
+  },
+  {
+    name: 'zotero_search_items',
+    description:
+      'Search items in the local Zotero library by title, author, year, DOI, or within a specific collection.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'Keywords to search in title, creators, year, or DOI.',
+        },
+        collectionKey: {
+          type: 'string',
+          description: 'Optional Zotero collection key to narrow down search to a specific collection.',
+        },
+        limit: {
+          type: 'integer',
+          description: 'Maximum items to return (default 50, max 200).',
+          default: 50,
+        },
+        dataDir: {
+          type: 'string',
+          description: 'Optional custom Zotero data directory. Omit to auto-detect.',
+        },
+      },
+    },
+  },
+  {
+    name: 'zotero_preview_sync',
+    description:
+      'Preview diff before syncing items or a collection from Zotero to PaperQuay. Checks which items are ready, already exist, or lack local PDFs.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        itemKeys: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Specific Zotero item keys to check for syncing.',
+        },
+        collectionKey: {
+          type: 'string',
+          description: 'Zotero collection key to check for syncing.',
+        },
+        dataDir: {
+          type: 'string',
+          description: 'Optional custom Zotero data directory. Omit to auto-detect.',
+        },
+      },
+    },
+  },
+  {
+    name: 'paperquay_sync_from_zotero',
+    description:
+      'Import selected items or a collection from the local Zotero library into PaperQuay, copying local PDFs and preserving metadata and collections.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        itemKeys: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Specific Zotero item keys to import into PaperQuay.',
+        },
+        collectionKey: {
+          type: 'string',
+          description: 'Zotero collection key to import into PaperQuay.',
+        },
+        targetCategoryId: {
+          type: 'string',
+          description: 'Optional target PaperQuay category ID to assign imported papers to.',
+        },
+        createCollectionCategory: {
+          type: 'boolean',
+          description: 'Whether to create/use a category matching the Zotero collection name when targetCategoryId is omitted (default true).',
+          default: true,
+        },
+        dataDir: {
+          type: 'string',
+          description: 'Optional custom Zotero data directory. Omit to auto-detect.',
+        },
+      },
+    },
+  },
 ];
 
 function sendJsonRpc(response) {
@@ -181,6 +277,14 @@ async function handleToolCall(name, args) {
       return service.readPaperContent(args || {});
     case 'search_notes':
       return service.searchNotes(args || {});
+    case 'zotero_list_collections':
+      return service.zoteroListCollections(args || {});
+    case 'zotero_search_items':
+      return service.zoteroSearchItems(args || {});
+    case 'zotero_preview_sync':
+      return service.zoteroPreviewSync(args || {});
+    case 'paperquay_sync_from_zotero':
+      return service.paperquaySyncFromZotero(args || {});
     default:
       throw new Error(`Unknown tool: ${name}`);
   }

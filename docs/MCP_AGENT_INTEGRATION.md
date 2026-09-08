@@ -15,6 +15,7 @@ PaperQuay 提供了基于标准 **Model Context Protocol (MCP)** 的只读知识
 
 ## 提供的 MCP 工具（Tools）
 
+### 知识库只读检索工具
 | 工具名称 | 说明 | 核心参数 | 返回内容 |
 | :--- | :--- | :--- | :--- |
 | `search_papers` | 检索文献库元数据 | `query`（关键词）、`tag`（标签）、`limit` | 匹配文献列表（ID、中英文标题、作者、年份、DOI、标签） |
@@ -22,6 +23,14 @@ PaperQuay 提供了基于标准 **Model Context Protocol (MCP)** 的只读知识
 | `search_knowledge_base` | 全文与 RAG 知识库证据检索 | `query`（必填）、`paperId`（可选）、`limit` | 带文献标题、页码、段落预览和匹配分数的证据切片 |
 | `read_paper_content` | 读取文献在知识库中的分块正文 | `paperId`（必填）、`pageIndex`（可选）、`limit` | 按页面或顺序排列的结构化正文内容 |
 | `search_notes` | 检索用户的阅读笔记与批注摘录 | `query`（可选）、`paperId`（可选）、`limit` | 用户个人笔记、高亮批注与摘录内容 |
+
+### Zotero 本地选择性同步工具
+| 工具名称 | 说明 | 核心参数 | 返回内容 |
+| :--- | :--- | :--- | :--- |
+| `zotero_list_collections` | 获取本地 Zotero 分类树及条目数 | `dataDir`（可选，默认自动探测） | 分类列表（key、分类名、父分类、条目数）及探测目录 |
+| `zotero_search_items` | 条件检索本地 Zotero 文献条目 | `query`、`collectionKey`、`limit`、`dataDir` | 匹配文献列表（包含是否有本地 PDF 附件、DOI 等） |
+| `zotero_preview_sync` | 同步前差量比对与去重预检 | `itemKeys`、`collectionKey`、`dataDir` | 差量清单（`ready` 待同步、`alreadyExists` 重复跳过、`missingPdf` 缺 PDF） |
+| `paperquay_sync_from_zotero` | 精准导入文献至 PaperQuay | `itemKeys`、`collectionKey`、`targetCategoryId`、`createCollectionCategory` | 导入报告（成功导入数、重复数、自动创建的分类） |
 
 ---
 

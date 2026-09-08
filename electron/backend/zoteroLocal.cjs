@@ -267,6 +267,27 @@ function localCreatorSummary(db, itemId) {
   return `${names[0]} et al.`;
 }
 
+function localCreators(db, itemId) {
+  return rows(db, `
+    select coalesce(c.firstName, '') as firstName, coalesce(c.lastName, '') as lastName
+    from itemCreators ic
+    join creators c on c.creatorID = ic.creatorID
+    where ic.itemID = ?
+    order by ic.orderIndex asc
+  `, [itemId])
+    .map((row) => {
+      const givenName = cleanString(row.firstName);
+      const familyName = cleanString(row.lastName);
+      const name = [givenName, familyName].filter(Boolean).join(' ');
+      return {
+        name,
+        givenName: givenName || undefined,
+        familyName: familyName || undefined,
+      };
+    })
+    .filter((creator) => creator.name);
+}
+
 function resolveLocalAttachmentPath(dataDir, attachmentKey, rawPath, baseAttachmentPath = '') {
   const raw = cleanString(rawPath);
   if (!raw) return undefined;
@@ -306,12 +327,21 @@ function buildLocalLibraryItem(db, dataDir, baseAttachmentPath, row) {
     || cleanString(localFieldValue(db, attachmentItemId, 'title'))
     || 'Untitled PDF';
   const date = localFieldValue(db, metadataItemId, 'date');
+  const doi = cleanString(localFieldValue(db, metadataItemId, 'DOI'));
+  const publication = cleanString(localFieldValue(db, metadataItemId, 'publicationTitle'));
+  const abstractNote = cleanString(localFieldValue(db, metadataItemId, 'abstractNote'));
+  const url = cleanString(localFieldValue(db, metadataItemId, 'url'));
 
   return {
     itemKey: String(row.itemKey),
     title,
     creators: localCreatorSummary(db, metadataItemId),
+    authors: localCreators(db, metadataItemId),
     year: yearFromDate(date),
+    doi: doi || undefined,
+    publication: publication || undefined,
+    abstractNote: abstractNote || undefined,
+    url: url || undefined,
     itemType: cleanString(row.itemType) || 'attachment',
     attachmentKey,
     attachmentTitle: undefined,
@@ -542,10 +572,129 @@ async function listRelatedNotes(options = {}) {
   });
 }
 
+async function getLocalItemsByKeys(options = {}) {
+  const itemKeys = Array.isArray(options.itemKeys)
+    ? options.itemKeys.map(cleanString).filter(Boolean)
+    : [];
+  if (itemKeys.length === 0) return [];
+
+  return withLocalZoteroDatabase(options.dataDir, (db, dataDir, baseAttachmentPath) => {
+    const placeholders = itemKeys.map(() => '?').join(',');
+    const query = `
+      select distinct
+        attachment.itemID as attachmentItemId,
+        attachment.key as attachmentKey,
+        ia.parentItemID as parentItemId,
+        ia.path as rawPath,
+        coalesce(parent.key, attachment.key) as itemKey,
+        coalesce(parentType.typeName, attachmentType.typeName, 'attachment') as itemType
+      from itemAttachments ia
+      join items attachment on attachment.itemID = ia.itemID
+      left join items parent on parent.itemID = ia.parentItemID
+      left join itemTypes parentType on parentType.itemTypeID = parent.itemTypeID
+      left join itemTypes attachmentType on attachmentType.itemTypeID = attachment.itemTypeID
+      left join deletedItems deletedAttachment on deletedAttachment.itemID = attachment.itemID
+      left join deletedItems deletedParent on deletedParent.itemID = parent.itemID
+      where ${PDF_ATTACHMENT_FILTER}
+        and deletedAttachment.itemID is null
+        and deletedParent.itemID is null
+        and (
+          parent.key in (${placeholders})
+          or attachment.key in (${placeholders})
+        )
+      order by attachment.dateModified desc
+    `;
+    const params = [...itemKeys, ...itemKeys];
+    return rows(db, query, params).map((row) =>
+      buildLocalLibraryItem(db, dataDir, baseAttachmentPath, row),
+    );
+  });
+}
+
+async function searchLocalLibraryItems(options = {}) {
+  const queryText = cleanString(options.query).toLowerCase();
+  const collectionKey = cleanString(options.collectionKey);
+  const limit = normalizeLimit(options.limit) ?? 50;
+
+  return withLocalZoteroDatabase(options.dataDir, (db, dataDir, baseAttachmentPath) => {
+    let sql;
+    let params = [];
+
+    if (collectionKey) {
+      sql = `
+        select distinct
+          attachment.itemID as attachmentItemId,
+          attachment.key as attachmentKey,
+          ia.parentItemID as parentItemId,
+          ia.path as rawPath,
+          coalesce(parent.key, attachment.key) as itemKey,
+          coalesce(parentType.typeName, attachmentType.typeName, 'attachment') as itemType
+        from collections c
+        join collectionItems ci on ci.collectionID = c.collectionID
+        join itemAttachments ia
+          on (ia.parentItemID = ci.itemID or ia.itemID = ci.itemID)
+          and ${PDF_ATTACHMENT_FILTER}
+        join items attachment on attachment.itemID = ia.itemID
+        left join items parent on parent.itemID = ia.parentItemID
+        left join itemTypes parentType on parentType.itemTypeID = parent.itemTypeID
+        left join itemTypes attachmentType on attachmentType.itemTypeID = attachment.itemTypeID
+        left join deletedItems deletedAttachment on deletedAttachment.itemID = attachment.itemID
+        left join deletedItems deletedParent on deletedParent.itemID = parent.itemID
+        where c.key = ?
+          and deletedAttachment.itemID is null
+          and deletedParent.itemID is null
+        order by attachment.dateModified desc
+      `;
+      params = [collectionKey];
+    } else {
+      sql = `
+        select distinct
+          attachment.itemID as attachmentItemId,
+          attachment.key as attachmentKey,
+          ia.parentItemID as parentItemId,
+          ia.path as rawPath,
+          coalesce(parent.key, attachment.key) as itemKey,
+          coalesce(parentType.typeName, attachmentType.typeName, 'attachment') as itemType
+        from itemAttachments ia
+        join items attachment on attachment.itemID = ia.itemID
+        left join items parent on parent.itemID = ia.parentItemID
+        left join itemTypes parentType on parentType.itemTypeID = parent.itemTypeID
+        left join itemTypes attachmentType on attachmentType.itemTypeID = attachment.itemTypeID
+        left join deletedItems deletedAttachment on deletedAttachment.itemID = attachment.itemID
+        left join deletedItems deletedParent on deletedParent.itemID = parent.itemID
+        where ${PDF_ATTACHMENT_FILTER}
+          and deletedAttachment.itemID is null
+          and deletedParent.itemID is null
+        order by attachment.dateModified desc
+      `;
+      params = [];
+    }
+
+    let items = rows(db, sql, params).map((row) =>
+      buildLocalLibraryItem(db, dataDir, baseAttachmentPath, row),
+    );
+
+    if (queryText) {
+      items = items.filter((item) => {
+        const titleMatch = item.title && item.title.toLowerCase().includes(queryText);
+        const creatorMatch = item.creators && item.creators.toLowerCase().includes(queryText);
+        const yearMatch = item.year && item.year.includes(queryText);
+        const doiMatch = item.doi && item.doi.toLowerCase().includes(queryText);
+        const keyMatch = item.itemKey && item.itemKey.toLowerCase().includes(queryText);
+        return titleMatch || creatorMatch || yearMatch || doiMatch || keyMatch;
+      });
+    }
+
+    return items.slice(0, limit);
+  });
+}
+
 module.exports = {
   detectLocalZoteroDataDir,
   listLocalCollections,
   listLocalLibraryItems,
   listLocalCollectionItems,
   listRelatedNotes,
+  getLocalItemsByKeys,
+  searchLocalLibraryItems,
 };

@@ -2,9 +2,40 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const { DatabaseSync } = require('../backend/nodeSqlite.cjs');
+const {
+  detectLocalZoteroDataDir,
+  listLocalCollections,
+  listLocalCollectionItems,
+  listLocalLibraryItems,
+  getLocalItemsByKeys,
+  searchLocalLibraryItems,
+} = require('../backend/zoteroLocal.cjs');
+const { createLibraryStore } = require('../backend/libraryStore.cjs');
+const { id, now, safeFileName, fileNameFromPath, hashBytes, isPdf } = require('../backend/utils.cjs');
 
 function cleanString(value) {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function buildPaperAuthors(item) {
+  if (Array.isArray(item.authors) && item.authors.length > 0) {
+    return item.authors.map((author, index) => ({
+      id: id('auth'),
+      name: cleanString(author.name) || 'Unknown Author',
+      givenName: cleanString(author.givenName) || null,
+      familyName: cleanString(author.familyName) || null,
+      sortOrder: index,
+    }));
+  }
+  const creators = cleanString(item.creators);
+  if (!creators) return [];
+  return creators.split(/,\s*|;\s*|\s+and\s+/).map((name, index) => ({
+    id: id('auth'),
+    name: cleanString(name),
+    givenName: null,
+    familyName: null,
+    sortOrder: index,
+  })).filter((a) => a.name);
 }
 
 function resolveDefaultDataDir() {
@@ -546,6 +577,367 @@ class PaperQuayKnowledgeService {
     } finally {
       db.close();
     }
+  }
+
+  async zoteroListCollections({ dataDir = '' } = {}) {
+    const collections = await listLocalCollections({ dataDir });
+    return {
+      collections,
+      total: collections.length,
+      dataDir: dataDir || (await detectLocalZoteroDataDir()),
+    };
+  }
+
+  async zoteroSearchItems({ dataDir = '', query = '', collectionKey = '', limit = 50 } = {}) {
+    const items = await searchLocalLibraryItems({
+      dataDir,
+      query,
+      collectionKey,
+      limit,
+    });
+    return {
+      items: items.map((item) => ({
+        itemKey: item.itemKey,
+        title: item.title,
+        creators: item.creators,
+        authors: item.authors,
+        year: item.year,
+        doi: item.doi || null,
+        publication: item.publication || null,
+        abstractNote: item.abstractNote || null,
+        itemType: item.itemType,
+        hasLocalPdf: Boolean(item.localPdfPath && fs.existsSync(item.localPdfPath)),
+        localPdfPath: item.localPdfPath || null,
+        attachmentFilename: item.attachmentFilename || null,
+      })),
+      total: items.length,
+      query: cleanString(query),
+      collectionKey: cleanString(collectionKey) || null,
+    };
+  }
+
+  async zoteroPreviewSync({ dataDir = '', itemKeys = [], collectionKey = '' } = {}) {
+    const targetKeys = Array.isArray(itemKeys) ? itemKeys.map(cleanString).filter(Boolean) : [];
+    const targetCollection = cleanString(collectionKey);
+
+    let candidates = [];
+    if (targetKeys.length > 0) {
+      candidates = await getLocalItemsByKeys({ dataDir, itemKeys: targetKeys });
+    } else if (targetCollection) {
+      candidates = await listLocalCollectionItems({ dataDir, collectionKey: targetCollection });
+    } else {
+      candidates = await listLocalLibraryItems({ dataDir, limit: 100 });
+    }
+
+    const db = this.getLibraryDb();
+    const existingDois = new Set();
+    const existingTitles = new Set();
+    const existingHashes = new Set();
+
+    if (db) {
+      try {
+        const rows = db.prepare(`
+          SELECT p.id, p.title, p.doi, a.content_hash AS contentHash
+          FROM papers p
+          LEFT JOIN attachments a ON a.paper_id = p.id
+        `).all();
+
+        for (const row of rows) {
+          if (row.doi) existingDois.add(cleanString(row.doi).toLowerCase());
+          if (row.title) existingTitles.add(cleanString(row.title).toLowerCase());
+          if (row.contentHash) existingHashes.add(row.contentHash);
+        }
+      } finally {
+        db.close();
+      }
+    }
+
+    const ready = [];
+    const alreadyExists = [];
+    const missingPdf = [];
+
+    for (const item of candidates) {
+      if (!item.localPdfPath || !fs.existsSync(item.localPdfPath)) {
+        missingPdf.push({
+          itemKey: item.itemKey,
+          title: item.title,
+          year: item.year,
+          creators: item.creators,
+          reason: 'Zotero 中无本地 PDF 附件或文件已丢失',
+        });
+        continue;
+      }
+
+      let isDuplicate = false;
+      let duplicateReason = '';
+
+      if (item.doi && existingDois.has(cleanString(item.doi).toLowerCase())) {
+        isDuplicate = true;
+        duplicateReason = `DOI 重复 (${item.doi})`;
+      } else if (item.title && existingTitles.has(cleanString(item.title).toLowerCase())) {
+        isDuplicate = true;
+        duplicateReason = `标题重复 (${item.title})`;
+      } else {
+        try {
+          const bytes = fs.readFileSync(item.localPdfPath);
+          const hash = hashBytes(bytes);
+          if (existingHashes.has(hash)) {
+            isDuplicate = true;
+            duplicateReason = 'PDF 文件内容 Hash 重复';
+          }
+        } catch {
+          // ignore read error
+        }
+      }
+
+      if (isDuplicate) {
+        alreadyExists.push({
+          itemKey: item.itemKey,
+          title: item.title,
+          year: item.year,
+          creators: item.creators,
+          doi: item.doi || null,
+          reason: duplicateReason,
+        });
+      } else {
+        ready.push({
+          itemKey: item.itemKey,
+          title: item.title,
+          year: item.year,
+          creators: item.creators,
+          doi: item.doi || null,
+          publication: item.publication || null,
+          hasLocalPdf: true,
+          localPdfPath: item.localPdfPath,
+          attachmentFilename: item.attachmentFilename || null,
+        });
+      }
+    }
+
+    return {
+      summary: {
+        total: candidates.length,
+        readyCount: ready.length,
+        alreadyExistsCount: alreadyExists.length,
+        missingPdfCount: missingPdf.length,
+      },
+      ready,
+      alreadyExists,
+      missingPdf,
+    };
+  }
+
+  async paperquaySyncFromZotero({
+    dataDir = '',
+    itemKeys = [],
+    collectionKey = '',
+    targetCategoryId = '',
+    createCollectionCategory = true,
+  } = {}) {
+    const targetKeys = Array.isArray(itemKeys) ? itemKeys.map(cleanString).filter(Boolean) : [];
+    const targetCollection = cleanString(collectionKey);
+
+    let candidates = [];
+    if (targetKeys.length > 0) {
+      candidates = await getLocalItemsByKeys({ dataDir, itemKeys: targetKeys });
+    } else if (targetCollection) {
+      candidates = await listLocalCollectionItems({ dataDir, collectionKey: targetCollection });
+    } else {
+      throw new Error('Must provide either itemKeys or collectionKey to sync');
+    }
+
+    if (candidates.length === 0) {
+      return {
+        summary: {
+          totalRequested: 0,
+          importedCount: 0,
+          duplicateCount: 0,
+          missingPdfCount: 0,
+          failedCount: 0,
+        },
+        importedPapers: [],
+        duplicates: [],
+        missingPdfs: [],
+        errors: [],
+      };
+    }
+
+    const store = createLibraryStore(this.appPaths);
+    const library = store.load();
+    const storageDir = library.settings.storageDir || path.join(this.appPaths.dataDir, 'paperquay-data');
+    fs.mkdirSync(storageDir, { recursive: true });
+
+    let resolvedCategoryId = cleanString(targetCategoryId) || null;
+
+    if (!resolvedCategoryId && targetCollection && createCollectionCategory !== false) {
+      const collections = await listLocalCollections({ dataDir });
+      const matched = collections.find((c) => c.collectionKey === targetCollection);
+      const collectionName = cleanString(matched?.name) || 'Zotero Collection';
+
+      const existingCat = library.categories.find(
+        (c) => !c.isSystem && c.parentId === null && c.name.toLowerCase() === collectionName.toLowerCase(),
+      );
+
+      if (existingCat) {
+        resolvedCategoryId = existingCat.id;
+      } else {
+        const newCat = {
+          id: id('cat'),
+          name: collectionName,
+          parentId: null,
+          sortOrder: library.categories.length,
+          isSystem: false,
+          systemKey: null,
+          createdAt: now(),
+          updatedAt: now(),
+          paperCount: 0,
+        };
+        library.categories.push(newCat);
+        resolvedCategoryId = newCat.id;
+      }
+    }
+
+    const importedPapers = [];
+    const duplicates = [];
+    const missingPdfs = [];
+    const errors = [];
+
+    for (const item of candidates) {
+      if (!item.localPdfPath || !fs.existsSync(item.localPdfPath)) {
+        missingPdfs.push({
+          itemKey: item.itemKey,
+          title: item.title,
+          reason: '本地无 PDF 附件',
+        });
+        continue;
+      }
+
+      try {
+        const sourcePath = item.localPdfPath;
+        if (!isPdf(sourcePath)) {
+          missingPdfs.push({ itemKey: item.itemKey, title: item.title, reason: '附件非 PDF 文件' });
+          continue;
+        }
+
+        const bytes = fs.readFileSync(sourcePath);
+        const contentHash = hashBytes(bytes);
+
+        const existingPaper = library.papers.find((p) =>
+          p.attachments?.some((att) => att.contentHash === contentHash) ||
+          (item.doi && p.doi && p.doi.toLowerCase() === item.doi.toLowerCase()) ||
+          (item.title && p.title && p.title.trim().toLowerCase() === item.title.trim().toLowerCase()),
+        );
+
+        if (existingPaper) {
+          if (resolvedCategoryId && !existingPaper.categoryIds.includes(resolvedCategoryId)) {
+            existingPaper.categoryIds.push(resolvedCategoryId);
+            existingPaper.updatedAt = now();
+          }
+          duplicates.push({
+            itemKey: item.itemKey,
+            title: item.title,
+            existingPaperId: existingPaper.id,
+            reason: '文献已在文库中存在',
+          });
+          continue;
+        }
+
+        const paperId = id('paper');
+        const fileName = safeFileName(item.attachmentFilename || fileNameFromPath(sourcePath));
+        const storedPath = path.join(storageDir, `${paperId}-${fileName}`);
+        fs.copyFileSync(sourcePath, storedPath);
+
+        const relativePath = path.relative(storageDir, storedPath);
+        const stat = fs.statSync(storedPath);
+
+        const authors = buildPaperAuthors(item);
+
+        const paper = {
+          id: paperId,
+          title: cleanString(item.title) || path.basename(fileName, path.extname(fileName)),
+          titleZh: null,
+          year: item.year || null,
+          publication: item.publication || null,
+          doi: item.doi || null,
+          url: item.url || null,
+          abstractText: item.abstractNote || null,
+          itemType: item.itemType || 'journalArticle',
+          publisher: null,
+          institution: null,
+          reportNumber: null,
+          volume: null,
+          issue: null,
+          pages: null,
+          isbn: null,
+          issn: null,
+          keywords: [],
+          importedAt: now(),
+          updatedAt: now(),
+          lastReadAt: null,
+          readingProgress: 0,
+          isFavorite: false,
+          userNote: null,
+          aiSummary: null,
+          citation: null,
+          source: 'zotero',
+          sortOrder: Math.min(0, ...library.papers.map((p) => p.sortOrder ?? 0)) - 1,
+          authors,
+          tags: [],
+          categoryIds: resolvedCategoryId ? [resolvedCategoryId] : [],
+          attachments: [{
+            id: id('att'),
+            paperId,
+            kind: 'pdf',
+            originalPath: sourcePath,
+            storedPath,
+            relativePath,
+            fileName,
+            mimeType: 'application/pdf',
+            fileSize: stat.size,
+            contentHash,
+            createdAt: now(),
+            missing: false,
+          }],
+        };
+
+        library.papers.push(paper);
+        importedPapers.push({
+          id: paper.id,
+          title: paper.title,
+          year: paper.year,
+          doi: paper.doi,
+          zoteroItemKey: item.itemKey,
+          categoryId: resolvedCategoryId,
+        });
+      } catch (err) {
+        errors.push({
+          itemKey: item.itemKey,
+          title: item.title,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
+    try {
+      store.save(library);
+    } finally {
+      store.close();
+    }
+
+    return {
+      summary: {
+        totalRequested: candidates.length,
+        importedCount: importedPapers.length,
+        duplicateCount: duplicates.length,
+        missingPdfCount: missingPdfs.length,
+        failedCount: errors.length,
+      },
+      importedPapers,
+      duplicates,
+      missingPdfs,
+      errors,
+      categoryId: resolvedCategoryId,
+    };
   }
 }
 

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -252,6 +252,10 @@ test('paperquay-mcp stdio server handles JSON-RPC 2.0 requests', async () => {
     assert.ok(toolNames.includes('search_knowledge_base'));
     assert.ok(toolNames.includes('read_paper_content'));
     assert.ok(toolNames.includes('search_notes'));
+    assert.ok(toolNames.includes('zotero_list_collections'));
+    assert.ok(toolNames.includes('zotero_search_items'));
+    assert.ok(toolNames.includes('zotero_preview_sync'));
+    assert.ok(toolNames.includes('paperquay_sync_from_zotero'));
 
     // 3. tools/call search_knowledge_base
     const callRes = (await call(3, 'tools/call', {
@@ -268,5 +272,166 @@ test('paperquay-mcp stdio server handles JSON-RPC 2.0 requests', async () => {
     await new Promise((resolve) => child.on('close', resolve));
   } finally {
     rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('PaperQuayKnowledgeService handles selective Zotero sync workflow', async () => {
+  const initSqlJs = require('sql.js');
+  const { createLibraryStore } = require('../electron/backend/libraryStore.cjs');
+  const { resolveAppPaths } = require('../electron/mcp/knowledgeMcpService.cjs');
+
+  const dataDir = mkdtempSync(path.join(tmpdir(), 'paperquay-mcp-sync-'));
+  const zoteroDir = mkdtempSync(path.join(tmpdir(), 'paperquay-zotero-sync-'));
+  const appPaths = resolveAppPaths(dataDir);
+
+  // 初始化 library
+  const store = createLibraryStore(appPaths);
+  const library = store.load();
+  library.papers.push({
+    id: 'paper-existing-1',
+    title: 'Attention Is All You Need',
+    titleZh: null,
+    year: '2017',
+    publication: 'NeurIPS',
+    doi: '10.1000/transformer',
+    url: null,
+    abstractText: 'Transformer architecture',
+    itemType: 'journalArticle',
+    publisher: null,
+    institution: null,
+    reportNumber: null,
+    volume: null,
+    issue: null,
+    pages: null,
+    isbn: null,
+    issn: null,
+    keywords: [],
+    importedAt: Date.now(),
+    updatedAt: Date.now(),
+    lastReadAt: null,
+    readingProgress: 0,
+    isFavorite: false,
+    userNote: null,
+    aiSummary: null,
+    citation: null,
+    source: 'local',
+    sortOrder: 0,
+    authors: [],
+    tags: [],
+    categoryIds: [],
+    attachments: [],
+  });
+  store.save(library);
+  store.close();
+
+  // 构建 Zotero 数据库 fixture
+  const SQL = await initSqlJs({
+    locateFile: () => require.resolve('sql.js/dist/sql-wasm.wasm'),
+  });
+  const zdb = new SQL.Database();
+
+  zdb.run(`
+    create table itemAttachments (itemID integer, parentItemID integer, contentType text, path text);
+    create table items (itemID integer primary key, key text, itemTypeID integer, dateModified text);
+    create table itemTypes (itemTypeID integer primary key, typeName text);
+    create table fields (fieldID integer primary key, fieldName text);
+    create table itemData (itemID integer, fieldID integer, valueID integer);
+    create table itemDataValues (valueID integer primary key, value text);
+    create table itemCreators (itemID integer, creatorID integer, orderIndex integer);
+    create table creators (creatorID integer primary key, firstName text, lastName text);
+    create table collections (collectionID integer primary key, key text, collectionName text, parentCollectionID integer);
+    create table collectionItems (collectionID integer, itemID integer);
+    create table deletedItems (itemID integer primary key, dateDeleted text);
+  `);
+  zdb.run("insert into itemTypes values (1, 'journalArticle'), (2, 'attachment')");
+  zdb.run("insert into fields values (1, 'title'), (2, 'date'), (3, 'DOI')");
+  zdb.run("insert into collections values (10, 'COLL_AI', 'AI Papers', null)");
+
+  // Item 1: 新文献，有本地 PDF
+  const storage1 = path.join(zoteroDir, 'storage', 'ATT_1');
+  mkdirSync(storage1, { recursive: true });
+  writeFileSync(path.join(storage1, 'rl.pdf'), '%PDF-1.7\nSample RL Content');
+  zdb.run("insert into items values (1, 'PARENT_RL', 1, '2026-01-01')");
+  zdb.run("insert into items values (101, 'ATT_1', 2, '2026-01-01')");
+  zdb.run("insert into itemAttachments values (101, 1, 'application/pdf', 'storage:rl.pdf')");
+  zdb.run('insert into collectionItems values (10, 1)');
+  zdb.run("insert into itemDataValues values (1, 'Reinforcement Learning at Scale'), (2, '2025'), (3, '10.1000/rl-scale')");
+  zdb.run('insert into itemData values (1, 1, 1), (1, 2, 2), (1, 3, 3)');
+
+  // Item 2: 重复文献 (DOI 10.1000/transformer)
+  const storage2 = path.join(zoteroDir, 'storage', 'ATT_2');
+  mkdirSync(storage2, { recursive: true });
+  writeFileSync(path.join(storage2, 'transformer.pdf'), '%PDF-1.7\nTransformer duplicate');
+  zdb.run("insert into items values (2, 'PARENT_TRANSFORMER', 1, '2026-01-01')");
+  zdb.run("insert into items values (102, 'ATT_2', 2, '2026-01-01')");
+  zdb.run("insert into itemAttachments values (102, 2, 'application/pdf', 'storage:transformer.pdf')");
+  zdb.run('insert into collectionItems values (10, 2)');
+  zdb.run("insert into itemDataValues values (4, 'Attention Is All You Need'), (5, '10.1000/transformer')");
+  zdb.run('insert into itemData values (2, 1, 4), (2, 3, 5)');
+
+  // Item 3: 缺少本地 PDF 附件
+  zdb.run("insert into items values (3, 'PARENT_NO_PDF', 1, '2026-01-01')");
+  zdb.run('insert into collectionItems values (10, 3)');
+  zdb.run("insert into itemDataValues values (6, 'Paper Without PDF')");
+  zdb.run('insert into itemData values (3, 1, 6)');
+
+  writeFileSync(path.join(zoteroDir, 'zotero.sqlite'), Buffer.from(zdb.export()));
+  zdb.close();
+
+  const service = new PaperQuayKnowledgeService({ dataDir });
+
+  try {
+    // 1. 测试列出分类
+    const collectionsResult = await service.zoteroListCollections({ dataDir: zoteroDir });
+    assert.equal(collectionsResult.total, 1);
+    assert.equal(collectionsResult.collections[0].name, 'AI Papers');
+    assert.equal(collectionsResult.collections[0].collectionKey, 'COLL_AI');
+
+    // 2. 测试搜索条目
+    const searchResult = await service.zoteroSearchItems({
+      dataDir: zoteroDir,
+      query: 'Reinforcement',
+    });
+    assert.equal(searchResult.total, 1);
+    assert.equal(searchResult.items[0].title, 'Reinforcement Learning at Scale');
+    assert.equal(searchResult.items[0].hasLocalPdf, true);
+
+    // 3. 测试同步预检 (preview)
+    const preview = await service.zoteroPreviewSync({
+      dataDir: zoteroDir,
+      collectionKey: 'COLL_AI',
+    });
+    assert.equal(preview.summary.total, 2); // 2 个带 PDF 的条目
+    assert.equal(preview.summary.readyCount, 1); // 1 个新文献可同步
+    assert.equal(preview.summary.alreadyExistsCount, 1); // 1 个与现有重复
+    assert.equal(preview.ready[0].itemKey, 'PARENT_RL');
+    assert.equal(preview.alreadyExists[0].itemKey, 'PARENT_TRANSFORMER');
+
+    // 4. 测试执行精准同步
+    const syncResult = await service.paperquaySyncFromZotero({
+      dataDir: zoteroDir,
+      itemKeys: ['PARENT_RL'],
+      collectionKey: 'COLL_AI',
+      createCollectionCategory: true,
+    });
+    assert.equal(syncResult.summary.importedCount, 1);
+    assert.equal(syncResult.summary.duplicateCount, 0);
+    assert.equal(syncResult.importedPapers[0].title, 'Reinforcement Learning at Scale');
+
+    // 5. 验证入库后能够被普通 searchPapers 检索到
+    const queryAfterSync = service.searchPapers({ query: 'Reinforcement' });
+    assert.equal(queryAfterSync.total, 1);
+    assert.equal(queryAfterSync.papers[0].title, 'Reinforcement Learning at Scale');
+
+    // 6. 再次预检，PARENT_RL 应该变成 alreadyExists
+    const previewAfter = await service.zoteroPreviewSync({
+      dataDir: zoteroDir,
+      itemKeys: ['PARENT_RL'],
+    });
+    assert.equal(previewAfter.summary.readyCount, 0);
+    assert.equal(previewAfter.summary.alreadyExistsCount, 1);
+  } finally {
+    rmSync(dataDir, { recursive: true, force: true });
+    rmSync(zoteroDir, { recursive: true, force: true });
   }
 });
