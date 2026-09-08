@@ -2,6 +2,24 @@ import type { JSONContent } from '@tiptap/core';
 import type { BBox, BBoxCoordinateSystem, BBoxPageSize } from './reader';
 
 export type NoteType = 'highlight' | 'area' | 'standalone' | 'ai-chat';
+export type NotePolishScope = 'none' | 'linked-papers' | 'library';
+
+export interface NotePolishCitation {
+  id: string;
+  paperId: string;
+  paperTitle: string;
+  chunkId: string;
+  blockId: string | null;
+  pageIndex: number | null;
+  excerpt: string;
+  sourceType: string | null;
+}
+
+export interface NotePolishResult {
+  text: string;
+  citations: NotePolishCitation[];
+  notice?: string | null;
+}
 
 export interface NotePdfLocation {
   pageNumber: number;

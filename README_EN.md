@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.1.33-2563eb?style=flat-square" alt="Version v0.1.33">
+  <img src="https://img.shields.io/badge/version-v0.1.34-2563eb?style=flat-square" alt="Version v0.1.34">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-4b5563?style=flat-square" alt="Windows macOS Linux">
   <img src="https://img.shields.io/badge/built%20with-Electron-47848f?style=flat-square" alt="Electron">
   <img src="https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-0f766e?style=flat-square" alt="React TypeScript">
@@ -51,14 +51,13 @@
 
 ## Latest Update
 
-The v0.1.33 release brings first-class support for Chinese literature:
+The v0.1.34 release adds traceable AI note polishing:
 
-- No translation needed for Chinese papers: full-text translation is skipped automatically when the document is Chinese-dominant and the target language is Chinese, and Chinese titles are adopted as-is instead of consuming translation calls. Japanese text (kana) is excluded from detection to avoid false positives.
-- Chinese full-text search: the local RAG tokenizer migrated from unicode61 to trigram, so Chinese keywords match content by substring; existing databases are rebuilt automatically on launch.
-- Auto-indexing after parsing: once MinerU parsing completes, the paper's markdown source is indexed into the local RAG knowledge base in the background — papers become searchable without opening the reader first.
-- AI metadata enrichment for Chinese papers: when Crossref/OpenAlex lookups miss, an LLM extracts title, authors, year, journal, DOI, abstract, keywords, volume, issue, and pages from the paper's first page, reusing the Paper Overview model preset.
+- The rich-text note editor now offers AI polishing for a text selection or an inserted structured revision of the full note. Generated output is always previewed before the user applies it.
+- Choose a scope of language-only polishing, papers linked to the note, or the complete local knowledge base. Missing embeddings, unavailable indexes, and retrieval failures fall back to language-only polishing with a clear notice.
+- Retrieved evidence is persisted as existing clickable paper anchors. A click opens the source paper at the relevant page or structural block, while the model can only select server-provided evidence IDs and cannot fabricate a source location.
 
-v0.1.28 brought batch library operations and reliability fixes (multi-select toolbar, batch title translation, and Bib export); v0.1.27 added bilingual paper titles and side-by-side reading with a retainpdf-translated PDF. See [CHANGELOG](./CHANGELOG.md) for earlier releases.
+v0.1.33 added first-class support for Chinese literature. See [CHANGELOG](./CHANGELOG.md) for earlier releases.
 
 ---
 

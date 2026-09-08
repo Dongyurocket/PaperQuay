@@ -14,10 +14,9 @@ Download the native installer for your operating system from the Assets section 
 
 ## Highlights
 
-- **Chinese Literature Support**: Chinese papers no longer waste translation calls — full-text translation is skipped automatically when the document is Chinese-dominant and the target language is Chinese, and Chinese titles are adopted as-is instead of being machine-translated. Japanese text (kana) is excluded from detection to avoid false positives.
-- **Chinese Full-Text Search in Local RAG**: The FTS5 tokenizer migrated from unicode61 to trigram, enabling substring keyword matching for Chinese content in the local knowledge base (previously an entire Chinese paragraph was treated as a single token, making Chinese search completely ineffective). Existing databases are rebuilt automatically on launch; English retrieval degrades gracefully to substring matching with even better recall.
-- **Auto-Indexing After Parsing**: Once MinerU parsing completes (single paper or batch, fresh parse or cached result), the paper's markdown source is indexed into the local RAG knowledge base in the background — papers become searchable without opening the reader first. Silently skipped when local RAG or the embedding service is not configured.
-- **AI Metadata Enrichment for Chinese Papers**: Crossref/OpenAlex have limited coverage of Chinese literature. A new LLM fallback extracts title, authors, year, journal, DOI, abstract, keywords, volume, issue, pages, and ISSN from the paper's first page, reusing the Paper Overview model preset. Available in the import dialog (manual auto-fill), bulk metadata enrichment, and the per-paper metadata dialog whenever remote lookups miss; English papers never trigger the model call.
+- **Traceable AI Note Polishing**: The rich-text note editor can now polish a selection or generate a structured revision of the full note. Results are previewed before they are applied, so the original note is never silently overwritten.
+- **Scoped Knowledge-Base Evidence**: Choose language-only polishing, papers linked to the note, or the complete local knowledge base. Missing embeddings, unavailable indexes, and retrieval failures fall back to language-only polishing with a clear notice.
+- **Clickable Source Locations**: Retrieved evidence is saved as existing paper anchors. A click opens the paper at the corresponding page or structural block. The model selects only server-issued evidence IDs and cannot fabricate source papers or locations.
 
 ## Notes
 
@@ -42,10 +41,9 @@ PaperQuay 是一个开源 AI 论文工作台，覆盖文献管理、PDF 阅读�
 
 ## 本次更新
 
-- **中文文献支持**：中文文献免翻译——检测到正文以中文为主且目标语言为中文时自动跳过全文翻译；中文标题直接采用原标题作为中文标题，不再占用翻译接口；语言检测排除日文假名，避免日文文献误入中文流程。
-- **中文全文检索**：本地 RAG 知识库的全文检索分词器从 unicode61 迁移到 trigram，中文关键词可按子串命中正文切片（旧版把整段中文当成单个词，中文检索完全失效）；旧版数据库启动时自动重建索引，环境不支持时安全回退；英文检索在 trigram 下退化为子串匹配，召回能力更高。
-- **解析后自动入库**：MinerU 解析完成（单篇/批量、新解析/缓存复用）后，自动将文献的 markdown 源后台纳入本地 RAG 索引，文献无需打开阅读器即可被知识库检索；未启用本地 RAG 或未配置 Embedding 服务时静默跳过。
-- **中文文献元数据智能补全**：Crossref/OpenAlex 对中文论文覆盖有限，新增 LLM 兑底提取——从文献首页文本抽取标题、作者、年份、期刊、DOI、摘要、关键词、卷号、期号、页码、ISSN 等字段，复用「论文概览」模型预设；导入对话框（手动点「自动补全」时）、批量「解析元数据」与单篇「解析元数据」对话框均在远程检索未命中时自动兑底，英文文献不会触发模型调用。
+- **可追溯的 AI 笔记润色**：富文本笔记编辑器支持润色选中文本，或生成整篇笔记的结构化版本。生成结果先预览，再由用户明确应用，原笔记不会被静默覆盖。
+- **可限定范围的知识库证据**：可选择仅优化文字、仅使用笔记关联文献，或使用整个本地知识库。未配置 Embedding、索引缺失或检索失败时，会明确提示并降级为纯文本润色。
+- **可点击的原文定位**：检索证据以现有文献锚点写入笔记；点击可打开对应论文并跳转到相关页码或结构块。模型只能选择服务器已提供的证据编号，不能伪造文献或位置。
 
 ## 备注
 

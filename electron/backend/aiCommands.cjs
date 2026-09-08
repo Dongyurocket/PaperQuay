@@ -1114,8 +1114,80 @@ function buildHtmlVisualQaPrompt(options) {
   ].join('\n');
 }
 
+function buildNotePolishPrompt(scope, evidence) {
+  const sourceInstructions = evidence.length > 0
+    ? [
+        'You may use only the source identifiers in the evidence block when a statement depends on source material.',
+        'Return the source IDs in citations. Never invent a source ID, paper, page, or quotation.',
+      ].join(' ')
+    : 'No source evidence is available. Polish and organize the supplied note without adding factual claims or citations.';
+
+  return [
+    'You are an academic note editor.',
+    'Improve clarity, grammar, structure, and readable Markdown formatting while preserving the author\'s meaning and uncertainty.',
+    'Do not add unsupported facts, references, conclusions, or claims.',
+    sourceInstructions,
+    'Return a JSON object only: {"text":"polished Markdown", "citations":["S1"]}.',
+  ].join('\n');
+}
+
+function normalizeNotePolishScope(value) {
+  return value === 'linked-papers' || value === 'library' ? value : 'none';
+}
+
+function normalizedStringArray(value, limit = 120) {
+  const seen = new Set();
+  const values = [];
+
+  for (const rawValue of Array.isArray(value) ? value : []) {
+    const value = typeof rawValue === 'string' ? rawValue.trim() : '';
+    if (!value || seen.has(value)) continue;
+    seen.add(value);
+    values.push(value);
+    if (values.length >= limit) break;
+  }
+
+  return values;
+}
+
+function normalizeNotePolishPaperId(value) {
+  return typeof value === 'string' ? value.trim().replace(/^native-library:/, '') : '';
+}
+
+function notePolishText(value) {
+  return typeof value === 'string' ? value.trim().slice(0, 60_000) : '';
+}
+
+function parseNotePolishResponse(value) {
+  const raw = notePolishText(value);
+
+  try {
+    return parseJsonObject(raw);
+  } catch {
+    // Some OpenAI-compatible providers ignore json_object and return plain Markdown.
+    return {
+      text: raw
+        .replace(/<think>[\s\S]*?<\/think>/gi, '')
+        .replace(/^```(?:markdown|md)?\s*/i, '')
+        .replace(/```\s*$/i, '')
+        .trim(),
+      citations: [],
+    };
+  }
+}
+
+function uniqueNotePolishEvidence(values) {
+  const seen = new Set();
+  return values.filter((value) => {
+    const key = `${value.paperId}:${value.sourceType}:${value.chunkId}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function createAiCommands(context) {
-  const { agentMemoryStore, ragStore } = context;
+  const { agentMemoryStore, ragStore, store } = context;
 
   function documentContext(options) {
     return options.documentText || (options.blocks ?? []).map((block) => block.text).join('\n\n');
@@ -1241,6 +1313,113 @@ function createAiCommands(context) {
 
     async ask_document_openai_compatible({ options }) {
       return pickChatText(await openAiChat(options, qaMessages(options)));
+    },
+
+    async notes_polish_openai_compatible({ options }) {
+      const text = notePolishText(options?.text);
+      if (!text) {
+        throw new Error('请先输入需要润色的笔记内容。');
+      }
+
+      const scope = normalizeNotePolishScope(options?.scope);
+      const library = store?.load?.() ?? { papers: [] };
+      const papers = Array.isArray(library.papers) ? library.papers : [];
+      const paperById = new Map(papers.map((paper) => [paper.id, paper]));
+      const scopedPaperIds = scope === 'linked-papers'
+        ? normalizedStringArray((Array.isArray(options?.linkedPaperIds) ? options.linkedPaperIds : []).map(normalizeNotePolishPaperId))
+        : scope === 'library'
+          ? papers.map((paper) => paper.id).filter(Boolean)
+          : [];
+      const notices = [];
+      let evidence = [];
+
+      if (scope !== 'none') {
+        const embedding = options?.embedding;
+        const embeddingReady = embedding?.apiKey?.trim() && embedding?.baseUrl?.trim() && embedding?.model?.trim();
+
+        if (!embeddingReady) {
+          notices.push('知识库检索未配置向量模型，已按纯文本润色执行。');
+        } else if (!ragStore?.retrieveDocumentChunks) {
+          notices.push('本地知识库暂不可用，已按纯文本润色执行。');
+        } else if (scopedPaperIds.length === 0) {
+          notices.push(scope === 'linked-papers'
+            ? '当前笔记没有关联文献，已按纯文本润色执行。'
+            : '文献库为空，已按纯文本润色执行。');
+        } else {
+          try {
+            const [queryEmbedding] = await embedTexts([text.slice(0, 4_000)], embedding);
+            if (!Array.isArray(queryEmbedding) || queryEmbedding.length === 0) {
+              notices.push('未能生成知识库检索向量，已按纯文本润色执行。');
+            } else {
+              const candidates = [];
+              for (const [paperIndex, paperId] of scopedPaperIds.entries()) {
+                const paper = paperById.get(paperId);
+                if (!paper) continue;
+
+                for (const sourceType of ['mineru-markdown', 'pdf-text']) {
+                  const chunks = ragStore.retrieveDocumentChunks({
+                    documentKey: `native-library:${paperId}`,
+                    sourceType,
+                    queryEmbedding,
+                    queryText: text.slice(0, 2_000),
+                    topK: 3,
+                  });
+                  for (const [sourceRank, chunk] of chunks.entries()) {
+                    candidates.push({
+                      paperId,
+                      paperTitle: typeof paper.title === 'string' ? paper.title : paperId,
+                      chunkId: chunk.chunkId,
+                      blockId: chunk.blockId ?? null,
+                      pageIndex: chunk.pageIndex ?? null,
+                      excerpt: String(chunk.text ?? '').slice(0, 1_600),
+                      sourceType: chunk.sourceType ?? sourceType,
+                      sourceRank,
+                    });
+                  }
+                }
+
+                // Keep a full-library request responsive while scanning indexed documents.
+                if (scope === 'library' && paperIndex > 0 && paperIndex % 12 === 0) {
+                  await new Promise((resolve) => setImmediate(resolve));
+                }
+              }
+              evidence = uniqueNotePolishEvidence(candidates)
+                .sort((left, right) => left.sourceRank - right.sourceRank)
+                .slice(0, 8)
+                .map(({ sourceRank, ...entry }, index) => ({ ...entry, id: `S${index + 1}` }));
+              if (evidence.length === 0) notices.push('未检索到与笔记相关的已索引文献内容。');
+            }
+          } catch (error) {
+            console.warn('[paperquay] Note polish RAG retrieval failed.', error);
+            notices.push('知识库检索失败，已按纯文本润色执行。');
+          }
+        }
+      }
+
+      const sourceContext = evidence.length > 0
+        ? evidence.map((item) => `[${item.id}] ${item.paperTitle}${item.pageIndex === null ? '' : ` · Page ${item.pageIndex + 1}`}\n${item.excerpt}`).join('\n\n')
+        : '(none)';
+      const data = await openAiChat(options, [
+        { role: 'system', content: buildNotePolishPrompt(scope, evidence) },
+        { role: 'user', content: `Note to polish:\n${text}\n\nEvidence:\n${sourceContext}` },
+      ], { responseFormat: { type: 'json_object' } });
+      const parsed = parseNotePolishResponse(pickChatText(data));
+      const polishedText = notePolishText(parsed.text);
+
+      if (!polishedText) {
+        throw new Error('模型没有返回可用的润色内容，请重试。');
+      }
+
+      const evidenceById = new Map(evidence.map((item) => [item.id, item]));
+      const citations = normalizedStringArray(parsed.citations, evidence.length)
+        .map((id) => evidenceById.get(id))
+        .filter(Boolean);
+
+      return {
+        text: polishedText,
+        citations,
+        notice: notices.length > 0 ? notices.join(' ') : null,
+      };
     },
 
     async ask_document_openai_compatible_stream({ requestId, options }, event) {

@@ -20,6 +20,7 @@ import {
   Quote,
   Redo2,
   Sigma,
+  Sparkles,
   Strikethrough,
   Table2,
   Undo2,
@@ -127,7 +128,17 @@ const EMPTY_TOOLBAR_STATE: ToolbarEditorState = {
   canRedo: false,
 };
 
-export function NoteEditorToolbar({ editor }: { editor: Editor | null }) {
+export function NoteEditorToolbar({
+  editor,
+  onPolish,
+  polishActive = false,
+  polishDisabled = false,
+}: {
+  editor: Editor | null;
+  onPolish?: () => void;
+  polishActive?: boolean;
+  polishDisabled?: boolean;
+}) {
   const [tableOpen, setTableOpen] = useState(false);
   const [tableSize, setTableSize] = useState({ rows: 3, cols: 3 });
   const [tableMenuPosition, setTableMenuPosition] = useState<{ left: number; top: number } | null>(null);
@@ -404,6 +415,19 @@ export function NoteEditorToolbar({ editor }: { editor: Editor | null }) {
       <ToolbarButton title="Image" onClick={() => openInputMenu('image')}>
         <ImageIcon className="h-3.5 w-3.5" strokeWidth={1.8} />
       </ToolbarButton>
+      {onPolish ? (
+        <>
+          <Divider />
+          <ToolbarButton
+            title="AI polish note"
+            active={polishActive}
+            disabled={polishDisabled}
+            onClick={onPolish}
+          >
+            <Sparkles className="h-3.5 w-3.5" strokeWidth={1.8} />
+          </ToolbarButton>
+        </>
+      ) : null}
       <input
         ref={imageInputRef}
         type="file"

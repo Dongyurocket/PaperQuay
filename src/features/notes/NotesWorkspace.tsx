@@ -989,6 +989,14 @@ export function NotesWorkspace() {
       anchorId: anchor.id,
       anchorPaperId: anchor.paperId,
       anchorLabel: anchor.label,
+      blockId: anchor.blockId ?? null,
+      pageIndex: typeof anchor.pageIndex === 'number'
+        ? anchor.pageIndex
+        : typeof anchor.pdfLocation?.pageNumber === 'number'
+          ? Math.max(0, anchor.pdfLocation.pageNumber - 1)
+          : null,
+      previewText: anchor.excerpt || null,
+      sourceType: anchor.source ?? null,
       pdfLocation: anchor.pdfLocation ?? null,
     });
   }, []);

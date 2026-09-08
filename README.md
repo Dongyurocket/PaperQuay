@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.1.33-2563eb?style=flat-square" alt="Version v0.1.33">
+  <img src="https://img.shields.io/badge/version-v0.1.34-2563eb?style=flat-square" alt="Version v0.1.34">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-4b5563?style=flat-square" alt="Windows macOS Linux">
   <img src="https://img.shields.io/badge/built%20with-Electron-47848f?style=flat-square" alt="Electron">
   <img src="https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-0f766e?style=flat-square" alt="React TypeScript">
@@ -51,14 +51,13 @@
 
 ## 近期更新
 
-v0.1.33 带来中文文献支持：
+v0.1.34 带来可追溯的 AI 笔记润色：
 
-- 中文文献免翻译：全文翻译在检测到正文以中文为主且目标语言为中文时自动跳过；中文标题直接采用原标题入库，不再占用翻译接口；日文文献不会被误判为中文。
-- 中文全文检索：本地 RAG 知识库分词器迁移到 trigram，中文关键词可按子串命中正文切片，旧库启动时自动重建索引。
-- 解析后自动入库：MinerU 解析完成后自动将文献 markdown 源纳入本地 RAG 索引，不打开阅读器也能被知识库检索。
-- 中文元数据智能补全：远程检索（Crossref/OpenAlex）未命中中文论文时，用「论文概览」模型从首页文本提取标题、作者、期刊、年份、DOI、摘要、关键词、卷期页等字段。
+- 笔记编辑器新增 AI 润色入口，可优化选中文本或生成整篇笔记的结构化版本；生成后先预览，再由用户明确应用。
+- 润色范围可选择仅优化文字、仅使用笔记关联文献，或使用整个本地知识库；未配置 Embedding、索引缺失或检索失败时自动降级为纯文本润色并说明原因。
+- 知识库证据以现有可点击文献锚点写入笔记；点击可打开对应论文并定位到相关页码或结构块，模型不能伪造来源与位置。
 
-v0.1.28 带来文库批量操作与稳定性修复（多选与批量工具栏、批量标题翻译与 Bib 导出）；v0.1.27 支持中英双语标题与 retainpdf 翻译版 PDF 对照阅读。历史版本变更见 [更新日志](./CHANGELOG.md)。
+v0.1.33 带来中文文献支持；历史版本变更见 [更新日志](./CHANGELOG.md)。
 
 ---
 
