@@ -14,10 +14,7 @@ Download the native installer for your operating system from the Assets section 
 
 ## Highlights
 
-- **MinerU Multi-Key Round-Robin & Failover Rotation**: Supports entering multiple MinerU API keys (separated by line breaks or commas) with visibility toggle and active key count badge. Single and batch tasks automatically rotate through keys in a round-robin schedule, with automatic failover to the next key if quota/rate-limits are reached.
-- **Automated Split-Parse-Merge for Large PDFs (>200 Pages)**: Completely eliminates the 200-page cloud limit! PDFs over 200 pages are automatically and losslessly split into safe batches (150 pages each), parsed in parallel/rotation using the multi-key pool, and seamlessly merged back together.
-- **Accurate BBox, Page Offset & Asset Remapping**: Automatically recalculates `page_idx` in `content_list_v2.json` and `middle.json` to keep text blocks and BBox crop fallbacks aligned with original PDF page numbers; isolates image assets with unique namespaces to prevent filename collisions.
-- **Friendly Error Translation & OCR Fallback Safeguard**: Translates cloud errors into actionable advice and eliminates redundant OCR retries on page limit failures.
+- **Fix: broken snapshot cards after cross-page table merging**: MinerU automatically merges multi-page tables (e.g., a thesis nomenclature spanning several pages) into the first fragment, leaving empty stub blocks on later pages whose asset path degrades to the bare `images/` directory. The renderer previously requested that directory as an image file, producing “No matching table snapshot was found” error cards with a red `Path is not a file` message. Directory-only asset paths are now rejected, and empty table stubs are treated as continuations of the merged table fragment so they are hidden from the block viewer; clicking the table region on later PDF pages still resolves to the merged table block.
 
 ## Notes
 
@@ -42,10 +39,7 @@ PaperQuay 是一个开源 AI 论文工作台，覆盖文献管理、PDF 阅读�
 
 ## 本次更新
 
-- **MinerU 多 Key 自动轮换与故障切换调度**：设置中支持同时录入多个 Key（换行或逗号分隔），提供明文显隐切换与实时状态徽章；单篇及批量解析时自动执行 Round-Robin 均衡分发，若单 Key 遭遇限流或额度耗尽自动无缝切换至下一个可用 Key 重试。
-- **超页大文件（>200页）全自动拆分、识别与产物合并**：彻底解决 MinerU 官方云端单次 200 页硬性限制！超过 200 页的大文件由系统在后台自动无损切分为 150 页安全分卷，协同多 Key 轮换并发上传识别，并在完成后全自动合并产物。
-- **精准页码对齐、BBox 映射与图片防冲突**：自动累加重写各分卷的 `page_idx`，保证阅读器双语段落、BBox 选区和原 PDF 区域切片（BBox Crop）与原始文档绝对对齐；图片资源自动做命名空间隔离与路径重映射，防止分卷图片互相覆盖。
-- **超页错误智能转译与 OCR Fallback 优化**：捕获超页报错时转译为人性化中文说明，并在发生超页限制时直接返回，规避无意义的 OCR 模式二次重复重试。
+- **修复：跨页合并表格后续分片渲染空错误卡片**：MinerU 云端会自动把跨页表格（如学位论文的多页注释表/符号表）合并进第一个分片，后续分片只留下没有表格内容与截图文件名的空壳块（资源路径退化为 `images/` 目录）。此前前端会把该目录当作图片文件请求后端读取，抛出 `Path is not a file` 并显示「没有找到对应的表格截图」错误卡片。现在资源路径提取会拒绝无文件名的目录路径，空壳表格块会被标记为首个合并分片的续块并自动隐藏；在 PDF 后续页点击表格区域仍会正确定位到合并表格块。
 
 ## 备注
 

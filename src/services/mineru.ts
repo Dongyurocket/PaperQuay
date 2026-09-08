@@ -396,7 +396,23 @@ export function extractMineruAssetPathFromBlock(
     content?.path ??
     content?.image_path;
 
-  return typeof candidate === 'string' && candidate.trim() ? candidate.trim() : undefined;
+  if (typeof candidate !== 'string') {
+    return undefined;
+  }
+
+  const trimmed = candidate.trim();
+
+  // MinerU 跨页合并表格后，后续分片的资源路径只剩目录没有文件名
+  //（如 v2 的 "images/"），不能作为资源文件加载，否则会把目录路径
+  // 传给后端读取并触发 “Path is not a file” 报错。
+  if (!trimmed || /[\\/]$/.test(trimmed)) {
+    return undefined;
+  }
+
+  const segments = trimmed.split(/[\\/]/).filter(Boolean);
+  const baseName = segments[segments.length - 1];
+
+  return baseName && baseName !== '.' && baseName !== '..' ? trimmed : undefined;
 }
 
 export function resolveMineruAssetPath(
@@ -1044,6 +1060,7 @@ export function flattenMineruPages(pages: MineruPage[]): PositionedMineruBlock[]
     })),
   );
   let lastTextParagraph: PositionedMineruBlock | null = null;
+  let lastContentfulTable: PositionedMineruBlock | null = null;
 
   return blocks.map((block) => {
     const blockText = extractTextFromMineruBlock(block).trim();
@@ -1062,6 +1079,28 @@ export function flattenMineruPages(pages: MineruPage[]): PositionedMineruBlock[]
 
     if (block.type === 'paragraph' && blockText) {
       lastTextParagraph = block;
+    }
+
+    if (block.type === 'table') {
+      // MinerU 云端会把跨页表格合并进第一个分片，后续分片只留下没有
+      // html、没有截图文件名的空壳块。将其标记为续块，由查看器隐藏并
+      // 把 PDF 点击解析到合并表格上，避免渲染出无效的错误卡片。
+      const hasTableContent = Boolean(
+        blockText ||
+        extractTableHtmlFromMineruBlock(block) ||
+        extractMineruAssetPathFromBlock(block)
+      );
+
+      if (!hasTableContent && lastContentfulTable) {
+        return {
+          ...block,
+          contentSourceBlockId: lastContentfulTable.blockId,
+        };
+      }
+
+      if (hasTableContent) {
+        lastContentfulTable = block;
+      }
     }
 
     return block;
