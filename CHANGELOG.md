@@ -4,6 +4,14 @@
 
 各平台安装包见 [GitHub Releases](https://github.com/Dongyurocket/PaperQuay/releases)。
 
+## [0.1.37] - 2026-09-08
+
+### 修复
+
+- **交叉引用误判伪上标智能清洗**：解决 MinerU 及 OCR 版面模型在遇到紧随标点的交叉引用（如 `Table 8,`、`Fig. 2,`、`Eq. 3,`）时误触发文献引用先验而将正文编号打上 `<sup>` 的问题；全面覆盖 `Table`、`Figure`、`Equation`、`Section`、`Algorithm` 等科技文献交叉引用实体，自动将 `Table <sup>8</sup>` 或 Unicode 上标 `Table ⁸` 还原为标准正文编号 `Table 8`。
+- **连续引用与标点空格自动修复**：支持串联交叉引用（如 `Table 8 and 9`、`Figure 2, 3, and 4`）的连续上标还原，并自动修复剥离上标后遗留的逗号与后续单词粘连缺失空格缺陷（如 `Table 8,while` 自动修正为 `Table 8, while`）。
+- **全链路一致性保障**：清洗逻辑在 BlockViewer 渲染、全文检索、RAG 向量切片、AI 摘要与翻译管道中全局生效，保障学术论文阅读排版与检索质量。
+
 ## [0.1.36] - 2026-09-08
 
 ### 新增

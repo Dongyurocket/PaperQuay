@@ -392,21 +392,72 @@ function wrapInlineLatexSegments(line: string) {
   );
 }
 
+const UNICODE_SUPERSCRIPT_MAP: Record<string, string> = {
+  '⁰': '0',
+  '¹': '1',
+  '²': '2',
+  '³': '3',
+  '⁴': '4',
+  '⁵': '5',
+  '⁶': '6',
+  '⁷': '7',
+  '⁸': '8',
+  '⁹': '9',
+};
+
+const CROSS_REF_SUPERSCRIPT_PATTERN =
+  /\b(Table|Tables|Tab\.|Tabs\.|Figure|Figures|Fig\.|Figs\.|Equation|Equations|Eq\.|Eqs\.|Section|Sections|Sec\.|Secs\.|Algorithm|Algorithms|Algo\.|Algos\.|Ref\.|Refs\.|Reference|References|Theorem|Lemma|Proposition|Corollary|Definition|Def\.|Scheme|Schemes|Box|Boxes|Appendix|Appendices|App\.)\s*<sup>([0-9IVXLCDMivxlcdm]+[a-zA-Z]?|\d+[-.]\d+|[A-Z]\.?\d+)<\/sup>/gi;
+
+const CONSECUTIVE_CROSS_REF_SUPERSCRIPT_PATTERN =
+  /(\b(?:Table|Tables|Tab\.|Tabs\.|Figure|Figures|Fig\.|Figs\.|Equation|Equations|Eq\.|Eqs\.|Section|Sections|Sec\.|Secs\.|Algorithm|Algorithms|Algo\.|Algos\.|Ref\.|Refs\.|Reference|References|Theorem|Lemma|Proposition|Corollary|Definition|Def\.|Scheme|Schemes|Box|Boxes|Appendix|Appendices|App\.)\s+(?:(?:[0-9IVXLCDMivxlcdm]+[a-zA-Z]?|\d+[-.]\d+|[A-Z]\.?\d+)\s*(?:,\s*(?:and|or)?\s*|(?:and|or)\s*))+)<sup>([0-9IVXLCDMivxlcdm]+[a-zA-Z]?|\d+[-.]\d+|[A-Z]\.?\d+)<\/sup>/i;
+
+const CROSS_REF_UNICODE_SUPERSCRIPT_PATTERN =
+  /\b(Table|Tables|Tab\.|Tabs\.|Figure|Figures|Fig\.|Figs\.|Equation|Equations|Eq\.|Eqs\.|Section|Sections|Sec\.|Secs\.|Algorithm|Algorithms|Algo\.|Algos\.|Ref\.|Refs\.|Reference|References|Theorem|Lemma|Proposition|Corollary|Definition|Def\.|Scheme|Schemes|Box|Boxes|Appendix|Appendices|App\.)\s*([⁰¹²³⁴⁵⁶⁷⁸⁹]+)/gi;
+
+const CROSS_REF_COMMA_SPACING_PATTERN =
+  /(\b(?:Table|Tables|Tab\.|Tabs\.|Figure|Figures|Fig\.|Figs\.|Equation|Equations|Eq\.|Eqs\.|Section|Sections|Sec\.|Secs\.|Algorithm|Algorithms|Algo\.|Algos\.|Ref\.|Refs\.|Reference|References|Theorem|Lemma|Proposition|Corollary|Definition|Def\.|Scheme|Schemes|Box|Boxes|Appendix|Appendices|App\.)\s+(?:(?:[0-9IVXLCDMivxlcdm]+[a-zA-Z]?|\d+[-.]\d+|[A-Z]\.?\d+)\s*(?:,|and|or)\s*)*(?:[0-9IVXLCDMivxlcdm]+[a-zA-Z]?|\d+[-.]\d+|[A-Z]\.?\d+)),([a-zA-Z])/i;
+
 export function sanitizeFakeSuperscripts(text: string): string {
-  if (!text || !text.includes('<sup>')) {
+  if (!text || (!text.includes('<sup>') && !/[⁰¹²³⁴⁵⁶⁷⁸⁹]/.test(text))) {
     return text;
   }
 
-  return text
-    // 1. 还原误打为上标的连字符、破折号、撇号、单双引号
+  let result = text
+    // 1. 还原 Table / Figure / Equation 等学术交叉引用后被误判的上标编号（HTML 形式，如 Table <sup>8</sup> -> Table 8）
+    .replace(CROSS_REF_SUPERSCRIPT_PATTERN, '$1 $2')
+    // 2. 还原学术交叉引用后被误判的 Unicode 上标数字（如 Table ⁸ -> Table 8）
+    .replace(CROSS_REF_UNICODE_SUPERSCRIPT_PATTERN, (_, prefix: string, digits: string) => {
+      const normalizedDigits = digits
+        .split('')
+        .map((d) => UNICODE_SUPERSCRIPT_MAP[d] ?? d)
+        .join('');
+      return `${prefix} ${normalizedDigits}`;
+    });
+
+  // 3. 循环还原可能连续出现的交叉引用后续上标（如 Figure 2, <sup>3</sup>, and <sup>4</sup> -> Figure 2, 3, and 4）
+  let prev = '';
+  while (result !== prev && CONSECUTIVE_CROSS_REF_SUPERSCRIPT_PATTERN.test(result)) {
+    prev = result;
+    result = result.replace(CONSECUTIVE_CROSS_REF_SUPERSCRIPT_PATTERN, '$1$2');
+  }
+
+  // 4. 循环修复交叉引用编号紧接标点逗号且缺失空格的粘连缺陷（如 Table 8,while -> Table 8, while）
+  prev = '';
+  while (result !== prev && CROSS_REF_COMMA_SPACING_PATTERN.test(result)) {
+    prev = result;
+    result = result.replace(CROSS_REF_COMMA_SPACING_PATTERN, '$1, $2');
+  }
+
+  return result
+    // 5. 还原误打为上标的连字符、破折号、撇号、单双引号
     .replace(/<sup>([–—\-'’"“”])<\/sup>/gi, '$1')
-    // 2. 词中伪上标（前后紧邻英文字母或连字符，如 signi<sup>fi</sup>cant, high-<sup>fi</sup>delity, ef-<sup>fi</sup>ciency）
+    // 6. 词中伪上标（前后紧邻英文字母或连字符，如 signi<sup>fi</sup>cant, high-<sup>fi</sup>delity, ef-<sup>fi</sup>ciency）
     .replace(/([a-zA-Z\-])<sup>([a-zA-Z]{1,4})<\/sup>([a-zA-Z\-])/gi, '$1$2$3')
-    // 3. 词首连字伪上标（fi, fl, ff, ffi, ffl：紧接英文字母，如 <sup>fi</sup>ndings, <sup>fl</sup>ight）
+    // 7. 词首连字伪上标（fi, fl, ff, ffi, ffl：紧接英文字母，如 <sup>fi</sup>ndings, <sup>fl</sup>ight）
     .replace(/(^|[\s"'(\[])<sup>(fi|fl|ff|ffi|ffl)<\/sup>([a-zA-Z])/gi, '$1$2$3')
-    // 4. 词尾连字伪上标（fi, fl, ff, ffi, ffl：前接英文字母且后跟非字母或行尾）
+    // 8. 词尾连字伪上标（fi, fl, ff, ffi, ffl：前接英文字母且后跟非字母或行尾）
     .replace(/([a-zA-Z])<sup>(fi|fl|ff|ffi|ffl)<\/sup>(?=[^a-zA-Z]|$)/gi, '$1$2')
-    // 5. 首字母大写连字（如 Fi, Fl）
+    // 9. 首字母大写连字（如 Fi, Fl）
     .replace(/(^|[\s"'(\[])<sup>(Fi|Fl|Ff|Ffi|Ffl)<\/sup>([a-zA-Z])/g, '$1$2$3');
 }
 

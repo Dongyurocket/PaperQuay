@@ -14,9 +14,9 @@ Download the native installer for your operating system from the Assets section 
 
 ## Highlights
 
-- **Original PDF BBox Crop Fallback**: Added a "PDF Crop" button to BlockViewer cards and context menus. Readers can switch any structural block (paragraphs, formulas, algorithms, tables) between parsed Markdown and high-fidelity 2x vector crops from the original PDF at any time.
-- **Instant Fallback for Formula Parse Failures**: When complex formulas encounter OCR errors or invalid LaTeX syntax, the error box automatically offers a "View PDF Crop" action to display the exact original PDF formula region inline, keeping reading uninterrupted.
-- **Retina 2x Vector Offscreen Rendering & LRU Caching**: Offscreen canvas renders crisp 2x resolution slices using PDF.js with memory caching for instant toggling and an enlargeable modal preview.
+- **Clean Cross-Reference Fake Superscripts**: Eliminates false superscript tags (`<sup>...</sup>` or Unicode superscripts) incorrectly applied to cross-reference numbers (e.g. `Table 8`, `Fig. 2`, `Eq. 3`) by MinerU/OCR layout models when followed by punctuation.
+- **Restore Consecutive References & Missing Comma Spaces**: Supports consecutive cross-references (`Table 8 and 9`, `Figure 2, 3, and 4`) and automatically restores missing spaces after commas (e.g. `Table 8,while` -> `Table 8, while`).
+- **Pipeline-Wide Correctness**: Cleans text across BlockViewer rendering, full-text search, RAG chunking, AI summary, and translation pipelines.
 
 ## Notes
 
@@ -41,9 +41,9 @@ PaperQuay 是一个开源 AI 论文工作台，覆盖文献管理、PDF 阅读�
 
 ## 本次更新
 
-- **PDF 原始区域切片（BBox Crop）回退机制**：BlockViewer 结构块（段落、公式、算法、表格等）右上角及右键菜单新增「原 PDF 切片」切换功能，可在识别排版与原版 PDF 矢量切片图之间随时一键互切，便于科研阅读中快速核对原文排版与微小常数。
-- **公式解析失败原切片即时兜底**：当公式因 OCR 识别缺陷或语法错误导致 KaTeX 无法解析时，报错卡片右上角提供「查看原 PDF 切片」按钮，直接内联展示高清原图，推导核对 100% 准确不中断。
-- **Retina 2x 高清离屏渲染与 LRU 缓存**：基于 PDF.js 实现 2.0x 高保真离屏裁剪，保证公式微小上下标和微小符号清晰可见，并支持点击放大预览。
+- **交叉引用误判伪上标智能清洗**：彻底解决 MinerU 与 OCR 版面分析模型在遇到紧随标点的交叉引用（如 `Table 8,`、`Fig. 2,`、`Eq. 3,`）时，因误触发文献引用先验而将正文编号错误打上 `<sup>` 的问题；覆盖科技文献常见的 Table、Figure、Equation、Section、Algorithm 等实体，自动将 `Table <sup>8</sup>` 或 Unicode 上标 `Table ⁸` 还原为标准正文编号 `Table 8`。
+- **连续引用与标点空格自动修复**：支持串联交叉引用（如 `Table 8 and 9`、`Figure 2, 3, and 4`）的连续上标还原，并自动修复剥离上标后遗留的逗号与后续单词粘连缺失空格缺陷（如 `Table 8,while` 自动修正为 `Table 8, while`）。
+- **全链路一致性保障**：清洗在结构块渲染、全文搜索、RAG 向量切片、AI 摘要与翻译主链路统一生效，保障学术阅读与知识检索质量。
 
 ## 备注
 

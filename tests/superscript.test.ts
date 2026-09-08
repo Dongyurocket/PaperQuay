@@ -51,6 +51,48 @@ test('sanitizeFakeSuperscripts restores misplaced punctuation and quotes', () =>
   );
 });
 
+test('sanitizeFakeSuperscripts cleans cross-reference fake superscripts and restores comma spacing', () => {
+  // 真实复现案例：Table <sup>8</sup>,while -> Table 8, while
+  assert.equal(
+    sanitizeFakeSuperscripts(
+      'The parameters presented in Table 10 maintain consistency with those in Table <sup>8</sup>,while exhibiting increased',
+    ),
+    'The parameters presented in Table 10 maintain consistency with those in Table 8, while exhibiting increased',
+  );
+
+  // Unicode 上标数字形式：Table ⁸,while -> Table 8, while
+  assert.equal(
+    sanitizeFakeSuperscripts(
+      'The parameters presented in Table 10 maintain consistency with those in Table ⁸,while exhibiting increased',
+    ),
+    'The parameters presented in Table 10 maintain consistency with those in Table 8, while exhibiting increased',
+  );
+
+  // Figure / Eq. / Algorithm 等交叉引用
+  assert.equal(
+    sanitizeFakeSuperscripts('as shown in Figure <sup>3a</sup>,which is clear'),
+    'as shown in Figure 3a, which is clear',
+  );
+  assert.equal(
+    sanitizeFakeSuperscripts('see Eq. <sup>12</sup>,where x is speed'),
+    'see Eq. 12, where x is speed',
+  );
+  assert.equal(
+    sanitizeFakeSuperscripts('in Section <sup>IV</sup>,we discuss'),
+    'in Section IV, we discuss',
+  );
+
+  // 连续引用（如 Table 8 and 9 或 Table 8, 9）
+  assert.equal(
+    sanitizeFakeSuperscripts('Table <sup>8</sup> and <sup>9</sup>,respectively'),
+    'Table 8 and 9, respectively',
+  );
+  assert.equal(
+    sanitizeFakeSuperscripts('Figure <sup>2</sup>, <sup>3</sup>,and <sup>4</sup>'),
+    'Figure 2, 3, and 4',
+  );
+});
+
 test('sanitizeFakeSuperscripts preserves valid academic superscripts', () => {
   assert.equal(
     sanitizeFakeSuperscripts('disk loading of 24.87 kg/ m<sup>2</sup> and wing loading of106 kg/m<sup>2</sup>'),
