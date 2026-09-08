@@ -9,7 +9,7 @@ import { Bot, Languages, PanelRightClose, Quote, Sparkles } from 'lucide-react';
 import { useLocaleText } from '../../i18n/uiLanguage';
 import type { PaperSummary, SelectedExcerpt } from '../../types/reader';
 import { cn } from '../../utils/cn';
-import { normalizeMarkdownMath } from '../../utils/markdown';
+import { normalizeMarkdownMath, remarkSuperscriptPlugin } from '../../utils/markdown';
 
 function SectionCard({
   title,
@@ -208,9 +208,21 @@ function MarkdownPreview({
           '[&_hr]:my-5 [&_hr]:border-slate-200 [&_.katex]:text-slate-900 [&_.katex-display]:my-4 [&_.katex-display]:overflow-x-auto [&_.katex-display]:overflow-y-hidden [&_.katex-display]:py-2',
           className,
         )}
-        remarkPlugins={[remarkGfm, remarkMath]}
+        remarkPlugins={[remarkGfm, remarkMath, remarkSuperscriptPlugin]}
         rehypePlugins={[[rehypeKatex, { strict: 'ignore', throwOnError: false }]]}
-        components={components}
+        components={{
+          sup: ({ children }) => (
+            <sup className="align-super text-[0.72em] font-medium leading-none text-slate-800 dark:text-[var(--pq-text)]">
+              {children}
+            </sup>
+          ),
+          sub: ({ children }) => (
+            <sub className="align-sub text-[0.72em] font-medium leading-none text-slate-800 dark:text-[var(--pq-text)]">
+              {children}
+            </sub>
+          ),
+          ...components,
+        }}
       >
         {normalized.content}
       </ReactMarkdown>

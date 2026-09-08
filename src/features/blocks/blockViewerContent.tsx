@@ -33,6 +33,7 @@ import { cn } from '../../utils/cn';
 import {
   normalizeMarkdownMath,
   normalizeRawLatexExpression,
+  remarkSuperscriptPlugin,
 } from '../../utils/markdown';
 import { sanitizeMineruTableHtml } from '../../utils/safeHtml';
 
@@ -175,9 +176,19 @@ function MarkdownContentComponent({
   return (
     <ReactMarkdown
       className="prose prose-slate max-w-none prose-headings:tracking-tight prose-a:text-indigo-600 prose-strong:text-slate-900 dark:prose-invert dark:prose-strong:text-[var(--pq-text)] [&_.katex]:text-slate-900 dark:[&_.katex]:text-[var(--pq-text)] [&_.katex-display]:my-4 [&_.katex-display]:overflow-x-auto [&_.katex-display]:overflow-y-hidden [&_.katex-display]:py-2"
-      remarkPlugins={[remarkGfm, remarkMath]}
+      remarkPlugins={[remarkGfm, remarkMath, remarkSuperscriptPlugin]}
       rehypePlugins={[[rehypeKatex, { strict: 'ignore', throwOnError: false }]]}
       components={{
+        sup: ({ children }) => (
+          <sup className="align-super text-[0.72em] font-medium leading-none text-slate-800 dark:text-[var(--pq-text)]">
+            {children}
+          </sup>
+        ),
+        sub: ({ children }) => (
+          <sub className="align-sub text-[0.72em] font-medium leading-none text-slate-800 dark:text-[var(--pq-text)]">
+            {children}
+          </sub>
+        ),
         p: ({ children }) => (
           <p
             className="my-0 text-slate-700 dark:text-[var(--pq-text-muted)] [&_.katex-display]:my-4 [&_.katex-display]:overflow-x-auto [&_.katex-display]:overflow-y-hidden"

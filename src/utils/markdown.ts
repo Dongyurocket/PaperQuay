@@ -1,7 +1,7 @@
 const MATH_FENCE_START_PATTERN = /^```(?:latex|tex|math|katex)\s*$/i;
 const CODE_FENCE_PATTERN = /^```/;
 const PROTECTED_MATH_PATTERN =
-  /(\$\$[^$]+\$\$|\$[^$\n]+\$|\\\([^)]*\\\)|\\\[[^\]]*\\\])/g;
+  /(\$\$[^$]+\$\$|\$[^$\n]+\$|\\\([^)]*\\\)|\\\[[^\]]*\\\]|<[^>]+>)/g;
 const INLINE_FORMULA_START_PATTERN =
   /[A-Za-z0-9\\\u0370-\u03FF\u1F00-\u1FFF]/;
 const INLINE_FORMULA_CHAR_PATTERN =
@@ -282,6 +282,10 @@ function looksLikeInlineFormulaSegment(value: string) {
     return false;
   }
 
+  if (/<[^>]+>/.test(trimmed)) {
+    return false;
+  }
+
   if (/[\u4e00-\u9fff]/.test(trimmed) || /^https?:\/\//i.test(trimmed)) {
     return false;
   }
@@ -388,12 +392,139 @@ function wrapInlineLatexSegments(line: string) {
   );
 }
 
+export function sanitizeFakeSuperscripts(text: string): string {
+  if (!text || !text.includes('<sup>')) {
+    return text;
+  }
+
+  return text
+    // 1. 还原误打为上标的连字符、破折号、撇号、单双引号
+    .replace(/<sup>([–—\-'’"“”])<\/sup>/gi, '$1')
+    // 2. 词中伪上标（前后紧邻英文字母或连字符，如 signi<sup>fi</sup>cant, high-<sup>fi</sup>delity, ef-<sup>fi</sup>ciency）
+    .replace(/([a-zA-Z\-])<sup>([a-zA-Z]{1,4})<\/sup>([a-zA-Z\-])/gi, '$1$2$3')
+    // 3. 词首连字伪上标（fi, fl, ff, ffi, ffl：紧接英文字母，如 <sup>fi</sup>ndings, <sup>fl</sup>ight）
+    .replace(/(^|[\s"'(\[])<sup>(fi|fl|ff|ffi|ffl)<\/sup>([a-zA-Z])/gi, '$1$2$3')
+    // 4. 词尾连字伪上标（fi, fl, ff, ffi, ffl：前接英文字母且后跟非字母或行尾）
+    .replace(/([a-zA-Z])<sup>(fi|fl|ff|ffi|ffl)<\/sup>(?=[^a-zA-Z]|$)/gi, '$1$2')
+    // 5. 首字母大写连字（如 Fi, Fl）
+    .replace(/(^|[\s"'(\[])<sup>(Fi|Fl|Ff|Ffi|Ffl)<\/sup>([a-zA-Z])/g, '$1$2$3');
+}
+
+export function separateCollidingDollarMath(text: string): string {
+  if (!text || !text.includes('$$')) {
+    return text;
+  }
+
+  // 解耦行内公式粘连：例如 $A$$B$ 或 $formula1$$formula2$，避免 remark-math 误当成块公式
+  return text.replace(/([^$\s\n])\$\$(?=[^$\s\n])/g, '$1$ $');
+}
+
+export function remarkSuperscriptPlugin() {
+  return (tree: any) => {
+    function processChildren(children: any[]): any[] {
+      if (!Array.isArray(children)) return children;
+      const newChildren: any[] = [];
+      for (let i = 0; i < children.length; i++) {
+        const child = children[i];
+        if (child.type === 'html' && /^<sup\b[^>]*>/i.test(child.value)) {
+          let closeIndex = -1;
+          for (let j = i + 1; j < children.length; j++) {
+            if (children[j].type === 'html' && /<\/sup>/i.test(children[j].value)) {
+              closeIndex = j;
+              break;
+            }
+          }
+          if (closeIndex !== -1) {
+            const innerChildren = children.slice(i + 1, closeIndex);
+            newChildren.push({
+              type: 'sup',
+              data: {
+                hName: 'sup',
+                hProperties: {
+                  className: 'pq-superscript align-super text-[0.72em] font-medium leading-none',
+                },
+              },
+              children: processChildren(innerChildren),
+            });
+            i = closeIndex;
+            continue;
+          }
+        }
+        if (child.type === 'html' && /^<sub\b[^>]*>/i.test(child.value)) {
+          let closeIndex = -1;
+          for (let j = i + 1; j < children.length; j++) {
+            if (children[j].type === 'html' && /<\/sub>/i.test(children[j].value)) {
+              closeIndex = j;
+              break;
+            }
+          }
+          if (closeIndex !== -1) {
+            const innerChildren = children.slice(i + 1, closeIndex);
+            newChildren.push({
+              type: 'sub',
+              data: {
+                hName: 'sub',
+                hProperties: {
+                  className: 'pq-subscript align-sub text-[0.72em] font-medium leading-none',
+                },
+              },
+              children: processChildren(innerChildren),
+            });
+            i = closeIndex;
+            continue;
+          }
+        }
+        if (child.type === 'text' && child.value && (child.value.includes('<sup>') || child.value.includes('<sub>'))) {
+          const tagRegex = /<(sup|sub)\b[^>]*>([\s\S]*?)<\/\1>/gi;
+          const textChildren: any[] = [];
+          let lastIdx = 0;
+          let m: RegExpExecArray | null;
+          while ((m = tagRegex.exec(child.value)) !== null) {
+            if (m.index > lastIdx) {
+              textChildren.push({ type: 'text', value: child.value.slice(lastIdx, m.index) });
+            }
+            const tagName = m[1].toLowerCase();
+            textChildren.push({
+              type: tagName,
+              data: {
+                hName: tagName,
+                hProperties: {
+                  className: tagName === 'sup'
+                    ? 'pq-superscript align-super text-[0.72em] font-medium leading-none'
+                    : 'pq-subscript align-sub text-[0.72em] font-medium leading-none',
+                },
+              },
+              children: [{ type: 'text', value: m[2] }],
+            });
+            lastIdx = tagRegex.lastIndex;
+          }
+          if (lastIdx < child.value.length) {
+            textChildren.push({ type: 'text', value: child.value.slice(lastIdx) });
+          }
+          if (textChildren.length > 0) {
+            newChildren.push(...textChildren);
+            continue;
+          }
+        }
+        if (child.children) {
+          child.children = processChildren(child.children);
+        }
+        newChildren.push(child);
+      }
+      return newChildren;
+    }
+
+    tree.children = processChildren(tree.children);
+  };
+}
+
 export function normalizeMarkdownMath(markdown: string) {
   if (!markdown.trim()) {
     return markdown;
   }
 
-  const preparedMarkdown = normalizeExplicitMathSyntax(normalizeMineruFragmentedMathText(markdown));
+  const sanitizedMarkdown = separateCollidingDollarMath(sanitizeFakeSuperscripts(markdown));
+  const preparedMarkdown = normalizeExplicitMathSyntax(normalizeMineruFragmentedMathText(sanitizedMarkdown));
   const lines = preparedMarkdown.replace(/\r\n?/g, '\n').split('\n');
   const output: string[] = [];
   let mathFenceBuffer: string[] | null = null;

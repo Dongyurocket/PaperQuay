@@ -12,6 +12,7 @@ import {
   normalizeLatexExpression,
   normalizeMarkdownMath,
   normalizeRawLatexExpression,
+  sanitizeFakeSuperscripts,
 } from '../utils/markdown.ts';
 import { joinReadableText } from '../utils/text.ts';
 
@@ -213,11 +214,24 @@ function renderInlineMarkdownContent(input: unknown): string {
   }
 
   if (typeof input === 'string' || typeof input === 'number' || typeof input === 'boolean') {
-    return String(input);
+    return sanitizeFakeSuperscripts(String(input));
   }
 
   if (Array.isArray(input)) {
-    return input.map((item) => renderInlineMarkdownContent(item)).join('');
+    const parts: string[] = [];
+    for (const item of input) {
+      const rendered = renderInlineMarkdownContent(item);
+      if (!rendered) continue;
+      if (parts.length > 0) {
+        const last = parts[parts.length - 1].trimEnd();
+        // 避免相邻公式定界符相贴合成非法 $$ 导致 KaTeX 报错
+        if (last.endsWith('$') && rendered.trimStart().startsWith('$')) {
+          parts.push('\n\n');
+        }
+      }
+      parts.push(rendered);
+    }
+    return parts.join('');
   }
 
   const record = getRecord(input);
@@ -230,7 +244,8 @@ function renderInlineMarkdownContent(input: unknown): string {
 
   if (nodeType === 'text') {
     const textContent = record.content ?? record.text ?? record.value;
-    return typeof textContent === 'string' ? textContent : renderInlineMarkdownContent(textContent);
+    const str = typeof textContent === 'string' ? textContent : renderInlineMarkdownContent(textContent);
+    return sanitizeFakeSuperscripts(str);
   }
 
   if (nodeType === 'equation_inline') {
@@ -249,6 +264,8 @@ function renderInlineMarkdownContent(input: unknown): string {
     'list_content',
     'list_items',
     'item_content',
+    'algorithm_content',
+    'algorithm_caption',
     'caption_content',
     'table_caption',
     'image_caption',
@@ -437,6 +454,16 @@ function toMarkdownFragment(block: PositionedMineruBlock, plainText: string): st
       const mathText = extractMathText(block.content);
       return mathText ? `$$\n${mathText}\n$$` : structuredMarkdown || safeText;
     }
+    case 'algorithm': {
+      if (structuredMarkdown) {
+        return structuredMarkdown
+          .split('\n')
+          .map((line) => line.trim())
+          .filter(Boolean)
+          .join('\n\n');
+      }
+      return safeText;
+    }
     case 'image': {
       // 无图注且无 OCR 正文的视觉块不产生文本片段：纯资源路径不应成为
       // 翻译单元，界面也不需要“未提取到文本”之类的占位说明。
@@ -564,6 +591,8 @@ function pickFlatContent(rawBlock: Record<string, unknown>): Record<string, unkn
     'image_footnote',
     'chart_caption',
     'chart_footnote',
+    'algorithm_content',
+    'algorithm_caption',
     'img_path',
     'code_body',
     'code_caption',
@@ -1066,7 +1095,7 @@ export function extractTextFromMineruBlock(block: PositionedMineruBlock): string
     return extractMathText(block.content);
   }
 
-  return joinReadableText(collectTextParts(block.content));
+  return sanitizeFakeSuperscripts(joinReadableText(collectTextParts(block.content)));
 }
 
 export function extractTranslatableMarkdownFromMineruBlock(

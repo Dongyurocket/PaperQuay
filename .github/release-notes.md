@@ -14,9 +14,9 @@ Download the native installer for your operating system from the Assets section 
 
 ## Highlights
 
-- **Traceable AI Note Polishing**: The rich-text note editor can now polish a selection or generate a structured revision of the full note. Results are previewed before they are applied, so the original note is never silently overwritten.
-- **Scoped Knowledge-Base Evidence**: Choose language-only polishing, papers linked to the note, or the complete local knowledge base. Missing embeddings, unavailable indexes, and retrieval failures fall back to language-only polishing with a clear notice.
-- **Clickable Source Locations**: Retrieved evidence is saved as existing paper anchors. A click opens the paper at the corresponding page or structural block. The model selects only server-issued evidence IDs and cannot fabricate source papers or locations.
+- **Automatic Ligature & Fake Superscript Sanitization**: Automatically cleans up OCR artifacts such as `<sup>fi</sup>`, `<sup>fl</sup>`, `<sup>–</sup>`, and `<sup>’</sup>` caused by Latin typography ligatures in MinerU parsing results, restoring clean English words across reader views, full-text search, RAG indexing, and AI translation.
+- **Native Academic Superscript & Subscript Rendering**: Introduced a dedicated Markdown superscript plugin that gracefully renders standard scientific superscripts and citations (such as $kg/m^2$ and $^{[1-3]}$) with fine-tuned typography rather than exposing raw HTML markup.
+- **Formula Delimiter Collision & Multi-Line Layout Fix**: Resolved KaTeX parsing crashes and red error text caused by adjacent inline formulas accidentally colliding into invalid `$$` delimiters. Preserved multi-line layout and comment hierarchy for complex formula and algorithm blocks.
 
 ## Notes
 
@@ -41,9 +41,9 @@ PaperQuay 是一个开源 AI 论文工作台，覆盖文献管理、PDF 阅读�
 
 ## 本次更新
 
-- **可追溯的 AI 笔记润色**：富文本笔记编辑器支持润色选中文本，或生成整篇笔记的结构化版本。生成结果先预览，再由用户明确应用，原笔记不会被静默覆盖。
-- **可限定范围的知识库证据**：可选择仅优化文字、仅使用笔记关联文献，或使用整个本地知识库。未配置 Embedding、索引缺失或检索失败时，会明确提示并降级为纯文本润色。
-- **可点击的原文定位**：检索证据以现有文献锚点写入笔记；点击可打开对应论文并跳转到相关页码或结构块。模型只能选择服务器已提供的证据编号，不能伪造文献或位置。
+- **连字与伪上标自动清洗**：自动清理 MinerU 解析结果中因西文连字（`fi`、`fl`、`ff`、`ffi`、`ffl`）及连字符误判产生的 `<sup>fi</sup>`、`<sup>fl</sup>`、`<sup>–</sup>`、`<sup>’</sup>` 乱码，还原为正常单词与标点，彻底修复正文、全文搜索、RAG 向量切片及 AI 翻译中的词汇碎裂问题。
+- **正规学术上标优雅渲染**：内置 Markdown 上标/下标插件，将单位（如 $kg/m^2$）、文献引用标号（如 $^{[1-3]}$）、作者注记等正确渲染为精细对齐的学术上标样式，不再露出 HTML 原始标签或误包装为畸形数学符号。
+- **公式定界符防撞与多行排版优化**：修复相邻行内公式拼接粘连生成非法 `$$` 导致 KaTeX 语法错误整段变红的缺陷；优化算法与复杂推导公式块的换行分段展示，恢复清晰的层次排版。
 
 ## 备注
 
