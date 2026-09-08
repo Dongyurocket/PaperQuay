@@ -4,6 +4,7 @@ import {
   Languages,
   RefreshCw,
   Scan,
+  Sparkles,
   Table2,
 } from 'lucide-react';
 import katex from 'katex';
@@ -684,9 +685,11 @@ interface BlockItemProps {
   compactMode: boolean;
   translatedText?: string;
   translationDisplayMode: TranslationDisplayMode;
+  customOverrideMarkdown?: string;
   pdfSource?: PdfSource;
   showPdfCrop?: boolean;
   onTogglePdfCrop?: () => void;
+  onOpenReparse?: (block: PositionedMineruBlock, currentText: string) => void;
   onClick: (block: PositionedMineruBlock) => void;
   onContextMenu?: (block: PositionedMineruBlock, event: ReactMouseEvent<HTMLDivElement>) => void;
   registerRef: (blockId: string, element: HTMLDivElement | null) => void;
@@ -702,9 +705,11 @@ function BlockItemComponent({
   compactMode,
   translatedText,
   translationDisplayMode,
+  customOverrideMarkdown,
   pdfSource,
   showPdfCrop = false,
   onTogglePdfCrop,
+  onOpenReparse,
   onClick,
   onContextMenu,
   registerRef,
@@ -716,14 +721,15 @@ function BlockItemComponent({
   const hasTranslation = Boolean(translatedText?.trim());
   const showTranslatedOnly = hasTranslation && translationDisplayMode === 'translated';
   const showBilingual = hasTranslation && translationDisplayMode === 'bilingual';
-  const effectiveMarkdown = showTranslatedOnly ? translatedText || markdown : markdown;
+  const baseMarkdown = customOverrideMarkdown || markdown;
+  const effectiveMarkdown = showTranslatedOnly ? translatedText || baseMarkdown : baseMarkdown;
   const effectivePlainText = showTranslatedOnly ? translatedText || plainText : plainText;
   const displayMarkdown = useMemo(
     () =>
       block.type === 'list'
-        ? renderListMarkdownContent(effectiveMarkdown || effectivePlainText || markdown)
+        ? renderListMarkdownContent(effectiveMarkdown || effectivePlainText || baseMarkdown)
         : effectiveMarkdown,
-    [block.type, effectiveMarkdown, effectivePlainText, markdown],
+    [block.type, effectiveMarkdown, effectivePlainText, baseMarkdown],
   );
   const displayTranslatedMarkdown = useMemo(
     () =>
@@ -814,7 +820,7 @@ function BlockItemComponent({
         )}
       />
 
-      {((active && showBlockMeta) || ((active || hovered || showPdfCrop) && pdfSource && isValidBBox(block.bbox))) ? (
+      {((active && showBlockMeta) || ((active || hovered || showPdfCrop) && ((pdfSource && isValidBBox(block.bbox)) || Boolean(onOpenReparse)))) ? (
         <div
           className="mb-3 flex items-center justify-between text-indigo-500"
           style={{
@@ -830,30 +836,52 @@ function BlockItemComponent({
                 `Page ${block.pageIndex + 1} · Block ${block.blockIndex + 1}`,
               )}
             </span>
+            {customOverrideMarkdown ? (
+              <span className="inline-flex items-center gap-0.5 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300">
+                <Sparkles className="h-2.5 w-2.5" />
+                {l('AI 已修复', 'AI Fixed')}
+              </span>
+            ) : null}
           </div>
-          {pdfSource && isValidBBox(block.bbox) ? (
-            <button
-              type="button"
-              onClick={(event) => {
-                event.stopPropagation();
-                onTogglePdfCrop?.();
-              }}
-              className={cn(
-                'inline-flex items-center gap-1.5 rounded-lg px-2.5 py-0.5 text-[11px] font-medium transition-all',
-                showPdfCrop
-                  ? 'bg-indigo-600 text-white shadow-sm hover:bg-indigo-700'
-                  : 'border border-slate-200/90 bg-white/95 text-slate-600 shadow-xs hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-600 dark:border-white/10 dark:bg-[var(--pq-surface-2)] dark:text-[var(--pq-text-muted)] dark:hover:bg-indigo-950/40 dark:hover:text-indigo-400',
-              )}
-              title={
-                showPdfCrop
-                  ? l('返回识别排版文本', 'Switch to parsed text')
-                  : l('切换为原 PDF 切片', 'View original PDF crop')
-              }
-            >
-              <Scan className="h-3.5 w-3.5" strokeWidth={2} />
-              <span>{showPdfCrop ? l('显示排版', 'Show Parsed') : l('原 PDF 切片', 'PDF Crop')}</span>
-            </button>
-          ) : null}
+          <div className="flex items-center gap-1.5">
+            {onOpenReparse ? (
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onOpenReparse(block, customOverrideMarkdown || effectiveMarkdown || plainText);
+                }}
+                className="inline-flex items-center gap-1 rounded-lg border border-indigo-200/90 bg-indigo-50/80 px-2 py-0.5 text-[11px] font-medium text-indigo-700 shadow-xs transition-all hover:bg-indigo-100 dark:border-indigo-500/30 dark:bg-indigo-950/40 dark:text-indigo-300 dark:hover:bg-indigo-900/60"
+                title={l('使用 AI 大模型重新识别和修复此区块', 'Re-parse and format this block with AI')}
+              >
+                <Sparkles className="h-3 w-3 text-indigo-600 dark:text-indigo-400" />
+                <span>{l('AI 重析', 'AI Re-parse')}</span>
+              </button>
+            ) : null}
+            {pdfSource && isValidBBox(block.bbox) ? (
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onTogglePdfCrop?.();
+                }}
+                className={cn(
+                  'inline-flex items-center gap-1.5 rounded-lg px-2.5 py-0.5 text-[11px] font-medium transition-all',
+                  showPdfCrop
+                    ? 'bg-indigo-600 text-white shadow-sm hover:bg-indigo-700'
+                    : 'border border-slate-200/90 bg-white/95 text-slate-600 shadow-xs hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-600 dark:border-white/10 dark:bg-[var(--pq-surface-2)] dark:text-[var(--pq-text-muted)] dark:hover:bg-indigo-950/40 dark:hover:text-indigo-400',
+                )}
+                title={
+                  showPdfCrop
+                    ? l('返回识别排版文本', 'Switch to parsed text')
+                    : l('切换为原 PDF 切片', 'View original PDF crop')
+                }
+              >
+                <Scan className="h-3.5 w-3.5" strokeWidth={2} />
+                <span>{showPdfCrop ? l('显示排版', 'Show Parsed') : l('原 PDF 切片', 'PDF Crop')}</span>
+              </button>
+            ) : null}
+          </div>
         </div>
       ) : null}
 
@@ -937,6 +965,7 @@ function BlockItemComponent({
 function areBlockItemPropsEqual(previous: BlockItemProps, next: BlockItemProps) {
   return (
     previous.renderable === next.renderable &&
+    previous.customOverrideMarkdown === next.customOverrideMarkdown &&
     previous.active === next.active &&
     previous.hovered === next.hovered &&
     previous.flashing === next.flashing &&
@@ -945,6 +974,9 @@ function areBlockItemPropsEqual(previous: BlockItemProps, next: BlockItemProps) 
     previous.compactMode === next.compactMode &&
     previous.translatedText === next.translatedText &&
     previous.translationDisplayMode === next.translationDisplayMode &&
+    previous.pdfSource === next.pdfSource &&
+    previous.showPdfCrop === next.showPdfCrop &&
+    previous.onOpenReparse === next.onOpenReparse &&
     previous.onClick === next.onClick &&
     previous.registerRef === next.registerRef
   );

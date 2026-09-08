@@ -966,6 +966,48 @@ function buildAcademicTranslationPrompt(options) {
   ].join(' ');
 }
 
+function sanitizeAiReparsedOutput(rawText) {
+  if (!rawText || typeof rawText !== 'string') return '';
+  let text = rawText.trim();
+  text = text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+  const codeBlockMatch = text.match(/^```(?:markdown|md|latex|text)?\s*\n([\s\S]*?)\n```$/i);
+  if (codeBlockMatch) {
+    text = codeBlockMatch[1].trim();
+  }
+  text = text.replace(/^(?:(?:Here is|Below is|This is)(?: the)? (?:corrected|re-parsed|reconstructed|formatted) (?:text|content|markdown|table)?:?\s*)+/i, '');
+  text = text.replace(/^(?:(?:这是|以下|为您|如下|重新识别结果)[^\n\r：:]*?[：:]\s*)+/i, '');
+  return text.trim();
+}
+
+function buildBlockReparsePrompt(options = {}) {
+  const { mode, customPrompt } = options;
+  const modeInstructions = [];
+  if (mode === 'table' || mode === 'nomenclature') {
+    modeInstructions.push('SPECIAL MODE - TABLE & NOMENCLATURE: Extract and restructure any symbol definitions, notations, or multi-column entries into a pristine Markdown table (| Symbol | Description |). Split concatenated symbols and text (e.g., "Bnumber" -> "$B$ | number").');
+  } else if (mode === 'formula') {
+    modeInstructions.push('SPECIAL MODE - MATHEMATICAL EXPRESSIONS: Ensure all mathematical symbols and equations are properly formatted in LaTeX ($...$ for inline, $$...$$ for block math). Fix corrupted sub/superscripts.');
+  }
+
+  return [
+    'You are a high-precision academic document OCR correction and Markdown restructuring engine.',
+    'Your EXCLUSIVE task is to correct OCR errors, restore broken layouts, and format the provided paper excerpt into publication-grade Markdown.',
+    '',
+    'CRITICAL CONSTRAINTS - STRICTLY ENFORCED:',
+    '1. ABSOLUTELY NO EXTRA TALK: DO NOT output any conversational filler, greetings, explanations, remarks, or notes (e.g., NEVER say "Here is...", "Sure!", "Based on...", "I fixed..."). Output ONLY the final corrected content.',
+    '2. NO CODE BLOCK WRAPPERS: DO NOT wrap the output in ```markdown or ``` code fences. Return raw markdown directly.',
+    '3. HIGH FIDELITY: Preserve all original terms, variables, numbers, units, and academic meaning. Do not summarize or invent.',
+    '4. LATEX MATH: Use $...$ for inline math and $$...$$ for standalone formulas.',
+    '5. DEFECT CORRECTIONS:',
+    '   - Drop Cap (首字下沉): If a single large initial letter is split from its word or misidentified as a superscript (e.g., "U" followed by "RBAN"), merge it into the correct word (e.g., "Urban").',
+    '   - Concatenated text: Fix symbols and words merged without spaces (e.g., "cchord" -> "$c$ chord", "Tthrust" -> "$T$ thrust").',
+    '   - Broken line wrapping: Merge lines that were accidentally split in mid-sentence.',
+    ...modeInstructions,
+    customPrompt ? `\nUSER SPECIAL REQUEST: ${customPrompt}` : '',
+    '',
+    'REMINDER: Output ONLY the repaired content. Any extra introductory or concluding words are forbidden.',
+  ].filter(Boolean).join('\n');
+}
+
 function buildPaperSummaryPrompt(options) {
   const outputLanguage = typeof options.outputLanguage === 'string' && options.outputLanguage.trim()
     ? options.outputLanguage.trim()
@@ -1262,6 +1304,27 @@ function createAiCommands(context) {
       }
 
       return results;
+    },
+
+    async reparse_block_openai_compatible({ options }) {
+      const text = typeof options?.text === 'string' ? options.text.trim() : '';
+      if (!text) {
+        throw new Error('未提供需要重新识别的区块内容。');
+      }
+
+      const systemPrompt = buildBlockReparsePrompt(options);
+      const data = await openAiChat(
+        options,
+        [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: text },
+        ],
+        {
+          temperature: 0.1,
+        },
+      );
+
+      return sanitizeAiReparsedOutput(pickChatText(data));
     },
 
     async extract_literature_metadata_openai_compatible({ options }) {

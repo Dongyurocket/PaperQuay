@@ -33,6 +33,7 @@ import { isValidBBox } from '../../utils/bbox';
 import { cn } from '../../utils/cn';
 import { normalizeSelectionText } from '../../utils/text';
 import { BlockItem } from './blockViewerContent';
+import { BlockReparseModal } from './BlockReparseModal';
 
 interface BlockViewerProps {
   blocks: PositionedMineruBlock[];
@@ -243,6 +244,34 @@ function BlockViewer({
   } | null>(null);
   const [flashBlockId, setFlashBlockId] = useState<string | null>(null);
   const [cropBlockIds, setCropBlockIds] = useState<Set<string>>(() => new Set());
+  const [reparseTarget, setReparseTarget] = useState<{
+    block: PositionedMineruBlock;
+    initialText: string;
+  } | null>(null);
+  const [blockOverrides, setBlockOverrides] = useState<Record<string, string>>({});
+
+  const handleOpenReparse = useCallback((block: PositionedMineruBlock, currentText: string) => {
+    setReparseTarget({ block, initialText: currentText });
+  }, []);
+
+  const handleApplyReparse = useCallback((reparsedText: string) => {
+    if (!reparseTarget) return;
+    const blockId = reparseTarget.block.blockId;
+    setBlockOverrides((prev) => ({
+      ...prev,
+      [blockId]: reparsedText,
+    }));
+  }, [reparseTarget]);
+
+  const handleResetReparse = useCallback(() => {
+    if (!reparseTarget) return;
+    const blockId = reparseTarget.block.blockId;
+    setBlockOverrides((prev) => {
+      const next = { ...prev };
+      delete next[blockId];
+      return next;
+    });
+  }, [reparseTarget]);
 
   const handleToggleBlockCrop = useCallback((blockId: string) => {
     setCropBlockIds((prev) => {
@@ -423,10 +452,28 @@ function BlockViewer({
       });
     }
 
+    const blockTextForReparse =
+      blockOverrides[contextMenu.block.blockId] ||
+      renderableBlocks.find((item) => item.block.blockId === contextMenu.block.blockId)?.markdown.trim() ||
+      '';
+
+    entries.push({
+      id: 'reparse-block-ai',
+      label: l('✨ AI 重新识别此块', '✨ AI Re-parse This Block'),
+      icon: <Sparkles className="h-4 w-4 text-indigo-500" strokeWidth={1.9} />,
+      tone: 'accent',
+      disabled: !blockTextForReparse,
+      onSelect: () => {
+        handleOpenReparse(contextMenu.block, blockTextForReparse);
+      },
+    });
+
     return entries;
   }, [
+    blockOverrides,
     contextMenu,
     cropBlockIds,
+    handleOpenReparse,
     handleToggleBlockCrop,
     l,
     onAddBlockToNote,
@@ -715,6 +762,8 @@ function BlockViewer({
                 compactMode={compactMode}
                 translatedText={translations[renderable.block.blockId]}
                 translationDisplayMode={translationDisplayMode}
+                customOverrideMarkdown={blockOverrides[renderable.block.blockId]}
+                onOpenReparse={handleOpenReparse}
                 onClick={onBlockClick}
                 onContextMenu={handleBlockContextMenu}
                 registerRef={registerBlockRef}
@@ -744,6 +793,17 @@ function BlockViewer({
           )}
           entries={contextMenuEntries}
           onClose={() => setContextMenu(null)}
+        />
+      ) : null}
+
+      {reparseTarget ? (
+        <BlockReparseModal
+          block={reparseTarget.block}
+          initialText={reparseTarget.initialText}
+          hasCustomOverride={Boolean(blockOverrides[reparseTarget.block.blockId])}
+          onApply={handleApplyReparse}
+          onReset={handleResetReparse}
+          onClose={() => setReparseTarget(null)}
         />
       ) : null}
     </div>

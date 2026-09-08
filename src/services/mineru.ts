@@ -12,6 +12,8 @@ import {
   normalizeLatexExpression,
   normalizeMarkdownMath,
   normalizeRawLatexExpression,
+  reconstructNomenclature,
+  sanitizeDropCapArtifacts,
   sanitizeFakeSuperscripts,
 } from '../utils/markdown.ts';
 import { joinReadableText } from '../utils/text.ts';
@@ -476,8 +478,10 @@ function toMarkdownFragment(block: PositionedMineruBlock, plainText: string): st
     }
     case 'caption':
       return `> ${structuredMarkdown || safeText}`;
-    default:
-      return structuredMarkdown || safeText;
+    default: {
+      const content = structuredMarkdown || safeText;
+      return reconstructNomenclature(sanitizeDropCapArtifacts(content));
+    }
   }
 }
 

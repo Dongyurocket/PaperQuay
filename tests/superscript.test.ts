@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 
 import {
   sanitizeFakeSuperscripts,
+  sanitizeDropCapArtifacts,
+  reconstructNomenclature,
   separateCollidingDollarMath,
   normalizeMarkdownMath,
   remarkSuperscriptPlugin,
@@ -155,3 +157,59 @@ test('remarkSuperscriptPlugin converts <sup> and <sub> tags into ast sup/sub nod
   assert.equal(supNodes[0].children[0].value, '2');
   assert.equal(supNodes[1].children[0].value, '[1-3]');
 });
+
+test('sanitizeDropCapArtifacts restores drop cap erroneously marked as superscript or split', () => {
+  // 截图 1 & 2 中的真实案例：HTML <sup>
+  assert.equal(
+    sanitizeDropCapArtifacts('U<sup>RBAN air mobility (UAM) is an emerging industry that has</sup> the potential'),
+    'Urban air mobility (UAM) is an emerging industry that has the potential',
+  );
+
+  // Markdown / LaTeX 形式 U^{RBAN...}
+  assert.equal(
+    sanitizeDropCapArtifacts('U^{RBAN air mobility (UAM) is an emerging industry that has} the potential'),
+    'Urban air mobility (UAM) is an emerging industry that has the potential',
+  );
+
+  // 纯单词词干：U<sup>RBAN</sup>
+  assert.equal(
+    sanitizeDropCapArtifacts('U<sup>RBAN</sup> air mobility is emerging'),
+    'Urban air mobility is emerging',
+  );
+
+  // 单字母空格断开：U RBAN air mobility -> Urban air mobility
+  assert.equal(
+    sanitizeDropCapArtifacts('U RBAN air mobility (UAM) is an emerging industry'),
+    'Urban air mobility (UAM) is an emerging industry',
+  );
+
+  // A CCORDING -> According
+  assert.equal(
+    sanitizeDropCapArtifacts('A CCORDING to recent studies'),
+    'According to recent studies',
+  );
+});
+
+test('reconstructNomenclature parses collapsed nomenclature paragraph into markdown table', () => {
+  // 截图 3 & 4 中的真实案例
+  const rawInput =
+    'Nomenclature\n\n' +
+    'Bnumber of rotor blades ^bwing span, m C_Bbattery capacity, Ah C_{D_p}parasitic drag coefficient ' +
+    'Dtotal drag, N EYoung\'s modulus, GPa Gshear modulus, GPa Llift, N mmass, kg ' +
+    'npbattery cells in parallel nsbattery cells in series OCVbattery open current voltage, V ' +
+    'Tthrust, N t/cthickness-to-chord ratio';
+
+  const output = reconstructNomenclature(rawInput);
+
+  // 必须重构成带有表头的 Markdown 表格
+  assert.ok(output.includes('| 符号 (Symbol) | 说明与单位 (Description) |'));
+  assert.ok(output.includes('| :--- | :--- |'));
+  // 符号必须解耦，且包裹 $
+  assert.ok(output.includes('| $B$ | number of rotor blades |'));
+  assert.ok(output.includes('| $b$ | wing span, m |'));
+  assert.ok(output.includes('| $C_B$ | battery capacity, Ah |'));
+  assert.ok(output.includes('| $D$ | total drag, N |'));
+  assert.ok(output.includes('| $T$ | thrust, N |'));
+  assert.ok(output.includes('| $t/c$ | thickness-to-chord ratio |'));
+});
+

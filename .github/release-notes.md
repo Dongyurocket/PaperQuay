@@ -14,9 +14,10 @@ Download the native installer for your operating system from the Assets section 
 
 ## Highlights
 
-- **Clean Cross-Reference Fake Superscripts**: Eliminates false superscript tags (`<sup>...</sup>` or Unicode superscripts) incorrectly applied to cross-reference numbers (e.g. `Table 8`, `Fig. 2`, `Eq. 3`) by MinerU/OCR layout models when followed by punctuation.
-- **Restore Consecutive References & Missing Comma Spaces**: Supports consecutive cross-references (`Table 8 and 9`, `Figure 2, 3, and 4`) and automatically restores missing spaces after commas (e.g. `Table 8,while` -> `Table 8, while`).
-- **Pipeline-Wide Correctness**: Cleans text across BlockViewer rendering, full-text search, RAG chunking, AI summary, and translation pipelines.
+- **AI Block Re-parse & Formatting**: In BlockViewer, select any unsatisfactory structured block and trigger "AI Re-parse" from either the block header toolbar or context menu. Choose any configured AI model to re-parse and fix broken OCR or layout.
+- **Strict Anti-Filler Constraints & Defensive Sanitization**: Enforces strict zero-filler system prompts forbidding any greetings, conversational remarks, or markdown code fence wrappers. Automatically strips `<think>` tags, code fences, and introductory prefixes on both backend and client layers.
+- **Automatic Drop Cap Artifact Sanitization**: Automatically fixes Drop Cap letters erroneously classified as superscripts (e.g. `U<sup>RBAN ...</sup>` -> `Urban ...`), restoring natural paragraph flow and line wrapping.
+- **Automatic Nomenclature Table Reconstruction**: Automatically recovers collapsed and concatenated borderless symbol lists and Nomenclature sections, restoring missing delimiters, decoupling symbols from text, and reformatting them into clean Markdown tables with KaTeX math rendering.
 
 ## Notes
 
@@ -41,9 +42,10 @@ PaperQuay 是一个开源 AI 论文工作台，覆盖文献管理、PDF 阅读�
 
 ## 本次更新
 
-- **交叉引用误判伪上标智能清洗**：彻底解决 MinerU 与 OCR 版面分析模型在遇到紧随标点的交叉引用（如 `Table 8,`、`Fig. 2,`、`Eq. 3,`）时，因误触发文献引用先验而将正文编号错误打上 `<sup>` 的问题；覆盖科技文献常见的 Table、Figure、Equation、Section、Algorithm 等实体，自动将 `Table <sup>8</sup>` 或 Unicode 上标 `Table ⁸` 还原为标准正文编号 `Table 8`。
-- **连续引用与标点空格自动修复**：支持串联交叉引用（如 `Table 8 and 9`、`Figure 2, 3, and 4`）的连续上标还原，并自动修复剥离上标后遗留的逗号与后续单词粘连缺失空格缺陷（如 `Table 8,while` 自动修正为 `Table 8, while`）。
-- **全链路一致性保障**：清洗在结构块渲染、全文搜索、RAG 向量切片、AI 摘要与翻译主链路统一生效，保障学术阅读与知识检索质量。
+- **不满意区块 AI 大模型重新识别**：BlockViewer 结构块在悬浮操作栏（「✨ AI 重析」）和右键菜单中支持对任意识别不满意的区块调用大模型进行二次重构与排版修复；支持下拉自由选择用户配置的任意大模型，并提供「智能排版纠错」、「表格/术语表结构化」、「数学公式提取」三种模式及补充指令输入。
+- **无多余内容严格约束与双重防御剥离**：设计了极端严密的负向约束系统提示词（强制禁止任何问候、开场白、解释废话或代码块包裹），并在 Node.js 后端与渲染层配备双层防御性清洗机制，自动剔除思考标签（`<think>...</think>`）、外层代码块定界符与可能逃逸的前置/后置废话，确保输出 100% 纯净学术 Markdown。
+- **首字下沉（Drop Cap）伪上标自动修复**：针对学术论文常见的首字下沉排版（如段首大号 `U` 跨两行高度导致右侧文本被判定为偏高上标 `U<sup>RBAN ...</sup>` 或 `U^{RBAN ...}`），自动规约并还原为标准大小写词汇（如 `Urban`），同时修复单字母与大写词干之间空格截断缺陷，消除异常留白与错位换行。
+- **术语表（Nomenclature）无框表格自动重构**：彻底解决学术论文无框术语表被版面分析误判为普通文本段落、因“去除软换行”而压平坍缩为整团乱码的问题；智能解耦变量符号与描述之间的字符粘连（如 `Bnumber` $\to$ `$B$` 与 `number`、`C_Bbattery` $\to$ `$C_B$` 与 `battery`、`mmass` $\to$ `$m$` 与 `mass`、`cchord` $\to$ `$c$` 与 `chord`），自动将其重构为排版优雅的两列 Markdown 变量定义表，数学符号自动以 KaTeX 矢量公式呈现。
 
 ## 备注
 
