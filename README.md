@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.1.34-2563eb?style=flat-square" alt="Version v0.1.34">
+  <img src="https://img.shields.io/badge/version-v0.1.39-2563eb?style=flat-square" alt="Version v0.1.39">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-4b5563?style=flat-square" alt="Windows macOS Linux">
   <img src="https://img.shields.io/badge/built%20with-Electron-47848f?style=flat-square" alt="Electron">
   <img src="https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-0f766e?style=flat-square" alt="React TypeScript">
@@ -26,7 +26,9 @@
   <a href="#本地开发">本地开发</a>
 </p>
 
-> 二次开发、上游同步、本地构建和个人 Fork 更新流程请阅读 [开发手册](./docs/DEVELOPMENT.zh-CN.md)。
+> 💡 **项目说明与二次开发背景**：
+> 本仓库是基于上游官方开源项目 [WangQrkkk/PaperQuay](https://github.com/WangQrkkk/PaperQuay) 进行二次开发与功能增强的个人 Fork 版本（由 [@Dongyurocket](https://github.com/Dongyurocket) 维护，开源许可沿用 `AGPL-3.0-only`）。
+> 在保持与上游主干持续同步演进的同时，本项目重点针对**科技文献精细排版清洗、PDF 原始切片（BBox Crop）对照、AI 大模型区块级重构、Zotero 本地库精细化选择性同步、MCP 知识库标准服务与外部 Agent 深度协同**等科研场景进行了深度定制与功能扩展。二次开发、上游同步、本地构建和更新流程详见 [开发手册](./docs/DEVELOPMENT.zh-CN.md)。
 
 <p align="center">
   <img src="./docs/assets/readme-hero.svg" alt="PaperQuay feature overview" width="920">
@@ -51,13 +53,43 @@
 
 ## 近期更新
 
-v0.1.34 带来可追溯的 AI 笔记润色：
+### v0.1.39 - Zotero 本地文献库选择性同步与 MCP 工具链深度联动
 
-- 笔记编辑器新增 AI 润色入口，可优化选中文本或生成整篇笔记的结构化版本；生成后先预览，再由用户明确应用。
-- 润色范围可选择仅优化文字、仅使用笔记关联文献，或使用整个本地知识库；未配置 Embedding、索引缺失或检索失败时自动降级为纯文本润色并说明原因。
-- 知识库证据以现有可点击文献锚点写入笔记；点击可打开对应论文并定位到相关页码或结构块，模型不能伪造来源与位置。
+- **按需选择性同步**：打破过去只能整体无差别全量导入的限制，支持按分类树精准浏览、多字段条件模糊检索（标题、作者、年份、DOI），并可按指定文献条目挑选同步入库。
+- **PaperQuay MCP 服务端扩展**：新增 4 个标准 MCP 工具（`zotero_list_collections`、`zotero_search_items`、`zotero_preview_sync`、`paperquay_sync_from_zotero`），供外部 Agent 免侵入完成探测、检索、差量比对与安全入库。
+- **高可靠入库与防重机制**：严格执行 DOI 精准匹配、标题标准化比对与 PDF SHA-256 内容哈希校验三层防重；深度解析补全作者列表、出版物、DOI、摘要等学术元数据。
+- **自动化协作联动**：发布专属 `paperquay-zotero-sync` 技能，确立「意图解析 ➔ 检索预检 ➔ 差量清单确认 ➔ 批准后精准入库」的高可靠人机交互 SOP。
 
-v0.1.33 带来中文文献支持；历史版本变更见 [更新日志](./CHANGELOG.md)。
+### v0.1.38 - 首字下沉与术语表自动修复 & AI 大模型区块级重构
+
+- **AI 大模型区块级重析重构**：在 BlockViewer 结构块操作栏（「✨ AI 重析」）和右键菜单中支持对任意识别不满意的区块调用大模型进行二次重构，提供「智能排版纠错」、「表格/术语表结构化」、「数学公式提取」三种模式，具备负向约束与双层防御性清洗，输出纯净学术 Markdown 并支持实时对比与一键撤销还原。
+- **首字下沉（Drop Cap）排版修复**：自动规约学术论文段首大号下沉字母导致的断裂与伪上标缺陷（如 `U<sup>RBAN ...</sup>` 还原为 `Urban`），彻底消除异常留白与错位换行。
+- **无框术语表（Nomenclature）自动重构**：智能解耦科技论文变量符号与描述之间的字符粘连（如 `Bnumber` $\to$ `$B$` 与 `number`），自动重构成两列排版优雅的 Markdown 变量定义表，数学符号自动以 KaTeX 矢量公式渲染。
+
+### v0.1.37 - 科技文献交叉引用误判伪上标与标点粘连修复
+
+- **交叉引用误判清洗**：自动规约版面模型在紧随标点的科技文献交叉引用实体（`Table 8,`、`Fig. 2,`、`Eq. 3,`、`Section 4` 等）上误触发的伪上标，还原标准正文标号。
+- **标点空格自动补全**：自动修复去除伪上标后遗留的逗号与后续单词粘连缺失空格问题（如 `Table 8,while` 自动修正为 `Table 8, while`），在渲染、全文检索与 RAG 切片链路全局生效。
+
+### v0.1.36 - PDF 原始区域切片（BBox Crop）回退机制与公式兜底
+
+- **一键原 PDF 切片对照**：BlockViewer 结构块（段落、公式、算法、表格等）支持在识别排版与原版 PDF 高保真矢量切片之间一键自由切换，方便核对原始排版与细微常数。
+- **公式解析失败原图兜底**：当公式语法错误导致 KaTeX 无法解析时，错误卡片中直接内联展开原 PDF 高清矢量切片，保障公式核对准确无误、科研阅读流程不中断。
+- **高清离屏渲染与缓存**：基于 PDF.js 实现 2.0x Retina 矢量离屏裁剪与轻量 LRU 内存缓存，小字号上下标清晰可见。
+
+### v0.1.35 - 连字伪上标清洗 & 正规学术上标优雅渲染
+
+- **连字伪上标自动清洗**：彻底消除 MinerU 解析中因西文连字（`fi`、`fl`、`ff` 等）误判产生的 `<sup>fi</sup>` 等伪上标乱码，自动还原完整英文词汇。
+- **正规学术上下标渲染**：自研零依赖 `remarkSuperscriptPlugin` 插件，完整支持 `<sup>`/`<sub>` 标签的语义排版，解决单位（如 $\text{kg/m}^2$）、引用标号（如 $^{[1-3]}$）乱码或裸露 HTML 标签问题。
+- **公式排版防撞保护**：行内公式检测增加 HTML 标签保护，消除公式定界符相邻拼接导致的粘连语法报错，优化算法块多行排版层次。
+
+### 历史核心里程碑（v0.1.32 - v0.1.34）
+
+- **v0.1.34 可追溯的 AI 笔记润色**：Tiptap 笔记编辑器支持仅优化文字、笔记关联文献或本地知识库三档范围润色，严格约束证据锚点，防止模型伪造引用与位置。
+- **v0.1.33 深度中文文献支持**：中文文献免翻译自动直填、trigram 中文全文检索、MinerU 解析后后台自动索引入库、LLM 首页元数据智能兜底。
+- **v0.1.32 MCP 知识库服务 & 译文集中管理**：内置独立标准 MCP stdio 知识库服务，提供给外部 Agent 检索论文、RAG 切片与笔记；支持译文 PDF 统一集中存放与安全迁移；扩展支持书籍、学位论文、研究报告等学术类型与引用字段。
+
+*详细版本发布记录与历史变更见 [更新日志](./CHANGELOG.md)。*
 
 ---
 
@@ -172,12 +204,14 @@ Agent 工作区不是普通聊天框，而是面向文献库操作设计。它�
 | 笔记工作区 | 支持独立 Tiptap 笔记工作区、文件夹、搜索、标签、置顶、收藏、大纲、反向链接和本地自动保存 |
 | 笔记编辑器 | 支持富文本、标题、列表、任务列表、代码块、表格、图片、数学公式、高亮、链接、组件块和斜杠菜单式插入 |
 | 内联笔记链接 | 支持 `[[笔记]]` 双向链接、`#标签`、`@paper` 文献引用、补全菜单，以及笔记和文献之间的内联跳转 |
-| 阅读器 | 支持 PDF 阅读、MinerU 结构块视图、PDF 区域联动、阅读热力进度、阅读时间记录和批注工具 |
-| 翻译 | 支持全文翻译、块级翻译缓存和划词翻译，模型使用 OpenAI 兼容接口；支持批量翻译文献标题；中文文献自动跳过翻译、中文标题直填入库 |
-| 引用导出 | 支持多选文献批量导出 Bib：合并为单个 .bib 或每篇一个文件，自动生成去重 citation key 并推断条目类型 |
+| 阅读器与排版清洗 | 支持 PDF 阅读、MinerU 结构块视图、PDF 区域联动、阅读热力进度、阅读时间记录和批注工具；自动清洗连字与交叉引用伪上标，优雅渲染正规学术上下标，自动修复首字下沉（Drop Cap）与无框术语表（Nomenclature）重构 |
+| 原切片与 AI 重析 | 支持 PDF 原始区域切片（BBox Crop）回退机制，公式解析失败自动切片兜底；支持对任意结构块调用大模型进行二次重析（排版纠错、表格/术语表结构化、数学公式提取，支持对比与撤销） |
+| 翻译与译文管理 | 支持全文翻译、块级翻译缓存和划词翻译，模型使用 OpenAI 兼容接口；支持批量翻译文献标题；中文文献自动跳过翻译、中文标题直填入库；支持统一译文 PDF 集中存放与平滑迁移 |
+| 引用导出 | 支持多选文献批量导出 Bib：合并为单个 .bib 或每篇一个文件，自动生成去重 citation key，支持期刊、书籍、学位论文、报告等标准条目类型 |
 | 论文概览 | 支持背景、研究问题、方法、实验设置、主要发现、结论和局限等速读概览字段 |
 | Agent 工作区 | 支持对话、执行轨迹、工具调用卡片、文献选择、元数据工具、重命名、打标签、分类和总结 |
-| Zotero 导入 | 支持从 `zotero.sqlite` 导入 Zotero 分类、标签和可用 PDF 附件 |
+| Zotero 导入与同步 | 支持从 `zotero.sqlite` 全量导入分类、标签和可用 PDF；新增支持基于分类树浏览、条件模糊检索、差量预检与三层防重校验的选择性精准同步 |
+| MCP 知识库服务 | 内置标准 MCP stdio 服务（`bin/paperquay-mcp.cjs`），直连本地 SQLite 提供文献检索、详情、RAG 切片、笔记搜索与 Zotero 同步工具链，供外部 Agent 零侵入直连 |
 | 备份 | 支持通过 WebDAV 备份和恢复文献库数据库、笔记数据库和本地 RAG SQLite 数据库 |
 | 软件更新 | 支持应用内检查更新、Windows 和 Linux 自动更新流程，以及 macOS 打开发布页手动下载 |
 | 知识图谱 | 支持文献、笔记、标签、分类和引用节点，语义相似边、Crossref 参考文献同步、共同作者关系、自定义与 AI 关系，fcose 力导向全局布局、局部同心圆视图和 PNG/JSON 导出 |
@@ -271,11 +305,13 @@ npm run electron:build
 
 ---
 
-## Zotero 兼容
+## Zotero 兼容与选择性同步
 
-PaperQuay 可以读取包含 `zotero.sqlite` 的 Zotero 本地数据目录。导入时会将 Zotero 数据库复制到临时只读工作文件中读取，不会修改 Zotero 原始数据库。
+PaperQuay 可以读取包含 `zotero.sqlite` 的 Zotero 本地数据目录。导入与同步时会将 Zotero 数据库复制到临时只读工作文件中读取，完全不会修改 Zotero 原始数据库。
 
-导入结果会进入 PaperQuay 自己的本地文献库。Zotero collections 会变成本地分类，分类下可访问的本地 PDF 会复制到 PaperQuay 的文献存储文件夹中。
+- **全量导入**：在设置中选择 Zotero 数据目录，一键将全部分类树、标签和可用本地 PDF 导入 PaperQuay。
+- **选择性精准同步（二次开发增强）**：打破全量导入的限制，支持查看分类条目树，支持按关键词、作者、年份、DOI 等条件精确检索，并在导入前执行差量预检（区分就绪、已存在去重、缺少附件）。
+- **外部 Agent 自动化协同**：内置的 MCP stdio 服务（`bin/paperquay-mcp.cjs`）封装了完整的 Zotero 检索、预检与同步工具，配合 Proma 等 Agent 技能可实现“自然语言指令 ➔ 预检确认 ➔ 事务入库”的全流程无缝协同。
 
 Zotero 是 PaperQuay 的兼容来源之一，不是必要依赖。你可以完全不使用 Zotero，直接在 PaperQuay 中建立自己的文献库。
 
@@ -309,9 +345,9 @@ PaperQuay 是本地优先。文献库、笔记和本地 RAG 索引保存在 SQLi
 
 ## 致谢
 
-PaperQuay 的不少设计与打磨，也受到 [LinuxDo 社区](https://linux.do/) 讨论、反馈和想法的启发。
-
-PaperQuay 的笔记工作区构建在 [Tiptap](https://github.com/ueberdosis/tiptap) 之上。感谢 Tiptap 维护者提供可扩展的编辑器框架与示例，支撑 PaperQuay 的笔记体验。
+- **上游原项目**：感谢 [WangQrkkk/PaperQuay](https://github.com/WangQrkkk/PaperQuay) 创造了如此优秀的本地优先 AI 论文工作台基础架构与丰富特性。
+- **社区与灵感**：PaperQuay 的不少设计与打磨，也受到 [LinuxDo 社区](https://linux.do/) 讨论、反馈和想法的启发。
+- **编辑器框架**：PaperQuay 的笔记工作区构建在 [Tiptap](https://github.com/ueberdosis/tiptap) 之上。感谢 Tiptap 维护者提供可扩展的编辑器框架与示例，支撑 PaperQuay 的笔记体验。
 
 ---
 

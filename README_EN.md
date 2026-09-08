@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.1.34-2563eb?style=flat-square" alt="Version v0.1.34">
+  <img src="https://img.shields.io/badge/version-v0.1.39-2563eb?style=flat-square" alt="Version v0.1.39">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-4b5563?style=flat-square" alt="Windows macOS Linux">
   <img src="https://img.shields.io/badge/built%20with-Electron-47848f?style=flat-square" alt="Electron">
   <img src="https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-0f766e?style=flat-square" alt="React TypeScript">
@@ -26,7 +26,9 @@
   <a href="#development">Development</a>
 </p>
 
-> 二次开发与本地更新流程请阅读 [中文开发手册](./docs/DEVELOPMENT.zh-CN.md)。
+> 💡 **Project Background & Fork Notice**:
+> This repository is a personalized fork and secondary development branch based on the upstream open-source project [WangQrkkk/PaperQuay](https://github.com/WangQrkkk/PaperQuay), maintained by [@Dongyurocket](https://github.com/Dongyurocket) under the `AGPL-3.0-only` license.
+> While staying closely synchronized with the upstream core, this fork focuses on **scientific typography & OCR cleaning, raw PDF vector slice (BBox Crop) fallback, LLM-powered block re-parsing/restructuring, selective Zotero synchronization, and native MCP knowledge base server for external Agent workflows**. See the [Development Manual](./docs/DEVELOPMENT.zh-CN.md) for fork workflows, upstream sync, and local builds.
 
 <p align="center">
   <img src="./docs/assets/readme-hero.svg" alt="PaperQuay feature overview" width="920">
@@ -51,13 +53,39 @@
 
 ## Latest Update
 
-The v0.1.34 release adds traceable AI note polishing:
+### v0.1.39 - Selective Zotero Synchronization & Extended MCP Toolchain
 
-- The rich-text note editor now offers AI polishing for a text selection or an inserted structured revision of the full note. Generated output is always previewed before the user applies it.
-- Choose a scope of language-only polishing, papers linked to the note, or the complete local knowledge base. Missing embeddings, unavailable indexes, and retrieval failures fall back to language-only polishing with a clear notice.
-- Retrieved evidence is persisted as existing clickable paper anchors. A click opens the source paper at the relevant page or structural block, while the model can only select server-provided evidence IDs and cannot fabricate a source location.
+- **Selective On-Demand Sync**: Breaks away from all-or-nothing library imports. Browse full collection trees, search items conditionally (title, author, year, DOI), and synchronize only selected literature into PaperQuay.
+- **Extended MCP Server**: Added 4 standard MCP tools (`zotero_list_collections`, `zotero_search_items`, `zotero_preview_sync`, `paperquay_sync_from_zotero`) for external AI agents to discover, search, diff, and import literature safely.
+- **Triple De-duplication & Academic Metadata**: Enforces exact DOI matching, normalized title comparison, and PDF SHA-256 hash validation. Extensively extracts authors, DOI, publication, and abstracts.
 
-v0.1.33 added first-class support for Chinese literature. See [CHANGELOG](./CHANGELOG.md) for earlier releases.
+### v0.1.38 - Drop Cap & Nomenclature Auto-Fix, LLM Block Restructuring
+
+- **AI Block Re-parsing (BlockViewer)**: Call LLMs directly from block hover actions or context menus to fix unsatisfactory OCR results with three specialized modes: Smart Typography Correction, Table/Nomenclature Restructuring, and Math Extraction. Features strict negative constraints, KaTeX live preview, and one-click revert.
+- **Drop Cap Typography Repair**: Automatically normalizes broken drop-cap initial letters and fake superscripts (e.g., `U<sup>RBAN ...</sup>` to `Urban`).
+- **Nomenclature Auto-Restructuring**: Disentangles merged variable symbols and descriptions in unbordered nomenclature sections into clean two-column Markdown tables with KaTeX formulas.
+
+### v0.1.37 - Cross-Reference Fake Superscripts & Spacing Fixes
+
+- Automatically cleans MinerU OCR fake superscripts erroneously attached to technological cross-references (e.g., `Table 8,`, `Fig. 2,`, `Eq. 3,`, `Section 4`), restoring standard numbering and missing spaces after punctuation.
+
+### v0.1.36 - PDF Vector BBox Crop Fallback & Formula Safeguard
+
+- **One-Click Raw PDF Slice**: Switch any parsed block between structured typography and raw 2.0x Retina PDF vector slices on demand.
+- **Formula Parse Failure Safeguard**: Inlines the raw PDF high-res crop when KaTeX syntax errors occur, ensuring uninterrupted reading and formula accuracy.
+
+### v0.1.35 - Ligature Cleaning & Academic Superscript Rendering
+
+- Eliminates fake superscript artifacts caused by typographic ligatures (`fi`, `fl`, `ff`).
+- Introduced zero-dependency `remarkSuperscriptPlugin` to properly render standard academic `<sup>`/`<sub>` annotations.
+
+### Historical Milestones (v0.1.32 - v0.1.34)
+
+- **v0.1.34 Traceable AI Note Polishing**: Three polishing scopes with server-validated citation anchors to prevent hallucinated references.
+- **v0.1.33 Chinese Literature Support**: Skip translation for Chinese text, trigram full-text search, automatic RAG ingestion, and LLM first-page metadata fallback.
+- **v0.1.32 MCP Server & Unified Translated PDFs**: Built-in stdio MCP server for external agents, centralized translated PDF storage, and expanded academic types (books, theses, reports).
+
+*See [CHANGELOG](./CHANGELOG.md) for full historical release notes.*
 
 ---
 
@@ -309,9 +337,9 @@ These items are planned or still being deepened beyond the completed features ab
 
 ## Acknowledgements
 
-PaperQuay is also shaped by discussions, feedback, and shared ideas from the [LinuxDo community](https://linux.do/).
-
-The Notes workspace builds on [Tiptap](https://github.com/ueberdosis/tiptap). Thanks to the Tiptap maintainers for the extensible editor framework and examples that help power PaperQuay's note-taking experience.
+- **Upstream Project**: Sincere thanks to [WangQrkkk/PaperQuay](https://github.com/WangQrkkk/PaperQuay) for providing the outstanding architectural foundation and rich features of this local-first AI paper workbench.
+- **Community**: PaperQuay is also shaped by discussions, feedback, and shared ideas from the [LinuxDo community](https://linux.do/).
+- **Editor Framework**: The Notes workspace builds on [Tiptap](https://github.com/ueberdosis/tiptap). Thanks to the Tiptap maintainers for the extensible editor framework and examples that help power PaperQuay's note-taking experience.
 
 ---
 
