@@ -326,7 +326,8 @@ export async function loadPdfBinary(source: PdfSource): Promise<Uint8Array | nul
 }
 
 export interface MineruCloudParseOptions {
-  apiToken: string;
+  apiToken?: string;
+  apiTokens?: string[];
   apiBaseUrl?: string;
   pdfPath: string;
   extractDir?: string;
@@ -345,6 +346,7 @@ export interface MineruCloudParseResult {
   fileName: string;
   state: string;
   fullZipUrl: string;
+  usedToken?: string;
   contentJsonText: string | null;
   middleJsonText: string | null;
   markdownText: string | null;

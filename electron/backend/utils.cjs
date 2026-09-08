@@ -26,6 +26,21 @@ function cleanString(value) {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+function parseMineruTokens(raw) {
+  if (Array.isArray(raw)) {
+    return raw
+      .map((item) => cleanString(item))
+      .filter(Boolean)
+      .filter((item, index, self) => self.indexOf(item) === index);
+  }
+  if (typeof raw !== 'string') return [];
+  return raw
+    .split(/[\r\n,;]+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .filter((item, index, self) => self.indexOf(item) === index);
+}
+
 function safeFileName(name, fallback = 'paper.pdf') {
   const cleaned = cleanString(name) || fallback;
   return cleaned.replace(/[\\/:*?"<>|]+/g, '_');
@@ -1144,6 +1159,7 @@ module.exports = {
   now,
   openAiChat,
   parseJsonObject,
+  parseMineruTokens,
   pathExists,
   pickChatThinking,
   pickChatText,

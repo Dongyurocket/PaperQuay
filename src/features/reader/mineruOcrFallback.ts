@@ -31,7 +31,7 @@ function shouldRetryWithOcr(error: unknown) {
     return true;
   }
 
-  return !/(api\s*token|authorization|unauthori[sz]ed|forbidden|http\s*(?:401|403)|upload url|upload failed|zip download|timed?\s*out|timeout)/i.test(
+  return !/(api\s*token|authorization|unauthori[sz]ed|forbidden|http\s*(?:401|403)|upload url|upload failed|zip download|timed?\s*out|timeout|200\s*pages?|exceeds?\s*limit|200\s*页|页数超出)/i.test(
     message,
   );
 }

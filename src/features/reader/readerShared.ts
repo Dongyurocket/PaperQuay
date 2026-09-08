@@ -1023,3 +1023,5 @@ export function formatPaperSummaryForLibrary(summary: PaperSummary): string {
 
   return sections.join('\n\n').trim();
 }
+
+export { parseMineruTokens } from '../../services/mineru';

@@ -14,10 +14,10 @@ Download the native installer for your operating system from the Assets section 
 
 ## Highlights
 
-- **Selective Zotero Library Synchronization**: Breaks through the limitation of bulk-only synchronization. Users and Agents can now selectively discover, search, preview diffs, and import specific collections or items from the local Zotero library into PaperQuay.
-- **MCP Server Zotero Toolchain**: Extended the standard MCP server (`bin/paperquay-mcp.cjs`) with four specialized tools: `zotero_list_collections`, `zotero_search_items`, `zotero_preview_sync`, and `paperquay_sync_from_zotero`.
-- **Pre-sync Diff & Triple Deduplication**: Automated pre-sync checking comparing against the PaperQuay SQLite library, precisely identifying `ready` (available with local PDF), `alreadyExists` (deduplicated by DOI, title, or SHA-256 content hash), and `missingPdf` items.
-- **Dedicated Proma Agent Skill**: Ships with the `paperquay-zotero-sync` skill providing a standardized 4-stage ReAct workflow (Intent Resolution -> Pre-sync Diff -> User Confirmation -> Safe Ingestion).
+- **MinerU Multi-Key Round-Robin & Failover Rotation**: Supports entering multiple MinerU API keys (separated by line breaks or commas) with visibility toggle and active key count badge. Single and batch tasks automatically rotate through keys in a round-robin schedule, with automatic failover to the next key if quota/rate-limits are reached.
+- **Automated Split-Parse-Merge for Large PDFs (>200 Pages)**: Completely eliminates the 200-page cloud limit! PDFs over 200 pages are automatically and losslessly split into safe batches (150 pages each), parsed in parallel/rotation using the multi-key pool, and seamlessly merged back together.
+- **Accurate BBox, Page Offset & Asset Remapping**: Automatically recalculates `page_idx` in `content_list_v2.json` and `middle.json` to keep text blocks and BBox crop fallbacks aligned with original PDF page numbers; isolates image assets with unique namespaces to prevent filename collisions.
+- **Friendly Error Translation & OCR Fallback Safeguard**: Translates cloud errors into actionable advice and eliminates redundant OCR retries on page limit failures.
 
 ## Notes
 
@@ -42,10 +42,10 @@ PaperQuay 是一个开源 AI 论文工作台，覆盖文献管理、PDF 阅读�
 
 ## 本次更新
 
-- **Zotero 本地文献库选择性同步能力**：打破过去只能整体无差别全量同步的限制；底层支持按分类精准提取、多字段条件检索（标题、作者、年份、DOI）与按指定 itemKey 挑选入库。
-- **PaperQuay MCP 服务端 Zotero 工具链扩展**：在标准 MCP 服务中扩展了 4 个新工具（`zotero_list_collections`、`zotero_search_items`、`zotero_preview_sync`、`paperquay_sync_from_zotero`），外部 Agent 现可免侵入直接调度 Zotero 数据并安全写入 PaperQuay。
-- **同步前差量比对与三重去重保障**：在真正执行文件拷贝与入库前自动进行安全预检，严格基于 DOI、标题标准化及 PDF 内容 SHA-256 哈希进行查重，清晰区分为「待同步」、「已存在跳过」与「缺少本地 PDF」状态。
-- **Proma 专属联动技能发布**：提供 `paperquay-zotero-sync` 专属技能，确立了「意图解析 ➔ 检索预检 ➔ Markdown 差量清单确认 ➔ 批准后精准入库」的高可靠人机交互 SOP，并在全工作区完成分发部署。
+- **MinerU 多 Key 自动轮换与故障切换调度**：设置中支持同时录入多个 Key（换行或逗号分隔），提供明文显隐切换与实时状态徽章；单篇及批量解析时自动执行 Round-Robin 均衡分发，若单 Key 遭遇限流或额度耗尽自动无缝切换至下一个可用 Key 重试。
+- **超页大文件（>200页）全自动拆分、识别与产物合并**：彻底解决 MinerU 官方云端单次 200 页硬性限制！超过 200 页的大文件由系统在后台自动无损切分为 150 页安全分卷，协同多 Key 轮换并发上传识别，并在完成后全自动合并产物。
+- **精准页码对齐、BBox 映射与图片防冲突**：自动累加重写各分卷的 `page_idx`，保证阅读器双语段落、BBox 选区和原 PDF 区域切片（BBox Crop）与原始文档绝对对齐；图片资源自动做命名空间隔离与路径重映射，防止分卷图片互相覆盖。
+- **超页错误智能转译与 OCR Fallback 优化**：捕获超页报错时转译为人性化中文说明，并在发生超页限制时直接返回，规避无意义的 OCR 模式二次重复重试。
 
 ## 备注
 

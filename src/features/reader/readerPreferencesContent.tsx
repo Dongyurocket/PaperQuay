@@ -3,6 +3,8 @@ import {
   BookOpenText,
   Cloud,
   Database,
+  Eye,
+  EyeOff,
   FolderOpen,
   Languages,
   Library,
@@ -25,6 +27,7 @@ import {
   buildSummaryLanguageOptions,
   buildSummarySourceOptions,
   clampBatchConcurrency,
+  parseMineruTokens,
   resolveModelPreset,
   type PreferencesSectionKey,
 } from './readerShared';
@@ -33,6 +36,7 @@ import {
   SettingsField,
   SettingsInput,
   SettingsSelect,
+  SettingsTextarea,
   ToggleRow,
 } from './readerPreferencesPrimitives';
 import { ReaderPreferencesBackupSection } from './readerPreferencesBackupSection';
@@ -274,6 +278,8 @@ export function ReaderPreferencesContent({
     status: 'idle' | 'testing' | 'ok' | 'fail';
     message: string;
   }>({ status: 'idle', message: '' });
+  const [showMineruTokens, setShowMineruTokens] = useState(false);
+  const mineruTokens = parseMineruTokens(mineruApiToken);
   const embeddingConfigured = Boolean(
     settings.embeddingBaseUrl.trim() && settings.embeddingModel.trim() && embeddingApiKey.trim(),
   );
@@ -713,8 +719,8 @@ export function ReaderPreferencesContent({
             description={
               <span>
                 {l(
-                  '配置后可将本地 PDF 发送给 MinerU 并生成结构化 JSON。可前往 ',
-                  'Configure this to send local PDFs to MinerU and generate structured JSON. Visit ',
+                  '配置后可将本地 PDF 发送给 MinerU 并生成结构化 JSON。支持同时录入多个 Key（每行一个或逗号分隔），解析时将自动轮换调度并在额度耗尽时故障切换。可前往 ',
+                  'Configure this to send local PDFs to MinerU and generate structured JSON. Supports multiple keys (one per line or comma-separated) with round-robin rotation and automatic failover. Visit ',
                 )}
                 <button
                   type="button"
@@ -727,12 +733,66 @@ export function ReaderPreferencesContent({
               </span>
             }
           >
-            <SettingsInput
-              value={mineruApiToken}
-              onChange={(event) => onMineruApiTokenChange(event.target.value)}
-              type="password"
-              placeholder={l('输入 MinerU API Token', 'Enter MinerU API Token')}
-            />
+            <div className="space-y-2">
+              <div className="relative">
+                <SettingsTextarea
+                  rows={showMineruTokens ? Math.min(Math.max(mineruTokens.length + 1, 3), 8) : 3}
+                  value={mineruApiToken}
+                  onChange={(event) => onMineruApiTokenChange(event.target.value)}
+                  style={!showMineruTokens ? ({ WebkitTextSecurity: 'disc' } as React.CSSProperties) : undefined}
+                  placeholder={l(
+                    '输入 MinerU API Token（支持多个 Key，一行一个）\n例如：\nkey_01xxxxxxxx\nkey_02xxxxxxxx',
+                    'Enter MinerU API Token (supports multiple keys, one per line)\nExample:\nkey_01xxxxxxxx\nkey_02xxxxxxxx',
+                  )}
+                  className="font-mono text-xs pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowMineruTokens((prev) => !prev)}
+                  className="absolute right-2.5 top-2.5 rounded-lg p-1.5 text-slate-400 hover:bg-slate-200/60 hover:text-slate-600 dark:text-slate-400 dark:hover:bg-white/10 dark:hover:text-slate-200 transition"
+                  title={showMineruTokens ? l('隐藏 API Key', 'Hide API Keys') : l('显示 API Key', 'Show API Keys')}
+                  aria-label={showMineruTokens ? l('隐藏 API Key', 'Hide API Keys') : l('显示 API Key', 'Show API Keys')}
+                >
+                  {showMineruTokens ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                <div className="flex items-center gap-1.5">
+                  <span
+                    className={clsx(
+                      'inline-flex items-center gap-1 rounded-md px-2 py-0.5 font-medium',
+                      mineruTokens.length > 0
+                        ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300'
+                        : 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300',
+                    )}
+                  >
+                    {mineruTokens.length > 0 ? (
+                      <>
+                        <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                        {l(
+                          `已识别 ${mineruTokens.length} 个 Key（轮换使用）`,
+                          `${mineruTokens.length} Key(s) active (Round-robin)`,
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-500" />
+                        {l('尚未配置 Key', 'No Keys Configured')}
+                      </>
+                    )}
+                  </span>
+                </div>
+                {mineruTokens.length > 1 ? (
+                  <span className="text-slate-500 dark:text-[var(--pq-text-muted)] text-[11px]">
+                    {l(
+                      '解析时自动轮询分发，若单 Key 额度耗尽将自动尝试下一个',
+                      'Round-robin distribution with automatic failover if quota exhausted',
+                    )}
+                  </span>
+                ) : null}
+              </div>
+            </div>
           </SettingsField>
 
           <SettingsField

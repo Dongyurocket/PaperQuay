@@ -1,7 +1,7 @@
 {
   "name": "paperquay",
   "private": true,
-  "version": "0.1.39",
+  "version": "0.1.40",
   "description": "AI-assisted desktop literature reader and library manager.",
   "author": {
     "name": "PaperQuay Developers",
@@ -53,6 +53,7 @@
     "eventsource-parser": "^3.1.0",
     "lowlight": "^3.3.0",
     "mathml2omml": "^0.5.0",
+    "pdf-lib": "^1.17.1",
     "pizzip": "^3.2.0",
     "sql.js": "^1.13.0",
     "sqlite-vec": "^0.1.9",
@@ -143,6 +144,8 @@
       "node_modules/sql.js/**/*",
       "node_modules/sqlite-vec/**/*",
       "node_modules/sqlite-vec-*/*",
+      "node_modules/pdf-lib/**/*",
+      "node_modules/@pdf-lib/**/*",
       "node_modules/xmlbuilder/**/*",
       "!node_modules/canvas/**/*"
     ],

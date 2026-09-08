@@ -1138,3 +1138,18 @@ export function buildRenderableBlocks(
     };
   });
 }
+
+export function parseMineruTokens(raw: unknown): string[] {
+  if (Array.isArray(raw)) {
+    return raw
+      .map((item) => (typeof item === 'string' ? item.trim() : ''))
+      .filter(Boolean)
+      .filter((item, index, self) => self.indexOf(item) === index);
+  }
+  if (typeof raw !== 'string') return [];
+  return raw
+    .split(/[\r\n,;]+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .filter((item, index, self) => self.indexOf(item) === index);
+}

@@ -8,6 +8,7 @@ import type {
   InputHTMLAttributes,
   ReactNode,
   SelectHTMLAttributes,
+  TextareaHTMLAttributes,
 } from 'react';
 
 export function ToggleRow({
@@ -158,6 +159,18 @@ export function SettingsSelect(props: SelectHTMLAttributes<HTMLSelectElement>) {
       {...props}
       className={clsx(
         'w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-indigo-300 focus:bg-white dark:border-white/10 dark:bg-[var(--pq-surface-2)] dark:text-[var(--pq-text)] dark:focus:border-[color-mix(in_srgb,var(--pq-accent)_30%,transparent)] dark:focus:bg-[var(--pq-surface-2)]',
+        props.className,
+      )}
+    />
+  );
+}
+
+export function SettingsTextarea(props: TextareaHTMLAttributes<HTMLTextAreaElement>) {
+  return (
+    <textarea
+      {...props}
+      className={clsx(
+        'w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-indigo-300 focus:bg-white dark:border-white/10 dark:bg-[var(--pq-surface-2)] dark:text-[var(--pq-text)] dark:placeholder:text-[var(--pq-text-faint)] dark:focus:border-[color-mix(in_srgb,var(--pq-accent)_30%,transparent)] dark:focus:bg-[var(--pq-surface-2)]',
         props.className,
       )}
     />
