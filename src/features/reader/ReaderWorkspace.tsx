@@ -508,6 +508,7 @@ function ReadingStage(props: ReaderWorkspaceProps & { immersiveReading: boolean 
                   <BlockViewer
                   blocks={blocks}
                   mineruPath={mineruPath}
+                  pdfSource={pdfSource}
                   translations={translations}
                   translationDisplayMode={translationDisplayMode}
                   translationLanguageLabel={props.translationLanguageLabel}

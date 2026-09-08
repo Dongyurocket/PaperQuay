@@ -11,6 +11,7 @@ import {
   FilePlus2,
   Languages,
   RefreshCw,
+  Scan,
   SearchCode,
   Sparkles,
   ZoomIn,
@@ -22,11 +23,13 @@ import { ContextMenu, type ContextMenuEntry } from '../../components/ContextMenu
 import { useLocaleText } from '../../i18n/uiLanguage';
 import { buildRenderableBlocks } from '../../services/mineru';
 import type {
+  PdfSource,
   PositionedMineruBlock,
   TextSelectionPayload,
   TranslationDisplayMode,
   TranslationMap,
 } from '../../types/reader';
+import { isValidBBox } from '../../utils/bbox';
 import { cn } from '../../utils/cn';
 import { normalizeSelectionText } from '../../utils/text';
 import { BlockItem } from './blockViewerContent';
@@ -34,6 +37,7 @@ import { BlockItem } from './blockViewerContent';
 interface BlockViewerProps {
   blocks: PositionedMineruBlock[];
   mineruPath: string;
+  pdfSource?: PdfSource;
   translations: TranslationMap;
   translationDisplayMode: TranslationDisplayMode;
   translationLanguageLabel: string;
@@ -181,6 +185,7 @@ function requestDeferredRender(callback: () => void) {
 function BlockViewer({
   blocks,
   mineruPath,
+  pdfSource,
   translations,
   translationDisplayMode,
   translationLanguageLabel,
@@ -237,6 +242,19 @@ function BlockViewer({
     y: number;
   } | null>(null);
   const [flashBlockId, setFlashBlockId] = useState<string | null>(null);
+  const [cropBlockIds, setCropBlockIds] = useState<Set<string>>(() => new Set());
+
+  const handleToggleBlockCrop = useCallback((blockId: string) => {
+    setCropBlockIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(blockId)) {
+        next.delete(blockId);
+      } else {
+        next.add(blockId);
+      }
+      return next;
+    });
+  }, []);
   const [contentScale, setContentScale] = useState(1);
 
   useEffect(() => {
@@ -392,8 +410,31 @@ function BlockViewer({
       });
     }
 
+    if (pdfSource && isValidBBox(contextMenu.block.bbox)) {
+      const isCropActive = cropBlockIds.has(contextMenu.block.blockId);
+      entries.push({
+        id: 'toggle-pdf-crop',
+        label: isCropActive
+          ? l('切换回排版文本', 'Show Parsed Text')
+          : l('切换为原 PDF 切片', 'View Original PDF Crop'),
+        icon: <Scan className="h-4 w-4" strokeWidth={1.9} />,
+        tone: 'default',
+        onSelect: () => handleToggleBlockCrop(contextMenu.block.blockId),
+      });
+    }
+
     return entries;
-  }, [contextMenu, l, onAddBlockToNote, onRetranslateBlock, renderableBlocks, translationBusy]);
+  }, [
+    contextMenu,
+    cropBlockIds,
+    handleToggleBlockCrop,
+    l,
+    onAddBlockToNote,
+    onRetranslateBlock,
+    pdfSource,
+    renderableBlocks,
+    translationBusy,
+  ]);
 
   const emitSelectedText = () => {
     if (!onTextSelect) {
@@ -663,6 +704,9 @@ function BlockViewer({
               <BlockItem
                 key={renderable.block.blockId}
                 renderable={renderable}
+                pdfSource={pdfSource}
+                showPdfCrop={cropBlockIds.has(renderable.block.blockId)}
+                onTogglePdfCrop={() => handleToggleBlockCrop(renderable.block.blockId)}
                 active={renderable.block.blockId === activeBlockId}
                 hovered={renderable.block.blockId === hoveredBlockId}
                 flashing={renderable.block.blockId === flashBlockId}

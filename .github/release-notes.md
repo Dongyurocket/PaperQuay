@@ -14,9 +14,9 @@ Download the native installer for your operating system from the Assets section 
 
 ## Highlights
 
-- **Automatic Ligature & Fake Superscript Sanitization**: Automatically cleans up OCR artifacts such as `<sup>fi</sup>`, `<sup>fl</sup>`, `<sup>–</sup>`, and `<sup>’</sup>` caused by Latin typography ligatures in MinerU parsing results, restoring clean English words across reader views, full-text search, RAG indexing, and AI translation.
-- **Native Academic Superscript & Subscript Rendering**: Introduced a dedicated Markdown superscript plugin that gracefully renders standard scientific superscripts and citations (such as $kg/m^2$ and $^{[1-3]}$) with fine-tuned typography rather than exposing raw HTML markup.
-- **Formula Delimiter Collision & Multi-Line Layout Fix**: Resolved KaTeX parsing crashes and red error text caused by adjacent inline formulas accidentally colliding into invalid `$$` delimiters. Preserved multi-line layout and comment hierarchy for complex formula and algorithm blocks.
+- **Original PDF BBox Crop Fallback**: Added a "PDF Crop" button to BlockViewer cards and context menus. Readers can switch any structural block (paragraphs, formulas, algorithms, tables) between parsed Markdown and high-fidelity 2x vector crops from the original PDF at any time.
+- **Instant Fallback for Formula Parse Failures**: When complex formulas encounter OCR errors or invalid LaTeX syntax, the error box automatically offers a "View PDF Crop" action to display the exact original PDF formula region inline, keeping reading uninterrupted.
+- **Retina 2x Vector Offscreen Rendering & LRU Caching**: Offscreen canvas renders crisp 2x resolution slices using PDF.js with memory caching for instant toggling and an enlargeable modal preview.
 
 ## Notes
 
@@ -41,9 +41,9 @@ PaperQuay 是一个开源 AI 论文工作台，覆盖文献管理、PDF 阅读�
 
 ## 本次更新
 
-- **连字与伪上标自动清洗**：自动清理 MinerU 解析结果中因西文连字（`fi`、`fl`、`ff`、`ffi`、`ffl`）及连字符误判产生的 `<sup>fi</sup>`、`<sup>fl</sup>`、`<sup>–</sup>`、`<sup>’</sup>` 乱码，还原为正常单词与标点，彻底修复正文、全文搜索、RAG 向量切片及 AI 翻译中的词汇碎裂问题。
-- **正规学术上标优雅渲染**：内置 Markdown 上标/下标插件，将单位（如 $kg/m^2$）、文献引用标号（如 $^{[1-3]}$）、作者注记等正确渲染为精细对齐的学术上标样式，不再露出 HTML 原始标签或误包装为畸形数学符号。
-- **公式定界符防撞与多行排版优化**：修复相邻行内公式拼接粘连生成非法 `$$` 导致 KaTeX 语法错误整段变红的缺陷；优化算法与复杂推导公式块的换行分段展示，恢复清晰的层次排版。
+- **PDF 原始区域切片（BBox Crop）回退机制**：BlockViewer 结构块（段落、公式、算法、表格等）右上角及右键菜单新增「原 PDF 切片」切换功能，可在识别排版与原版 PDF 矢量切片图之间随时一键互切，便于科研阅读中快速核对原文排版与微小常数。
+- **公式解析失败原切片即时兜底**：当公式因 OCR 识别缺陷或语法错误导致 KaTeX 无法解析时，报错卡片右上角提供「查看原 PDF 切片」按钮，直接内联展示高清原图，推导核对 100% 准确不中断。
+- **Retina 2x 高清离屏渲染与 LRU 缓存**：基于 PDF.js 实现 2.0x 高保真离屏裁剪，保证公式微小上下标和微小符号清晰可见，并支持点击放大预览。
 
 ## 备注
 
