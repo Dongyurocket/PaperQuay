@@ -3,6 +3,7 @@ import { invoke } from '../platform/electron/core';
 import type {
   RagChunkInput,
   RagDocumentIndexStatus,
+  RagFinalizeDocumentIndexRequest,
   RagIndexDocumentRequest,
   RagIndexedChunkInput,
   RagReportDocumentIndexFailureRequest,
@@ -132,6 +133,33 @@ export async function ragGetDocumentIndexStatus(
     });
   } catch (error) {
     throw new Error(toErrorMessage(error, '读取本地 RAG 索引状态失败'));
+  }
+}
+
+export async function ragListIndexedChunkIds(
+  documentKey: string,
+  sourceType: Exclude<RagSourceMode, 'off' | 'hybrid'>,
+): Promise<string[]> {
+  try {
+    const result = await invoke<string[]>('rag_list_indexed_chunk_ids', {
+      request: {
+        documentKey,
+        sourceType,
+      },
+    });
+    return Array.isArray(result) ? result.filter((id) => typeof id === 'string') : [];
+  } catch (error) {
+    throw new Error(toErrorMessage(error, '读取本地 RAG 已索引分块列表失败'));
+  }
+}
+
+export async function ragFinalizeDocumentIndex(
+  request: RagFinalizeDocumentIndexRequest,
+): Promise<RagDocumentIndexStatus | null> {
+  try {
+    return await invoke<RagDocumentIndexStatus | null>('rag_finalize_document_index', { request });
+  } catch (error) {
+    throw new Error(toErrorMessage(error, '本地 RAG 索引状态收敛失败'));
   }
 }
 

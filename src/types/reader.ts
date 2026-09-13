@@ -251,6 +251,17 @@ export interface RagReportDocumentIndexFailureRequest {
   retryAfterMs?: number | null;
 }
 
+export interface RagFinalizeDocumentIndexRequest {
+  documentKey: string;
+  title: string;
+  sourceType: Exclude<RagSourceMode, "off" | "hybrid">;
+  sourceSignature: string;
+  embeddingModelKey: string;
+  totalChunkCount: number;
+  /** 当前内容期望的 chunkId 全集；提供时清理不在集合内的陈旧分块行。 */
+  expectedChunkIds?: string[];
+}
+
 export interface QaModelPreset {
   id: string;
   label: string;

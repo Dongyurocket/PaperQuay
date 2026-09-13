@@ -111,7 +111,8 @@ export async function indexLibraryPaperMineruSource(input: {
     return { outcome: 'skipped' };
   }
 
-  // ensurePreparedSourceIndexed 内部已容错（失败写入索引状态并冷却），不会抛出。
+  // embedding 与索引写入失败已在内部记录状态并冷却，返回 failed；
+  // 状态查询等前置 IPC 异常仍可能抛出，由调用方兜底展示。
   const result = await ensurePreparedSourceIndexed({
     documentKey: preparedDocument.documentKey,
     title: preparedDocument.title,

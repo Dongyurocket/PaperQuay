@@ -1563,6 +1563,14 @@ function createAiCommands(context) {
       return ragStore.getDocumentIndexStatus(request);
     },
 
+    async rag_list_indexed_chunk_ids({ request }) {
+      return ragStore.listIndexedChunkIds(request);
+    },
+
+    async rag_finalize_document_index({ request }) {
+      return ragStore.finalizeDocumentIndex(request);
+    },
+
     async rag_list_index_statuses() {
       return ragStore.listIndexStatuses();
     },

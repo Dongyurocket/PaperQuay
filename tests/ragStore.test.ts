@@ -495,3 +495,142 @@ test('RAG store migrates a legacy unicode61 FTS table to trigram', () => {
     rmSync(dataDir, { recursive: true, force: true });
   }
 });
+
+test('RAG resume by chunk id gap closes the pending fixed point', () => {
+  const { dataDir, store } = createStore();
+
+  try {
+    const totalChunkCount = 8;
+    const allChunks = Array.from({ length: totalChunkCount }, (_, index) => ({
+      chunkId: `chunk-${index}`,
+      chunkIndex: index,
+      pageIndex: index,
+      blockId: null,
+      text: `chunk text ${index}`,
+      embedding: [0.1 * (index + 1), 0.2, 0.3, 0.4],
+    }));
+
+    // 模拟历史缺陷状态：低位 chunk（0-2）从未入库，只有 3-7 行存在，
+    // indexed_chunk_count=5 与“前 5 个 chunk 已索引”的位置假设错位。
+    store.indexDocument({
+      documentKey: 'doc-gap',
+      title: 'Gap Document',
+      sourceType: 'mineru-markdown',
+      sourceSignature: 'sig-gap',
+      embeddingModelKey: 'embedding-test',
+      totalChunkCount,
+      chunks: allChunks.slice(3),
+    });
+
+    let status = store.getDocumentIndexStatus({ documentKey: 'doc-gap', sourceType: 'mineru-markdown' });
+    assert.equal(status.status, 'pending');
+    assert.equal(status.indexedChunkCount, 5);
+
+    // 错误的旧逻辑：chunks.slice(5) 只重发已存在的 5-7，行数不变，永远 pending。
+    // 新逻辑：按 chunkId 差集补缺失的 0-2。
+    const indexedIds = new Set(
+      store.listIndexedChunkIds({ documentKey: 'doc-gap', sourceType: 'mineru-markdown' }),
+    );
+    assert.equal(indexedIds.size, 5);
+    const remaining = allChunks.filter((chunk) => !indexedIds.has(chunk.chunkId));
+    assert.deepEqual(remaining.map((chunk) => chunk.chunkId), ['chunk-0', 'chunk-1', 'chunk-2']);
+
+    store.indexDocument({
+      documentKey: 'doc-gap',
+      title: 'Gap Document',
+      sourceType: 'mineru-markdown',
+      sourceSignature: 'sig-gap',
+      embeddingModelKey: 'embedding-test',
+      totalChunkCount,
+      chunks: remaining,
+    });
+
+    const finalized = store.finalizeDocumentIndex({
+      documentKey: 'doc-gap',
+      title: 'Gap Document',
+      sourceType: 'mineru-markdown',
+      sourceSignature: 'sig-gap',
+      embeddingModelKey: 'embedding-test',
+      totalChunkCount,
+      expectedChunkIds: allChunks.map((chunk) => chunk.chunkId),
+    });
+
+    assert.equal(finalized.status, 'ready');
+    assert.equal(finalized.indexedChunkCount, totalChunkCount);
+
+    status = store.getDocumentIndexStatus({ documentKey: 'doc-gap', sourceType: 'mineru-markdown' });
+    assert.equal(status.status, 'ready');
+    assert.equal(status.indexedChunkCount, totalChunkCount);
+  } finally {
+    store.close();
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('RAG finalize prunes stale chunk rows and keeps signature mismatch untouched', () => {
+  const { dataDir, store } = createStore();
+
+  try {
+    const chunks = [
+      { chunkId: 'keep-0', chunkIndex: 0, pageIndex: 0, blockId: null, text: 'keep zero', embedding: [0.1, 0.2, 0.3, 0.4] },
+      { chunkId: 'keep-1', chunkIndex: 1, pageIndex: 1, blockId: null, text: 'keep one', embedding: [0.5, 0.6, 0.7, 0.8] },
+    ];
+
+    store.indexDocument({
+      documentKey: 'doc-stale',
+      title: 'Stale Document',
+      sourceType: 'mineru-markdown',
+      sourceSignature: 'sig-stale',
+      embeddingModelKey: 'embedding-test',
+      totalChunkCount: 2,
+      chunks,
+    });
+
+    // 人为制造一行不属于当前内容集的陈旧分块（同 signature/模型下的历史残留）。
+    store.indexDocument({
+      documentKey: 'doc-stale',
+      title: 'Stale Document',
+      sourceType: 'mineru-markdown',
+      sourceSignature: 'sig-stale',
+      embeddingModelKey: 'embedding-test',
+      totalChunkCount: 2,
+      chunks: [
+        { chunkId: 'stale-legacy', chunkIndex: 99, pageIndex: 99, blockId: null, text: 'stale legacy chunk', embedding: [0.9, 0.9, 0.9, 0.9] },
+      ],
+    });
+
+    let ids = store.listIndexedChunkIds({ documentKey: 'doc-stale', sourceType: 'mineru-markdown' });
+    assert.deepEqual([...ids].sort(), ['keep-0', 'keep-1', 'stale-legacy']);
+
+    const mismatched = store.finalizeDocumentIndex({
+      documentKey: 'doc-stale',
+      title: 'Stale Document',
+      sourceType: 'mineru-markdown',
+      sourceSignature: 'sig-changed',
+      embeddingModelKey: 'embedding-test',
+      totalChunkCount: 2,
+      expectedChunkIds: ['keep-0', 'keep-1'],
+    });
+    assert.equal(mismatched.sourceSignature, 'sig-stale');
+    ids = store.listIndexedChunkIds({ documentKey: 'doc-stale', sourceType: 'mineru-markdown' });
+    assert.deepEqual([...ids].sort(), ['keep-0', 'keep-1', 'stale-legacy']);
+
+    const finalized = store.finalizeDocumentIndex({
+      documentKey: 'doc-stale',
+      title: 'Stale Document',
+      sourceType: 'mineru-markdown',
+      sourceSignature: 'sig-stale',
+      embeddingModelKey: 'embedding-test',
+      totalChunkCount: 2,
+      expectedChunkIds: ['keep-0', 'keep-1'],
+    });
+
+    assert.equal(finalized.status, 'ready');
+    assert.equal(finalized.indexedChunkCount, 2);
+    ids = store.listIndexedChunkIds({ documentKey: 'doc-stale', sourceType: 'mineru-markdown' });
+    assert.deepEqual([...ids].sort(), ['keep-0', 'keep-1']);
+  } finally {
+    store.close();
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});

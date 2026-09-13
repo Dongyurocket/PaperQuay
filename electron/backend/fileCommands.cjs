@@ -388,14 +388,19 @@ function createFileCommands(context) {
 
     // 批量路径存在性检查：供文献库 MinerU 状态检查等场景单次 IPC 完成，
     // 避免每篇文献多次 IPC 往返形成启动期洪水。
+    // 注意：pathExists 是 async 函数，必须等待全部结果后再返回；
+    // 直接返回 Promise 数组无法通过 Electron IPC 结构化克隆，
+    // 渲染层 invoke 会永久悬挂，调用方界面停留在“检测中”。
     async paths_exist({ paths }) {
       if (!Array.isArray(paths)) {
         throw new Error('paths must be an array of paths');
       }
 
-      return paths
-        .slice(0, 10000)
-        .map((candidate) => (typeof candidate === 'string' && candidate ? pathExists(candidate) : false));
+      return Promise.all(
+        paths
+          .slice(0, 10000)
+          .map((candidate) => (typeof candidate === 'string' && candidate ? pathExists(candidate) : false)),
+      );
     },
 
     async read_text_file({ path: filePath }) {

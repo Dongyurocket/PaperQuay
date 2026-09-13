@@ -520,10 +520,21 @@ export default function LiteratureLibraryView({
           const existence = await localPathsExist(uniquePaths);
 
           if (shouldCancel()) {
-            // 取消时回滚标记，让下一次运行重新检查，避免状态停在 checking。
+            // 取消时回滚标记，让下一次运行重新检查；同时清除已写入的 checking 状态，
+            // 避免没有后续运行时界面永久停在“检测中”。
             for (const paper of uncheckedPapers) {
               checkedMineruPaperIdsRef.current.delete(paper.id);
             }
+            setPaperStatuses((current) =>
+              Object.fromEntries(
+                Object.entries(current).map(([paperId, status]) => [
+                  paperId,
+                  uncheckedPaperIds.has(paperId) && status.checkingMineru
+                    ? { ...status, checkingMineru: false }
+                    : status,
+                ]),
+              ),
+            );
             return;
           }
 

@@ -10,8 +10,10 @@ import {
   buildRagEmbeddingModelKey,
   embedRagChunks,
   embedRagText,
+  ragFinalizeDocumentIndex,
   ragGetDocumentIndexStatus,
   ragIndexDocument,
+  ragListIndexedChunkIds,
   ragReportDocumentIndexFailure,
   ragRetrieveDocumentChunks,
   type RagEmbeddingOptions,
@@ -187,14 +189,35 @@ export async function ensurePreparedSourceIndexed(input: {
     return { outcome: 'skipped' };
   }
 
-  const alreadyIndexedCount =
+  // 断续索引按 chunkId 差集计算真实缺口：历史上的中断或缺陷可能导致
+  // indexed_chunk_count 与实际入库的 chunk 行错位；只按位置 slice 会反复
+  // 重发已存在的 chunk、永远补不上缺失的低位 chunk，状态停在 pending 形成不动点。
+  const hasMatchingProgress =
     currentStatus?.sourceSignature === input.sourceSignature &&
-    currentStatus.embeddingModelKey === embeddingModelKey
-      ? Math.max(0, currentStatus.indexedChunkCount)
-      : 0;
-  const remainingChunks = input.chunks.slice(alreadyIndexedCount);
+    currentStatus.embeddingModelKey === embeddingModelKey &&
+    (currentStatus.status === 'pending' || currentStatus.status === 'ready') &&
+    currentStatus.indexedChunkCount > 0;
+  const existingChunkIds = hasMatchingProgress
+    ? new Set(await ragListIndexedChunkIds(input.documentKey, input.sourceType))
+    : null;
+  const remainingChunks = existingChunkIds
+    ? input.chunks.filter((chunk) => !existingChunkIds.has(chunk.chunkId))
+    : input.chunks;
 
   if (remainingChunks.length === 0) {
+    // 缺口为空但状态尚未收敛为 ready（历史缺陷状态），通过 finalize 修正计数与状态。
+    if (currentStatus && currentStatus.status !== 'ready') {
+      await ragFinalizeDocumentIndex({
+        documentKey: input.documentKey,
+        title: input.title,
+        sourceType: input.sourceType,
+        sourceSignature: input.sourceSignature,
+        embeddingModelKey,
+        totalChunkCount: input.chunks.length,
+        expectedChunkIds: input.chunks.map((chunk) => chunk.chunkId),
+      });
+      emitRagIndexStatusUpdated(input.documentKey);
+    }
     return { outcome: 'ready' };
   }
 
@@ -231,6 +254,18 @@ export async function ensurePreparedSourceIndexed(input: {
       }
     }
 
+    // 循环成功后按期望 chunkId 集收敛状态并清理可能的陈旧行，
+    // 避免计数错位或历史残留导致状态停在 pending。
+    await ragFinalizeDocumentIndex({
+      documentKey: input.documentKey,
+      title: input.title,
+      sourceType: input.sourceType,
+      sourceSignature: input.sourceSignature,
+      embeddingModelKey,
+      totalChunkCount: input.chunks.length,
+      expectedChunkIds: input.chunks.map((chunk) => chunk.chunkId),
+    });
+
     clearCachedRagIndexFailure(
       input.documentKey,
       input.sourceType,
@@ -249,16 +284,22 @@ export async function ensurePreparedSourceIndexed(input: {
       embeddingModelKey,
       message,
     );
-    await ragReportDocumentIndexFailure({
-      documentKey: input.documentKey,
-      title: input.title,
-      sourceType: input.sourceType,
-      sourceSignature: input.sourceSignature,
-      embeddingModelKey,
-      totalChunkCount: input.chunks.length,
-      errorMessage: message,
-      retryAfterMs: RAG_INDEX_FAILURE_COOLDOWN_MS,
-    });
+
+    try {
+      await ragReportDocumentIndexFailure({
+        documentKey: input.documentKey,
+        title: input.title,
+        sourceType: input.sourceType,
+        sourceSignature: input.sourceSignature,
+        embeddingModelKey,
+        totalChunkCount: input.chunks.length,
+        errorMessage: message,
+        retryAfterMs: RAG_INDEX_FAILURE_COOLDOWN_MS,
+      });
+    } catch {
+      // 失败状态写回失败属于次要故障，保留原始错误信息向上传递。
+    }
+
     emitRagIndexStatusUpdated(input.documentKey);
     return { outcome: 'failed', errorMessage: message };
   }

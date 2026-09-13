@@ -1107,6 +1107,86 @@ function createRagStore(appPaths, options = {}) {
     return getStatus(db, documentKey, sourceType);
   }
 
+  // 续跑索引时用于按 chunkId 差集计算真实缺口：位置计数（indexed_chunk_count）
+  // 在历史上的中断/缺陷状态下可能与实际入库的 chunk 行错位，只按位置切片
+  // 会反复重发已存在的 chunk，缺失的低位 chunk 永远补不上，状态停在 pending。
+  function listIndexedChunkIds(request) {
+    const documentKey = normalizeDocumentKey(request?.documentKey);
+    const sourceType = normalizeSourceType(request?.sourceType);
+    return db
+      .prepare('SELECT chunk_id FROM rag_chunks WHERE document_key = ? AND source_type = ?')
+      .all(documentKey, sourceType)
+      .map((row) => row.chunk_id)
+      .filter((chunkId) => typeof chunkId === 'string' && chunkId.length > 0);
+  }
+
+  // 索引循环结束后按期望 chunkId 集收敛状态：清理同一 signature/模型下遗留的
+  // 陈旧 chunk 行，重算计数，并把状态写为 ready/pending，使断续/缺陷状态自愈。
+  function finalizeDocumentIndex(request) {
+    const documentKey = normalizeDocumentKey(request?.documentKey);
+    const sourceType = normalizeSourceType(request?.sourceType);
+    const title = cleanString(request?.title);
+    const sourceSignature = normalizeRequiredString(request?.sourceSignature, 'sourceSignature');
+    const embeddingModelKey = normalizeRequiredString(request?.embeddingModelKey, 'embeddingModelKey');
+    const totalChunkCount = normalizeNonNegativeInteger(request?.totalChunkCount);
+    const expectedChunkIds = Array.isArray(request?.expectedChunkIds)
+      ? new Set(request.expectedChunkIds.map((id) => cleanString(id)).filter(Boolean))
+      : null;
+
+    return withTransaction(db, () => {
+      const existing = getStatus(db, documentKey, sourceType);
+
+      // signature 或模型不匹配说明内容已变化，后续索引流程会走重建路径，
+      // finalize 不干预，避免误删新内容。
+      if (
+        existing &&
+        (existing.sourceSignature !== sourceSignature ||
+          existing.embeddingModelKey !== embeddingModelKey)
+      ) {
+        return existing;
+      }
+
+      if (expectedChunkIds) {
+        const staleRowIds = db
+          .prepare('SELECT id, chunk_id FROM rag_chunks WHERE document_key = ? AND source_type = ?')
+          .all(documentKey, sourceType)
+          .filter((row) => !expectedChunkIds.has(row.chunk_id))
+          .map((row) => Number(row.id))
+          .filter((id) => Number.isSafeInteger(id) && id > 0);
+
+        if (staleRowIds.length > 0) {
+          deleteVectorRowsByIds(db, staleRowIds);
+          const deleteChunk = db.prepare('DELETE FROM rag_chunks WHERE id = ?');
+
+          for (const rowId of staleRowIds) {
+            deleteChunk.run(BigInt(rowId));
+          }
+        }
+      }
+
+      const indexedChunkCount = countChunks(db, documentKey, sourceType);
+      upsertStatus(db, {
+        documentKey,
+        sourceType,
+        title: title || existing?.title || '',
+        sourceSignature,
+        embeddingModelKey,
+        embeddingDimension: existing?.embeddingDimension ?? 0,
+        totalChunkCount,
+        chunkCount: indexedChunkCount,
+        indexedChunkCount,
+        indexedAt: Date.now(),
+        status: indexedChunkCount >= totalChunkCount ? 'ready' : 'pending',
+        lastError: null,
+        failedAt: null,
+        retryAfterMs: null,
+        cooldownUntil: null,
+      });
+      rebuildDocumentVectors(db, documentKey);
+      return getStatus(db, documentKey, sourceType);
+    });
+  }
+
   function retrieveVectorChunks({ documentKey, sourceType, queryEmbedding, dimension, limit }) {
     if (!hasVectorTable(db, dimension)) {
       return [];
@@ -1548,6 +1628,7 @@ function createRagStore(appPaths, options = {}) {
     appendAgentRunEvent,
     close,
     createAgentRun,
+    finalizeDocumentIndex,
     finishAgentRun,
     getAgentRun,
     getAgentRunEvents,
@@ -1556,6 +1637,7 @@ function createRagStore(appPaths, options = {}) {
     isFtsAvailable,
     listAgentRunUsageBySession,
     listDocumentSimilarities,
+    listIndexedChunkIds,
     listIndexStatuses() {
       return db
         .prepare('SELECT * FROM rag_indexes ORDER BY indexed_at DESC')

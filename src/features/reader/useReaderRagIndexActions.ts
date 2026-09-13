@@ -232,6 +232,7 @@ export function useReaderRagIndexActions({
       };
 
       const syncProgress = () => setRagIndexProgress({ ...progress });
+      let firstFailureMessage = '';
 
       try {
         for (const entry of candidates) {
@@ -257,11 +258,18 @@ export function useReaderRagIndexActions({
           try {
             const result = await indexOneItem(entry);
 
-            if (result.outcome === 'failed') progress.failed += 1;
-            else if (result.outcome === 'skipped') progress.skipped += 1;
-            else progress.succeeded += 1;
-          } catch {
+            if (result.outcome === 'failed') {
+              progress.failed += 1;
+              firstFailureMessage ||= result.errorMessage ?? '';
+            } else if (result.outcome === 'skipped') {
+              progress.skipped += 1;
+            } else {
+              progress.succeeded += 1;
+            }
+          } catch (error) {
             progress.failed += 1;
+            firstFailureMessage ||=
+              error instanceof Error ? error.message : String(error ?? '');
           }
 
           progress.completed += 1;
@@ -279,10 +287,14 @@ export function useReaderRagIndexActions({
       }
 
       const cancelled = cancelRequestedRef.current;
+      const failureSuffix =
+        progress.failed > 0 && firstFailureMessage
+          ? l(` 首个失败原因：${firstFailureMessage}`, ` First failure: ${firstFailureMessage}`)
+          : '';
       setStatusMessage(
         l(
-          `RAG 索引${cancelled ? '已取消，' : ''}完成 ${progress.completed}/${progress.total}：成功 ${progress.succeeded}，跳过 ${progress.skipped}，失败 ${progress.failed}。`,
-          `RAG indexing ${cancelled ? 'cancelled, ' : ''}finished ${progress.completed}/${progress.total}: ${progress.succeeded} succeeded, ${progress.skipped} skipped, ${progress.failed} failed.`,
+          `RAG 索引${cancelled ? '已取消，' : ''}完成 ${progress.completed}/${progress.total}：成功 ${progress.succeeded}，跳过 ${progress.skipped}，失败 ${progress.failed}。${failureSuffix}`,
+          `RAG indexing ${cancelled ? 'cancelled, ' : ''}finished ${progress.completed}/${progress.total}: ${progress.succeeded} succeeded, ${progress.skipped} skipped, ${progress.failed} failed.${failureSuffix}`,
         ),
       );
     },
@@ -336,6 +348,16 @@ export function useReaderRagIndexActions({
         } else {
           setStatusMessage(l(`《${entry.title}》索引完成。`, `Finished indexing "${entry.title}".`));
         }
+      } catch (error) {
+        // indexOneItem 上层（状态查询/缓存读取等 IPC）可能直接抛错，
+        // 必须在状态栏给出反馈，否则按钮看起来“点了没反应”。
+        const message = error instanceof Error ? error.message : String(error);
+        setStatusMessage(
+          l(
+            `《${entry.title}》索引失败：${message || '未知错误'}`,
+            `Failed to index "${entry.title}": ${message || 'unknown error'}`,
+          ),
+        );
       } finally {
         setRagIndexingDocumentKey('');
         await refreshRagIndexStatuses();

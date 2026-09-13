@@ -4,6 +4,14 @@
 
 各平台安装包见 [GitHub Releases](https://github.com/Dongyurocket/PaperQuay/releases)。
 
+## [0.1.43] - 2026-09-13
+
+### 修复
+
+- **文献库启动时全部文献卡在「MinerU 检测中」**：后端批量检查 IPC `paths_exist` 此前直接返回 `.map(pathExists)`，因 `pathExists` 为异步函数，返回值为未等待的 Promise 数组；Electron 结构化克隆无法序列化 Promise 导致响应挂起，渲染层调用永久等待，使全库文献永久显示检测中。现已改为 `Promise.all` 等待全部异步结果后返回真正的布尔数组，同时在前端取消分支补充状态回滚，确保任何退出路径状态收敛。
+- **RAG 索引断续续跑陷入不动点死循环**：`ensurePreparedSourceIndexed` 此前采用「按已索引条数进行位置切片（`chunks.slice`）」假设前 N 个分块按序入库；若历史中断缺失的是低位分块，切片会导致重发已存在分块，数据库条数无法达到总数而永远停留在 `pending`，但向上返回完成。现新增 `listIndexedChunkIds` 与 `finalizeDocumentIndex`，改用分块 ID 差集精准计算真实缺口并补齐，循环结束后自动执行状态收敛与陈旧分块清理。
+- **RAG 单篇与批量索引错误透传**：单篇右键索引入口增加异常捕获，在发生底层 IPC 异常时及时在状态栏反馈错误原因，消除“点击无反应”感知；批量索引记录首个失败原因并在汇总中提示。
+
 ## [0.1.42] - 2026-09-13
 
 ### 新增

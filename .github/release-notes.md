@@ -14,8 +14,9 @@ Download the native installer for your operating system from the Assets section 
 
 ## Highlights
 
-- **Hybrid vector retrieval for the knowledge-base MCP server**: `search_knowledge_base` now vectorizes the query with your configured embedding API and fuses vector KNN results with FTS5 keyword results via reciprocal rank fusion — the same retrieval semantics as the in-app Agent. A new `mode` parameter (`auto`/`hybrid`/`keyword`) controls the behavior, responses report `retrievalMode` plus per-snippet `channels` (`vector`/`fts`), and any embedding failure degrades gracefully to keyword-only search with a `warning` instead of an error.
-- **Manual RAG indexing with visible progress**: the Local RAG settings panel gains an index management card with indexed/pending/failed counts, batch actions to index unindexed papers or retry only failed ones (with progress bar, pause/resume, and cancel), a per-paper RAG status badge in the library list (indexed/indexing/not indexed/failed), and a “Build/Rebuild RAG Index” entry in the paper context menu. Manual triggers bypass the failure cooldown while keeping chunk-level incremental resume, so re-indexing never re-embeds already indexed chunks.
+- **Fix MinerU detection hang on library launch**: The batch path existence check IPC `paths_exist` previously returned an array of unawaited Promises from an async helper. Electron's structured clone failed to serialize the Promise array, causing the renderer's `invoke` promise to hang forever and stranding all papers in the library list with a perpetual "MinerU Checking" badge. The backend now uses `Promise.all` to await all asynchronous checks and return concrete booleans, and the cancel branch rolls back checking state properly.
+- **Fix RAG indexing fixed-point loop on interrupted documents**: The incremental indexing flow previously assumed chunks were indexed in exact sequential order using positional slicing (`chunks.slice(alreadyIndexedCount)`). When an interrupted document lacked low-index chunks, slicing repeatedly resent already-indexed chunks, preventing the database row count from ever reaching the total while erroneously reporting completion. The store and local RAG service now query existing `chunkId` sets to compute true gaps by set difference, automatically self-healing interrupted documents and pruning obsolete chunks via `finalizeDocumentIndex`.
+- **Improve RAG error visibility**: Single-paper context menu indexing now captures errors and surfaces them in the status bar instead of failing silently, and batch indexing reports the first failure error in the completion summary.
 
 ## Notes
 
@@ -40,8 +41,9 @@ PaperQuay 是一个开源 AI 论文工作台，覆盖文献管理、PDF 阅读�
 
 ## 本次更新
 
-- **知识库 MCP 服务升级为向量混合检索**：`search_knowledge_base` 在配置了 Embedding API 时自动将查询向量化，与 FTS5 全文检索双通道召回并经 RRF 融合排序，与应用内 Agent 检索语义完全一致；新增 `mode` 参数（`auto`/`hybrid`/`keyword`），响应报告 `retrievalMode` 与每条结果的 `channels` 命中来源；embedding 异常时自动降级为关键词检索并返回 `warning`，不会报错中断。
-- **RAG 手动索引触发与索引进度显示**：设置面板「本地 RAG 检索」新增索引管理卡片，提供已索引/待索引/失败统计与「为未索引文献建立索引」「仅重建失败索引」批量操作（带进度条、暂停/取消）；文献列表新增 RAG 状态角标（已索引/索引中/未索引/失败）；文献右键菜单新增「建立/重建 RAG 索引」。手动触发绕过失败冷却期且保留分块级断点续传，重建不会重复消耗已索引分块的 embedding 额度。
+- **修复启动后文献库全部卡在「MinerU 检测中」**：后端批量检查 IPC `paths_exist` 此前因直接返回未等待的 Promise 数组导致 Electron 结构化克隆挂起，前端调用永久未响应并使全库文献停留于检测中。现已修复为 `Promise.all` 并完善了取消回滚。
+- **修复 RAG 索引断续续跑陷入不动点死循环**：续跑逻辑由「位置切片」全面升级为「分块 ID 差集补齐」，精确挑出未入库分块重补并新增 `finalizeDocumentIndex` 自动收敛状态与清理历史陈旧分块，彻底解决中断文献重复点击无法收敛的问题。
+- **增强 RAG 索引错误反馈**：单篇右键索引入口补充异常捕获，在底层异常时向状态栏给出明确反馈；批量索引记录首个失败原因并在总结中提示。
 
 ## 备注
 
