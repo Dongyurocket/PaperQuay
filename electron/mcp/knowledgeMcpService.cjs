@@ -1,7 +1,10 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
+const sqliteVec = require('sqlite-vec');
 const { DatabaseSync } = require('../backend/nodeSqlite.cjs');
+const { embedTexts } = require('../backend/utils.cjs');
+const { rrfFuse } = require('../backend/ragStore.cjs');
 const {
   detectLocalZoteroDataDir,
   listLocalCollections,
@@ -85,19 +88,46 @@ function resolveAppPaths(customDataDir = '') {
 
   return {
     dataDir,
+    configPath: path.join(dataDir, '.settings', 'paperquay.config.json'),
     libraryDatabasePath: path.join(dataDir, 'paperquay-library.sqlite'),
     notesDatabasePath: path.join(dataDir, 'paperquay-notes.sqlite'),
     ragDatabasePath: path.join(dataDir, 'paperquay-rag.sqlite'),
   };
 }
 
-function openReadOnlyDb(databasePath) {
+function openReadOnlyDb(databasePath, { allowExtension = false } = {}) {
   if (!fs.existsSync(databasePath)) {
     return null;
   }
 
   try {
-    return new DatabaseSync(databasePath, { readOnly: true, timeout: 5000 });
+    const db = new DatabaseSync(databasePath, { readOnly: true, timeout: 5000, allowExtension });
+
+    if (allowExtension) {
+      // sqlite-vec 扩展加载是连接级操作，只读连接上同样可以执行 vec0 查询。
+      db.enableLoadExtension(true);
+      try {
+        const loadablePath = typeof sqliteVec.getLoadablePath === 'function'
+          ? sqliteVec.getLoadablePath()
+          : null;
+        if (loadablePath) {
+          db.loadExtension(loadablePath);
+        } else {
+          sqliteVec.load(db);
+        }
+      } catch (extensionError) {
+        // 扩展不可用时退化为普通只读连接，保证关键词检索仍可用。
+        console.warn('[PaperQuay MCP] sqlite-vec extension unavailable; vector retrieval disabled.', extensionError.message);
+        try {
+          db.close();
+        } catch {}
+        return new DatabaseSync(databasePath, { readOnly: true, timeout: 5000 });
+      } finally {
+        db.enableLoadExtension(false);
+      }
+    }
+
+    return db;
   } catch (error) {
     console.error(`[PaperQuay MCP] Failed to open database at ${databasePath}:`, error.message);
     return null;
@@ -125,17 +155,69 @@ function getTableColumns(db, tableName) {
   }
 }
 
+// ---- 向量混合检索（与桌面端 ragStore.cjs 的混合检索逻辑对齐） ----
+
+const MAX_VECTOR_FANOUT_SOURCES = 500;
+
+// 与 src/services/rag.ts 的 normalizeBaseUrl 保持一致，用于比对 embedding_model_key。
+function normalizeEmbeddingBaseUrl(baseUrl) {
+  const trimmed = cleanString(baseUrl);
+  if (!trimmed) return '';
+
+  const normalized = trimmed
+    .replace(/\/embeddings\/?$/i, '')
+    .replace(/\/+$/, '');
+
+  if (/\/v\d+$/i.test(normalized)) {
+    return normalized;
+  }
+
+  return `${normalized}/v1`;
+}
+
+// 与 src/services/rag.ts 的 buildRagEmbeddingModelKey 保持一致。
+function buildEmbeddingModelKey(config) {
+  return `${normalizeEmbeddingBaseUrl(config.baseUrl)}::${cleanString(config.model)}::${config.dimensions ?? 'default'}`;
+}
+
+// 与 ragStore.cjs 的 vectorTableName 保持一致。
+function vectorTableName(dimension) {
+  return `rag_vec_${dimension}`;
+}
+
+function toFloat32Array(vector) {
+  const output = new Float32Array(vector.length);
+  for (let index = 0; index < vector.length; index += 1) {
+    output[index] = Number(vector[index]);
+  }
+  return output;
+}
+
+function normalizeRetrievalMode(mode) {
+  const value = cleanString(mode).toLowerCase();
+  if (value === 'hybrid' || value === 'keyword') return value;
+  return 'auto';
+}
+
+function ragResultKey(row) {
+  return `${row.sourceType}::${row.chunkId}`;
+}
+
 class PaperQuayKnowledgeService {
   constructor(options = {}) {
     this.appPaths = resolveAppPaths(options.dataDir);
+    // 测试可注入 embedFn(queryText, embeddingConfig) => Promise<number[]>，默认走 OpenAI 兼容接口。
+    this.embedFn = typeof options.embedFn === 'function'
+      ? options.embedFn
+      : async (text, embedding) => (await embedTexts([text], embedding))[0];
   }
 
   getLibraryDb() {
     return openReadOnlyDb(this.appPaths.libraryDatabasePath);
   }
 
-  getRagDb() {
-    return openReadOnlyDb(this.appPaths.ragDatabasePath);
+  getRagDb({ withVec = false } = {}) {
+    return openReadOnlyDb(this.appPaths.ragDatabasePath, { allowExtension: withVec });
   }
 
   getNotesDb() {
@@ -323,13 +405,168 @@ class PaperQuayKnowledgeService {
     }
   }
 
-  searchKnowledgeBase({ query, paperId = '', limit = 8 } = {}) {
+  // 从渲染层持久化的阅读器配置中读取 embedding 设置（settings + secrets）。
+  // 与桌面端共用同一份配置，用户在应用内修改后 MCP 下次调用即生效。
+  resolveEmbeddingConfig() {
+    try {
+      if (!fs.existsSync(this.appPaths.configPath)) {
+        return null;
+      }
+
+      const raw = JSON.parse(fs.readFileSync(this.appPaths.configPath, 'utf8'));
+      const settings = raw?.settings ?? {};
+      const secrets = raw?.secrets ?? {};
+      const baseUrl = normalizeEmbeddingBaseUrl(settings.embeddingBaseUrl);
+      const model = cleanString(settings.embeddingModel);
+      const apiKey = cleanString(secrets.embeddingApiKey);
+
+      if (!baseUrl || !model) {
+        return null;
+      }
+
+      const dimensions = Number.isInteger(settings.embeddingDimensions) && settings.embeddingDimensions > 0
+        ? settings.embeddingDimensions
+        : null;
+
+      return { baseUrl, model, dimensions, apiKey, timeoutSeconds: 60 };
+    } catch {
+      return null;
+    }
+  }
+
+  // 选择与当前 embedding 配置最匹配的已索引向量维度：优先 model_key 完全匹配，
+  // 否则退到 ready 文档数最多的维度（调用方需自行校验查询向量维度一致）。
+  pickVectorDimension(ragDb, modelKey) {
+    let registered;
+    try {
+      registered = new Set(
+        ragDb.prepare('SELECT dimension FROM rag_vec_dimensions').all()
+          .map((row) => Number(row.dimension))
+          .filter((d) => Number.isSafeInteger(d) && d > 0),
+      );
+    } catch {
+      return null;
+    }
+
+    if (registered.size === 0) {
+      return null;
+    }
+
+    const rows = ragDb.prepare(`
+      SELECT embedding_dimension AS dimension, embedding_model_key AS modelKey,
+             COUNT(DISTINCT document_key) AS documentCount
+      FROM rag_indexes
+      WHERE status = 'ready'
+      GROUP BY embedding_dimension, embedding_model_key
+    `).all().filter((row) => registered.has(Number(row.dimension)));
+
+    if (rows.length === 0) {
+      return null;
+    }
+
+    const exact = rows.find((row) => row.modelKey === modelKey);
+    if (exact) {
+      return { dimension: Number(exact.dimension), modelKeyMatched: true };
+    }
+
+    rows.sort((left, right) => Number(right.documentCount) - Number(left.documentCount));
+    return { dimension: Number(rows[0].dimension), modelKeyMatched: false };
+  }
+
+  // vec0 的 document_key/source_type 是 partition key，KNN 必须逐（文档, 来源）扇出，
+  // 与桌面端 retrieveVectorChunks 的查询方式一致，再全局按距离归并。
+  retrieveVectorChunks(ragDb, { queryVector, dimension, paperId, candidateLimit }) {
+    const table = vectorTableName(dimension);
+    const conditions = [`status = 'ready'`, 'embedding_dimension = ?'];
+    const params = [dimension];
+
+    if (paperId) {
+      conditions.push('document_key = ?');
+      params.push(paperId);
+    }
+
+    params.push(MAX_VECTOR_FANOUT_SOURCES);
+
+    const sources = ragDb.prepare(`
+      SELECT document_key AS documentKey, source_type AS sourceType
+      FROM rag_indexes
+      WHERE ${conditions.join(' AND ')}
+      ORDER BY indexed_at DESC
+      LIMIT ?
+    `).all(...params);
+
+    const countParams = paperId ? [dimension, paperId] : [dimension];
+    const totalSources = ragDb.prepare(`
+      SELECT COUNT(*) AS count FROM rag_indexes
+      WHERE status = 'ready' AND embedding_dimension = ?
+      ${paperId ? 'AND document_key = ?' : ''}
+    `).get(...countParams);
+
+    if (sources.length === 0) {
+      return { rows: [], truncated: false };
+    }
+
+    const search = ragDb.prepare(`
+      SELECT
+        c.document_key AS paperId,
+        c.chunk_id AS chunkId,
+        c.source_type AS sourceType,
+        c.page_index AS pageIndex,
+        c.block_id AS blockId,
+        c.text,
+        v.distance
+      FROM ${table} v
+      JOIN rag_chunks c ON c.id = v.rowid
+      WHERE v.embedding MATCH ?
+        AND k = ?
+        AND v.document_key = ?
+        AND v.source_type = ?
+      ORDER BY v.distance
+    `);
+
+    const queryVec = toFloat32Array(queryVector);
+    const rows = [];
+    for (const source of sources) {
+      rows.push(...search.all(queryVec, candidateLimit, source.documentKey, source.sourceType));
+    }
+
+    rows.sort((left, right) => Number(left.distance) - Number(right.distance));
+
+    return {
+      rows: rows.slice(0, candidateLimit).map((row) => ({
+        paperId: row.paperId,
+        chunkId: row.chunkId,
+        sourceType: row.sourceType,
+        pageIndex: row.pageIndex ?? null,
+        blockId: row.blockId ?? null,
+        text: row.text,
+        score: Number(row.distance) || 0,
+      })),
+      truncated: Number(totalSources?.count ?? 0) > sources.length,
+    };
+  }
+
+  async embedQuery(queryText, config) {
+    const vector = await this.embedFn(queryText, config);
+    if (!Array.isArray(vector) || vector.length === 0) {
+      throw new Error('Embedding service returned an empty query vector');
+    }
+    return vector;
+  }
+
+  async searchKnowledgeBase({ query, paperId = '', limit = 8, mode = 'auto' } = {}) {
     const cleanQuery = cleanString(query);
     if (!cleanQuery) throw new Error('query is required');
 
-    const ragDb = this.getRagDb();
+    const retrievalMode = normalizeRetrievalMode(mode);
+    const embeddingDisabled = cleanString(process.env.PAPERQUAY_MCP_EMBEDDING).toLowerCase() === 'off';
+    const wantsHybrid = retrievalMode !== 'keyword' && !embeddingDisabled;
+
+    const ragDb = this.getRagDb({ withVec: wantsHybrid });
     if (!ragDb) {
       return {
+        query: cleanQuery,
+        retrievalMode: 'keyword',
         results: [],
         total: 0,
         message: `RAG database not found at: ${this.appPaths.ragDatabasePath}`,
@@ -349,11 +586,27 @@ class PaperQuayKnowledgeService {
 
     try {
       const safeLimit = Math.max(1, Math.min(30, Number(limit) || 8));
+      const candidateLimit = Math.min(100, Math.max(safeLimit, safeLimit * 2));
       const targetPaperId = cleanString(paperId);
       const ftsQuery = escapeFtsQuery(cleanQuery);
-      let results = [];
+      let warning;
+      let embeddingModel;
+      let vectorExecuted = false;
 
-      // 1. 尝试 FTS5 全文搜索
+      const toResult = (row, channels) => ({
+        paperId: row.paperId,
+        paperTitle: paperTitles.get(row.paperId) || row.paperId,
+        pageIndex: row.pageIndex !== null && row.pageIndex !== undefined ? Number(row.pageIndex) : null,
+        pageNumber: row.pageIndex !== null && row.pageIndex !== undefined ? Number(row.pageIndex) + 1 : null,
+        blockId: row.blockId || null,
+        sourceType: row.sourceType,
+        snippet: row.text,
+        score: row.score,
+        channels,
+      });
+
+      // 1. FTS5 全文搜索（关键词通道）
+      let ftsRows = [];
       if (ftsQuery) {
         try {
           const conditions = ['rag_chunks_fts MATCH ?'];
@@ -364,7 +617,7 @@ class PaperQuayKnowledgeService {
             params.push(targetPaperId);
           }
 
-          params.push(safeLimit);
+          params.push(wantsHybrid ? candidateLimit : safeLimit);
 
           const ftsSql = `
             SELECT
@@ -382,24 +635,96 @@ class PaperQuayKnowledgeService {
             LIMIT ?
           `;
 
-          const rows = ragDb.prepare(ftsSql).all(...params);
-          results = rows.map((row) => ({
+          ftsRows = ragDb.prepare(ftsSql).all(...params).map((row) => ({
             paperId: row.paperId,
-            paperTitle: paperTitles.get(row.paperId) || row.paperId,
-            pageIndex: row.pageIndex !== null && row.pageIndex !== undefined ? Number(row.pageIndex) : null,
-            pageNumber: row.pageIndex !== null && row.pageIndex !== undefined ? Number(row.pageIndex) + 1 : null,
-            blockId: row.blockId || null,
+            chunkId: row.chunkId,
             sourceType: row.sourceType,
-            snippet: row.text,
+            pageIndex: row.pageIndex,
+            blockId: row.blockId,
+            text: row.text,
             score: Number(row.rank) || 0,
           }));
         } catch (ftsError) {
-          // FTS5 失败时降级到 LIKE
+          // FTS5 失败时后续降级到 LIKE
         }
       }
 
-      // 2. 如果 FTS 未匹配到或不可用，使用 LIKE 降级
+      // 2. 向量通道：查询向量化 + 逐文档 KNN，与桌面端混合检索对齐
+      let vectorRows = [];
+      if (wantsHybrid) {
+        const config = this.resolveEmbeddingConfig();
+
+        if (!config) {
+          if (retrievalMode === 'hybrid') {
+            warning = 'Embedding 未在 PaperQuay 中配置，已降级为关键词检索。';
+          }
+        } else {
+          try {
+            embeddingModel = config.model;
+            const pick = this.pickVectorDimension(ragDb, buildEmbeddingModelKey(config));
+
+            if (!pick) {
+              warning = 'RAG 知识库中没有已完成的向量索引，已降级为关键词检索。';
+            } else {
+              const queryVector = await this.embedQuery(cleanQuery, config);
+
+              if (queryVector.length !== pick.dimension) {
+                warning = `查询向量维度 (${queryVector.length}) 与索引维度 (${pick.dimension}) 不一致，已降级为关键词检索。`;
+              } else {
+                const vectorResult = this.retrieveVectorChunks(ragDb, {
+                  queryVector,
+                  dimension: pick.dimension,
+                  paperId: targetPaperId,
+                  candidateLimit,
+                });
+                vectorRows = vectorResult.rows;
+                vectorExecuted = true;
+
+                if (vectorResult.truncated) {
+                  warning = `向量检索仅覆盖最近索引的 ${MAX_VECTOR_FANOUT_SOURCES} 个来源（文档, source）组合。`;
+                }
+              }
+            }
+          } catch (error) {
+            warning = `向量检索失败，已降级为关键词检索：${error.message}`;
+          }
+        }
+      }
+
+      // 3. 融合排序：向量 + FTS 双通道走 RRF（与桌面端 rrfFuse 相同）；
+      //    chunk_id 仅在 (document_key, source_type) 内唯一，跨库融合前用 paperId 前缀合成全局键。
+      let results = [];
+      if (vectorExecuted) {
+        if (vectorRows.length > 0 && ftsRows.length > 0) {
+          const wrap = (rows) => rows.map((row) => ({
+            ...row,
+            chunkId: `${row.paperId}::${row.chunkId}`,
+          }));
+          const fused = rrfFuse(wrap(vectorRows), wrap(ftsRows)).slice(0, safeLimit);
+          const vectorKeys = new Set(vectorRows.map(ragResultKey));
+          const ftsKeys = new Set(ftsRows.map(ragResultKey));
+
+          results = fused.map((row) => {
+            const chunkId = row.chunkId.slice(row.paperId.length + 2);
+            const key = ragResultKey({ sourceType: row.sourceType, chunkId });
+            const channels = [];
+            if (vectorKeys.has(key)) channels.push('vector');
+            if (ftsKeys.has(key)) channels.push('fts');
+            return toResult({ ...row, chunkId }, channels);
+          });
+        } else if (vectorRows.length > 0) {
+          results = vectorRows.slice(0, safeLimit).map((row) => toResult(row, ['vector']));
+        } else {
+          results = ftsRows.slice(0, safeLimit).map((row) => toResult(row, ['fts']));
+        }
+      } else {
+        results = ftsRows.slice(0, safeLimit).map((row) => toResult(row, ['fts']));
+      }
+
+      // 4. 如果 FTS/向量均未命中，使用 LIKE 降级
+      let likeFallbackUsed = false;
       if (results.length === 0) {
+        likeFallbackUsed = true;
         const likeConditions = ['lower(c.text) LIKE ?'];
         const likeParams = [`%${cleanQuery.toLowerCase()}%`];
 
@@ -425,20 +750,14 @@ class PaperQuayKnowledgeService {
         `;
 
         const rows = ragDb.prepare(likeSql).all(...likeParams);
-        results = rows.map((row) => ({
-          paperId: row.paperId,
-          paperTitle: paperTitles.get(row.paperId) || row.paperId,
-          pageIndex: row.pageIndex !== null && row.pageIndex !== undefined ? Number(row.pageIndex) : null,
-          pageNumber: row.pageIndex !== null && row.pageIndex !== undefined ? Number(row.pageIndex) + 1 : null,
-          blockId: row.blockId || null,
-          sourceType: row.sourceType,
-          snippet: row.text,
-          score: 1.0,
-        }));
+        results = rows.map((row) => toResult({ ...row, score: 1.0 }, ['like']));
       }
 
       return {
         query: cleanQuery,
+        retrievalMode: vectorExecuted && !likeFallbackUsed ? 'hybrid' : 'keyword',
+        ...(embeddingModel && vectorExecuted && !likeFallbackUsed ? { embeddingModel } : {}),
+        ...(warning ? { warning } : {}),
         results,
         total: results.length,
       };

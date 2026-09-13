@@ -9,7 +9,7 @@ PaperQuay 提供了基于标准 **Model Context Protocol (MCP)** 的只读知识
 1. **零服务依赖**：基于 Node.js 原生只读直连 SQLite，无需 Electron 桌面应用保持运行即可查询。
 2. **并发安全无锁**：数据库开启 WAL 模式，外部只读查询与桌面应用读写互不阻塞、无锁冲突。
 3. **精准段落引用**：`search_knowledge_base` 返回段落所在的**文献 ID、文献标题、页码与结构块 ID**，便于 Agent 依据事实回答并自动生成 `[1] (Paper Title, P.x)` 格式引用。
-4. **混合检索兜底**：优先采用 SQLite FTS5 全文搜索，在分词或特殊字符场景下自动无缝降级到语义关键词模糊匹配。
+4. **向量混合检索**：在阅读器设置中配置了 Embedding API 时，`search_knowledge_base` 自动将查询向量化，与 FTS5 全文检索双通道召回，经 RRF（Reciprocal Rank Fusion）融合排序；未配置或接口异常时自动降级为关键词检索，并在分词或特殊字符场景下无缝降级到模糊匹配。
 
 ---
 
@@ -20,7 +20,7 @@ PaperQuay 提供了基于标准 **Model Context Protocol (MCP)** 的只读知识
 | :--- | :--- | :--- | :--- |
 | `search_papers` | 检索文献库元数据 | `query`（关键词）、`tag`（标签）、`limit` | 匹配文献列表（ID、中英文标题、作者、年份、DOI、标签） |
 | `get_paper_details` | 读取单篇文献完整详情 | `paperId`（必填） | 完整元数据、摘要、用户笔记、AI 概览、文献类型、出版物等 |
-| `search_knowledge_base` | 全文与 RAG 知识库证据检索 | `query`（必填）、`paperId`（可选）、`limit` | 带文献标题、页码、段落预览和匹配分数的证据切片 |
+| `search_knowledge_base` | 向量 + 全文混合检索 RAG 知识库证据 | `query`（必填）、`paperId`（可选）、`limit`、`mode`（`auto`/`hybrid`/`keyword`） | 带文献标题、页码、段落预览、匹配分数与命中通道（`vector`/`fts`）的证据切片 |
 | `read_paper_content` | 读取文献在知识库中的分块正文 | `paperId`（必填）、`pageIndex`（可选）、`limit` | 按页面或顺序排列的结构化正文内容 |
 | `search_notes` | 检索用户的阅读笔记与批注摘录 | `query`（可选）、`paperId`（可选）、`limit` | 用户个人笔记、高亮批注与摘录内容 |
 
@@ -120,6 +120,22 @@ args = [
    ```bash
    export PAPERQUAY_DATA_DIR="D:/MyPaperQuayData"
    ```
+
+---
+
+## 向量混合检索说明
+
+`search_knowledge_base` 的检索行为由 `mode` 参数控制（默认 `auto`）：
+
+| 模式 | 行为 |
+| :--- | :--- |
+| `auto`（默认） | 检测到可用的 Embedding 配置时走向量 + 全文混合检索，否则静默使用关键词检索 |
+| `hybrid` | 强制尝试混合检索；配置缺失或向量索引不可用时降级为关键词检索，并在响应中返回 `warning` 说明原因 |
+| `keyword` | 强制使用 FTS5 关键词检索（分词/特殊字符场景再降级为模糊匹配），不发起任何网络请求 |
+
+混合检索的实现与桌面端完全一致：查询文本先经已配置的 Embedding API 向量化，在 `sqlite-vec` 向量索引上按文档做 KNN 召回，与 FTS5 的 BM25 候选经 RRF 融合排序。响应中的 `retrievalMode` 字段标识本次实际生效的检索方式（`hybrid` / `keyword`），每条结果的 `channels` 字段标识命中来源（`vector` / `fts` / `like`）。
+
+**配置来源与隐私边界**：MCP 服务直接读取 PaperQuay 渲染层持久化的阅读器配置（`<数据目录>/.settings/paperquay.config.json` 中的 `settings.embeddingBaseUrl` / `embeddingModel` / `embeddingDimensions` 与 `secrets.embeddingApiKey`），在应用内修改配置后下一次 MCP 调用即生效。混合检索会把**查询文本**发送到你配置的 Embedding 端点（与桌面端索引/检索时的行为一致）；设环境变量 `PAPERQUAY_MCP_EMBEDDING=off` 可全局禁用该网络请求，强制关键词检索。
 
 ---
 

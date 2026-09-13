@@ -10,6 +10,16 @@ const require = createRequire(import.meta.url);
 const { DatabaseSync } = require('../electron/backend/nodeSqlite.cjs');
 const { PaperQuayKnowledgeService } = require('../electron/mcp/knowledgeMcpService.cjs');
 
+// Windows 上杀毒/索引软件可能短暂持有临时目录句柄，重试后仍失败则由 OS 兜底清理，
+// 不让清理失败阻塞测试结果。
+function cleanupDir(dir: string) {
+  try {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+  } catch (error: any) {
+    console.warn(`cleanup skipped for ${dir}: ${error?.code ?? error}`);
+  }
+}
+
 function setupTestEnvironment() {
   const dataDir = mkdtempSync(path.join(tmpdir(), 'paperquay-mcp-test-'));
   const libraryDbPath = path.join(dataDir, 'paperquay-library.sqlite');
@@ -173,18 +183,19 @@ test('PaperQuayKnowledgeService searches papers and reads details', () => {
     assert.deepEqual(details.authors, ['Ashish Vaswani']);
     assert.equal(details.isFavorite, true);
   } finally {
-    rmSync(dataDir, { recursive: true, force: true });
+    cleanupDir(dataDir);
   }
 });
 
-test('PaperQuayKnowledgeService searches knowledge base chunks with citations', () => {
+test('PaperQuayKnowledgeService searches knowledge base chunks with citations', async () => {
   const dataDir = setupTestEnvironment();
   try {
     const service = new PaperQuayKnowledgeService({ dataDir });
 
     // 知识库分块检索
-    const ragResult = service.searchKnowledgeBase({ query: 'multi-head attention' });
+    const ragResult = await service.searchKnowledgeBase({ query: 'multi-head attention' });
     assert.ok(ragResult.total > 0);
+    assert.equal(ragResult.retrievalMode, 'keyword');
     assert.equal(ragResult.results[0].paperId, 'paper-1');
     assert.equal(ragResult.results[0].pageNumber, 2); // page_index 1 -> pageNumber 2
     assert.equal(ragResult.results[0].blockId, 'b-2');
@@ -200,7 +211,7 @@ test('PaperQuayKnowledgeService searches knowledge base chunks with citations', 
     assert.equal(notes.total, 1);
     assert.equal(notes.notes[0].id, 'n-1');
   } finally {
-    rmSync(dataDir, { recursive: true, force: true });
+    cleanupDir(dataDir);
   }
 });
 
@@ -271,7 +282,142 @@ test('paperquay-mcp stdio server handles JSON-RPC 2.0 requests', async () => {
     child.stdin.end();
     await new Promise((resolve) => child.on('close', resolve));
   } finally {
-    rmSync(dataDir, { recursive: true, force: true });
+    cleanupDir(dataDir);
+  }
+});
+
+// 在基础 fixture 上补充向量索引（rag_vec_dimensions + rag_indexes + vec0 表）与 embedding 配置。
+function setupVectorFixture(dataDir: string) {
+  const sqliteVec = require('sqlite-vec');
+  const ragDbPath = path.join(dataDir, 'paperquay-rag.sqlite');
+  const db = new DatabaseSync(ragDbPath, { allowExtension: true });
+  db.enableLoadExtension(true);
+  db.loadExtension(sqliteVec.getLoadablePath());
+  db.enableLoadExtension(false);
+
+  db.exec(`
+    CREATE TABLE rag_vec_dimensions (dimension INTEGER PRIMARY KEY);
+    INSERT INTO rag_vec_dimensions (dimension) VALUES (4);
+    CREATE TABLE rag_indexes (
+      document_key TEXT NOT NULL,
+      source_type TEXT NOT NULL,
+      status TEXT NOT NULL,
+      embedding_model_key TEXT NOT NULL,
+      embedding_dimension INTEGER NOT NULL,
+      indexed_at INTEGER NOT NULL
+    );
+    INSERT INTO rag_indexes VALUES
+      ('paper-1', 'mineru-markdown', 'ready', 'http://localhost:11434/v1::test-embed::4', 4, 1),
+      ('paper-2', 'mineru-markdown', 'ready', 'http://localhost:11434/v1::test-embed::4', 4, 2);
+  `);
+  db.exec(`
+    CREATE VIRTUAL TABLE rag_vec_4 USING vec0(
+      document_key TEXT partition key,
+      source_type TEXT partition key,
+      embedding float[4]
+    );
+  `);
+  const insert = db.prepare(
+    'INSERT INTO rag_vec_4 (rowid, document_key, source_type, embedding) VALUES (?, ?, ?, ?)',
+  );
+  // rowid 与 rag_chunks.id 对齐：c-1=1（Transformer 概述）、c-2=2（multi-head attention）、c-3=3（residual）
+  // vec0 要求 rowid 严格为整数类型，node:sqlite 下 JS number 会绑定为 REAL，必须用 BigInt。
+  insert.run(1n, 'paper-1', 'mineru-markdown', new Float32Array([1, 0, 0, 0]));
+  insert.run(2n, 'paper-1', 'mineru-markdown', new Float32Array([0, 1, 0, 0]));
+  insert.run(3n, 'paper-2', 'mineru-markdown', new Float32Array([0, 0, 1, 0]));
+  db.close();
+
+  const settingsDir = path.join(dataDir, '.settings');
+  mkdirSync(settingsDir, { recursive: true });
+  writeFileSync(path.join(settingsDir, 'paperquay.config.json'), JSON.stringify({
+    version: 1,
+    settings: {
+      embeddingBaseUrl: 'http://localhost:11434/v1',
+      embeddingModel: 'test-embed',
+      embeddingDimensions: 4,
+    },
+    secrets: { embeddingApiKey: 'test-key' },
+  }));
+}
+
+test('PaperQuayKnowledgeService fuses vector and FTS channels in hybrid mode', async () => {
+  const dataDir = setupTestEnvironment();
+  try {
+    setupVectorFixture(dataDir);
+    const embedCalls: string[] = [];
+    const service = new PaperQuayKnowledgeService({
+      dataDir,
+      embedFn: async (text: string) => {
+        embedCalls.push(text);
+        return [1, 0, 0, 0]; // 与 c-1 的向量完全一致
+      },
+    });
+
+    const result = await service.searchKnowledgeBase({ query: 'multi-head attention' });
+    assert.equal(result.retrievalMode, 'hybrid');
+    assert.equal(result.embeddingModel, 'test-embed');
+    assert.equal(embedCalls.length, 1);
+    assert.ok(result.results.length > 0);
+
+    const c1 = result.results.find((row: any) => row.blockId === 'b-1');
+    const c2 = result.results.find((row: any) => row.blockId === 'b-2');
+    // c-1 向量距离为 0（向量通道第一）且 FTS 也命中 attention，双通道融合后应排第一
+    assert.ok(c1, 'expected the Transformer overview chunk in results');
+    assert.deepEqual([...c1.channels].sort(), ['fts', 'vector']);
+    assert.ok(c2, 'expected the multi-head attention chunk in results');
+    assert.ok(c2.channels.includes('fts'));
+    assert.equal(result.results[0].blockId, 'b-1');
+
+    // keyword 模式不触发 embedding 请求
+    const keywordResult = await service.searchKnowledgeBase({ query: 'multi-head attention', mode: 'keyword' });
+    assert.equal(keywordResult.retrievalMode, 'keyword');
+    assert.equal(embedCalls.length, 1);
+    assert.ok(keywordResult.results.length > 0);
+  } finally {
+    cleanupDir(dataDir);
+  }
+});
+
+test('PaperQuayKnowledgeService degrades to keyword retrieval when embedding fails or mismatches', async () => {
+  const dataDir = setupTestEnvironment();
+  try {
+    setupVectorFixture(dataDir);
+
+    // embedding 接口失败：降级为关键词检索并给出 warning
+    const failingService = new PaperQuayKnowledgeService({
+      dataDir,
+      embedFn: async () => {
+        throw new Error('embedding endpoint unreachable');
+      },
+    });
+    const degraded = await failingService.searchKnowledgeBase({ query: 'multi-head attention' });
+    assert.equal(degraded.retrievalMode, 'keyword');
+    assert.match(degraded.warning, /向量检索失败/);
+    assert.ok(degraded.results.length > 0);
+
+    // 查询向量维度与索引不一致：降级并给出 warning
+    const mismatchService = new PaperQuayKnowledgeService({
+      dataDir,
+      embedFn: async () => [1, 0, 0],
+    });
+    const mismatched = await mismatchService.searchKnowledgeBase({ query: 'multi-head attention' });
+    assert.equal(mismatched.retrievalMode, 'keyword');
+    assert.match(mismatched.warning, /维度/);
+  } finally {
+    cleanupDir(dataDir);
+  }
+});
+
+test('PaperQuayKnowledgeService reports a warning for hybrid mode without embedding config', async () => {
+  const dataDir = setupTestEnvironment();
+  try {
+    const service = new PaperQuayKnowledgeService({ dataDir });
+    const result = await service.searchKnowledgeBase({ query: 'multi-head attention', mode: 'hybrid' });
+    assert.equal(result.retrievalMode, 'keyword');
+    assert.match(result.warning, /Embedding/);
+    assert.ok(result.results.length > 0);
+  } finally {
+    cleanupDir(dataDir);
   }
 });
 
@@ -431,7 +577,7 @@ test('PaperQuayKnowledgeService handles selective Zotero sync workflow', async (
     assert.equal(previewAfter.summary.readyCount, 0);
     assert.equal(previewAfter.summary.alreadyExistsCount, 1);
   } finally {
-    rmSync(dataDir, { recursive: true, force: true });
-    rmSync(zoteroDir, { recursive: true, force: true });
+    cleanupDir(dataDir);
+    cleanupDir(zoteroDir);
   }
 });

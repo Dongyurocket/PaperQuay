@@ -31,7 +31,7 @@ const options = parseArgs();
 const service = new PaperQuayKnowledgeService({ dataDir: options.dataDir });
 
 const SERVER_NAME = 'paperquay-knowledge-mcp';
-const SERVER_VERSION = '0.1.39';
+const SERVER_VERSION = '0.1.40';
 
 const TOOLS = [
   {
@@ -75,7 +75,7 @@ const TOOLS = [
   {
     name: 'search_knowledge_base',
     description:
-      'Full-text and chunk evidence search across the PaperQuay RAG knowledge base. Returns grounded text snippets with paper title, page number, block ID, and relevance score for answering user questions with citations.',
+      'Hybrid semantic + full-text search across the PaperQuay RAG knowledge base. When an embedding API is configured in PaperQuay reader settings, the query is vectorized and fused with FTS5 keyword results via reciprocal rank fusion; otherwise it falls back to keyword-only search. Returns grounded text snippets with paper title, page number, block ID, relevance score, and the retrieval channels that matched each snippet.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -91,6 +91,13 @@ const TOOLS = [
           type: 'integer',
           description: 'Maximum number of evidence snippets to return (default 8, max 30).',
           default: 8,
+        },
+        mode: {
+          type: 'string',
+          enum: ['auto', 'hybrid', 'keyword'],
+          description:
+            "Retrieval mode. 'auto' (default) uses vector hybrid retrieval when an embedding API is configured, otherwise keyword-only. 'hybrid' requires vector retrieval and reports a warning when unavailable. 'keyword' forces FTS5 keyword-only search.",
+          default: 'auto',
         },
       },
       required: ['query'],
