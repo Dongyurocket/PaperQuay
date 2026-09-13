@@ -55,6 +55,7 @@ import {
 import { readPdfPageCount } from '../literature/pdfPageCount';
 import ReaderPreferencesWindow from './ReaderPreferencesWindow';
 import { useReaderLibraryActions } from './useReaderLibraryActions';
+import { useReaderRagIndexActions } from './useReaderRagIndexActions';
 import { useReaderLibraryPreview } from './useReaderLibraryPreview';
 import { useReaderSettings } from './useReaderSettings';
 import { useReaderZoteroSync } from './useReaderZoteroSync';
@@ -499,6 +500,29 @@ function Reader({ workspaceActive = true }: ReaderProps) {
     openTab,
   });
 
+  const {
+    ragIndexAvailable,
+    ragBadgeByDocumentKey,
+    ragIndexOverview,
+    ragIndexPaused,
+    ragIndexProgress,
+    ragIndexRunning,
+    ragIndexingDocumentKey,
+    handleBatchRagIndex,
+    handleCancelRagIndex,
+    handleIndexPaperRag,
+    handleToggleRagIndexPause,
+  } = useReaderRagIndexActions({
+    allKnownItems,
+    configHydrated,
+    embeddingApiKey,
+    findExistingMineruJson,
+    itemParseStatusMap,
+    l,
+    setStatusMessage,
+    settings,
+  });
+
   const handleReaderZoteroUserIdChange = useCallback(
     (value: string) => updateReaderSecret('zoteroUserId', value),
     [updateReaderSecret],
@@ -926,6 +950,10 @@ function Reader({ workspaceActive = true }: ReaderProps) {
                   onBatchExportBib={(papers, mode) => void handleBatchExportBib(papers, mode)}
                   paperActionStates={nativePaperActionStates}
                   metadataLlmPreset={summaryModelPreset ?? translationModelPreset}
+                  ragIndexAvailable={ragIndexAvailable}
+                  ragBadgeByDocumentKey={ragBadgeByDocumentKey}
+                  ragIndexingDocumentKey={ragIndexingDocumentKey}
+                  onIndexPaperRag={(paperId) => void handleIndexPaperRag(paperId)}
                 />
               </div>
 
@@ -1096,6 +1124,14 @@ function Reader({ workspaceActive = true }: ReaderProps) {
           batchSummaryPaused={batchSummaryPaused}
           batchMineruProgress={batchMineruProgress}
           batchSummaryProgress={batchSummaryProgress}
+          ragIndexAvailable={ragIndexAvailable}
+          ragIndexOverview={ragIndexOverview}
+          ragIndexPaused={ragIndexPaused}
+          ragIndexProgress={ragIndexProgress}
+          ragIndexRunning={ragIndexRunning}
+          onBatchRagIndex={(options) => void handleBatchRagIndex(options)}
+          onToggleRagIndexPause={handleToggleRagIndexPause}
+          onCancelRagIndex={handleCancelRagIndex}
         />
       </div>
     </AppLocaleProvider>

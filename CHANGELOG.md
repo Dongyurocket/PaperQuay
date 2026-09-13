@@ -4,6 +4,20 @@
 
 各平台安装包见 [GitHub Releases](https://github.com/Dongyurocket/PaperQuay/releases)。
 
+## [0.1.42] - 2026-09-13
+
+### 新增
+
+- **知识库 MCP 服务升级为向量混合检索**：`search_knowledge_base` 在阅读器设置中配置了 Embedding API 时，自动将查询向量化，与 FTS5 全文检索双通道召回并经 RRF（Reciprocal Rank Fusion）融合排序，与桌面端应用内检索语义完全一致；新增 `mode` 参数（`auto` 默认 / `hybrid` / `keyword`），响应新增 `retrievalMode`、`embeddingModel` 与每条结果的 `channels` 命中来源标记；embedding 未配置、接口异常或维度不匹配时自动降级为关键词检索并在 `warning` 中说明，设 `PAPERQUAY_MCP_EMBEDDING=off` 可全局禁用向量通道。
+- **RAG 手动索引触发与索引进度显示**：
+  - 设置面板「本地 RAG 检索」新增知识库索引管理卡片：已索引 / 待索引 / 失败统计一目了然，支持「为未索引文献建立索引」「仅重建失败索引」两种批量强制索引，运行中带进度条并支持暂停 / 继续 / 取消；
+  - 文献列表在 MinerU 角标旁新增 RAG 状态角标（已索引 / 索引中 / 未索引 / 失败），任何索引路径完成后自动刷新；
+  - 文献右键菜单新增「建立/重建 RAG 索引」，单篇强制重试失败或未完成的索引（绕过失败冷却期，保留分块级断点续传，不重复消耗 embedding 额度）。
+
+### 修复
+
+- **Windows 下 MCP 知识库测试临时目录清理偶发 EPERM**：杀毒软件可能短暂持有句柄，清理逻辑改为重试后容忍失败，不再阻塞测试结果。
+
 ## [0.1.41] - 2026-09-09
 
 ### 修复

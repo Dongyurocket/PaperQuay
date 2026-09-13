@@ -9,7 +9,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from 'react';
 import { createPortal } from 'react-dom';
-import { Sparkles, Star, Tag, Trash2 } from 'lucide-react';
+import { Database, Sparkles, Star, Tag, Trash2 } from 'lucide-react';
 import { useLocaleText } from '../../i18n/uiLanguage';
 import { localPathsExist } from '../../services/desktop';
 import {
@@ -71,6 +71,7 @@ import LiteratureCategorySidebar from './components/LiteratureCategorySidebar';
 import LiteraturePaperDetails from './components/LiteraturePaperDetails';
 import LiteraturePaperList, {
   type LiteraturePaperListStatus,
+  type LiteraturePaperRagStatus,
 } from './components/LiteraturePaperList';
 import { flattenCategories, paperPdfPath, paperTranslatedPdfAttachment } from './literatureUi';
 import { readPdfPageCount } from './pdfPageCount';
@@ -139,6 +140,14 @@ interface LiteratureLibraryViewProps {
   batchTitleTranslationRunning?: boolean;
   /** 元数据智能提取所用的 LLM 预设（通常复用总结模型预设）。 */
   metadataLlmPreset?: QaModelPreset | null;
+  /** 本地 RAG 索引可用（启用且 embedding 配置完整）。 */
+  ragIndexAvailable?: boolean;
+  /** paper id（rag_indexes.document_key）→ 聚合索引状态。 */
+  ragBadgeByDocumentKey?: Record<string, LiteraturePaperRagStatus>;
+  /** 正在建立索引的文献 id。 */
+  ragIndexingDocumentKey?: string;
+  /** 右键菜单：为单篇文献建立/重建 RAG 索引。 */
+  onIndexPaperRag?: (paperId: string) => void;
 }
 
 interface NativeSummaryUpdatedEventDetail {
@@ -292,6 +301,10 @@ export default function LiteratureLibraryView({
   onBatchExportBib,
   batchTitleTranslationRunning = false,
   metadataLlmPreset = null,
+  ragIndexAvailable = false,
+  ragBadgeByDocumentKey,
+  ragIndexingDocumentKey = '',
+  onIndexPaperRag,
 }: LiteratureLibraryViewProps) {
   const l = useLocaleText();
   const demoMode = Boolean(demoLibrary);
@@ -2262,6 +2275,22 @@ export default function LiteratureLibraryView({
     }
   };
 
+  const handleIndexPaperRagFromContextMenu = () => {
+    if (demoMode) {
+      showDemoLockedMessage();
+      setPaperContextMenu(null);
+      return;
+    }
+
+    const paper = paperContextMenu?.paper;
+
+    setPaperContextMenu(null);
+
+    if (paper) {
+      onIndexPaperRag?.(paper.id);
+    }
+  };
+
   const handleSubmitMetadataDialog = async () => {
     if (demoMode) {
       showDemoLockedMessage();
@@ -2638,6 +2667,9 @@ export default function LiteratureLibraryView({
           onPaperDropOnCategory={handlePaperDropOnCategory}
           onPaperPointerDragOverCategory={setPaperDragOverCategoryId}
           onPaperContextMenu={handlePaperContextMenu}
+          ragBadgeByDocumentKey={ragBadgeByDocumentKey}
+          ragIndexingDocumentKey={ragIndexingDocumentKey}
+          ragIndexAvailable={ragIndexAvailable}
         />
         </div>
       </div>
@@ -2806,6 +2838,19 @@ export default function LiteratureLibraryView({
               <Sparkles className="mr-2 h-4 w-4 text-violet-600 dark:text-violet-200" strokeWidth={1.9} />
               {l('解析元数据', 'Parse Metadata')}
             </button>
+            {ragIndexAvailable && onIndexPaperRag ? (
+              <button
+                type="button"
+                onClick={handleIndexPaperRagFromContextMenu}
+                disabled={ragIndexingDocumentKey === paperContextMenu.paper.id}
+                className="mt-1 flex w-full items-center rounded-xl px-3 py-2 text-left text-sm font-medium text-slate-700 transition hover:bg-slate-100 disabled:opacity-60 dark:text-[#e0e0e0] dark:hover:bg-white/[0.06]"
+              >
+                <Database className="mr-2 h-4 w-4 text-teal-600 dark:text-teal-200" strokeWidth={1.9} />
+                {ragIndexingDocumentKey === paperContextMenu.paper.id
+                  ? l('RAG 索引中…', 'Indexing…')
+                  : l('建立/重建 RAG 索引', 'Build/Rebuild RAG Index')}
+              </button>
+            ) : null}
             <div className="my-1 border-t border-slate-100 dark:border-white/10" />
             <button
               type="button"

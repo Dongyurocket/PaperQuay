@@ -237,8 +237,8 @@ export function useReaderLibraryActions({
         markdownText,
         l,
       })
-        .then((outcome) => {
-          if (outcome === 'indexed') {
+        .then((result) => {
+          if (result.outcome === 'indexed') {
             setStatusMessage(
               l(
                 `已纳入本地知识库索引：${item.title}`,

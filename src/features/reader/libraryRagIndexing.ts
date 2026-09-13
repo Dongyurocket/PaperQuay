@@ -18,7 +18,10 @@ import { prepareReaderRagDocument } from './readerRag';
  * 且已配置 embedding 服务。任一条件不满足时静默跳过。
  */
 
-export type LibraryRagIndexOutcome = 'indexed' | 'skipped';
+export interface LibraryRagIndexResult {
+  outcome: 'indexed' | 'skipped' | 'failed';
+  errorMessage?: string;
+}
 
 export function resolveLibraryRagEmbeddingOptions(
   settings: Pick<
@@ -71,12 +74,14 @@ export async function indexLibraryPaperMineruSource(input: {
   mineruPath: string;
   /** 新鲜解析结果中已有的 markdown 文本；缺省时回退读取缓存的 full.md。 */
   markdownText?: string | null;
+  /** 手动触发时传 true：绕过失败冷却与内存失败缓存，立即重试。 */
+  force?: boolean;
   l: <T>(zh: T, en: T) => T;
-}): Promise<LibraryRagIndexOutcome> {
+}): Promise<LibraryRagIndexResult> {
   const embedding = resolveLibraryRagEmbeddingOptions(input.settings, input.embeddingApiKey);
 
   if (!embedding) {
-    return 'skipped';
+    return { outcome: 'skipped' };
   }
 
   const mineruDocumentText = input.markdownText?.trim()
@@ -103,11 +108,11 @@ export async function indexLibraryPaperMineruSource(input: {
   );
 
   if (!mineruSource) {
-    return 'skipped';
+    return { outcome: 'skipped' };
   }
 
   // ensurePreparedSourceIndexed 内部已容错（失败写入索引状态并冷却），不会抛出。
-  await ensurePreparedSourceIndexed({
+  const result = await ensurePreparedSourceIndexed({
     documentKey: preparedDocument.documentKey,
     title: preparedDocument.title,
     sourceType: mineruSource.sourceType,
@@ -115,7 +120,10 @@ export async function indexLibraryPaperMineruSource(input: {
     chunks: mineruSource.chunks,
     embedding,
     batchSize: Math.max(1, input.settings.embeddingBatchSize || 24),
+    force: input.force,
   });
 
-  return 'indexed';
+  return result.outcome === 'failed'
+    ? { outcome: 'failed', errorMessage: result.errorMessage }
+    : { outcome: result.outcome === 'ready' ? 'indexed' : 'skipped' };
 }

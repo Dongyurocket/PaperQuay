@@ -135,6 +135,14 @@ export async function ragGetDocumentIndexStatus(
   }
 }
 
+export async function ragListIndexStatuses(): Promise<RagDocumentIndexStatus[]> {
+  try {
+    return await invoke<RagDocumentIndexStatus[]>('rag_list_index_statuses', {});
+  } catch (error) {
+    throw new Error(toErrorMessage(error, '读取本地 RAG 索引状态列表失败'));
+  }
+}
+
 export async function ragRetrieveDocumentChunks(
   request: RagRetrieveRequest,
 ): Promise<RagRetrievalResult[]> {

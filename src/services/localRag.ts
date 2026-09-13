@@ -16,6 +16,17 @@ import {
   ragRetrieveDocumentChunks,
   type RagEmbeddingOptions,
 } from './rag';
+import { RAG_INDEX_STATUS_UPDATED_EVENT } from './ragIndexStatus';
+
+function emitRagIndexStatusUpdated(documentKey: string) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  window.dispatchEvent(
+    new CustomEvent(RAG_INDEX_STATUS_UPDATED_EVENT, { detail: { documentKey } }),
+  );
+}
 
 const RAG_INDEX_FAILURE_COOLDOWN_MS = 60_000;
 const RAG_RESULT_MIN_MARGIN = 0.12;
@@ -116,6 +127,11 @@ function filterRelevantRetrievals(
   return (filtered.length > 0 ? filtered : sorted).slice(0, topK);
 }
 
+export interface RagIndexEnsureResult {
+  outcome: 'ready' | 'skipped' | 'failed';
+  errorMessage?: string;
+}
+
 export async function ensurePreparedSourceIndexed(input: {
   documentKey: string;
   title: string;
@@ -130,7 +146,9 @@ export async function ensurePreparedSourceIndexed(input: {
   }>;
   embedding: RagEmbeddingOptions;
   batchSize: number;
-}) {
+  /** 手动触发时传 true：绕过失败冷却与内存失败缓存，立即重试。 */
+  force?: boolean;
+}): Promise<RagIndexEnsureResult> {
   const embeddingModelKey = buildRagEmbeddingModelKey(input.embedding);
   const currentStatus = await ragGetDocumentIndexStatus(input.documentKey, input.sourceType);
   const cachedFailure = getCachedRagIndexFailure(
@@ -152,20 +170,21 @@ export async function ensurePreparedSourceIndexed(input: {
       input.sourceSignature,
       embeddingModelKey,
     );
-    return;
+    return { outcome: 'ready' };
   }
 
   if (
+    !input.force &&
     currentStatus?.sourceSignature === input.sourceSignature &&
     currentStatus.embeddingModelKey === embeddingModelKey &&
     currentStatus.status === 'failed' &&
     shouldSkipFailedStatus(currentStatus.cooldownUntil)
   ) {
-    return;
+    return { outcome: 'skipped' };
   }
 
-  if (cachedFailure) {
-    return;
+  if (!input.force && cachedFailure) {
+    return { outcome: 'skipped' };
   }
 
   const alreadyIndexedCount =
@@ -176,7 +195,7 @@ export async function ensurePreparedSourceIndexed(input: {
   const remainingChunks = input.chunks.slice(alreadyIndexedCount);
 
   if (remainingChunks.length === 0) {
-    return;
+    return { outcome: 'ready' };
   }
 
   try {
@@ -218,6 +237,8 @@ export async function ensurePreparedSourceIndexed(input: {
       input.sourceSignature,
       embeddingModelKey,
     );
+    emitRagIndexStatusUpdated(input.documentKey);
+    return { outcome: 'ready' };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
 
@@ -238,6 +259,8 @@ export async function ensurePreparedSourceIndexed(input: {
       errorMessage: message,
       retryAfterMs: RAG_INDEX_FAILURE_COOLDOWN_MS,
     });
+    emitRagIndexStatusUpdated(input.documentKey);
+    return { outcome: 'failed', errorMessage: message };
   }
 }
 

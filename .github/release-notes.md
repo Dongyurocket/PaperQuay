@@ -14,7 +14,8 @@ Download the native installer for your operating system from the Assets section 
 
 ## Highlights
 
-- **Fix: broken snapshot cards after cross-page table merging**: MinerU automatically merges multi-page tables (e.g., a thesis nomenclature spanning several pages) into the first fragment, leaving empty stub blocks on later pages whose asset path degrades to the bare `images/` directory. The renderer previously requested that directory as an image file, producing “No matching table snapshot was found” error cards with a red `Path is not a file` message. Directory-only asset paths are now rejected, and empty table stubs are treated as continuations of the merged table fragment so they are hidden from the block viewer; clicking the table region on later PDF pages still resolves to the merged table block.
+- **Hybrid vector retrieval for the knowledge-base MCP server**: `search_knowledge_base` now vectorizes the query with your configured embedding API and fuses vector KNN results with FTS5 keyword results via reciprocal rank fusion — the same retrieval semantics as the in-app Agent. A new `mode` parameter (`auto`/`hybrid`/`keyword`) controls the behavior, responses report `retrievalMode` plus per-snippet `channels` (`vector`/`fts`), and any embedding failure degrades gracefully to keyword-only search with a `warning` instead of an error.
+- **Manual RAG indexing with visible progress**: the Local RAG settings panel gains an index management card with indexed/pending/failed counts, batch actions to index unindexed papers or retry only failed ones (with progress bar, pause/resume, and cancel), a per-paper RAG status badge in the library list (indexed/indexing/not indexed/failed), and a “Build/Rebuild RAG Index” entry in the paper context menu. Manual triggers bypass the failure cooldown while keeping chunk-level incremental resume, so re-indexing never re-embeds already indexed chunks.
 
 ## Notes
 
@@ -39,7 +40,8 @@ PaperQuay 是一个开源 AI 论文工作台，覆盖文献管理、PDF 阅读�
 
 ## 本次更新
 
-- **修复：跨页合并表格后续分片渲染空错误卡片**：MinerU 云端会自动把跨页表格（如学位论文的多页注释表/符号表）合并进第一个分片，后续分片只留下没有表格内容与截图文件名的空壳块（资源路径退化为 `images/` 目录）。此前前端会把该目录当作图片文件请求后端读取，抛出 `Path is not a file` 并显示「没有找到对应的表格截图」错误卡片。现在资源路径提取会拒绝无文件名的目录路径，空壳表格块会被标记为首个合并分片的续块并自动隐藏；在 PDF 后续页点击表格区域仍会正确定位到合并表格块。
+- **知识库 MCP 服务升级为向量混合检索**：`search_knowledge_base` 在配置了 Embedding API 时自动将查询向量化，与 FTS5 全文检索双通道召回并经 RRF 融合排序，与应用内 Agent 检索语义完全一致；新增 `mode` 参数（`auto`/`hybrid`/`keyword`），响应报告 `retrievalMode` 与每条结果的 `channels` 命中来源；embedding 异常时自动降级为关键词检索并返回 `warning`，不会报错中断。
+- **RAG 手动索引触发与索引进度显示**：设置面板「本地 RAG 检索」新增索引管理卡片，提供已索引/待索引/失败统计与「为未索引文献建立索引」「仅重建失败索引」批量操作（带进度条、暂停/取消）；文献列表新增 RAG 状态角标（已索引/索引中/未索引/失败）；文献右键菜单新增「建立/重建 RAG 索引」。手动触发绕过失败冷却期且保留分块级断点续传，重建不会重复消耗已索引分块的 embedding 额度。
 
 ## 备注
 

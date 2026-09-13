@@ -1556,6 +1556,12 @@ function createRagStore(appPaths, options = {}) {
     isFtsAvailable,
     listAgentRunUsageBySession,
     listDocumentSimilarities,
+    listIndexStatuses() {
+      return db
+        .prepare('SELECT * FROM rag_indexes ORDER BY indexed_at DESC')
+        .all()
+        .map(rowToStatus);
+    },
     listInterruptedAgentRuns,
     migrateFromLibraryRagIndexes,
     reportFailure,

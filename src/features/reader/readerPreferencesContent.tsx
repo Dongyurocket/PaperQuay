@@ -98,6 +98,14 @@ interface ReaderPreferencesContentProps
     | 'batchSummaryPaused'
     | 'batchMineruProgress'
     | 'batchSummaryProgress'
+    | 'ragIndexAvailable'
+    | 'ragIndexOverview'
+    | 'ragIndexPaused'
+    | 'ragIndexProgress'
+    | 'ragIndexRunning'
+    | 'onBatchRagIndex'
+    | 'onToggleRagIndexPause'
+    | 'onCancelRagIndex'
   > {
   activeSection: PreferencesSectionKey;
   l: ReaderPreferencesLocalizer;
@@ -252,6 +260,14 @@ export function ReaderPreferencesContent({
   batchSummaryPaused = false,
   batchMineruProgress,
   batchSummaryProgress,
+  ragIndexAvailable = false,
+  ragIndexOverview,
+  ragIndexPaused = false,
+  ragIndexProgress,
+  ragIndexRunning = false,
+  onBatchRagIndex,
+  onToggleRagIndexPause,
+  onCancelRagIndex,
 }: ReaderPreferencesContentProps) {
   const languageOptions = buildLanguageOptions(settings.uiLanguage);
   const summaryLanguageOptions = buildSummaryLanguageOptions(settings.uiLanguage);
@@ -1497,6 +1513,70 @@ export function ReaderPreferencesContent({
                   </div>
                 </div>
               </div>
+              {settings.localRagEnabled ? (
+                <div className="space-y-2 rounded-2xl border border-slate-200 bg-white/60 px-3 py-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="text-xs font-medium text-slate-500">
+                      {l('知识库索引管理', 'Knowledge Base Indexing')}
+                    </div>
+                    {ragIndexOverview ? (
+                      <div className="text-[11px] leading-5 text-slate-400">
+                        {l(
+                          `已索引 ${ragIndexOverview.ready} · 待索引 ${ragIndexOverview.pending + ragIndexOverview.unindexed} · 失败 ${ragIndexOverview.failed}`,
+                          `Indexed ${ragIndexOverview.ready} · Pending ${ragIndexOverview.pending + ragIndexOverview.unindexed} · Failed ${ragIndexOverview.failed}`,
+                        )}
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => onBatchRagIndex?.()}
+                      disabled={!ragIndexAvailable || ragIndexRunning}
+                      className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2 text-sm text-slate-700 transition hover:bg-slate-100 disabled:opacity-60"
+                    >
+                      {ragIndexRunning
+                        ? l('索引中...', 'Indexing...')
+                        : l('为未索引文献建立索引', 'Index Unindexed Papers')}
+                    </button>
+                    {ragIndexOverview && ragIndexOverview.failed > 0 && !ragIndexRunning ? (
+                      <button
+                        type="button"
+                        onClick={() => onBatchRagIndex?.({ onlyFailed: true })}
+                        disabled={!ragIndexAvailable}
+                        className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-700 transition hover:bg-amber-100 disabled:opacity-60"
+                      >
+                        {l('仅重建失败索引', 'Retry Failed Indexes')}
+                      </button>
+                    ) : null}
+                    {ragIndexRunning ? (
+                      <button
+                        type="button"
+                        onClick={onToggleRagIndexPause}
+                        className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm text-slate-700 transition hover:bg-slate-50"
+                      >
+                        {ragIndexPaused ? l('继续', 'Resume') : l('暂停', 'Pause')}
+                      </button>
+                    ) : null}
+                    {ragIndexRunning ? (
+                      <button
+                        type="button"
+                        onClick={onCancelRagIndex}
+                        className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm text-rose-600 transition hover:bg-rose-100"
+                      >
+                        {l('取消', 'Cancel')}
+                      </button>
+                    ) : null}
+                  </div>
+                  {ragIndexProgress ? (
+                    <BatchProgressCard
+                      title={l('RAG 索引进度', 'RAG Indexing Progress')}
+                      progress={ragIndexProgress}
+                      tone="indigo"
+                    />
+                  ) : null}
+                </div>
+              ) : null}
             </div>
           </SettingsField>
 

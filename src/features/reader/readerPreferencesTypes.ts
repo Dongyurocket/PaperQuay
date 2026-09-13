@@ -7,6 +7,7 @@ import type {
   ReaderSettings,
 } from '../../types/reader';
 import type { LibrarySettings } from '../../types/library';
+import type { RagIndexOverview } from '../../services/ragIndexStatus';
 import type { BatchProgressState, PreferencesSectionKey } from './readerShared';
 
 export type ReaderPreferencesLocalizer = <T>(zh: T, en: T) => T;
@@ -78,4 +79,12 @@ export interface ReaderPreferencesWindowProps {
   batchSummaryPaused?: boolean;
   batchMineruProgress: BatchProgressState;
   batchSummaryProgress: BatchProgressState;
+  ragIndexAvailable?: boolean;
+  ragIndexOverview?: RagIndexOverview;
+  ragIndexPaused?: boolean;
+  ragIndexProgress?: BatchProgressState;
+  ragIndexRunning?: boolean;
+  onBatchRagIndex?: (options?: { onlyFailed?: boolean }) => void;
+  onToggleRagIndexPause?: () => void;
+  onCancelRagIndex?: () => void;
 }

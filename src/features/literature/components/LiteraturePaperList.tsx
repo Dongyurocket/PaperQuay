@@ -44,6 +44,9 @@ export interface LiteraturePaperListStatus {
   checkingMineru?: boolean;
 }
 
+/** 本地 RAG 索引聚合状态（与 src/services/ragIndexStatus.ts 的 RagAggregateStatus 对齐）。 */
+export type LiteraturePaperRagStatus = 'ready' | 'pending' | 'failed' | 'none';
+
 export type LiteraturePaperListSortBy = NonNullable<ListPapersRequest['sortBy']>;
 export type LiteraturePaperListSortDirection = NonNullable<ListPapersRequest['sortDirection']>;
 
@@ -85,6 +88,12 @@ interface LiteraturePaperListProps {
     event: MouseEvent<HTMLDivElement>,
     paper: LiteraturePaper,
   ) => void;
+  /** 本地 RAG 索引角标：paper id（即 rag_indexes.document_key）→ 聚合状态。 */
+  ragBadgeByDocumentKey?: Record<string, LiteraturePaperRagStatus>;
+  /** 正在建立索引的文献 id（批量或单篇索引运行时）。 */
+  ragIndexingDocumentKey?: string;
+  /** 本地 RAG 可用（启用且 embedding 配置完整）时才展示角标。 */
+  ragIndexAvailable?: boolean;
 }
 
 export default function LiteraturePaperList({
@@ -114,6 +123,9 @@ export default function LiteraturePaperList({
   onPaperDropOnCategory,
   onPaperPointerDragOverCategory,
   onPaperContextMenu,
+  ragBadgeByDocumentKey,
+  ragIndexingDocumentKey = '',
+  ragIndexAvailable = false,
 }: LiteraturePaperListProps) {
   const l = useLocaleText();
   const locale = useAppLocale();
@@ -689,6 +701,35 @@ export default function LiteraturePaperList({
                               ? l('MinerU 已解析', 'MinerU Parsed')
                               : l('MinerU 未解析', 'MinerU Not Parsed')}
                         </span>
+                        {ragIndexAvailable && mineruParsed ? (
+                          <span
+                            title={
+                              ragIndexingDocumentKey === paper.id
+                                ? l('正在建立 RAG 索引', 'Building RAG index')
+                                : ragBadgeByDocumentKey?.[paper.id] === 'failed'
+                                  ? l('RAG 索引失败，可在设置中重建', 'RAG indexing failed; rebuild it in settings')
+                                  : undefined
+                            }
+                            className={clsx(
+                              'rounded-full border px-2 py-0.5 text-[10px] font-semibold',
+                              ragIndexingDocumentKey === paper.id
+                                ? 'border-indigo-300/55 bg-indigo-50 text-indigo-700 dark:border-indigo-300/20 dark:bg-indigo-300/10 dark:text-indigo-100'
+                                : ragBadgeByDocumentKey?.[paper.id] === 'ready'
+                                  ? 'border-teal-300/55 bg-teal-50 text-teal-700 dark:border-teal-300/20 dark:bg-teal-300/10 dark:text-teal-100'
+                                  : ragBadgeByDocumentKey?.[paper.id] === 'failed'
+                                    ? 'border-rose-300/55 bg-rose-50 text-rose-700 dark:border-rose-300/20 dark:bg-rose-300/10 dark:text-rose-100'
+                                    : 'border-slate-300 bg-slate-100 text-slate-500 dark:border-white/10 dark:bg-white/[0.06] dark:text-[#a0a0a0]',
+                            )}
+                          >
+                            {ragIndexingDocumentKey === paper.id
+                              ? l('RAG 索引中', 'RAG Indexing')
+                              : ragBadgeByDocumentKey?.[paper.id] === 'ready'
+                                ? l('RAG 已索引', 'RAG Indexed')
+                                : ragBadgeByDocumentKey?.[paper.id] === 'failed'
+                                  ? l('RAG 索引失败', 'RAG Index Failed')
+                                  : l('RAG 未索引', 'RAG Not Indexed')}
+                          </span>
+                        ) : null}
                         <span
                           className={clsx(
                             'rounded-full border px-2 py-0.5 text-[10px] font-semibold',
