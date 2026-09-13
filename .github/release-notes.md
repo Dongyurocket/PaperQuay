@@ -18,6 +18,8 @@ Download the native installer for your operating system from the Assets section 
 - **Fix RAG indexing fixed-point loop on interrupted documents**: The incremental indexing flow previously assumed chunks were indexed in exact sequential order using positional slicing (`chunks.slice(alreadyIndexedCount)`). When an interrupted document lacked low-index chunks, slicing repeatedly resent already-indexed chunks, preventing the database row count from ever reaching the total while erroneously reporting completion. The store and local RAG service now query existing `chunkId` sets to compute true gaps by set difference, automatically self-healing interrupted documents and pruning obsolete chunks via `finalizeDocumentIndex`.
 - **Improve RAG error visibility**: Single-paper context menu indexing now captures errors and surfaces them in the status bar instead of failing silently, and batch indexing reports the first failure error in the completion summary.
 - **Connect full library to RAG index management**: Previously, only papers opened in active reader tabs were recognized as indexable items. Viewing the library with no documents open resulted in an empty item pool, forcing all papers to display fallback "RAG Not Indexed" badges, showing 0/0/0 counts in settings, and silently aborting rebuild requests. All library papers are now injected into the workspace item pool and synchronized with real-time MinerU parse statuses.
+- **Support multi-part MinerU page-dictionary format**: Large documents (such as 200–300+ page dissertations) merged from multi-volume splits store `content_list_v2.json` as an array of page dictionary objects (`Array<Record<string, Block>>`). The parser now properly unwraps these page dictionaries, restoring full structured block and RAG chunk extraction for long papers that previously yielded 0 chunks and were skipped.
+- **Self-heal orphan failure statuses for ready documents**: Automatically clean up obsolete zero-chunk `pdf-text:failed` records when `mineru-markdown` is already ready, preventing old legacy failures from permanently pinning healthy papers into a failed state.
 
 ## Notes
 
@@ -46,6 +48,8 @@ PaperQuay 是一个开源 AI 论文工作台，覆盖文献管理、PDF 阅读�
 - **修复 RAG 索引断续续跑陷入不动点死循环**：续跑逻辑由「位置切片」全面升级为「分块 ID 差集补齐」，精确挑出未入库分块重补并新增 `finalizeDocumentIndex` 自动收敛状态与清理历史陈旧分块，彻底解决中断文献重复点击无法收敛的问题。
 - **增强 RAG 索引错误反馈**：单篇右键索引入口补充异常捕获，在底层异常时向状态栏给出明确反馈；批量索引记录首个失败原因并在总结中提示。
 - **文献库全量文献接入 RAG 索引与状态池**：修复阅读器层此前仅将已在标签页打开的文献纳入条目池，导致在文库主页未打开文档时条目池为空、全库角标回退为“未索引”、设置面板统计为 0 且右键与批量索引无响应的问题。全例文献现已注入条目池并与 MinerU 状态实时同步。
+- **兼容超页大文件 MinerU 合并产物解析**：解决 200~300+ 页长篇学位论文经多卷拆分合并后，`content_list_v2.json` 采用页面字典结构导致文本提取为空、分块数为 0 且建索引被静默跳过的问题，完全恢复结构化向量切块提取。
+- **自愈清理已就绪文献的陈旧空壳失败记录**：自动清理主来源 `mineru-markdown` 已经 ready 但残留无数据 `pdf-text:failed` 导致的永久误报失败问题。
 
 ## 备注
 

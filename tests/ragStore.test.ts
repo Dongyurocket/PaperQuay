@@ -634,3 +634,53 @@ test('RAG finalize prunes stale chunk rows and keeps signature mismatch untouche
     rmSync(dataDir, { recursive: true, force: true });
   }
 });
+
+test('RAG store cleans up orphan zero-chunk failed statuses when mineru-markdown is ready', () => {
+  const { dataDir, store } = createStore();
+
+  try {
+    // 模拟历史遗留状态：一个文档同时存在一个空的 pdf-text failed 状态和一个就绪的 mineru-markdown 状态
+    store.reportFailure({
+      documentKey: 'doc-orphan-test',
+      title: 'Orphan Test Doc',
+      sourceType: 'pdf-text',
+      sourceSignature: 'sig-pdf',
+      embeddingModelKey: 'embedding-test',
+      totalChunkCount: 10,
+      errorMessage: 'ancient 404 failure',
+      retryAfterMs: 1000,
+    });
+
+    let pdfStatus = store.getDocumentIndexStatus({ documentKey: 'doc-orphan-test', sourceType: 'pdf-text' });
+    assert.equal(pdfStatus.status, 'failed');
+    assert.equal(pdfStatus.chunkCount, 0);
+
+    // 索引 mineru-markdown 并达到 ready
+    store.indexDocument({
+      documentKey: 'doc-orphan-test',
+      title: 'Orphan Test Doc',
+      sourceType: 'mineru-markdown',
+      sourceSignature: 'sig-mineru',
+      embeddingModelKey: 'embedding-test',
+      totalChunkCount: 1,
+      chunks: [{
+        chunkId: 'mineru-1',
+        chunkIndex: 0,
+        pageIndex: 0,
+        blockId: null,
+        text: 'valid mineru text',
+        embedding: [0.1, 0.2, 0.3, 0.4],
+      }],
+    });
+
+    const mineruStatus = store.getDocumentIndexStatus({ documentKey: 'doc-orphan-test', sourceType: 'mineru-markdown' });
+    assert.equal(mineruStatus.status, 'ready');
+
+    // indexDocument 成功就绪后，同文档下无数据的 pdf-text failed 记录应被自动清理
+    pdfStatus = store.getDocumentIndexStatus({ documentKey: 'doc-orphan-test', sourceType: 'pdf-text' });
+    assert.equal(pdfStatus, null);
+  } finally {
+    store.close();
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});

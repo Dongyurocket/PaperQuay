@@ -695,6 +695,26 @@ function initializeFtsSchema(db, { disabled = false } = {}) {
   }
 }
 
+// 启动自愈：清理已拥有可用 mineru-markdown ready 索引的文档下、残留的无数据 failed 记录（如历史早期测试遗留的 pdf-text:failed 空壳行），
+// 避免已就绪文献因历史次要来源残留被永久误判为索引失败。
+function cleanupOrphanFailedStatuses(db) {
+  try {
+    db.exec(`
+      DELETE FROM rag_indexes
+      WHERE status = 'failed'
+        AND chunk_count = 0
+        AND document_key IN (
+          SELECT document_key
+          FROM rag_indexes
+          WHERE source_type = 'mineru-markdown'
+            AND status = 'ready'
+        );
+    `);
+  } catch (error) {
+    console.warn('[paperquay] Failed to cleanup orphan failed RAG statuses.', toError(error));
+  }
+}
+
 function openDatabase(databasePath) {
   fs.mkdirSync(path.dirname(databasePath), { recursive: true });
 
@@ -712,6 +732,7 @@ function openDatabase(databasePath) {
 
   db.exec('PRAGMA journal_mode = WAL;');
   createSchema(db);
+  cleanupOrphanFailedStatuses(db);
   backfillDocumentVectors(db);
   return db;
 }
@@ -1048,6 +1069,7 @@ function createRagStore(appPaths, options = {}) {
       }
 
       const indexedChunkCount = countChunks(db, documentKey, sourceType);
+      const nextStatus = indexedChunkCount >= totalChunkCount ? 'ready' : 'pending';
       upsertStatus(db, {
         documentKey,
         sourceType,
@@ -1059,12 +1081,23 @@ function createRagStore(appPaths, options = {}) {
         chunkCount: indexedChunkCount,
         indexedChunkCount,
         indexedAt: Date.now(),
-        status: indexedChunkCount >= totalChunkCount ? 'ready' : 'pending',
+        status: nextStatus,
         lastError: null,
         failedAt: null,
         retryAfterMs: null,
         cooldownUntil: null,
       });
+
+      if (nextStatus === 'ready' && sourceType === 'mineru-markdown') {
+        db.prepare(`
+          DELETE FROM rag_indexes
+          WHERE document_key = ?
+            AND source_type != ?
+            AND status = 'failed'
+            AND chunk_count = 0
+        `).run(documentKey, sourceType);
+      }
+
       rebuildDocumentVectors(db, documentKey);
     });
   }
@@ -1165,6 +1198,7 @@ function createRagStore(appPaths, options = {}) {
       }
 
       const indexedChunkCount = countChunks(db, documentKey, sourceType);
+      const nextStatus = indexedChunkCount >= totalChunkCount ? 'ready' : 'pending';
       upsertStatus(db, {
         documentKey,
         sourceType,
@@ -1176,12 +1210,23 @@ function createRagStore(appPaths, options = {}) {
         chunkCount: indexedChunkCount,
         indexedChunkCount,
         indexedAt: Date.now(),
-        status: indexedChunkCount >= totalChunkCount ? 'ready' : 'pending',
+        status: nextStatus,
         lastError: null,
         failedAt: null,
         retryAfterMs: null,
         cooldownUntil: null,
       });
+
+      if (nextStatus === 'ready' && sourceType === 'mineru-markdown') {
+        db.prepare(`
+          DELETE FROM rag_indexes
+          WHERE document_key = ?
+            AND source_type != ?
+            AND status = 'failed'
+            AND chunk_count = 0
+        `).run(documentKey, sourceType);
+      }
+
       rebuildDocumentVectors(db, documentKey);
       return getStatus(db, documentKey, sourceType);
     });

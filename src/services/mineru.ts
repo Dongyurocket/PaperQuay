@@ -755,12 +755,29 @@ export function parseMineruPages(payload: string | unknown): MineruPage[] {
   const parsed = typeof payload === 'string' ? JSON.parse(payload) : payload;
 
   if (Array.isArray(parsed)) {
-    if (parsed.every(Array.isArray)) {
-      return parsed.map((page, pageIndex) => {
-        if (!Array.isArray(page)) {
-          throw new Error(`第 ${pageIndex + 1} 页不是有效的块数组`);
+    // 兼容 MinerU 结构：每页可能是二维子数组，也可能是以数字索引为键的页字典对象（如超页大文件拆分合并产物）。
+    const normalizedPageArrays = parsed.map((pageCandidate) => {
+      if (Array.isArray(pageCandidate)) {
+        return pageCandidate;
+      }
+      if (
+        pageCandidate &&
+        typeof pageCandidate === 'object' &&
+        !('type' in (pageCandidate as Record<string, unknown>))
+      ) {
+        const values = Object.values(pageCandidate as Record<string, unknown>);
+        if (
+          values.length > 0 &&
+          values.every((v) => v && typeof v === 'object' && 'type' in (v as Record<string, unknown>))
+        ) {
+          return values;
         }
+      }
+      return null;
+    });
 
+    if (normalizedPageArrays.length > 0 && normalizedPageArrays.every((p): p is unknown[] => Array.isArray(p))) {
+      return normalizedPageArrays.map((page, pageIndex) => {
         return page.map((block, blockIndex) => {
           return normalizeMineruBlock(block, pageIndex, blockIndex, 'normalized-1000');
         });
