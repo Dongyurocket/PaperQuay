@@ -206,7 +206,9 @@ function Reader({ workspaceActive = true }: ReaderProps) {
   const [readerNotesLoading, setReaderNotesLoading] = useState(false);
   const [readerNotesSaving, setReaderNotesSaving] = useState(false);
   const [readerNotesError, setReaderNotesError] = useState('');
-  const [notePaperCandidates, setNotePaperCandidates] = useState<LiteraturePaper[]>([]);
+  const [allLibraryPapers, setAllLibraryPapers] = useState<LiteraturePaper[]>([]);
+  const [libraryPaperStatuses, setLibraryPaperStatuses] = useState<Record<string, { mineruParsed?: boolean }>>({});
+  const notePaperCandidates = allLibraryPapers;
   const [pendingNoteAnchorJump, setPendingNoteAnchorJump] =
     useState<JumpToNoteAnchorEventDetail | null>(null);
 
@@ -301,6 +303,12 @@ function Reader({ workspaceActive = true }: ReaderProps) {
     [activeTabId, tabs],
   );
 
+  const libraryWorkspaceItems = useMemo(() => {
+    return allLibraryPapers
+      .map((paper) => createNativeLibraryWorkspaceItem(paper, librarySettings?.storageDir))
+      .filter((item): item is WorkspaceItem => Boolean(item));
+  }, [allLibraryPapers, librarySettings?.storageDir]);
+
   const workspaceItemMap = useMemo(() => {
     const itemMap = new Map<string, WorkspaceItem>();
 
@@ -321,11 +329,12 @@ function Reader({ workspaceActive = true }: ReaderProps) {
       }
     };
 
+    applyItems(libraryWorkspaceItems);
     applyItems(standaloneItems);
     applyItems(nativeLibraryItems);
 
     return itemMap;
-  }, [nativeLibraryItems, standaloneItems]);
+  }, [libraryWorkspaceItems, nativeLibraryItems, standaloneItems]);
 
   const allKnownItems = useMemo(
     () => Array.from(workspaceItemMap.values()),
@@ -500,6 +509,16 @@ function Reader({ workspaceActive = true }: ReaderProps) {
     openTab,
   });
 
+  const effectiveItemParseStatusMap = useMemo(() => {
+    const merged: Record<string, boolean | undefined> = { ...itemParseStatusMap };
+    for (const [paperId, status] of Object.entries(libraryPaperStatuses)) {
+      if (status?.mineruParsed) {
+        merged[`native-library:${paperId}`] = true;
+      }
+    }
+    return merged;
+  }, [itemParseStatusMap, libraryPaperStatuses]);
+
   const {
     ragIndexAvailable,
     ragBadgeByDocumentKey,
@@ -517,7 +536,7 @@ function Reader({ workspaceActive = true }: ReaderProps) {
     configHydrated,
     embeddingApiKey,
     findExistingMineruJson,
-    itemParseStatusMap,
+    itemParseStatusMap: effectiveItemParseStatusMap,
     l,
     setStatusMessage,
     settings,
@@ -560,15 +579,15 @@ function Reader({ workspaceActive = true }: ReaderProps) {
 
     let cancelled = false;
 
-    void listLibraryPapers({ limit: 1000, sortBy: 'updatedAt', sortDirection: 'desc' })
+    void listLibraryPapers({ limit: 5000, sortBy: 'updatedAt', sortDirection: 'desc' })
       .then((papers) => {
         if (!cancelled) {
-          setNotePaperCandidates(papers);
+          setAllLibraryPapers(papers);
         }
       })
       .catch(() => {
         if (!cancelled) {
-          setNotePaperCandidates([]);
+          setAllLibraryPapers([]);
         }
       });
 
@@ -680,7 +699,7 @@ function Reader({ workspaceActive = true }: ReaderProps) {
 
       try {
         const papers = await listLibraryPapers({ limit: 1000, sortBy: 'updatedAt', sortDirection: 'desc' });
-        setNotePaperCandidates(papers);
+        setAllLibraryPapers(papers);
         const paper = papers.find((item) => item.id === paperId);
         const workspaceItem = paper
           ? createNativeLibraryWorkspaceItem(paper, librarySettings?.storageDir)
@@ -746,7 +765,7 @@ function Reader({ workspaceActive = true }: ReaderProps) {
 
       try {
         const papers = await listLibraryPapers({ limit: 1000, sortBy: 'updatedAt', sortDirection: 'desc' });
-        setNotePaperCandidates(papers);
+        setAllLibraryPapers(papers);
 
         const paper = papers.find((item) => item.id === normalizedPaperId);
 
@@ -853,6 +872,12 @@ function Reader({ workspaceActive = true }: ReaderProps) {
         return;
       }
 
+      setAllLibraryPapers((current) =>
+        current.some((paper) => paper.id === detail.paper.id)
+          ? current.map((paper) => (paper.id === detail.paper.id ? detail.paper : paper))
+          : [detail.paper, ...current],
+      );
+
       const refreshedItem = createNativeLibraryWorkspaceItem(detail.paper, librarySettings?.storageDir);
 
       if (refreshedItem) {
@@ -954,6 +979,8 @@ function Reader({ workspaceActive = true }: ReaderProps) {
                   ragBadgeByDocumentKey={ragBadgeByDocumentKey}
                   ragIndexingDocumentKey={ragIndexingDocumentKey}
                   onIndexPaperRag={(paperId) => void handleIndexPaperRag(paperId)}
+                  onAllPapersChange={setAllLibraryPapers}
+                  onPaperStatusesChange={setLibraryPaperStatuses}
                 />
               </div>
 

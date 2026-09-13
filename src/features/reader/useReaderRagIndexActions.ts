@@ -325,6 +325,9 @@ export function useReaderRagIndexActions({
       const entry = indexableItems.find((candidate) => candidate.documentKey === documentKey);
 
       if (!entry) {
+        setStatusMessage(
+          l('未找到该文献对应的阅读器条目。', 'Document entry not found for this paper.'),
+        );
         return;
       }
 

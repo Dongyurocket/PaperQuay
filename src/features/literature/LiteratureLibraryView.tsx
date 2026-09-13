@@ -148,6 +148,10 @@ interface LiteratureLibraryViewProps {
   ragIndexingDocumentKey?: string;
   /** 右键菜单：为单篇文献建立/重建 RAG 索引。 */
   onIndexPaperRag?: (paperId: string) => void;
+  /** 全量文献快照同步至父级（如供阅读器 RAG 索引与概览池使用）。 */
+  onAllPapersChange?: (allPapers: LiteraturePaper[]) => void;
+  /** MinerU 批量检测状态字典同步至父级。 */
+  onPaperStatusesChange?: (statuses: Record<string, LiteraturePaperListStatus>) => void;
 }
 
 interface NativeSummaryUpdatedEventDetail {
@@ -305,6 +309,8 @@ export default function LiteratureLibraryView({
   ragBadgeByDocumentKey,
   ragIndexingDocumentKey = '',
   onIndexPaperRag,
+  onAllPapersChange,
+  onPaperStatusesChange,
 }: LiteratureLibraryViewProps) {
   const l = useLocaleText();
   const demoMode = Boolean(demoLibrary);
@@ -312,6 +318,10 @@ export default function LiteratureLibraryView({
   const [categories, setCategories] = useState<LiteratureCategory[]>([]);
   const [papers, setPapers] = useState<LiteraturePaper[]>([]);
   const [paperStatuses, setPaperStatuses] = useState<Record<string, LiteraturePaperListStatus>>({});
+
+  useEffect(() => {
+    onPaperStatusesChange?.(paperStatuses);
+  }, [onPaperStatusesChange, paperStatuses]);
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
   const [selectedPaperId, setSelectedPaperId] = useState<string | null>(null);
   const [multiSelectedPaperIds, setMultiSelectedPaperIds] = useState<string[]>([]);
@@ -627,9 +637,10 @@ export default function LiteratureLibraryView({
     ]);
 
     allPapersSnapshotRef.current = allPapers;
+    onAllPapersChange?.(allPapers);
     setCategories(nextCategories);
     void refreshMineruStatusesForPapers(allPapers);
-  }, [demoLibrary, refreshMineruStatusesForPapers, refreshPapers, resolveDemoPapers]);
+  }, [demoLibrary, onAllPapersChange, refreshMineruStatusesForPapers, refreshPapers, resolveDemoPapers]);
 
   const hydrateImportDraftsFromLocalPdf = useCallback(
     async (drafts: ImportDraftItem[]) => {

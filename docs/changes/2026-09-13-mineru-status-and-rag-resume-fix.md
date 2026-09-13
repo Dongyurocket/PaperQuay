@@ -49,9 +49,13 @@
 8. **测试**：
    - 新增 `tests/fileCommands.test.ts`：验证 `paths_exist` 返回真实布尔值且类型正确。
    - 扩充 `tests/ragStore.test.ts`：增加 chunkId 差集续跑补齐不动点、陈旧分块清理以及签名不匹配保护测试。
+8. **文库全量文献接入 RAG 索引与状态池**：
+   - 修复 `Reader.tsx` 此前仅将已打开的阅读器 Tab 纳入 `allKnownItems`，导致在文库主页时 `allKnownItems` 为空数组、RAG 角标全部回退为“未索引”、设置面板统计为 0/0/0 且无法触发重建的问题。
+   - 现将文库全量文献转为 `libraryWorkspaceItems` 注入 `workspaceItemMap`，并实时双向同步文库变更与 MinerU 解析状态。
 
 ## 验证
 
 - `npm run build`：TypeScript 编译与 Vite 生产打包 100% 成功通过。
 - `npm test`：运行 `tests/*.test.ts` 全部 297 项测试（含新增的 4 项），耗时 1.16 秒，全部 pass。
 - 本地真实数据仿真验证：复制真实 `paperquay-rag.sqlite` 数据库中 552/565 pending 的文献数据，经新差集逻辑成功提取缺失的 13 个低位分块并入库，调用 `finalizeDocumentIndex` 后状态顺利收敛为 `ready 565/565`。
+- 本地 54 篇真实文献全库仿真：全库 54 篇文献接入后，35 篇已索引、7 篇待补齐、3 篇失败、9 篇未索引，角标与统计完全匹配。
