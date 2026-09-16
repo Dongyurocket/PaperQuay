@@ -1,3 +1,5 @@
+import { getDocumentParseTask } from '../../services/documentParseTasks';
+import { parseMineruPages, flattenMineruPages } from '../../services/mineru';
 import {
   useCallback,
   useEffect,
@@ -263,6 +265,8 @@ export function useReaderLibraryActions({
 
   const runLibraryItemMineruParse = useCallback(
     async (item: WorkspaceItem, options?: { force?: boolean }) => {
+      const initialParseTask = getDocumentParseTask(item.workspaceId);
+      if (initialParseTask?.status === 'running') return;
       const force = options?.force === true;
       const pdfPath = item.localPdfPath?.trim() ?? '';
       const provider = settings.parseProvider;
@@ -366,7 +370,7 @@ export function useReaderLibraryActions({
 
         // 重新识别前先隔离旧产物：译文按 blockId 索引，顺序变化后会静默错配。
         let reparsePrepared = false;
-        if (force && cachePaths) {
+        if (provider !== 'paddleocr-vl' && force && cachePaths) {
           await prepareMineruReparse(cachePaths.directory);
           reparsePrepared = true;
         }
@@ -394,6 +398,8 @@ export function useReaderLibraryActions({
         );
 
         const parseResult = await runDocumentParseWithFallback({
+          documentKey: item.workspaceId,
+          reparse: force,
           provider,
           pdfPath,
           extractDir: cachePaths?.directory,
@@ -420,6 +426,14 @@ export function useReaderLibraryActions({
             },
           );
         });
+        if (provider === 'paddleocr-vl') {
+          if (getDocumentParseTask(item.workspaceId)?.taskId === parseResult.result.taskId) {
+            const pages = parseMineruPages(parseResult.jsonText);
+            scheduleLibraryItemRagIndexing(item, { blocks: flattenMineruPages(pages) },
+              parseResult.result.contentJsonPath ?? '', parseResult.result.markdownText);
+          }
+          return;
+        }
         const { result, jsonText, usedOcr } = parseResult;
 
         if (!jsonText?.trim()) {
@@ -499,6 +513,9 @@ export function useReaderLibraryActions({
           reparsePrepared = false;
         }
       } catch (nextError) {
+        const latestParseTask = getDocumentParseTask(item.workspaceId);
+        if (provider === 'paddleocr-vl'
+          && (latestParseTask?.status === 'running' || latestParseTask !== initialParseTask)) return;
         const message =
           nextError instanceof Error
             ? nextError.message

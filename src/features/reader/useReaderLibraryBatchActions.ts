@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { getDocumentParseTask } from '../../services/documentParseTasks';
+import { parseMineruPages, flattenMineruPages } from '../../services/mineru';
 import { runDocumentParseWithFallback } from './mineruOcrFallback';
 import { resolveSummaryOutputLanguage } from '../../services/summarySource';
 import { buildMineruCachePaths } from '../../utils/mineruCache';
@@ -244,6 +246,7 @@ export function useReaderLibraryBatchActions({
                 ? buildMineruCachePaths(settings.mineruCacheDir.trim(), item)
                 : null;
               const { result, jsonText } = await runDocumentParseWithFallback({
+                documentKey: item.workspaceId,
                 provider: settings.parseProvider,
                 pdfPath,
                 extractDir: cachePaths?.directory,
@@ -254,6 +257,17 @@ export function useReaderLibraryBatchActions({
                 timeoutSecs: 900,
                 pollIntervalSecs: 5,
               });
+
+              if (settings.parseProvider === 'paddleocr-vl') {
+                if (getDocumentParseTask(item.workspaceId)?.taskId === result.taskId) {
+                  void indexLibraryPaperMineruSource({ item, settings, embeddingApiKey,
+                    blocks: flattenMineruPages(parseMineruPages(jsonText)),
+                    mineruPath: result.contentJsonPath ?? '', markdownText: result.markdownText, l }).catch(() => {});
+                }
+                parsedCount += 1;
+                successCount += 1;
+                continue;
+              }
 
               if (!jsonText?.trim()) {
                 throw new Error(

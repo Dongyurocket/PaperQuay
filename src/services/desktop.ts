@@ -1,5 +1,6 @@
 import { invoke } from '../platform/electron/core';
 import type { PdfSource } from '../types/reader';
+import { connectDocumentParseTasks, reportDocumentParseFailure } from './documentParseTasks';
 
 export interface AppDefaultPaths {
   executableDir: string;
@@ -341,6 +342,7 @@ export interface MineruCloudParseOptions {
 }
 
 export interface MineruCloudParseResult {
+  taskId?: string;
   batchId: string;
   dataId: string;
   fileName: string;
@@ -368,6 +370,9 @@ export async function runMineruCloudParse(
 }
 
 export interface PaddleOcrCloudParseOptions {
+  reparse?: boolean;
+  documentKey?: string;
+  taskId?: string;
   apiToken?: string;
   apiBaseUrl?: string;
   pdfPath: string;
@@ -382,9 +387,15 @@ export interface PaddleOcrCloudParseOptions {
 export async function runPaddleOcrCloudParse(
   options: PaddleOcrCloudParseOptions,
 ): Promise<MineruCloudParseResult> {
+  const taskId = options.taskId ?? crypto.randomUUID();
+  const startedAt = Date.now();
   try {
-    return await invoke<MineruCloudParseResult>('run_paddleocr_cloud_parse', { options });
+    await connectDocumentParseTasks();
+    return await invoke<MineruCloudParseResult>('run_paddleocr_cloud_parse', {
+      options: { ...options, taskId },
+    });
   } catch (error) {
+    reportDocumentParseFailure(options.documentKey ?? options.pdfPath, taskId, error, startedAt);
     throw new Error(toErrorMessage(error, '调用 PaddleOCR-VL 云端解析失败'));
   }
 }

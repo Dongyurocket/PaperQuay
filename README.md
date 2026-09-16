@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.1.47-2563eb?style=flat-square" alt="Version v0.1.47">
+  <img src="https://img.shields.io/badge/version-v0.1.48-2563eb?style=flat-square" alt="Version v0.1.48">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-4b5563?style=flat-square" alt="Windows macOS Linux">
   <img src="https://img.shields.io/badge/built%20with-Electron-47848f?style=flat-square" alt="Electron">
   <img src="https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-0f766e?style=flat-square" alt="React TypeScript">
@@ -54,6 +54,12 @@
 ---
 
 ## 近期更新
+
+### v0.1.48 - 正文渲染、PDF 图片重析与 OCR 状态修复
+
+- **正文不再误变符号表**：保留普通段落和行内公式，不在渲染时自动重建符号表。
+- **统一区块重析**：优先读取原 PDF 对应区域图片，OCR 文本作为辅助；显示实际切片与仅文本回退，支持预览、保存和恢复本地修复。
+- **PaddleOCR 状态收敛**：后端维护文献级任务，结果落盘后完成；关闭标签页后仍可恢复进度，并对下载超时和过期回调作明确处理。
 
 ### v0.1.47 - 新增 PaddleOCR-VL 1.6 识别引擎、强制重新识别与解析图片引用自愈
 

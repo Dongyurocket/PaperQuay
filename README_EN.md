@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.1.47-2563eb?style=flat-square" alt="Version v0.1.47">
+  <img src="https://img.shields.io/badge/version-v0.1.48-2563eb?style=flat-square" alt="Version v0.1.48">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-4b5563?style=flat-square" alt="Windows macOS Linux">
   <img src="https://img.shields.io/badge/built%20with-Electron-47848f?style=flat-square" alt="Electron">
   <img src="https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-0f766e?style=flat-square" alt="React TypeScript">
@@ -54,6 +54,12 @@
 ---
 
 ## Latest Update
+
+### v0.1.48 - Prose Rendering, PDF-image Reparsing and OCR Task State Fixes
+
+- **Preserve prose**: ordinary paragraphs and inline mathematics are no longer automatically reconstructed as symbol tables.
+- **Unified block reparsing**: use the original PDF crop as primary input with OCR as reference; show the actual image or explicit text-only fallback, and preview, save or restore local corrections.
+- **Reliable PaddleOCR completion**: backend document tasks finish after results are saved, retain progress across reader-tab closure, and handle download timeouts and stale callbacks explicitly.
 
 ### v0.1.47 - PaddleOCR-VL 1.6 Engine, Forced Re-parsing & Image Reference Self-Healing
 

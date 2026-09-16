@@ -20,6 +20,8 @@ export interface MineruParseWithFallbackResult {
  * 调用方（阅读器 / 文献库 / 批量任务）不需要区分 provider。
  */
 export interface DocumentParseRequest {
+  reparse?: boolean;
+  documentKey?: string;
   provider: DocumentParseProvider;
   pdfPath: string;
   extractDir?: string;
@@ -126,6 +128,8 @@ export async function runDocumentParseWithFallback(
 ): Promise<MineruParseWithFallbackResult> {
   if (request.provider === 'paddleocr-vl') {
     const options: PaddleOcrCloudParseOptions = {
+      documentKey: request.documentKey,
+      reparse: request.reparse,
       apiToken: request.paddleOcrApiToken.trim(),
       apiBaseUrl: request.paddleOcrApiBaseUrl,
       pdfPath: request.pdfPath,

@@ -25,6 +25,7 @@ const {
 const { getPdfPageCount, planPdfSplits, splitPdfFiles } = require('./pdfSplitter.cjs');
 const { mergeMineruParseResults } = require('./mineruMerge.cjs');
 const { normalizePaddleOcrDocument } = require('./paddleOcrNormalize.cjs');
+const { fetchPaddleResource, mapConcurrent, createPaddleTaskRegistry } = require('./paddleOcrRuntime.cjs');
 
 const PADDLE_OCR_DEFAULT_BASE_URL = 'https://paddleocr.aistudio-app.com';
 const PADDLE_OCR_DEFAULT_MODEL = 'PaddleOCR-VL-1.6';
@@ -223,13 +224,12 @@ async function submitPaddleOcrJob({ apiBaseUrl, token, pdfPath, fileName, model,
     fileName,
   );
 
-  const response = await fetch(`${apiBaseUrl}/api/v2/ocr/jobs`, {
+  options.onProgress?.({ stage: 'submitting', completed: 5, total: 100 });
+  const parsed = await fetchPaddleResource(`${apiBaseUrl}/api/v2/ocr/jobs`, {
     method: 'POST',
     headers: buildAuthHeaders(token),
     body: form,
-  });
-
-  const parsed = await readPaddleResponse(response, 'PaddleOCR-VL 任务提交失败');
+  }, (response) => readPaddleResponse(response, 'PaddleOCR-VL 任务提交失败'), options);
 
   // 成功与否以 jobId 是否存在为准：实测该接口的成功信封并不保证带 errorCode，
   // 旧实现用 `errorCode !== 0` 判定会把成功的提交误判为失败。
@@ -242,20 +242,20 @@ async function submitPaddleOcrJob({ apiBaseUrl, token, pdfPath, fileName, model,
   return jobId;
 }
 
-async function pollPaddleOcrJob({ apiBaseUrl, token, jobId, timeoutSecs, pollIntervalSecs }) {
-  const timeoutAt = Date.now() + (timeoutSecs ?? 3600) * 1000;
+async function pollPaddleOcrJob({ apiBaseUrl, token, jobId, timeoutSecs, pollIntervalSecs, ...runtime }) {
+  const timeoutAt = Math.min(runtime.deadline ?? Infinity, Date.now() + (timeoutSecs ?? 3600) * 1000);
   const intervalMs = Math.max(1, pollIntervalSecs ?? 5) * 1000;
 
   while (Date.now() < timeoutAt) {
-    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    await new Promise((resolve) => setTimeout(resolve, Math.min(intervalMs, Math.max(0, timeoutAt - Date.now()))));
 
-    const response = await fetch(`${apiBaseUrl}/api/v2/ocr/jobs/${encodeURIComponent(jobId)}`, {
+    const parsed = await fetchPaddleResource(`${apiBaseUrl}/api/v2/ocr/jobs/${encodeURIComponent(jobId)}`, {
       headers: buildAuthHeaders(token),
-    });
-
-    const parsed = await readPaddleResponse(response, 'PaddleOCR-VL 任务状态查询失败');
+    }, (response) => readPaddleResponse(response, 'PaddleOCR-VL 任务状态查询失败'), { ...runtime, deadline: timeoutAt });
     const data = parsed.payload?.data ?? {};
     const state = cleanString(data.state).toLowerCase();
+    runtime.onProgress?.({ stage: 'recognizing', completed: Number(data.extractProgress?.extractedPages) || 0,
+      total: Number(data.extractProgress?.totalPages) || null });
 
     if (!state) {
       throw new Error(describePaddleFailure(parsed));
@@ -289,16 +289,13 @@ async function pollPaddleOcrJob({ apiBaseUrl, token, jobId, timeoutSecs, pollInt
   throw new Error(`PaddleOCR-VL 任务超时（jobId=${jobId}），可在服务端查看该任务状态后重试。`);
 }
 
-async function downloadPaddleOcrLayoutResults(jsonUrl) {
-  const response = await fetch(jsonUrl);
-  if (!response.ok) {
-    const text = await response.text().catch(() => '');
-    throw new Error(
-      `PaddleOCR-VL 结果下载失败 · HTTP ${response.status} · ${text.replace(/\s+/g, ' ').trim().slice(0, 200)}`,
-    );
-  }
-
-  const text = await response.text();
+async function downloadPaddleOcrLayoutResults(jsonUrl, runtime = {}) {
+  runtime.onProgress?.({ stage: 'downloading', completed: 0, total: null });
+  const text = await fetchPaddleResource(jsonUrl, {}, async (response) => {
+    const body = await response.text();
+    if (!response.ok) throw new Error(`PaddleOCR-VL 结果下载失败 · HTTP ${response.status}`);
+    return body;
+  }, runtime);
   const layoutResults = [];
 
   for (const line of text.split(/\r?\n/)) {
@@ -330,16 +327,16 @@ async function downloadPaddleOcrLayoutResults(jsonUrl) {
  * 云端返回的 markdown.images 可能是 Base64，也可能是预签名 URL（官方两种示例都存在），
  * 必须在 URL 过期前落盘为本地副本。
  */
-async function resolvePaddleAssetBuffer(value) {
+async function resolvePaddleAssetBuffer(value, runtime = {}) {
   const trimmed = cleanString(value);
   if (!trimmed) return null;
 
   if (/^https?:\/\//i.test(trimmed)) {
     try {
-      const response = await fetch(trimmed);
-      if (!response.ok) return null;
-
-      const buffer = Buffer.from(await response.arrayBuffer());
+      const buffer = await fetchPaddleResource(trimmed, {}, async (response) => {
+        if (!response.ok) return null;
+        return Buffer.from(await response.arrayBuffer());
+      }, { ...runtime, requestTimeoutMs: runtime.assetTimeoutMs ?? 30000 });
 
       return looksLikeImage(buffer) ? buffer : null;
     } catch {
@@ -359,7 +356,7 @@ async function resolvePaddleAssetBuffer(value) {
 }
 
 /** 把归一化结果落盘成 MinerU 同构缓存产物。 */
-async function persistPaddleOcrDocument({ layoutResults, extractDir }) {
+async function persistPaddleOcrDocument({ layoutResults, extractDir, runtime = {} }) {
   const document = normalizePaddleOcrDocument(layoutResults);
 
   const imagesDir = path.join(extractDir, 'images');
@@ -369,17 +366,20 @@ async function persistPaddleOcrDocument({ layoutResults, extractDir }) {
   const missingAssets = [];
   const assetPathByKey = new Map(document.assets.map((asset) => [asset.key, asset.assetPath]));
 
-  for (const asset of document.assets) {
-    const buffer = await resolvePaddleAssetBuffer(asset.value);
-
+  let settledAssets = 0;
+  runtime.onProgress?.({ stage: 'assets', completed: 0, total: document.assets.length });
+  await mapConcurrent(document.assets, 4, async (asset) => {
+    const buffer = await resolvePaddleAssetBuffer(asset.value, runtime);
     if (!buffer) {
       missingAssets.push(asset.key);
-      continue;
+    } else {
+      await fsp.writeFile(path.join(extractDir, ...asset.assetPath.split('/')), buffer);
+      writtenAssets += 1;
     }
-
-    await fsp.writeFile(path.join(extractDir, ...asset.assetPath.split('/')), buffer);
-    writtenAssets += 1;
-  }
+    runtime.onProgress?.({ stage: 'assets', completed: ++settledAssets, total: document.assets.length });
+  });
+  if (Date.now() >= (runtime.deadline ?? Infinity)) throw new Error('PaddleOCR-VL 任务总时限已到');
+  runtime.onProgress?.({ stage: 'saving', completed: 0, total: null });
 
   // 资产写盘失败的块必须退回文本/表格表示，不能留下指向不存在文件的引用。
   const missingPaths = new Set(
@@ -461,9 +461,12 @@ async function runSinglePaddleOcrParse({
     jobId,
     timeoutSecs: options.timeoutSecs,
     pollIntervalSecs: options.pollIntervalSecs,
+    deadline: options.deadline,
+    requestTimeoutMs: options.requestTimeoutMs,
+    onProgress: options.onProgress,
   });
 
-  const layoutResults = await downloadPaddleOcrLayoutResults(jsonUrl);
+  const layoutResults = await downloadPaddleOcrLayoutResults(jsonUrl, options);
 
   if (expectedPageCount > 0 && layoutResults.length < expectedPageCount) {
     throw new Error(
@@ -472,7 +475,8 @@ async function runSinglePaddleOcrParse({
     );
   }
 
-  const persisted = await persistPaddleOcrDocument({ layoutResults, extractDir });
+  const persisted = await persistPaddleOcrDocument({ layoutResults, extractDir, runtime: options });
+  if (persisted.blockCount <= 0) throw new Error('PaddleOCR-VL 未返回可用结构块');
 
   return {
     batchId: jobId,
@@ -487,9 +491,12 @@ async function runSinglePaddleOcrParse({
 
 function createPaddleOcrCommands(context) {
   const { appPaths } = context;
+  const registry = createPaddleTaskRegistry();
 
   return {
-    async run_paddleocr_cloud_parse({ options }) {
+    async list_paddleocr_parse_tasks() { return registry.list(); },
+    async run_paddleocr_cloud_parse({ options }, event) {
+      return registry.run(options, event, async (options) => {
       const token = cleanString(options.apiToken || options.apiTokens);
       if (!token) throw new Error('PaddleOCR-VL API Token cannot be empty');
 
@@ -593,7 +600,10 @@ function createPaddleOcrCommands(context) {
         `${path.basename(fileName, '.pdf')}-paddle-${now()}`,
       );
 
+      options.onProgress?.({ stage: 'merging', completed: 0, total: null });
+      if (Date.now() >= (options.deadline ?? Infinity)) throw new Error('PaddleOCR-VL 任务总时限已到');
       const merged = await mergeMineruParseResults(partResults, finalExtractDir);
+      if (Date.now() >= (options.deadline ?? Infinity)) throw new Error('PaddleOCR-VL 任务总时限已到');
 
       await fsp.rm(splitWorkDir, { recursive: true, force: true }).catch(() => {});
 
@@ -608,7 +618,9 @@ function createPaddleOcrCommands(context) {
         splitPartCount: partResults.length,
         totalPageCount,
         ...merged,
+        blockCount: partResults.reduce((sum, part) => sum + (part.extracted.blockCount || 0), 0),
       };
+      });
     },
   };
 }

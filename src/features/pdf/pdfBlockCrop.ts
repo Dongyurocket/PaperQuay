@@ -24,7 +24,8 @@ export async function getPdfBlockCropDataUrl(
   }
 
   const sourceKey = getPdfSourceSignature(source) || 'default-pdf';
-  const cacheKey = `${sourceKey}:${block.blockId}:${scale}`;
+  // A reparse can reuse block IDs while moving or resizing their PDF regions.
+  const cacheKey = JSON.stringify([sourceKey, block.blockId, block.pageIndex, block.bbox, block.bboxCoordinateSystem, block.bboxPageSize, scale]);
 
   if (cropDataUrlCache.has(cacheKey)) {
     return cropDataUrlCache.get(cacheKey)!;

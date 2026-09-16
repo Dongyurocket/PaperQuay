@@ -8,12 +8,11 @@ import { sanitizeClientReparsedText } from '../utils/markdown';
 
 export { sanitizeClientReparsedText };
 
-export type BlockReparseMode = 'general' | 'table' | 'nomenclature' | 'formula';
-
 export interface ReparseBlockRequest {
   text: string;
   blockType?: string;
-  mode?: BlockReparseMode;
+  /** Original PDF bbox crop, prepared and shown before a model request. */
+  imageDataUrl?: string;
   customPrompt?: string;
   preferredPresetId?: string | null;
 }
@@ -42,13 +41,17 @@ export async function reparseBlockWithAi(
     throw new Error('请先在设置中配置可用的 AI 模型（需要有效的 Base URL、API Key 与模型名称）。');
   }
 
+  if (request.imageDataUrl && modelPreset.supportsVision !== true) {
+    throw new Error('所选模型未启用视觉能力。请重新选择模型；本次未发送请求。');
+  }
+
   try {
     const rawResult = await invoke<string>('reparse_block_openai_compatible', {
       options: {
         ...modelPreset,
         text: request.text,
         blockType: request.blockType,
-        mode: request.mode || 'general',
+        imageDataUrl: request.imageDataUrl,
         customPrompt: request.customPrompt,
       },
     });

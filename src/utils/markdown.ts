@@ -527,23 +527,10 @@ export function reconstructNomenclature(text: string): string {
     return text;
   }
 
-  // 判定是否处于 Nomenclature 上下文或包含典型的符号定义密集模式
-  const hasNomenclatureHeader = /^(?:#{1,6}\s+)?(?:Nomenclature|Notation|List of Symbols|Variables)\b/i.test(
-    text.trim(),
-  );
-
-  // 典型学术符号与单位粘连特征检测（例如 Bnumber, cchord, Tthrust, C_Bbattery, \rho density, wing span, m 等）
-  const knownSymbolStickyPatterns = [
-    /\b[BDEGLQT][a-z]{3,}\b/, // Bnumber, Dtotal, EYoung, Gshear, Llift, Qtorque, Tthrust
-    /\b(?:cchord|mmass|qdynamic|rradial|sshear)\b/, // cchord, mmass, qdynamic, rradial, sshear
-    /\b[A-Za-z](?:_[A-Za-z0-9,{}\\]+|\^[0-9]+)[a-z]{3,}\b/, // C_Bbattery, C_{D_p}parasitic, t_{\text{ply}}ply
-    /\b(?:SOC|OCV|np|ns)[a-z]{3,}\b/, // npbattery, OCVbattery
-    /\\(?:Omega|rho|sigma|eta|nu|theta|mu|lambda|infty)\b\s*[a-z]{3,}/, // \eta efficiency, \rho density
-  ];
-
-  const stickyMatchCount = knownSymbolStickyPatterns.filter((p) => p.test(text)).length;
-
-  if (!hasNomenclatureHeader && stickyMatchCount < 2) {
+  // Only explicitly titled, plain-text legacy notation lists are eligible.
+  // Rendering paths must never infer table structure from ordinary prose.
+  const hasNomenclatureHeader = /^(?:#{1,6}\s+)?(?:Nomenclature|Notation|List of Symbols|Variables)[ \t]*\r?\n/i.test(text.trimStart());
+  if (!hasNomenclatureHeader || /[$\\|`<>]/.test(text)) {
     return text;
   }
 
@@ -577,9 +564,6 @@ export function reconstructNomenclature(text: string): string {
   // 带下标的变量粘连：严格区分带花括号和单字符无花括号下标，避免贪婪吞噬
   // 如 C_Bbattery -> \uE002C_B\uE003battery, C_{D_p}parasitic -> \uE002C_{D_p}\uE003parasitic
   cleaned = cleaned.replace(/([A-Za-z](?:_\{[^{}]+\}|_[A-Za-z0-9]|\^[0-9]+))\s*([a-z]{3,})/g, '\uE002$1\uE003$2');
-
-  // LaTeX 符号粘连：\eta efficiency -> \uE002\eta\uE003efficiency
-  cleaned = cleaned.replace(/(\\[A-Za-z]+(?:_[A-Za-z0-9{}]+)?)\s*([a-z]{3,})/g, '\uE002$1\uE003$2');
 
   // 带等号的条目：SOC = battery state of charge
   cleaned = cleaned.replace(/(?:^|[\s,;])([A-Za-z\u0370-\u03FF\\](?:_[A-Za-z0-9,{}\\]+|\^[0-9]+)?|[A-Z]{2,4})\s*=\s*/g, '\uE002$1\uE003');
@@ -624,8 +608,8 @@ export function reconstructNomenclature(text: string): string {
     return `${headerPrefix}${tableHeader}\n${tableBody}`;
   }
 
-  // 备用兜底：如果不满足成表条件但检测到了粘连，返回解耦粘连后的清晰文本
-  return `${headerPrefix}${cleaned.replace(/\uE002|\uE003/g, ' ')}`;
+  // Inconclusive reconstruction must preserve the source verbatim.
+  return text;
 }
 
 /**
@@ -774,9 +758,8 @@ export function normalizeMarkdownMath(markdown: string) {
   const sanitizedMarkdown = separateCollidingDollarMath(
     sanitizeDropCapArtifacts(sanitizeFakeSuperscripts(markdown)),
   );
-  const nomenclatureMarkdown = reconstructNomenclature(sanitizedMarkdown);
   const preparedMarkdown = normalizeExplicitMathSyntax(
-    normalizeMineruFragmentedMathText(nomenclatureMarkdown),
+    normalizeMineruFragmentedMathText(sanitizedMarkdown),
   );
   const lines = preparedMarkdown.replace(/\r\n?/g, '\n').split('\n');
   const output: string[] = [];

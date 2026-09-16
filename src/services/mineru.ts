@@ -12,7 +12,6 @@ import {
   normalizeLatexExpression,
   normalizeMarkdownMath,
   normalizeRawLatexExpression,
-  reconstructNomenclature,
   sanitizeDropCapArtifacts,
   sanitizeFakeSuperscripts,
 } from '../utils/markdown.ts';
@@ -496,7 +495,7 @@ function toMarkdownFragment(block: PositionedMineruBlock, plainText: string): st
       return `> ${structuredMarkdown || safeText}`;
     default: {
       const content = structuredMarkdown || safeText;
-      return reconstructNomenclature(sanitizeDropCapArtifacts(content));
+      return sanitizeDropCapArtifacts(content);
     }
   }
 }
