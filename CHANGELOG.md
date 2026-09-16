@@ -4,6 +4,14 @@
 
 各平台安装包见 [GitHub Releases](https://github.com/Dongyurocket/PaperQuay/releases)。
 
+## [0.1.47] - 2026-09-16
+
+### 修复
+
+- **PaddleOCR-VL 提交成功却被误判为失败（报 `errorCode=undefined`）**：异步 Jobs API 的错误信封实际使用 `code` / `msg`（实测 401 返回 `{"traceId":"…","code":401,"msg":"Unauthorized"}`），而实现按官方**同步服务**文档的 `errorCode` / `errorMsg` 判定，`envelope.errorCode !== 0` 恒为真 —— 即使提交成功也会抛错并丢弃已经拿到的 `jobId`，导致该引擎完全不可用。现改为**以 `data.jobId` 是否存在判定成功**，不再依赖任何信封字段名；轮询与结果下载同步改造。
+- **PaddleOCR-VL 错误信息改为可操作**：失败时输出 HTTP 状态、真实 `code`/`msg`、`traceId` 与原始响应片段，并按状态码给出定向提示（401 → Token 失效、404 → 地址填错、429 → 限流、5xx → 服务端），不再出现 `errorCode=undefined：unknown error` 这类无法定位的提示。
+- **容忍从百度控制台整段粘贴 API URL**：控制台给出的是完整作业地址（`…/api/v2/ocr/jobs`），此前粘进 Base URL 会拼成双路径并返回 404；现自动剥离该后缀。
+
 ## [0.1.46] - 2026-09-16
 
 ### 新增

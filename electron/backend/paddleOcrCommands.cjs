@@ -21,7 +21,6 @@ const {
   ensureFile,
   fileNameFromPath,
   now,
-  readRequestJson,
 } = require('./utils.cjs');
 const { getPdfPageCount, planPdfSplits, splitPdfFiles } = require('./pdfSplitter.cjs');
 const { mergeMineruParseResults } = require('./mineruMerge.cjs');
@@ -87,6 +86,133 @@ function buildAuthHeaders(token, extra = {}) {
   return { Authorization: `bearer ${token}`, Accept: 'application/json', ...extra };
 }
 
+/**
+ * 解析 Base URL。
+ *
+ * 百度 AI Studio 控制台给出的「API_URL」是完整的作业地址
+ * （`https://paddleocr.aistudio-app.com/api/v2/ocr/jobs`），用户很容易整段粘进来；
+ * 这里容忍这种写法，避免拼成 `.../api/v2/ocr/jobs/api/v2/ocr/jobs` 得到 404。
+ */
+function resolvePaddleApiBaseUrl(rawBaseUrl) {
+  const trimmed = cleanString(rawBaseUrl).replace(/\/+$/, '');
+  if (!trimmed) return PADDLE_OCR_DEFAULT_BASE_URL;
+
+  return trimmed
+    .replace(/\/api\/v2\/ocr\/jobs$/i, '')
+    .replace(/\/api\/v2\/ocr$/i, '')
+    .replace(/\/+$/, '') || PADDLE_OCR_DEFAULT_BASE_URL;
+}
+
+/**
+ * 读取响应并保留原始文本。
+ *
+ * 注意：异步 Jobs API 的错误信封使用 `code` / `msg`
+ * （实测 401 返回 `{"traceId":"…","code":401,"msg":"Unauthorized"}`），
+ * 与官方同步服务文档里的 `errorCode` / `errorMsg` 不一致；因此不能只看单一字段名，
+ * 也不能在 2xx 时假定 body 一定带某个固定字段。
+ */
+async function readPaddleResponse(response, label) {
+  const text = await response.text().catch(() => '');
+
+  let payload = null;
+  try {
+    payload = text.trim() ? JSON.parse(text) : null;
+  } catch {
+    payload = null;
+  }
+
+  return {
+    label,
+    ok: response.ok,
+    status: response.status,
+    statusText: response.statusText,
+    payload,
+    text,
+  };
+}
+
+function pickPaddleErrorCode(payload) {
+  if (!payload || typeof payload !== 'object') return null;
+
+  for (const key of ['code', 'errorCode', 'error_code', 'status']) {
+    const value = payload[key];
+
+    if (typeof value === 'number' && value !== 0) return value;
+
+    if (typeof value === 'string' && value.trim() && value.trim() !== '0') {
+      const numeric = Number(value);
+      if (!Number.isFinite(numeric) || numeric !== 0) return value;
+    }
+  }
+
+  return null;
+}
+
+function pickPaddleMessage(payload) {
+  if (!payload || typeof payload !== 'object') return '';
+
+  for (const key of ['msg', 'errorMsg', 'message', 'error', 'detail']) {
+    const value = payload[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+
+  return '';
+}
+
+function pickPaddleTraceId(payload) {
+  if (!payload || typeof payload !== 'object') return '';
+
+  for (const key of ['traceId', 'logId', 'requestId']) {
+    const value = payload[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+
+  return '';
+}
+
+function buildPaddleFailureHint(status, code) {
+  if (status === 401 || status === 403 || code === 401 || code === 403) {
+    return 'Token 无效或已过期，请在 https://aistudio.baidu.com/paddleocr/task 重新获取 API Token。';
+  }
+
+  if (status === 404 || code === 404) {
+    return '接口路径不存在：API Base URL 只需填域名（如 https://paddleocr.aistudio-app.com），不要包含 /api/v2/ocr/jobs。';
+  }
+
+  if (status === 429 || code === 429) {
+    return '请求过于频繁或额度已用尽，请稍后重试。';
+  }
+
+  if (status >= 500) {
+    return '服务端错误，请稍后重试。';
+  }
+
+  return '请检查 API Token、API Base URL 与网络连通性。';
+}
+
+/** 组装可操作的失败信息：HTTP 状态 + 真实 code/msg + traceId + 原始响应片段。 */
+function describePaddleFailure({ label, status, statusText, payload, text }) {
+  const code = pickPaddleErrorCode(payload);
+  const message = pickPaddleMessage(payload);
+  const traceId = pickPaddleTraceId(payload);
+
+  const parts = [label];
+
+  if (status) parts.push(`HTTP ${status}${statusText ? ` ${statusText}` : ''}`);
+  if (code != null) parts.push(`code=${code}`);
+  if (message) parts.push(message);
+  if (traceId) parts.push(`traceId=${traceId}`);
+
+  let detail = parts.join(' · ');
+
+  if (!message && !code) {
+    const snippet = String(text ?? '').replace(/\s+/g, ' ').trim().slice(0, 300);
+    if (snippet) detail += ` · 原始响应：${snippet}`;
+  }
+
+  return `${detail}。${buildPaddleFailureHint(status, code)}`;
+}
+
 async function submitPaddleOcrJob({ apiBaseUrl, token, pdfPath, fileName, model, options }) {
   const form = new FormData();
   form.append('model', model);
@@ -103,16 +229,15 @@ async function submitPaddleOcrJob({ apiBaseUrl, token, pdfPath, fileName, model,
     body: form,
   });
 
-  const envelope = await readRequestJson(response, 'PaddleOCR-VL submit');
+  const parsed = await readPaddleResponse(response, 'PaddleOCR-VL 任务提交失败');
 
-  if (envelope.errorCode !== 0) {
-    throw new Error(
-      `PaddleOCR-VL 提交失败（errorCode=${envelope.errorCode}）：${envelope.errorMsg || 'unknown error'}`,
-    );
+  // 成功与否以 jobId 是否存在为准：实测该接口的成功信封并不保证带 errorCode，
+  // 旧实现用 `errorCode !== 0` 判定会把成功的提交误判为失败。
+  const jobId = cleanString(parsed.payload?.data?.jobId);
+
+  if (!jobId) {
+    throw new Error(describePaddleFailure(parsed));
   }
-
-  const jobId = cleanString(envelope.data?.jobId);
-  if (!jobId) throw new Error('PaddleOCR-VL did not return a jobId');
 
   return jobId;
 }
@@ -124,25 +249,26 @@ async function pollPaddleOcrJob({ apiBaseUrl, token, jobId, timeoutSecs, pollInt
   while (Date.now() < timeoutAt) {
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
 
-    const envelope = await readRequestJson(
-      await fetch(`${apiBaseUrl}/api/v2/ocr/jobs/${encodeURIComponent(jobId)}`, {
-        headers: buildAuthHeaders(token),
-      }),
-      'PaddleOCR-VL status',
-    );
+    const response = await fetch(`${apiBaseUrl}/api/v2/ocr/jobs/${encodeURIComponent(jobId)}`, {
+      headers: buildAuthHeaders(token),
+    });
 
-    if (envelope.errorCode !== 0) {
-      throw new Error(
-        `PaddleOCR-VL 查询失败（errorCode=${envelope.errorCode}）：${envelope.errorMsg || 'unknown error'}`,
-      );
-    }
-
-    const data = envelope.data ?? {};
+    const parsed = await readPaddleResponse(response, 'PaddleOCR-VL 任务状态查询失败');
+    const data = parsed.payload?.data ?? {};
     const state = cleanString(data.state).toLowerCase();
+
+    if (!state) {
+      throw new Error(describePaddleFailure(parsed));
+    }
 
     if (state === 'done') {
       const jsonUrl = cleanString(data.resultUrl?.jsonUrl);
-      if (!jsonUrl) throw new Error('PaddleOCR-VL 任务完成但没有返回 resultUrl.jsonUrl');
+      if (!jsonUrl) {
+        throw new Error(
+          `PaddleOCR-VL 任务已完成但没有返回 resultUrl.jsonUrl（jobId=${jobId}）。` +
+            `原始响应：${JSON.stringify(parsed.payload).slice(0, 300)}`,
+        );
+      }
 
       return {
         jsonUrl,
@@ -151,17 +277,25 @@ async function pollPaddleOcrJob({ apiBaseUrl, token, jobId, timeoutSecs, pollInt
     }
 
     if (state === 'failed') {
-      throw new Error(`PaddleOCR-VL 任务失败：${cleanString(data.errorMsg) || 'unknown error'}`);
+      const message = cleanString(data.errorMsg) || pickPaddleMessage(parsed.payload) || 'unknown error';
+
+      throw new Error(
+        `PaddleOCR-VL 任务执行失败（jobId=${jobId}）：${message}` +
+          (pickPaddleTraceId(parsed.payload) ? ` · traceId=${pickPaddleTraceId(parsed.payload)}` : ''),
+      );
     }
   }
 
-  throw new Error(`PaddleOCR-VL 任务超时（jobId=${jobId}）`);
+  throw new Error(`PaddleOCR-VL 任务超时（jobId=${jobId}），可在服务端查看该任务状态后重试。`);
 }
 
 async function downloadPaddleOcrLayoutResults(jsonUrl) {
   const response = await fetch(jsonUrl);
   if (!response.ok) {
-    throw new Error(`PaddleOCR-VL 结果下载失败：HTTP ${response.status}`);
+    const text = await response.text().catch(() => '');
+    throw new Error(
+      `PaddleOCR-VL 结果下载失败 · HTTP ${response.status} · ${text.replace(/\s+/g, ' ').trim().slice(0, 200)}`,
+    );
   }
 
   const text = await response.text();
@@ -183,7 +317,10 @@ async function downloadPaddleOcrLayoutResults(jsonUrl) {
   }
 
   if (layoutResults.length === 0) {
-    throw new Error('PaddleOCR-VL 结果中没有可用的 layoutParsingResults');
+    throw new Error(
+      `PaddleOCR-VL 结果中没有可用的 layoutParsingResults（响应 ${text.length} 字节）。` +
+        `请确认该任务确实已完成并包含 PDF 页结果。`,
+    );
   }
 
   return layoutResults;
@@ -356,8 +493,7 @@ function createPaddleOcrCommands(context) {
       const token = cleanString(options.apiToken || options.apiTokens);
       if (!token) throw new Error('PaddleOCR-VL API Token cannot be empty');
 
-      const apiBaseUrl =
-        cleanString(options.apiBaseUrl).replace(/\/+$/, '') || PADDLE_OCR_DEFAULT_BASE_URL;
+      const apiBaseUrl = resolvePaddleApiBaseUrl(options.apiBaseUrl);
       const model = cleanString(options.model) || PADDLE_OCR_DEFAULT_MODEL;
 
       const pdfPath = options.pdfPath;
@@ -483,9 +619,14 @@ module.exports = {
   PADDLE_OCR_MAX_PAGES_PER_JOB,
   buildOptionalPayload,
   createPaddleOcrCommands,
+  describePaddleFailure,
   downloadPaddleOcrLayoutResults,
   looksLikeImage,
   persistPaddleOcrDocument,
+  pickPaddleErrorCode,
+  pickPaddleMessage,
   pollPaddleOcrJob,
+  readPaddleResponse,
+  resolvePaddleApiBaseUrl,
   submitPaddleOcrJob,
 };

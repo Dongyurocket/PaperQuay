@@ -95,3 +95,51 @@ if (Array.isArray(parsed)) {
 - PaddleOCR-VL 的图表识别（`useChartRecognition`）默认关闭，以与 MinerU 的「chart 作为截图渲染」保持一致；开启后图表转 Markdown 表格的路径在适配层已有分支，但未做质量对比。
 - 未改动 `middle.json` 中的资产路径（MinerU 合并阶段同样不处理），实测缓存中该文件不承载图片引用。
 - 强制重新识别会重新上传 PDF 并消耗云端额度，界面未加二次确认弹窗，仅按钮文案与提示说明。
+
+## 追加修复（v0.1.47 热修，2026-09-16）
+
+### 现象
+
+v0.1.46 发布后，用户在应用中启用 PaddleOCR-VL 引擎时报错：
+
+```
+Error invoking remote method 'paperquay:invoke':
+Error: PaddleOCR-VL 提交失败（errorCode=undefined）：unknown error
+```
+
+### 根因
+
+对真实端点做只读探测（伪造 Token，不发送任何真实数据），抓到异步 Jobs API 的实际错误信封：
+
+| 场景 | 真实响应体 |
+|---|---|
+| 401 未授权 | `{"traceId":"f952a5c8-…","code":401,"msg":"Unauthorized"}` |
+| 404 路径重复 | `{"timestamp":"2026-09-16 23:19:57","status":404,"error":"Not Found","path":"/api/v2/ocr/jobs/api/v2/ocr/jobs"}` |
+
+**异步 Jobs API 使用 `code` / `msg`**，与官方**同步服务**文档记载的 `errorCode` / `errorMsg` 并不一致。实现照文档写死了：
+
+```js
+if (envelope.errorCode !== 0) {
+  throw new Error(`PaddleOCR-VL 提交失败（errorCode=${envelope.errorCode}）：${envelope.errorMsg || 'unknown error'}`);
+}
+```
+
+`envelope.errorCode` 恒为 `undefined`，`undefined !== 0` 恒为真 —— **提交成功也会被判为失败**，并且已经拿到的 `data.jobId` 被直接丢弃。另一个佐证：`utils.readRequestJson` 在非 2xx 时会抛出 `HTTP <status>`，而用户看到的是本实现的文案，说明该请求实际返回了 2xx。
+
+定位过程中的一个干扰项：`gh` CLI 在该检出目录默认解析到 `upstream`（`WangQrkkk/PaperQuay`），使 `gh run list` / `gh release list` 显示上游数据（最新 release 停在 v0.1.25），一度看起来像 Actions 未运行；加 `-R Dongyurocket/PaperQuay` 后确认 fork 的发布链路一直正常。
+
+### 修改
+
+均位于 `electron/backend/paddleOcrCommands.cjs`：
+
+1. `submitPaddleOcrJob` 改为**以 `data.jobId` 是否存在判定成功**，不再依赖任何信封字段名。
+2. 新增 `readPaddleResponse` / `pickPaddleErrorCode` / `pickPaddleMessage` / `pickPaddleTraceId` / `describePaddleFailure`：失败时输出 HTTP 状态、真实 `code`/`msg`、`traceId` 与原始响应片段，并按状态码给出定向提示（401 → Token 失效、404 → 地址填错、429 → 限流、5xx → 服务端）。
+3. 新增 `resolvePaddleApiBaseUrl`：百度控制台给出的 `API_URL` 是完整作业地址，整段粘贴时自动剥离 `/api/v2/ocr/jobs` 后缀，避免双路径 404。
+4. 轮询 `pollPaddleOcrJob` 与结果下载 `downloadPaddleOcrLayoutResults` 按同一口径改造。
+
+### 验证
+
+- 新增 `tests/paddleOcrEnvelope.test.ts`（7 例），把上述**实测真实响应体**固化为回归用例，含两条直接锁死本次症状的断言：成功信封无 `errorCode` 时必须被接受（旧实现会抛错）、401 的报错文案中不得出现 `undefined`；另覆盖 Base URL 归一化、`code`/`errorCode` 双命名探测、成功码 `0` 不被误判。
+- `npm run check`：322 项测试通过，0 失败；构建通过。
+- 未使用用户真实 Token 做端到端调用；修复后的实际提交行为待用户首次成功解析确认。
+

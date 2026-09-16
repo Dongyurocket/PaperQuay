@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.1.46-2563eb?style=flat-square" alt="Version v0.1.46">
+  <img src="https://img.shields.io/badge/version-v0.1.47-2563eb?style=flat-square" alt="Version v0.1.47">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-4b5563?style=flat-square" alt="Windows macOS Linux">
   <img src="https://img.shields.io/badge/built%20with-Electron-47848f?style=flat-square" alt="Electron">
   <img src="https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-0f766e?style=flat-square" alt="React TypeScript">
@@ -55,7 +55,9 @@
 
 ## 近期更新
 
-### v0.1.46 - 新增 PaddleOCR-VL 1.6 识别引擎、强制重新识别与解析图片引用自愈
+### v0.1.47 - 新增 PaddleOCR-VL 1.6 识别引擎、强制重新识别与解析图片引用自愈
+
+- **PaddleOCR-VL 提交误判修复（v0.1.47 热修）**：异步 Jobs API 的错误信封实际使用 `code` / `msg`，此前按官方同步服务文档的 `errorCode` 判定，导致**提交成功也被判为失败**并丢弃 `jobId`，该引擎在 v0.1.46 中完全不可用。现改为以 `data.jobId` 是否存在判定成功，并输出含 HTTP 状态、真实 `code`/`msg`、`traceId` 与原始响应片段的可操作错误；同时容忍从百度控制台整段粘贴完整作业地址。
 
 - **PaddleOCR-VL 1.6 结构识别引擎**：设置 →「文档解析」新增引擎选择器，可在 MinerU 与 PaddleOCR-VL 1.6（云端异步 Jobs API）之间切换，阅读器、文献库与批量解析三条链路统一生效。适配层把 PaddleOCR-VL 输出归一化为现有 MinerU 缓存契约，结构阅读、图片渲染、PDF↔块几何联动、翻译、RAG 与缓存自愈全部零改动复用；布局坐标与页尺寸映射为 `pdf` 坐标系 bbox，图注/表注并入紧邻视觉块，资产同时支持 Base64 与预签名 URL，超过 100 页自动切分合并。
 - **强制重新识别（忽略缓存）**：阅读器工具栏与概览页新增「重新解析 / 重新识别」入口，文献库解析不再无条件复用已有结果；重新识别前备份译文、摘要与图片，成功后清理、失败则保留以便回退。

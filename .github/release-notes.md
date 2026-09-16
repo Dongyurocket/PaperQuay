@@ -20,6 +20,9 @@ Download the native installer for your operating system from the Assets section 
 
 ## Fixes
 
+- **PaddleOCR-VL submits were wrongly reported as failures (`errorCode=undefined`)**: the async Jobs API error envelope actually uses `code` / `msg` (a real 401 returns `{"traceId":"…","code":401,"msg":"Unauthorized"}`), but the implementation checked `errorCode` / `errorMsg` as documented for the **synchronous** service. Since `envelope.errorCode !== 0` was always true, even a **successful** submit raised an error and discarded the returned `jobId`, making the engine unusable. Success is now determined by the presence of `data.jobId`, independent of envelope field naming, and the polling and result-download paths were hardened the same way.
+- **Actionable PaddleOCR-VL error messages**: failures now report the HTTP status, the real `code` / `msg`, `traceId`, and a raw response snippet, with targeted hints by status code (401 → invalid token, 404 → wrong base URL, 429 → rate limited, 5xx → server side) instead of an undiagnosable `errorCode=undefined：unknown error`.
+- **Pasting the console API URL no longer breaks the base URL**: Baidu AI Studio hands out the full job URL (`…/api/v2/ocr/jobs`); pasting it into the Base URL field previously produced a doubled path and a 404. The suffix is now stripped automatically.
 - **All images broken after split/merge of oversized documents**: `mergeMineruParseResults` assumed `content_list_v2.json` was a flat block array, but MinerU v2 (`vlm`) returns a "page array + per-page block dictionary" (`[{ "0": block, … }, …]`), so the loop received a whole page dictionary and never rewrote a single image path. The same code also looked for `img_path` / `image_source` at block top level, while 100% of the 8,955 asset references in a real cache live in the nested `content.image_source.path` — meaning the rewrite had never applied to v2 output at all. Because image copying and `full.md` rewriting are string-based and shape-independent, images were renamed with a `part_N_` prefix and the Markdown was updated, but the structured JSON kept stale references — the reader therefore showed a flood of "No matching image asset was found" cards while the text looked perfectly fine. References are now rewritten at any depth while preserving all three real-world shapes. Full-library reconciliation: **2859 broken references across 9 oversized documents reduced to 0**, with the 53 non-split documents unaffected.
 
 ## Notes
@@ -52,6 +55,9 @@ PaperQuay 是一个开源 AI 论文工作台，覆盖文献管理、PDF 阅读�
 
 ## 修复
 
+- **PaddleOCR-VL 提交成功却被误判为失败（报 `errorCode=undefined`）**：异步 Jobs API 的错误信封实际使用 `code` / `msg`（实测 401 返回 `{"traceId":"…","code":401,"msg":"Unauthorized"}`），而实现按官方**同步服务**文档的 `errorCode` / `errorMsg` 判定，`envelope.errorCode !== 0` 恒为真 —— 即使提交成功也会抛错并丢弃已经拿到的 `jobId`，导致该引擎完全不可用。现改为**以 `data.jobId` 是否存在判定成功**，不再依赖任何信封字段名；轮询与结果下载同步改造。
+- **PaddleOCR-VL 错误信息改为可操作**：失败时输出 HTTP 状态、真实 `code`/`msg`、`traceId` 与原始响应片段，并按状态码给出定向提示（401 → Token 失效、404 → 地址填错、429 → 限流、5xx → 服务端），不再出现 `errorCode=undefined：unknown error` 这类无法定位的提示。
+- **容忍从百度控制台整段粘贴 API URL**：控制台给出的是完整作业地址（`…/api/v2/ocr/jobs`），此前粘进 Base URL 会拼成双路径并返回 404；现自动剥离该后缀。
 - **超页文档拆分合并后图片全部失效（界面大量「没有找到对应的图片资源」）**：`mergeMineruParseResults` 假定 `content_list_v2.json` 是扁平 block 数组，但 MinerU v2（`vlm`）返回的是「页数组 + 每页块字典」（`[{ "0": block, … }, …]`），导致循环拿到一整页字典、图片改写从未执行；同时该逻辑只在块顶层查找 `img_path` / `image_source`，而真实缓存中 8955 条资产引用 100% 位于嵌套的 `content.image_source.path`，对 v2 产物从未生效。由于图片复制与 `full.md` 改写基于字符串、不依赖 JSON 形状，最终表现为图片被改名为 `part_N_` 前缀、Markdown 正确，唯独结构化 JSON 仍是旧引用，文字正常而图片全部 404。现改为结构保持地识别三种真实形状并递归改写任意深度的资源路径。全库对账：9 份超页文档共 **2859 条失效引用 → 0**，其余 53 份未拆分文档不受影响。
 
 ## 使用提示

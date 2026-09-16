@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.1.46-2563eb?style=flat-square" alt="Version v0.1.46">
+  <img src="https://img.shields.io/badge/version-v0.1.47-2563eb?style=flat-square" alt="Version v0.1.47">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-4b5563?style=flat-square" alt="Windows macOS Linux">
   <img src="https://img.shields.io/badge/built%20with-Electron-47848f?style=flat-square" alt="Electron">
   <img src="https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-0f766e?style=flat-square" alt="React TypeScript">
@@ -55,7 +55,9 @@
 
 ## Latest Update
 
-### v0.1.46 - PaddleOCR-VL 1.6 Engine, Forced Re-parsing & Image Reference Self-Healing
+### v0.1.47 - PaddleOCR-VL 1.6 Engine, Forced Re-parsing & Image Reference Self-Healing
+
+- **Fixed: PaddleOCR-VL submits wrongly reported as failures (v0.1.47 hotfix)**: the async Jobs API error envelope actually uses `code` / `msg`, but the implementation checked `errorCode` as documented for the synchronous service — so a **successful** submit was rejected and its `jobId` discarded, leaving the engine unusable in v0.1.46. Success is now determined by the presence of `data.jobId`, failures report the HTTP status, real `code` / `msg`, `traceId`, and a raw response snippet, and pasting the full job URL from the Baidu console no longer breaks the base URL.
 
 - **PaddleOCR-VL 1.6 Structure Recognition Engine**: Settings → Document Parsing now offers an engine selector between MinerU and PaddleOCR-VL 1.6 (cloud async Jobs API), applied uniformly across the reader, library, and batch parsing paths. The adapter normalizes PaddleOCR-VL output into the existing MinerU cache contract, so structured reading, image rendering, PDF↔block geometry linking, translation, RAG, and cache self-healing are reused with zero changes; layout coordinates and page sizes map to `pdf`-space bboxes, figure/table captions attach to the adjacent visual block, assets support both Base64 and presigned URLs, and documents above 100 pages are split and merged automatically.
 - **Forced Re-parsing (Ignore Cache)**: New "Re-parse / Re-recognize" entries in the reader toolbar and overview page; library parsing no longer unconditionally reuses existing results. Translations, summaries, and images are backed up before re-parsing, cleaned up on success, and retained for rollback on failure.
