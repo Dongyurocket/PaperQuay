@@ -192,7 +192,9 @@ export const DEFAULT_SETTINGS: ReaderSettings = {
   showBlockMeta: true,
   hidePageDecorationsInBlockView: false,
   softPageShadow: true,
+  parseProvider: 'mineru',
   mineruApiBaseUrl: '',
+  paddleOcrApiBaseUrl: '',
   mineruCacheDir: '',
   remotePdfDownloadDir: '',
   translationBatchSize: 10,
@@ -237,6 +239,7 @@ export const DEFAULT_QA_PRESET: QaModelPreset = {
 
 export const DEFAULT_SECRETS: ReaderSecrets = {
   mineruApiToken: '',
+  paddleOcrApiToken: '',
   translationApiKey: '',
   summaryApiKey: '',
   embeddingApiKey: '',
@@ -778,7 +781,9 @@ export function normalizeReaderSettings(value?: Partial<ReaderSettings> | null):
     enableSelectionTranslation: merged.enableSelectionTranslation !== false,
     highlightSelectionTranslation: merged.highlightSelectionTranslation !== false,
     enablePdfParagraphTranslationPopover: merged.enablePdfParagraphTranslationPopover !== false,
+    parseProvider: merged.parseProvider === 'paddleocr-vl' ? 'paddleocr-vl' : 'mineru',
     mineruApiBaseUrl: merged.mineruApiBaseUrl?.trim() ?? '',
+    paddleOcrApiBaseUrl: merged.paddleOcrApiBaseUrl?.trim() ?? '',
     translationBatchSize: clampTranslationBatchSize(merged.translationBatchSize),
     translationConcurrency: clampTranslationConcurrency(merged.translationConcurrency),
     translationRequestsPerMinute: clampTranslationRequestsPerMinute(

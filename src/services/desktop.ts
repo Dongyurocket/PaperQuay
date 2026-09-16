@@ -366,3 +366,86 @@ export async function runMineruCloudParse(
     throw new Error(toErrorMessage(error, '调用 MinerU 云端解析失败'));
   }
 }
+
+export interface PaddleOcrCloudParseOptions {
+  apiToken?: string;
+  apiBaseUrl?: string;
+  pdfPath: string;
+  extractDir?: string;
+  /** 默认 PaddleOCR-VL-1.6（后端兜底）。 */
+  model?: string;
+  useChartRecognition?: boolean;
+  timeoutSecs?: number;
+  pollIntervalSecs?: number;
+}
+
+export async function runPaddleOcrCloudParse(
+  options: PaddleOcrCloudParseOptions,
+): Promise<MineruCloudParseResult> {
+  try {
+    return await invoke<MineruCloudParseResult>('run_paddleocr_cloud_parse', { options });
+  } catch (error) {
+    throw new Error(toErrorMessage(error, '调用 PaddleOCR-VL 云端解析失败'));
+  }
+}
+
+export interface MineruCacheRepairReport {
+  directory: string;
+  imageFileCount: number;
+  scannedFiles: string[];
+  changedFiles: string[];
+  scannedRefs: number;
+  fixed: number;
+  unresolved: number;
+  unresolvedSamples: string[];
+}
+
+/**
+ * 修复解析缓存中指向不存在文件的图片引用。
+ * 幂等：已经正确的引用不会被改写，可安全地在每次打开文档前调用。
+ */
+export async function repairMineruCacheImages(
+  directory: string,
+): Promise<MineruCacheRepairReport> {
+  try {
+    return await invoke<MineruCacheRepairReport>('repair_mineru_cache_images', { directory });
+  } catch (error) {
+    throw new Error(toErrorMessage(error, '修复解析缓存图片引用失败'));
+  }
+}
+
+export interface MineruReparsePreparation {
+  directory: string;
+  removedStaleBackups: string[];
+  backups: Array<{ name: string; backupName: string }>;
+  removedFiles: string[];
+}
+
+/**
+ * 强制重新识别前的准备：备份译文/摘要/图片并清理上一次的解析产物。
+ * 译文按 blockId 索引，重新识别后顺序会变，必须隔离而不能沿用。
+ */
+export async function prepareMineruReparse(
+  directory: string,
+): Promise<MineruReparsePreparation> {
+  try {
+    return await invoke<MineruReparsePreparation>('prepare_mineru_reparse', { directory });
+  } catch (error) {
+    throw new Error(toErrorMessage(error, '准备重新识别失败'));
+  }
+}
+
+/** 重新识别成功后清理备份代；失败时保留备份以便回退。 */
+export async function finishMineruCacheReparse(
+  directory: string,
+  success: boolean,
+): Promise<{ directory: string; removed: string[] }> {
+  try {
+    return await invoke<{ directory: string; removed: string[] }>('finish_mineru_cache_reparse', {
+      directory,
+      success,
+    });
+  } catch (error) {
+    throw new Error(toErrorMessage(error, '清理重新识别备份失败'));
+  }
+}

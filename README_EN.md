@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.1.43-2563eb?style=flat-square" alt="Version v0.1.43">
+  <img src="https://img.shields.io/badge/version-v0.1.46-2563eb?style=flat-square" alt="Version v0.1.46">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-4b5563?style=flat-square" alt="Windows macOS Linux">
   <img src="https://img.shields.io/badge/built%20with-Electron-47848f?style=flat-square" alt="Electron">
   <img src="https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-0f766e?style=flat-square" alt="React TypeScript">
@@ -55,6 +55,13 @@
 
 ## Latest Update
 
+### v0.1.46 - PaddleOCR-VL 1.6 Engine, Forced Re-parsing & Image Reference Self-Healing
+
+- **PaddleOCR-VL 1.6 Structure Recognition Engine**: Settings → Document Parsing now offers an engine selector between MinerU and PaddleOCR-VL 1.6 (cloud async Jobs API), applied uniformly across the reader, library, and batch parsing paths. The adapter normalizes PaddleOCR-VL output into the existing MinerU cache contract, so structured reading, image rendering, PDF↔block geometry linking, translation, RAG, and cache self-healing are reused with zero changes; layout coordinates and page sizes map to `pdf`-space bboxes, figure/table captions attach to the adjacent visual block, assets support both Base64 and presigned URLs, and documents above 100 pages are split and merged automatically.
+- **Forced Re-parsing (Ignore Cache)**: New "Re-parse / Re-recognize" entries in the reader toolbar and overview page; library parsing no longer unconditionally reuses existing results. Translations, summaries, and images are backed up before re-parsing, cleaned up on success, and retained for rollback on failure.
+- **Parse Cache Image Reference Self-Healing**: A new idempotent repair command repoints image references that target missing files to the volume files that actually exist, without re-uploading the PDF or spending quota. It runs automatically when a document is opened, and Settings offers a full-library scan.
+- **Fixed: All Images Broken After Split/Merge of Oversized Documents**: When long documents (>200 pages) are automatically split and merged, the `content_list_v2.json` "page array + per-page block dictionary" structure was not recognized, and asset paths actually live in the nested `content.image_source.path` rather than at block top level, so image references were never rewritten — images were renamed with a `part_N_` prefix and the Markdown was updated, but the structured JSON kept stale references, producing a flood of "No matching image asset was found" cards. References are now rewritten at any depth while preserving all three real-world shapes. Full-library reconciliation: all 2859 broken references across 9 oversized documents were recovered.
+
 ### v0.1.43 - Full Library RAG Pool Ingestion, Fixed-Point Resume Self-Healing & Large Thesis Compatibility
 
 - **Full Library RAG Ingestion & State Synchronization**: Fixed issue where home library papers were omitted from RAG candidate pools, causing zero stats and inactive context menus; entire library entries are now actively synced with real-time MinerU status tracking.
@@ -69,7 +76,7 @@
 - **Local RAG Knowledge Base Management Console**: Settings panel now features an index management card displaying indexed / pending / failed counts, one-click "Index unindexed papers" and "Rebuild failed indexes" with a real-time progress bar and pause / resume / cancel controls.
 - **Library RAG Status Badges & Context Menu Force-Retry**: Literature items now show dedicated RAG status badges (Indexed / Indexing / Unindexed / Failed); right-click menu provides "Build/Rebuild RAG Index" to force single-paper resume retries without re-spending embedding quota.
 
-*For full historical releases (v0.1.32 - v0.1.41 including multi-key scheduling, large PDF split/merge, selective Zotero sync, BBox crop, and AI re-parsing), see [CHANGELOG.md](./CHANGELOG.md).*
+*For full historical releases (v0.1.32 - v0.1.45 including multi-key scheduling, large PDF split/merge, selective Zotero sync, BBox crop, and AI re-parsing), see [CHANGELOG.md](./CHANGELOG.md).*
 
 ---
 

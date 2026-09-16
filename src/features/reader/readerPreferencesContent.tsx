@@ -12,6 +12,7 @@ import {
   RefreshCw,
   Settings2,
   Sparkles,
+  Wrench,
 } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -56,6 +57,7 @@ interface ReaderPreferencesContentProps
     | 'librarySettings'
     | 'zoteroLocalDataDir'
     | 'mineruApiToken'
+    | 'paddleOcrApiToken'
     | 'embeddingApiKey'
     | 'qaModelPresets'
     | 'zoteroApiKey'
@@ -68,6 +70,8 @@ interface ReaderPreferencesContentProps
     | 'onSelectTranslatedPdfStorageDir'
     | 'onZoteroLocalDataDirChange'
     | 'onMineruApiTokenChange'
+    | 'onPaddleOcrApiTokenChange'
+    | 'onRepairMineruCacheImages'
     | 'onEmbeddingApiKeyChange'
     | 'onZoteroApiKeyChange'
     | 'onZoteroUserIdChange'
@@ -156,10 +160,10 @@ export function buildReaderPreferencesSections(
     },
     {
       key: 'mineru',
-      title: 'MinerU',
+      title: l('文档解析', 'Document Parsing'),
       description: l(
-        'API Key、缓存、自动解析和批量任务',
-        'API key, cache, auto parse, and batch jobs',
+        '识别引擎、API Key、缓存、自动解析和批量任务',
+        'Engine, API keys, cache, auto parse, and batch jobs',
       ),
       icon: <Database className="h-4 w-4" strokeWidth={1.8} />,
     },
@@ -218,6 +222,7 @@ export function ReaderPreferencesContent({
   librarySettings,
   zoteroLocalDataDir,
   mineruApiToken,
+  paddleOcrApiToken,
   embeddingApiKey,
   qaModelPresets,
   zoteroApiKey,
@@ -230,6 +235,8 @@ export function ReaderPreferencesContent({
   onSelectTranslatedPdfStorageDir,
   onZoteroLocalDataDirChange,
   onMineruApiTokenChange,
+  onPaddleOcrApiTokenChange,
+  onRepairMineruCacheImages,
   onEmbeddingApiKeyChange,
   onZoteroApiKeyChange,
   onZoteroUserIdChange,
@@ -731,6 +738,70 @@ export function ReaderPreferencesContent({
       {activeSection === 'mineru' ? (
         <>
           <SettingsField
+            label={l('结构识别引擎', 'Structure Recognition Engine')}
+            description={l(
+              '选择把 PDF 解析成结构块的云端引擎。两者产出同一套缓存格式，阅读器、翻译与知识库行为一致；切换后对未解析文献立即生效。',
+              'Choose the cloud engine that turns PDFs into structured blocks. Both produce the same cache format, so the reader, translation, and knowledge base behave identically. The change applies to not-yet-parsed papers.',
+            )}
+          >
+            <SettingsSelect
+              value={settings.parseProvider}
+              onChange={(event) =>
+                onSettingChange('parseProvider', event.target.value === 'paddleocr-vl' ? 'paddleocr-vl' : 'mineru')
+              }
+            >
+              <option value="mineru">MinerU（content_list_v2，支持多 Key 轮换）</option>
+              <option value="paddleocr-vl">PaddleOCR-VL 1.6（云端异步 Jobs API）</option>
+            </SettingsSelect>
+          </SettingsField>
+
+          {settings.parseProvider === 'paddleocr-vl' ? (
+            <>
+              <SettingsField
+                label="PaddleOCR-VL API Token"
+                description={
+                  <span>
+                    {l(
+                      '用于 PaddleOCR-VL 云端异步解析。PDF 会以 multipart 上传到该服务，请确认数据外发范围可接受。可前往 ',
+                      'Used for PaddleOCR-VL cloud async parsing. The PDF is uploaded to this service via multipart; confirm the data-egress scope is acceptable. Visit ',
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => void openExternalUrl('https://aistudio.baidu.com/paddleocr/task')}
+                      className="font-semibold text-sky-600 underline decoration-sky-300 underline-offset-2 transition hover:text-sky-700 dark:text-sky-300 dark:decoration-sky-500/70 dark:hover:text-sky-200"
+                    >
+                      https://aistudio.baidu.com/paddleocr/task
+                    </button>
+                    {l(' 获取 Token。', ' to get a token.')}
+                  </span>
+                }
+              >
+                <SettingsInput
+                  type="password"
+                  value={paddleOcrApiToken}
+                  onChange={(event) => onPaddleOcrApiTokenChange(event.target.value)}
+                  placeholder="PaddleOCR-VL access token"
+                  className="font-mono text-xs"
+                />
+              </SettingsField>
+
+              <SettingsField
+                label={l('PaddleOCR-VL API Base URL', 'PaddleOCR-VL API Base URL')}
+                description={l(
+                  '留空时使用官方地址 https://paddleocr.aistudio-app.com。',
+                  'Leave empty to use the official https://paddleocr.aistudio-app.com endpoint.',
+                )}
+              >
+                <SettingsInput
+                  value={settings.paddleOcrApiBaseUrl}
+                  onChange={(event) => onSettingChange('paddleOcrApiBaseUrl', event.target.value)}
+                  placeholder="https://paddleocr.aistudio-app.com"
+                />
+              </SettingsField>
+            </>
+          ) : null}
+
+          <SettingsField
             label="MinerU API Token"
             description={
               <span>
@@ -856,6 +927,20 @@ export function ReaderPreferencesContent({
               >
                 {l('清空路径', 'Clear Path')}
               </button>
+              {onRepairMineruCacheImages ? (
+                <button
+                  type="button"
+                  onClick={() => void onRepairMineruCacheImages()}
+                  title={l(
+                    '扫描全部缓存，把指向不存在文件的图片引用重新指向实际的 part_N_ 文件。幂等，可随时重复执行。',
+                    'Scan every cache and repoint image references that point at missing files to the actual part_N_ files. Idempotent and safe to re-run.',
+                  )}
+                  className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100"
+                >
+                  <Wrench className="mr-2 inline h-4 w-4" strokeWidth={1.8} />
+                  {l('修复图片引用', 'Repair Image References')}
+                </button>
+              ) : null}
             </div>
           </SettingsField>
 

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { runMineruCloudParse } from '../../services/desktop';
+import { runDocumentParseWithFallback } from './mineruOcrFallback';
 import { resolveSummaryOutputLanguage } from '../../services/summarySource';
 import { buildMineruCachePaths } from '../../utils/mineruCache';
 import { indexLibraryPaperMineruSource } from './libraryRagIndexing';
@@ -25,6 +25,7 @@ interface UseReaderLibraryBatchActionsOptions
     | 'itemParseStatusMap'
     | 'l'
     | 'mineruApiToken'
+    | 'paddleOcrApiToken'
     | 'saveLibraryMineruParseCache'
     | 'setError'
     | 'setPreferencesOpen'
@@ -58,6 +59,7 @@ export function useReaderLibraryBatchActions({
   itemParseStatusMap,
   l,
   mineruApiToken,
+  paddleOcrApiToken,
   saveLibraryMineruParseCache,
   setError,
   setPreferencesOpen,
@@ -241,20 +243,17 @@ export function useReaderLibraryBatchActions({
               const cachePaths = settings.mineruCacheDir.trim()
                 ? buildMineruCachePaths(settings.mineruCacheDir.trim(), item)
                 : null;
-              const result = await runMineruCloudParse({
-                apiToken: mineruApiToken.trim(),
-                apiBaseUrl: settings.mineruApiBaseUrl,
+              const { result, jsonText } = await runDocumentParseWithFallback({
+                provider: settings.parseProvider,
                 pdfPath,
                 extractDir: cachePaths?.directory,
-                language: 'ch',
-                modelVersion: 'vlm',
-                enableFormula: true,
-                enableTable: true,
-                isOcr: false,
+                mineruApiToken,
+                mineruApiBaseUrl: settings.mineruApiBaseUrl,
+                paddleOcrApiToken,
+                paddleOcrApiBaseUrl: settings.paddleOcrApiBaseUrl,
                 timeoutSecs: 900,
                 pollIntervalSecs: 5,
               });
-              const jsonText = result.contentJsonText ?? result.middleJsonText;
 
               if (!jsonText?.trim()) {
                 throw new Error(
@@ -376,6 +375,7 @@ export function useReaderLibraryBatchActions({
       findExistingMineruJson,
       l,
       mineruApiToken,
+      paddleOcrApiToken,
       saveLibraryMineruParseCache,
       setError,
       setPreferencesOpen,
@@ -389,6 +389,8 @@ export function useReaderLibraryBatchActions({
       settings.localRagEnabled,
       settings.mineruCacheDir,
       settings.mineruApiBaseUrl,
+      settings.paddleOcrApiBaseUrl,
+      settings.parseProvider,
       settings.ragSourceMode,
       syncLibraryParsedState,
     ],
@@ -743,7 +745,10 @@ export function useReaderLibraryBatchActions({
     autoMineruAttemptedRef.current.clear();
   }, [
     mineruApiToken,
+    paddleOcrApiToken,
     settings.mineruApiBaseUrl,
+    settings.paddleOcrApiBaseUrl,
+    settings.parseProvider,
     settings.autoLoadSiblingJson,
     settings.autoMineruParse,
     settings.mineruCacheDir,

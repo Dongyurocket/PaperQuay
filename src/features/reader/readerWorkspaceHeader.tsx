@@ -12,6 +12,7 @@ import {
   Languages,
   Maximize2,
   MoreHorizontal,
+  RefreshCw,
   Settings2,
   Sparkles,
 } from 'lucide-react';
@@ -45,6 +46,7 @@ export interface ReaderWorkspaceHeaderProps {
   onCurrentPdfPathChange: (path: string) => void;
   onOpenMineruJson: () => void;
   onCloudParse: () => void;
+  onForceReparse: () => void;
   onTranslateDocument: () => void;
   onCancelTranslateDocument: () => void;
   onOpenPreferences: () => void;
@@ -214,6 +216,7 @@ function HeaderToolsMenu({
   translationCancelling,
   onOpenMineruJson,
   onCloudParse,
+  onForceReparse,
   onTranslateDocument,
   onCancelTranslateDocument,
   onOpenPreferences,
@@ -224,6 +227,7 @@ function HeaderToolsMenu({
   | 'translationCancelling'
   | 'onOpenMineruJson'
   | 'onCloudParse'
+  | 'onForceReparse'
   | 'onTranslateDocument'
   | 'onCancelTranslateDocument'
   | 'onOpenPreferences'
@@ -317,6 +321,13 @@ function HeaderToolsMenu({
           tone: 'default',
         },
         {
+          label: l('重新解析（忽略缓存）', 'Re-parse (ignore cache)'),
+          icon: <RefreshCw className="h-4 w-4" strokeWidth={1.8} />,
+          onClick: onForceReparse,
+          disabled: loading,
+          tone: 'default',
+        },
+        {
           label: translating
             ? translationCancelling
               ? l('取消中...', 'Cancelling...')
@@ -398,6 +409,7 @@ export function ReaderWorkspaceHeader({
   onCurrentPdfPathChange,
   onOpenMineruJson,
   onCloudParse,
+  onForceReparse,
   onTranslateDocument,
   onCancelTranslateDocument,
   onOpenPreferences,
@@ -506,6 +518,7 @@ export function ReaderWorkspaceHeader({
             translationCancelling={translationCancelling}
             onOpenMineruJson={onOpenMineruJson}
             onCloudParse={onCloudParse}
+            onForceReparse={onForceReparse}
             onTranslateDocument={onTranslateDocument}
             onCancelTranslateDocument={onCancelTranslateDocument}
             onOpenPreferences={onOpenPreferences}

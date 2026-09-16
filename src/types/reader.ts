@@ -190,6 +190,17 @@ export interface OpenAICompatibleModelListResult {
 
 export type RagSourceMode = "off" | "mineru-markdown" | "pdf-text" | "hybrid";
 
+/**
+ * PDF 结构识别引擎。
+ *
+ * - `mineru`      MinerU 云端解析（content_list_v2 / middle JSON 原生产物）
+ * - `paddleocr-vl` PaddleOCR-VL 云端异步 Jobs API
+ *
+ * 两个引擎都写同一套缓存契约（content_list_v2.json + images/ + full.md），
+ * 因此阅读器、翻译、RAG、缓存自愈无需区分来源。
+ */
+export type DocumentParseProvider = "mineru" | "paddleocr-vl";
+
 export interface RagChunkInput {
   chunkId: string;
   chunkIndex: number;
@@ -555,7 +566,10 @@ export interface ReaderSettings {
   showBlockMeta: boolean;
   hidePageDecorationsInBlockView: boolean;
   softPageShadow: boolean;
+  /** PDF 结构识别引擎。两个引擎都产出同一套 MinerU 兼容缓存契约。 */
+  parseProvider: DocumentParseProvider;
   mineruApiBaseUrl: string;
+  paddleOcrApiBaseUrl: string;
   mineruCacheDir: string;
   remotePdfDownloadDir: string;
   translationBatchSize: number;
@@ -590,6 +604,7 @@ export interface ReaderSettings {
 
 export interface ReaderSecrets {
   mineruApiToken: string;
+  paddleOcrApiToken: string;
   translationApiKey: string;
   summaryApiKey: string;
   embeddingApiKey: string;

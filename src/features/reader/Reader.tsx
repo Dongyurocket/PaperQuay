@@ -16,7 +16,8 @@ import {
   type OpenLibraryPaperEventDetail,
   type OpenPreferencesEventDetail,
 } from '../../app/appEvents';
-import { selectDirectory, selectLocalPdfSource } from '../../services/desktop';
+import { repairMineruCacheImages, selectDirectory, selectLocalPdfSource } from '../../services/desktop';
+import { buildMineruCachePathCandidates } from '../../utils/mineruCache';
 import {
   addLibraryAttachment,
   listLibraryPapers,
@@ -214,6 +215,7 @@ function Reader({ workspaceActive = true }: ReaderProps) {
 
   const {
     mineruApiToken,
+    paddleOcrApiToken,
     translationApiKey,
     summaryApiKey,
     embeddingApiKey,
@@ -490,6 +492,7 @@ function Reader({ workspaceActive = true }: ReaderProps) {
     loadLibraryPreviewBlocks,
     libraryTranslationSnapshots,
     mineruApiToken,
+    paddleOcrApiToken,
     settings,
     setError,
     setLibraryPreviewStates,
@@ -508,6 +511,63 @@ function Reader({ workspaceActive = true }: ReaderProps) {
     saveLibraryMineruParseCache,
     openTab,
   });
+
+  /**
+   * 全库扫描解析缓存，把指向不存在文件的图片引用重新指向实际存在的 part_N_ 文件。
+   *
+   * 用于修复历史「拆分合并」产物：图片被重命名成 part_N_ 前缀，但 content_list
+   * 里的引用没有同步改写。后端幂等且按 mtime+size 记忆化，可随时重复执行。
+   */
+  const handleRepairMineruCacheImages = useCallback(async () => {
+    const cacheDir = settings.mineruCacheDir.trim();
+
+    if (!cacheDir) {
+      const message = l(
+        '请先在设置中配置解析缓存目录',
+        'Configure the parse cache directory in Settings first',
+      );
+      setError(message);
+      setStatusMessage(message);
+      return;
+    }
+
+    setError('');
+    setStatusMessage(l('正在检查解析缓存的图片引用…', 'Checking image references in parse caches...'));
+
+    let fixed = 0;
+    let unresolved = 0;
+    let changedDocuments = 0;
+    const seenDirectories = new Set<string>();
+
+    for (const item of allKnownItems) {
+      for (const cachePaths of buildMineruCachePathCandidates(cacheDir, item)) {
+        if (seenDirectories.has(cachePaths.directory)) continue;
+        seenDirectories.add(cachePaths.directory);
+
+        try {
+          const report = await repairMineruCacheImages(cachePaths.directory);
+
+          if (report.fixed > 0) {
+            fixed += report.fixed;
+            changedDocuments += 1;
+          }
+
+          unresolved += report.unresolved;
+        } catch {
+          // 不存在的候选目录或权限问题：跳过，不中断整库扫描。
+        }
+      }
+    }
+
+    const summary = changedDocuments > 0
+      ? l(
+          `图片引用修复完成：修复 ${fixed} 条，涉及 ${changedDocuments} 份文献${unresolved > 0 ? `，仍有 ${unresolved} 条无法定位` : ''}`,
+          `Image reference repair finished: fixed ${fixed} across ${changedDocuments} document(s)${unresolved > 0 ? `, ${unresolved} could not be resolved` : ''}`,
+        )
+      : l('图片引用检查完成：没有需要修复的引用', 'Image reference check finished: nothing to repair');
+
+    setStatusMessage(summary);
+  }, [allKnownItems, l, settings.mineruCacheDir, setError, setStatusMessage]);
 
   const effectiveItemParseStatusMap = useMemo(() => {
     const merged: Record<string, boolean | undefined> = { ...itemParseStatusMap };
@@ -1000,6 +1060,7 @@ function Reader({ workspaceActive = true }: ReaderProps) {
                     settings={settings}
                     zoteroLocalDataDir={zoteroLocalDataDir}
                     mineruApiToken={mineruApiToken}
+                    paddleOcrApiToken={paddleOcrApiToken}
                     translationApiKey={translationApiKey}
                     summaryApiKey={summaryApiKey}
                     embeddingApiKey={embeddingApiKey}
@@ -1104,6 +1165,7 @@ function Reader({ workspaceActive = true }: ReaderProps) {
           librarySettings={librarySettings}
           zoteroLocalDataDir={zoteroLocalDataDir}
           mineruApiToken={mineruApiToken}
+          paddleOcrApiToken={paddleOcrApiToken}
           translationApiKey={translationApiKey}
           summaryApiKey={summaryApiKey}
           embeddingApiKey={embeddingApiKey}
@@ -1119,6 +1181,8 @@ function Reader({ workspaceActive = true }: ReaderProps) {
           onSelectTranslatedPdfStorageDir={() => void handleSelectTranslatedPdfStorageDir()}
           onZoteroLocalDataDirChange={setZoteroLocalDataDir}
           onMineruApiTokenChange={(value) => updateReaderSecret('mineruApiToken', value)}
+          onPaddleOcrApiTokenChange={(value) => updateReaderSecret('paddleOcrApiToken', value)}
+          onRepairMineruCacheImages={() => void handleRepairMineruCacheImages()}
           onTranslationApiKeyChange={(value) => updateReaderSecret('translationApiKey', value)}
           onSummaryApiKeyChange={(value) => updateReaderSecret('summaryApiKey', value)}
           onEmbeddingApiKeyChange={(value) => updateReaderSecret('embeddingApiKey', value)}

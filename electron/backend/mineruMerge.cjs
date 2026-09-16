@@ -1,6 +1,11 @@
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const path = require('node:path');
+const {
+  IMAGE_FILE_PATTERN,
+  mapContentListBlocks,
+  remapStringValuesDeep,
+} = require('./mineruContentList.cjs');
 
 /**
  * 递归获取目录下所有文件的相对路径
@@ -76,38 +81,44 @@ async function mergeMineruParseResults(parts, finalExtractDir) {
       }
     }
 
+    // 只改写真能命中的图片引用：
+    // 1. 完整相对路径（images/<name>）精确命中；
+    // 2. 否则要求字符串本身带图片扩展名，再用 basename 命中本卷图片，
+    //    避免把正文里恰好出现的同名字符串一并改写。
     const remapImagePath = (rawPath) => {
       if (!rawPath || typeof rawPath !== 'string') return rawPath;
       const normalized = rawPath.replace(/\\/g, '/');
       if (imageMap.has(normalized)) return imageMap.get(normalized);
+      if (!IMAGE_FILE_PATTERN.test(normalized.trim())) return rawPath;
       const base = path.basename(normalized);
       if (imageMap.has(base)) return `images/${imageMap.get(base)}`;
       return rawPath;
     };
 
     // 2. 合并 content_list.json / content_list_v2.json
+    //
+    // 产物可能是 flat / pages / dict 三种形状（见 mineruContentList.cjs）。三种都必须
+    // 改写图片路径：图片在上一步已统一重命名为 part_<N>_<原名>，JSON 里的旧引用不会
+    // 自动跟着变。只有 flat 形状能靠 page_idx 做页偏移；pages / dict 的页序由数组顺序
+    // 保持，偏移在切片时已经隐含。
     if (extracted.contentJsonText) {
       try {
         const parsed = JSON.parse(extracted.contentJsonText);
-        if (Array.isArray(parsed)) {
-          for (const block of parsed) {
-            if (block && typeof block === 'object') {
-              const adjusted = { ...block };
-              if (typeof adjusted.page_idx === 'number') {
-                adjusted.page_idx = adjusted.page_idx + pageOffset;
-              }
-              if (adjusted.img_path) {
-                adjusted.img_path = remapImagePath(adjusted.img_path);
-              }
-              if (adjusted.image_source && typeof adjusted.image_source === 'object' && adjusted.image_source.path) {
-                adjusted.image_source = {
-                  ...adjusted.image_source,
-                  path: remapImagePath(adjusted.image_source.path),
-                };
-              }
-              allMergedBlocks.push(adjusted);
+        const normalized = mapContentListBlocks(parsed, (block) => {
+          const adjusted = remapStringValuesDeep(block, remapImagePath);
+
+          if (adjusted && typeof adjusted === 'object' && !Array.isArray(adjusted)) {
+            if (typeof adjusted.page_idx === 'number') {
+              adjusted.page_idx += pageOffset;
             }
+            return adjusted;
           }
+
+          return block;
+        });
+
+        if (normalized) {
+          allMergedBlocks.push(...normalized);
         }
       } catch (err) {
         console.warn(`[MinerU Merge] Error parsing contentJson for part ${partIndex + 1}:`, err);

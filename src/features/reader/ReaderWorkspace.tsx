@@ -104,6 +104,7 @@ interface ReaderWorkspaceProps {
   onOpenStandalonePdf: () => void;
   onOpenMineruJson: () => void;
   onCloudParse: () => void;
+  onForceReparse: () => void;
   onTranslateDocument: () => void;
   onCancelTranslateDocument: () => void;
   onOpenPreferences: () => void;
@@ -573,6 +574,7 @@ function ReaderWorkspace(props: ReaderWorkspaceProps) {
     activeBlockSummary,
     onOpenMineruJson,
     onCloudParse,
+    onForceReparse,
     onTranslateDocument,
     onCancelTranslateDocument,
     onOpenPreferences,
@@ -666,6 +668,7 @@ function ReaderWorkspace(props: ReaderWorkspaceProps) {
           onCurrentPdfPathChange={onCurrentPdfPathChange}
           onOpenMineruJson={onOpenMineruJson}
           onCloudParse={onCloudParse}
+          onForceReparse={onForceReparse}
           onTranslateDocument={onTranslateDocument}
           onCancelTranslateDocument={onCancelTranslateDocument}
           onOpenPreferences={onOpenPreferences}
@@ -698,6 +701,7 @@ function ReaderWorkspace(props: ReaderWorkspaceProps) {
           onEnterReading={() => props.onStageChange('reading')}
           onOpenMineruJson={props.onOpenMineruJson}
           onCloudParse={props.onCloudParse}
+          onForceReparse={props.onForceReparse}
           onTranslateDocument={props.onTranslateDocument}
           onCancelTranslateDocument={props.onCancelTranslateDocument}
           aiConfigured={props.aiConfigured}

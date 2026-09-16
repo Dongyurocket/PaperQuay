@@ -3,12 +3,16 @@ import ReaderWorkspace from './ReaderWorkspace';
 import {
   captureSystemScreenshot,
   downloadRemoteFileToPath,
+  finishMineruCacheReparse,
   loadPdfBinary,
   listLocalDirectoryFiles,
   localPathExists,
+  prepareMineruReparse,
   readLocalTextFile,
   readLocalTextFileIfExists,
+  repairMineruCacheImages,
   runMineruCloudParse,
+  runPaddleOcrCloudParse,
   selectChatAttachmentPaths,
   selectLocalMineruJsonPath,
 } from '../../services/desktop';
@@ -29,6 +33,11 @@ import {
   resolveMineruBlockContentSource,
 } from '../../services/mineru';
 import { askDocumentOpenAICompatibleStream } from '../../services/qa';
+import {
+  getMissingParseCredentialMessage,
+  getParseProviderLabel,
+  runDocumentParseWithFallback,
+} from './mineruOcrFallback';
 import { resolveLocalRag } from '../../services/localRag';
 import { summarizeDocumentOpenAICompatible } from '../../services/summary';
 import {
@@ -217,6 +226,7 @@ interface DocumentReaderTabProps {
   embeddingApiKey: string;
   zoteroLocalDataDir: string;
   mineruApiToken: string;
+  paddleOcrApiToken: string;
   translationApiKey: string;
   summaryApiKey: string;
   qaModelPresets: QaModelPreset[];
@@ -283,6 +293,7 @@ function DocumentReaderTab({
   embeddingApiKey,
   zoteroLocalDataDir,
   mineruApiToken,
+  paddleOcrApiToken,
   translationApiKey,
   summaryApiKey,
   qaModelPresets,
@@ -1036,6 +1047,9 @@ function DocumentReaderTab({
         readText: readLocalTextFileIfExists,
         parsePages: parseMineruPages,
         parseMarkdownPages: parseMineruMarkdownPages,
+        repairCacheImages: async (directory) => {
+          await repairMineruCacheImages(directory);
+        },
       });
     },
     [settings.mineruCacheDir],
@@ -1599,7 +1613,13 @@ function DocumentReaderTab({
     [activateBlock],
   );
 
-  const handleCloudParse = useCallback(async () => {
+  /**
+   * 执行一次结构识别。
+   *
+   * force = true 时忽略已有缓存：先备份译文/摘要/图片并清理上一次的解析产物，
+   * 再重新调用云端；成功后清理备份代，失败则保留备份以便回退。
+   */
+  const runDocumentParse = useCallback(async ({ force }: { force: boolean }) => {
     if (isPaperTaskRunning(libraryOperation, 'mineru')) {
       return;
     }
@@ -1611,9 +1631,21 @@ function DocumentReaderTab({
       return;
     }
 
-    if (!mineruApiToken.trim()) {
+    const provider = settings.parseProvider;
+    const providerLabel = getParseProviderLabel(provider);
+
+    const missingCredential = getMissingParseCredentialMessage({
+      provider,
+      mineruApiToken,
+      paddleOcrApiToken,
+    });
+
+    if (missingCredential) {
       onOpenPreferences();
-      const message = lRef.current('请先在设置中填写 MinerU API Token', 'Configure the MinerU API token in Settings first');
+      const message = lRef.current(
+        `请先在设置中填写 ${providerLabel} API Token`,
+        `Configure the ${providerLabel} API token in Settings first`,
+      );
       setError(message);
       setStatusMessage(message);
       updateLibraryOperation('mineru', 'error', message, 100, 100);
@@ -1622,35 +1654,48 @@ function DocumentReaderTab({
 
     setLoading(true);
     setError('');
-    const runningMessage = lRef.current('正在将 PDF 发送到 MinerU 云端解析…', 'Sending the PDF to MinerU cloud parsing...');
+    const runningMessage = force
+      ? lRef.current(
+          `正在重新识别（${providerLabel}，已忽略旧缓存）…`,
+          `Re-parsing with ${providerLabel} (existing cache ignored)...`,
+        )
+      : lRef.current(
+          `正在将 PDF 发送到 ${providerLabel} 云端解析…`,
+          `Sending the PDF to ${providerLabel} cloud parsing...`,
+        );
     setStatusMessage(runningMessage);
     updateLibraryOperation('mineru', 'running', runningMessage, 20, 100);
 
+    const cachePaths =
+      currentDocument && settings.mineruCacheDir.trim()
+        ? buildMineruCachePaths(settings.mineruCacheDir.trim(), currentDocument)
+        : null;
+
+    let reparsePrepared = false;
+
     try {
-      const cachePaths =
-        currentDocument && settings.mineruCacheDir.trim()
-          ? buildMineruCachePaths(settings.mineruCacheDir.trim(), currentDocument)
-          : null;
-      const result = await runMineruCloudParse({
-        apiToken: mineruApiToken.trim(),
-        apiBaseUrl: settings.mineruApiBaseUrl,
+      if (force && cachePaths) {
+        await prepareMineruReparse(cachePaths.directory);
+        reparsePrepared = true;
+      }
+
+      const { result, jsonText } = await runDocumentParseWithFallback({
+        provider,
         pdfPath,
         extractDir: cachePaths?.directory,
-        language: 'ch',
-        modelVersion: 'vlm',
-        enableFormula: true,
-        enableTable: true,
-        isOcr: false,
+        mineruApiToken,
+        mineruApiBaseUrl: settings.mineruApiBaseUrl,
+        paddleOcrApiToken,
+        paddleOcrApiBaseUrl: settings.paddleOcrApiBaseUrl,
         timeoutSecs: 900,
         pollIntervalSecs: 5,
       });
-      const jsonText = result.contentJsonText ?? result.middleJsonText;
 
       if (!jsonText) {
         throw new Error(
           lRef.current(
-            'MinerU 解析成功，但未返回可用的 JSON 内容',
-            'MinerU parsing succeeded, but no usable JSON payload was returned.',
+            `${providerLabel} 解析成功，但未返回可用的 JSON 内容`,
+            `${providerLabel} parsing succeeded, but no usable JSON payload was returned.`,
           ),
         );
       }
@@ -1698,6 +1743,12 @@ function DocumentReaderTab({
       setStatusMessage(nextStatusMessage);
       const blockCount = flattenMineruPages(pages).length;
       updateLibraryOperation('mineru', 'success', nextStatusMessage, blockCount, blockCount || null);
+
+      // 重新识别成功：新译文将基于新的 blockId 重新生成，可以丢弃备份代。
+      if (reparsePrepared && cachePaths) {
+        await finishMineruCacheReparse(cachePaths.directory, true).catch(() => undefined);
+        reparsePrepared = false;
+      }
     } catch (nextError) {
       const message =
         nextError instanceof Error ? nextError.message : lRef.current('云端解析失败', 'Cloud parsing failed');
@@ -1713,12 +1764,25 @@ function DocumentReaderTab({
     libraryOperation,
     mineruApiToken,
     onOpenPreferences,
+    paddleOcrApiToken,
     pdfPath,
     saveMineruParseCache,
     settings.mineruCacheDir,
     settings.mineruApiBaseUrl,
+    settings.paddleOcrApiBaseUrl,
+    settings.parseProvider,
     updateLibraryOperation,
   ]);
+
+  const handleCloudParse = useCallback(
+    () => runDocumentParse({ force: false }),
+    [runDocumentParse],
+  );
+
+  const handleForceReparse = useCallback(
+    () => runDocumentParse({ force: true }),
+    [runDocumentParse],
+  );
 
   const loadMineruMarkdownForSummary = useCallback(async () => {
     return loadMineruMarkdownDocument({
@@ -3929,6 +3993,7 @@ function DocumentReaderTab({
         attachTranslatedPdfBusy={attachTranslatedPdfBusy}
         onOpenMineruJson={() => void handleOpenMineruJson()}
         onCloudParse={() => void handleCloudParse()}
+        onForceReparse={() => void handleForceReparse()}
         onTranslateDocument={() => void handleTranslateDocument()}
         onCancelTranslateDocument={handleCancelDocumentTranslation}
         onOpenPreferences={onOpenPreferences}

@@ -4,6 +4,18 @@
 
 各平台安装包见 [GitHub Releases](https://github.com/Dongyurocket/PaperQuay/releases)。
 
+## [0.1.46] - 2026-09-16
+
+### 新增
+
+- **PaddleOCR-VL 1.6 结构识别引擎**：设置 →「文档解析」新增引擎选择器，可在 MinerU 与 PaddleOCR-VL 1.6（百度 AI Studio 云端异步 Jobs API）之间切换，阅读器、文献库与批量解析三条链路统一生效。适配层把 PaddleOCR-VL 输出**归一化成现有 MinerU 缓存契约**（`content_list_v2.json` + `images/` + `full.md`），因此结构阅读、图片渲染、PDF↔块几何联动、翻译、RAG 与缓存自愈全部零改动复用；`prunedResult` 的布局坐标与页尺寸映射为 `pdf` 坐标系 bbox，图注/表注并入紧邻视觉块，资产同时支持 Base64 与预签名 URL 并做图片魔数校验；超过 100 页自动切分合并，返回页数不足时显式报错而非静默丢页。
+- **强制重新识别（忽略缓存）**：阅读器工具栏新增「重新解析（忽略缓存）」，概览页新增「重新识别」按钮，文献库解析动作不再无条件复用已有结果。重新识别前会把 `translations` / `summaries` / `images` 备份为 `*.bak-<时间戳>` 并清理上一次解析产物，成功后清理备份代、失败则保留以便回退 —— 译文按 `page-N-block-M` 索引，重新识别后顺序会变，不隔离会静默错配到别的段落。
+- **解析缓存图片引用自愈**：新增后端命令 `repair_mineru_cache_images`，把所有指向不存在文件的图片引用重新指向实际存在的 `part_<N>_` 文件；幂等、按 mtime+size 记忆化、多候选或真缺失时不猜测。阅读器打开文档时自动自愈，设置 →「文档解析」另提供「修复图片引用」按钮可对全库执行一次扫描。
+
+### 修复
+
+- **超页文档拆分合并后全部图片失效（大量「没有找到对应的图片资源」）**：`mergeMineruParseResults` 假定 `content_list_v2.json` 是扁平 block 数组，但 MinerU v2（`vlm`）返回的是「页数组 + 每页块字典」（`[{ "0": block, … }, …]`），导致循环拿到一整页字典、图片改写从未执行；同时该逻辑只在块顶层查找 `img_path` / `image_source`，而实测 8955 条资产引用 100% 位于嵌套的 `content.image_source.path`，对 v2 产物从未生效。由于图片复制与 `full.md` 改写基于字符串、不依赖 JSON 形状，最终表现为图片被改名为 `part_N_`、Markdown 正确，唯独 JSON 引用未改。现改为结构保持地识别 flat / pages / dict 三种形状并递归改写任意深度的资源路径。全库对账：9 份超页文档共 **2859 条缺失引用 → 0**，其余 53 份未拆分文档不受影响。
+
 ## [0.1.45] - 2026-09-16
 
 ### 优化

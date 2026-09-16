@@ -6,7 +6,9 @@ import {
 } from 'react';
 
 import {
+  finishMineruCacheReparse,
   prepareMineruCacheDir,
+  prepareMineruReparse,
   selectDirectory,
   selectLocalPdfSource,
   selectSaveFilePath,
@@ -59,7 +61,11 @@ import { isPaperPipelineBusy } from './paperTaskState';
 import {
   writeLibraryTranslationCache,
 } from './readerLibraryPreview';
-import { runMineruCloudParseWithOcrFallback } from './mineruOcrFallback';
+import {
+  getMissingParseCredentialMessage,
+  getParseProviderLabel,
+  runDocumentParseWithFallback,
+} from './mineruOcrFallback';
 import {
   mergeReaderTranslations,
   sanitizeTranslationErrorMessage,
@@ -121,6 +127,7 @@ export function useReaderLibraryActions({
   libraryTranslationSnapshots,
   loadLibraryPreviewBlocks,
   mineruApiToken,
+  paddleOcrApiToken,
   settings,
   setError,
   setLibraryPreviewStates,
@@ -255,8 +262,11 @@ export function useReaderLibraryActions({
   );
 
   const runLibraryItemMineruParse = useCallback(
-    async (item: WorkspaceItem) => {
+    async (item: WorkspaceItem, options?: { force?: boolean }) => {
+      const force = options?.force === true;
       const pdfPath = item.localPdfPath?.trim() ?? '';
+      const provider = settings.parseProvider;
+      const providerLabel = getParseProviderLabel(provider);
 
       if (!pdfPath) {
         const message = l('这篇文献缺少可解析的 PDF 文件', 'This paper has no PDF file to parse');
@@ -284,18 +294,25 @@ export function useReaderLibraryActions({
           operation: createPaperTaskState(
             'mineru',
             'running',
-            l('正在执行 MinerU 解析...', 'Running MinerU parsing...'),
+            l(
+              `正在执行 ${providerLabel} 解析...`,
+              `Running ${providerLabel} parsing...`,
+            ),
             10,
             100,
           ),
           currentPdfName: getFileNameFromPath(pdfPath),
-          statusMessage: l('正在执行 MinerU 解析...', 'Running MinerU parsing...'),
+          statusMessage: l(
+            `正在执行 ${providerLabel} 解析...`,
+            `Running ${providerLabel} parsing...`,
+          ),
         },
       }));
       setStatusMessage(l(`正在解析：${item.title}`, `Parsing: ${item.title}`));
 
       try {
-        const existingParse = await findExistingMineruJson(item);
+        // force 时跳过「复用已有结果」分支，走完整的重新识别流程。
+        const existingParse = force ? null : await findExistingMineruJson(item);
 
         if (existingParse) {
           const parsedState = syncLibraryParsedState(
@@ -331,10 +348,27 @@ export function useReaderLibraryActions({
           return;
         }
 
-        if (!mineruApiToken.trim()) {
+        const missingCredential = getMissingParseCredentialMessage({
+          provider,
+          mineruApiToken,
+          paddleOcrApiToken,
+        });
+
+        if (missingCredential) {
           setPreferredPreferencesSection('mineru');
           setPreferencesOpen(true);
-          throw new Error(l('缺少 MinerU API Token', 'MinerU API Token is missing'));
+          throw new Error(missingCredential);
+        }
+
+        const cachePaths = settings.mineruCacheDir.trim()
+          ? buildMineruCachePaths(settings.mineruCacheDir.trim(), item)
+          : null;
+
+        // 重新识别前先隔离旧产物：译文按 blockId 索引，顺序变化后会静默错配。
+        let reparsePrepared = false;
+        if (force && cachePaths) {
+          await prepareMineruReparse(cachePaths.directory);
+          reparsePrepared = true;
         }
 
         updateLibraryPreviewOperation(
@@ -343,8 +377,8 @@ export function useReaderLibraryActions({
             'mineru',
             'running',
             l(
-              '已提交 MinerU 云端任务，正在等待解析结果...',
-              'Submitted the MinerU cloud task. Waiting for the parse result...',
+              `已提交 ${providerLabel} 云端任务，正在等待解析结果...`,
+              `Submitted the ${providerLabel} cloud task. Waiting for the parse result...`,
             ),
             35,
             100,
@@ -353,25 +387,20 @@ export function useReaderLibraryActions({
             loading: true,
             error: '',
             statusMessage: l(
-              '已提交 MinerU 云端任务，正在等待解析结果...',
-              'Submitted the MinerU cloud task. Waiting for the parse result...',
+              `已提交 ${providerLabel} 云端任务，正在等待解析结果...`,
+              `Submitted the ${providerLabel} cloud task. Waiting for the parse result...`,
             ),
           },
         );
 
-        const cachePaths = settings.mineruCacheDir.trim()
-          ? buildMineruCachePaths(settings.mineruCacheDir.trim(), item)
-          : null;
-        const parseResult = await runMineruCloudParseWithOcrFallback({
-          apiToken: mineruApiToken.trim(),
-          apiBaseUrl: settings.mineruApiBaseUrl,
+        const parseResult = await runDocumentParseWithFallback({
+          provider,
           pdfPath,
           extractDir: cachePaths?.directory,
-          language: 'ch',
-          modelVersion: 'vlm',
-          enableFormula: true,
-          enableTable: true,
-          isOcr: false,
+          mineruApiToken,
+          mineruApiBaseUrl: settings.mineruApiBaseUrl,
+          paddleOcrApiToken,
+          paddleOcrApiBaseUrl: settings.paddleOcrApiBaseUrl,
           timeoutSecs: 900,
           pollIntervalSecs: 5,
         }, () => {
@@ -394,7 +423,12 @@ export function useReaderLibraryActions({
         const { result, jsonText, usedOcr } = parseResult;
 
         if (!jsonText?.trim()) {
-          throw new Error(l('MinerU 未返回可用的 JSON 结果', 'MinerU did not return a usable JSON result'));
+          throw new Error(
+            l(
+              `${providerLabel} 未返回可用的 JSON 结果`,
+              `${providerLabel} did not return a usable JSON result`,
+            ),
+          );
         }
 
         const savedPaths = await saveLibraryMineruParseCache({
@@ -424,10 +458,10 @@ export function useReaderLibraryActions({
           resolvedJsonPath,
           savedPaths
             ? l(
-                `已完成 MinerU 解析并写入缓存：${savedPaths.directory}`,
-                `MinerU parsing finished and was cached in: ${savedPaths.directory}`,
+                `已完成 ${providerLabel} 解析并写入缓存：${savedPaths.directory}`,
+                `${providerLabel} parsing finished and was cached in: ${savedPaths.directory}`,
               )
-            : l('已完成 MinerU 解析', 'MinerU parsing finished'),
+            : l(`已完成 ${providerLabel} 解析`, `${providerLabel} parsing finished`),
         );
         scheduleLibraryItemRagIndexing(
           item,
@@ -440,7 +474,7 @@ export function useReaderLibraryActions({
           createPaperTaskState(
             'mineru',
             'success',
-            l('MinerU 解析已完成', 'MinerU parsing finished'),
+            l(`${providerLabel} 解析已完成`, `${providerLabel} parsing finished`),
             parsedState.blocks.length,
             parsedState.blocks.length || null,
           ),
@@ -457,7 +491,13 @@ export function useReaderLibraryActions({
             },
           }),
         );
-        setStatusMessage(l('MinerU 解析已完成', 'MinerU parsing finished'));
+        setStatusMessage(l(`${providerLabel} 解析已完成`, `${providerLabel} parsing finished`));
+
+        // 重新识别成功：备份代已完成使命，可以清理。
+        if (reparsePrepared && cachePaths) {
+          await finishMineruCacheReparse(cachePaths.directory, true).catch(() => undefined);
+          reparsePrepared = false;
+        }
       } catch (nextError) {
         const message =
           nextError instanceof Error
@@ -482,6 +522,7 @@ export function useReaderLibraryActions({
       findExistingMineruJson,
       l,
       mineruApiToken,
+      paddleOcrApiToken,
       saveLibraryMineruParseCache,
       scheduleLibraryItemRagIndexing,
       setError,
@@ -491,6 +532,8 @@ export function useReaderLibraryActions({
       setStatusMessage,
       settings.mineruCacheDir,
       settings.mineruApiBaseUrl,
+      settings.paddleOcrApiBaseUrl,
+      settings.parseProvider,
       syncLibraryParsedState,
       updateLibraryPreviewOperation,
     ],
@@ -824,6 +867,7 @@ export function useReaderLibraryActions({
     itemParseStatusMap,
     l,
     mineruApiToken,
+    paddleOcrApiToken,
     saveLibraryMineruParseCache,
     setError,
     setPreferencesOpen,

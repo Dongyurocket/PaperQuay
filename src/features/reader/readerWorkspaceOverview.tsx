@@ -1,4 +1,4 @@
-import { ArrowRight, CircleStop, FileJson, FileText, Languages, ScanSearch, Sparkles } from 'lucide-react';
+import { ArrowRight, CircleStop, FileJson, FileText, Languages, RefreshCw, ScanSearch, Sparkles } from 'lucide-react';
 import { useLocaleText } from '../../i18n/uiLanguage';
 import type { PaperSummary, PositionedMineruBlock } from '../../types/reader';
 import { SectionCard, SummaryPanel } from './AssistantSidebar';
@@ -22,6 +22,7 @@ export interface ReaderWorkspaceOverviewProps {
   onEnterReading: () => void;
   onOpenMineruJson: () => void;
   onCloudParse: () => void;
+  onForceReparse: () => void;
   onTranslateDocument: () => void;
   onCancelTranslateDocument: () => void;
   aiConfigured: boolean;
@@ -80,6 +81,7 @@ export function ReaderWorkspaceOverview({
   onEnterReading,
   onOpenMineruJson,
   onCloudParse,
+  onForceReparse,
   onTranslateDocument,
   onCancelTranslateDocument,
   aiConfigured,
@@ -131,6 +133,19 @@ export function ReaderWorkspaceOverview({
                 >
                   <Sparkles className="mr-2 h-4 w-4" strokeWidth={1.8} />
                   {l('MinerU 解析', 'MinerU Parse')}
+                </button>
+                <button
+                  type="button"
+                  onClick={onForceReparse}
+                  disabled={loading}
+                  title={l(
+                    '忽略已有缓存，重新执行一次完整识别（会重新上传 PDF 并消耗额度）',
+                    'Ignore the existing cache and re-run a full parse (re-uploads the PDF and consumes quota)',
+                  )}
+                  className="inline-flex items-center rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition-all duration-200 hover:border-slate-300 hover:bg-slate-50 disabled:opacity-60"
+                >
+                  <RefreshCw className="mr-2 h-4 w-4" strokeWidth={1.8} />
+                  {l('重新识别', 'Re-parse')}
                 </button>
                 <button
                   type="button"

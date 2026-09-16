@@ -107,6 +107,7 @@ export async function loadSavedMineruPages({
   readText,
   parsePages,
   parseMarkdownPages,
+  repairCacheImages,
 }: {
   item: WorkspaceItem;
   mineruCacheDir: string;
@@ -114,6 +115,11 @@ export async function loadSavedMineruPages({
   readText: ReadLocalTextFileIfExists;
   parsePages: ParseMineruPages;
   parseMarkdownPages?: ParseMineruMarkdownPages;
+  /**
+   * 可选的缓存自愈钩子：修复历史拆分合并产物中未改写的图片引用。
+   * 后端按 content_list 的 mtime+size 记忆化，重复调用不会重复解析大 JSON。
+   */
+  repairCacheImages?: (directory: string) => Promise<void>;
 }): Promise<SavedMineruPagesResult | null> {
   if (!mineruCacheDir.trim()) {
     return null;
@@ -122,6 +128,10 @@ export async function loadSavedMineruPages({
   const candidateCaches = buildMineruCachePathCandidates(mineruCacheDir.trim(), item);
 
   for (const cachePaths of candidateCaches) {
+    if (repairCacheImages) {
+      await repairCacheImages(cachePaths.directory).catch(() => undefined);
+    }
+
     for (const candidatePath of getMineruJsonPathCandidates(cachePaths)) {
       try {
         const jsonText = await readText(candidatePath);

@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.1.43-2563eb?style=flat-square" alt="Version v0.1.43">
+  <img src="https://img.shields.io/badge/version-v0.1.46-2563eb?style=flat-square" alt="Version v0.1.46">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-4b5563?style=flat-square" alt="Windows macOS Linux">
   <img src="https://img.shields.io/badge/built%20with-Electron-47848f?style=flat-square" alt="Electron">
   <img src="https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-0f766e?style=flat-square" alt="React TypeScript">
@@ -55,6 +55,13 @@
 
 ## 近期更新
 
+### v0.1.46 - 新增 PaddleOCR-VL 1.6 识别引擎、强制重新识别与解析图片引用自愈
+
+- **PaddleOCR-VL 1.6 结构识别引擎**：设置 →「文档解析」新增引擎选择器，可在 MinerU 与 PaddleOCR-VL 1.6（云端异步 Jobs API）之间切换，阅读器、文献库与批量解析三条链路统一生效。适配层把 PaddleOCR-VL 输出归一化为现有 MinerU 缓存契约，结构阅读、图片渲染、PDF↔块几何联动、翻译、RAG 与缓存自愈全部零改动复用；布局坐标与页尺寸映射为 `pdf` 坐标系 bbox，图注/表注并入紧邻视觉块，资产同时支持 Base64 与预签名 URL，超过 100 页自动切分合并。
+- **强制重新识别（忽略缓存）**：阅读器工具栏与概览页新增「重新解析 / 重新识别」入口，文献库解析不再无条件复用已有结果；重新识别前备份译文、摘要与图片，成功后清理、失败则保留以便回退。
+- **解析缓存图片引用自愈**：新增幂等自愈命令，把指向不存在文件的图片引用重新指向实际存在的分卷文件，无需重新上传 PDF 或消耗额度；打开文档时自动执行，设置页另提供全库扫描入口。
+- **修复超页文档拆分合并后图片全部失效**：长文档（>200 页）自动拆分合并时，`content_list_v2.json` 的「页数组 + 每页块字典」结构未被识别，且资产路径实际位于嵌套的 `content.image_source.path` 而非块顶层，导致图片引用从未被改写 —— 图片被重命名为 `part_N_` 前缀、Markdown 也已同步，唯独结构化 JSON 仍是旧引用，界面因此大量出现「没有找到对应的图片资源」。现已按三种真实形状结构保持地改写任意深度的资源路径。全库对账：9 份超页文档共 2859 条失效引用全部恢复。
+
 ### v0.1.43 - 全量文献接入 RAG 索引池、断点续跑死循环自愈与超长论文深度兼容
 
 - **全量文献接入 RAG 索引池与状态管理**：修复主页文献未纳入索引候选导致角标回退与统计归零问题，全量文库条目实时注入索引池并动态同步 MinerU 解析状态。
@@ -69,7 +76,7 @@
 - **本地 RAG 知识库索引管理卡片**：设置面板新增索引管理控制台，直观呈现已索引 / 待索引 / 失败统计，支持一键「为未索引文献建立索引」与「仅重建失败索引」，配备动态进度条与暂停 / 继续 / 取消控制。
 - **文库列表 RAG 状态徽章与右键强制重试**：文献列表新增 RAG 状态角标（已索引 / 索引中 / 未索引 / 失败）；文献右键菜单支持「建立/重建 RAG 索引」，单篇强制断点续传重试，不重复消耗 embedding 额度。
 
-*历史版本演进（v0.1.32 - v0.1.41 包括多 Key 轮换、超大文件拆分合并、Zotero 选择性同步、BBox 原图切片、AI 区块重析等）详见 [CHANGELOG.md](./CHANGELOG.md)。*
+*历史版本演进（v0.1.32 - v0.1.45 包括多 Key 轮换、超大文件拆分合并、Zotero 选择性同步、BBox 原图切片、AI 区块重析等）详见 [CHANGELOG.md](./CHANGELOG.md)。*
 
 ---
 
