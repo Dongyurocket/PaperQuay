@@ -473,37 +473,48 @@ class PaperQuayKnowledgeService {
     return { dimension: Number(rows[0].dimension), modelKeyMatched: false };
   }
 
-  // vec0 的 document_key/source_type 是 partition key，KNN 必须逐（文档, 来源）扇出，
-  // 与桌面端 retrieveVectorChunks 的查询方式一致，再全局按距离归并。
+  // 原生单次全局 KNN 检索：vec0 的 partition key 支持全局缺省查询，
+  // 通过单条 SQL 跨全库直接召回 Top-K 向量，免除逐文档循环与来源截断限制。
   retrieveVectorChunks(ragDb, { queryVector, dimension, paperId, candidateLimit }) {
     const table = vectorTableName(dimension);
-    const conditions = [`status = 'ready'`, 'embedding_dimension = ?'];
-    const params = [dimension];
+    const queryVec = toFloat32Array(queryVector);
 
     if (paperId) {
-      conditions.push('document_key = ?');
-      params.push(paperId);
-    }
+      const search = ragDb.prepare(`
+        SELECT
+          c.document_key AS paperId,
+          c.chunk_id AS chunkId,
+          c.source_type AS sourceType,
+          c.page_index AS pageIndex,
+          c.block_id AS blockId,
+          c.text,
+          v.distance
+        FROM ${table} v
+        JOIN rag_chunks c ON c.id = v.rowid
+        JOIN rag_indexes i
+          ON i.document_key = c.document_key
+         AND i.source_type = c.source_type
+         AND i.status = 'ready'
+         AND i.embedding_dimension = ?
+        WHERE v.embedding MATCH ?
+          AND k = ?
+          AND v.document_key = ?
+        ORDER BY v.distance
+      `);
 
-    params.push(MAX_VECTOR_FANOUT_SOURCES);
-
-    const sources = ragDb.prepare(`
-      SELECT document_key AS documentKey, source_type AS sourceType
-      FROM rag_indexes
-      WHERE ${conditions.join(' AND ')}
-      ORDER BY indexed_at DESC
-      LIMIT ?
-    `).all(...params);
-
-    const countParams = paperId ? [dimension, paperId] : [dimension];
-    const totalSources = ragDb.prepare(`
-      SELECT COUNT(*) AS count FROM rag_indexes
-      WHERE status = 'ready' AND embedding_dimension = ?
-      ${paperId ? 'AND document_key = ?' : ''}
-    `).get(...countParams);
-
-    if (sources.length === 0) {
-      return { rows: [], truncated: false };
+      const rows = search.all(dimension, queryVec, candidateLimit, paperId);
+      return {
+        rows: rows.map((row) => ({
+          paperId: row.paperId,
+          chunkId: row.chunkId,
+          sourceType: row.sourceType,
+          pageIndex: row.pageIndex ?? null,
+          blockId: row.blockId ?? null,
+          text: row.text,
+          score: Number(row.distance) || 0,
+        })),
+        truncated: false,
+      };
     }
 
     const search = ragDb.prepare(`
@@ -517,23 +528,19 @@ class PaperQuayKnowledgeService {
         v.distance
       FROM ${table} v
       JOIN rag_chunks c ON c.id = v.rowid
+      JOIN rag_indexes i
+        ON i.document_key = c.document_key
+       AND i.source_type = c.source_type
+       AND i.status = 'ready'
+       AND i.embedding_dimension = ?
       WHERE v.embedding MATCH ?
         AND k = ?
-        AND v.document_key = ?
-        AND v.source_type = ?
       ORDER BY v.distance
     `);
 
-    const queryVec = toFloat32Array(queryVector);
-    const rows = [];
-    for (const source of sources) {
-      rows.push(...search.all(queryVec, candidateLimit, source.documentKey, source.sourceType));
-    }
-
-    rows.sort((left, right) => Number(left.distance) - Number(right.distance));
-
+    const rows = search.all(dimension, queryVec, candidateLimit);
     return {
-      rows: rows.slice(0, candidateLimit).map((row) => ({
+      rows: rows.map((row) => ({
         paperId: row.paperId,
         chunkId: row.chunkId,
         sourceType: row.sourceType,
@@ -542,7 +549,7 @@ class PaperQuayKnowledgeService {
         text: row.text,
         score: Number(row.distance) || 0,
       })),
-      truncated: Number(totalSources?.count ?? 0) > sources.length,
+      truncated: false,
     };
   }
 

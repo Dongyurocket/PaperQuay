@@ -133,7 +133,7 @@ args = [
 | `hybrid` | 强制尝试混合检索；配置缺失或向量索引不可用时降级为关键词检索，并在响应中返回 `warning` 说明原因 |
 | `keyword` | 强制使用 FTS5 关键词检索（分词/特殊字符场景再降级为模糊匹配），不发起任何网络请求 |
 
-混合检索的实现与桌面端完全一致：查询文本先经已配置的 Embedding API 向量化，在 `sqlite-vec` 向量索引上按文档做 KNN 召回，与 FTS5 的 BM25 候选经 RRF 融合排序。响应中的 `retrievalMode` 字段标识本次实际生效的检索方式（`hybrid` / `keyword`），每条结果的 `channels` 字段标识命中来源（`vector` / `fts` / `like`）。
+混合检索的实现与桌面端完全一致：查询文本先经已配置的 Embedding API 向量化，在 `sqlite-vec` 向量索引上由底层单条 SQL 跨全库所有就绪文献执行全局 KNN 向量召回（若传 `paperId` 则限定单篇），与 FTS5 的 BM25 候选经 RRF 融合排序，无任何来源数量截断。响应中的 `retrievalMode` 字段标识本次实际生效的检索方式（`hybrid` / `keyword`），每条结果的 `channels` 字段标识命中来源（`vector` / `fts` / `like`）。
 
 **配置来源与隐私边界**：MCP 服务直接读取 PaperQuay 渲染层持久化的阅读器配置（`<数据目录>/.settings/paperquay.config.json` 中的 `settings.embeddingBaseUrl` / `embeddingModel` / `embeddingDimensions` 与 `secrets.embeddingApiKey`），在应用内修改配置后下一次 MCP 调用即生效。混合检索会把**查询文本**发送到你配置的 Embedding 端点（与桌面端索引/检索时的行为一致）；设环境变量 `PAPERQUAY_MCP_EMBEDDING=off` 可全局禁用该网络请求，强制关键词检索。
 
