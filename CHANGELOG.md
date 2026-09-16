@@ -4,6 +4,13 @@
 
 各平台安装包见 [GitHub Releases](https://github.com/Dongyurocket/PaperQuay/releases)。
 
+## [0.1.45] - 2026-09-16
+
+### 优化
+
+- **知识库 MCP 服务重构为单次全局原生 KNN 检索**：`knowledgeMcpService.cjs` 彻底移除了原先 60 篇来源硬截断限制（`MAX_VECTOR_FANOUT_SOURCES = 60`）与基于 Node.js 内存循环的 60 次串行 SQL 查询；全面升级为单条 SQL 跨全库已就绪索引执行原生全局 KNN 向量相似度检索与 FTS5 BM25 融合召回，耗时由几十毫秒压缩至数毫秒，彻底消除了大规模知识库检索时的来源截断风险与 `truncated` 警告。
+- **知识库检索相关 Skills 与集成文档全面对齐**：更新 `paperquay-knowledge-search` Skill 至 1.1.0，优化 Agent 问答工作流引导（泛化学术概念与方法问题可直接发起全库正文检索，无需强迫前置检索元数据）；向所有配置了 `paperquay` MCP 的 Proma 工作区（`ai`、`personal-web`、`aris-op` 等）同步最新版 Skill，并同步更新了各领域工作区（`cad-mcp`、`cair-thesis-template`、`ppt`、`proj-evtol-design-4` 等）中检索增强 Skill 的参数与能力说明。
+
 ## [0.1.44] - 2026-09-16
 
 ### 新增
