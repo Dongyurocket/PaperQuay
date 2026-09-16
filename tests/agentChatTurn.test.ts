@@ -129,6 +129,89 @@ test('agent_chat_turn streams tool calls and usage through the shared Agent even
   assert.ok(events.some((event) => event.payload.kind === 'done'));
 });
 
+test('agent_chat_turn streams tool calls using responses api mode', async (t) => {
+  const requests: Array<Record<string, unknown>> = [];
+  t.mock.method(globalThis, 'fetch', async (_url, init) => {
+    requests.push(JSON.parse(String(init?.body ?? '{}')));
+    return sseResponse([
+      {
+        type: 'response.created',
+        response: { id: 'resp-1', status: 'in_progress' },
+      },
+      {
+        type: 'response.output_item.added',
+        output_index: 0,
+        item: {
+          id: 'item-1',
+          type: 'function_call',
+          call_id: 'call-resp-1',
+          name: 'search_library',
+          arguments: '',
+        },
+      },
+      {
+        type: 'response.function_call_arguments.delta',
+        output_index: 0,
+        call_id: 'call-resp-1',
+        delta: '{"query": "responses test"}',
+      },
+      {
+        type: 'response.output_item.done',
+        output_index: 0,
+        item: {
+          id: 'item-1',
+          type: 'function_call',
+          call_id: 'call-resp-1',
+          name: 'search_library',
+          arguments: '{"query": "responses test"}',
+        },
+      },
+      {
+        type: 'response.completed',
+        response: {
+          id: 'resp-1',
+          status: 'completed',
+          usage: { input_tokens: 15, output_tokens: 6 },
+        },
+      },
+    ]);
+  });
+
+  const commands = createAiCommands(context());
+  const result = await commands.agent_chat_turn({
+    request: {
+      requestId: 'request-responses-1',
+      options: {
+        baseUrl: 'https://example.test/v1',
+        apiKey: 'test-key',
+        model: 'test-model',
+        apiMode: 'responses',
+      },
+      messages: [{ role: 'user', content: 'Search something.' }],
+      tools: [{
+        type: 'function',
+        function: {
+          name: 'search_library',
+          description: 'Search',
+          parameters: { type: 'object', properties: { query: { type: 'string' } } },
+        },
+      }],
+      toolChoice: 'auto',
+      stream: true,
+    },
+  }, {
+    sender: {
+      send() {},
+    },
+  });
+
+  assert.equal(result.toolCalls.length, 1);
+  assert.equal(result.toolCalls[0]?.id, 'call-resp-1');
+  assert.equal(result.toolCalls[0]?.name, 'search_library');
+  assert.deepEqual(result.toolCalls[0]?.arguments, { query: 'responses test' });
+  assert.deepEqual(result.usage, { promptTokens: 15, completionTokens: 6 });
+});
+
 test('agent_chat_turn_cancel aborts an in-flight provider request', async (t) => {
   let fetchSignal: AbortSignal | undefined;
   t.mock.method(globalThis, 'fetch', async (_url, init) => {

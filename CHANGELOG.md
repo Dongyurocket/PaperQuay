@@ -4,6 +4,19 @@
 
 各平台安装包见 [GitHub Releases](https://github.com/Dongyurocket/PaperQuay/releases)。
 
+## [0.1.44] - 2026-09-16
+
+### 新增
+
+- **全库单次原生 KNN 向量与 FTS5 混合检索**：底层 `ragStore` 移除单篇文献硬编码限制，单次 SQL 跨全库执行 KNN 距离计算与 FTS5 BM25 检索并由 RRF 融合排序，支持可选多文档范围过滤（`documentKeys`）；智能体 `rag_search` 工具全面升级为原生全局混合检索，当未指定 `paperIds` 时自动针对全库文献毫秒级召回证据切片并挂载学术引用。
+- **检索与建库解耦异步化**：在智能体问答与检索链路中，未就绪文献调度后台异步索引，当前轮次立即可用已就绪切片或 FTS 关键词秒级返回，彻底杜绝 JIT 同步切块与 embedding 造成的交互卡死。
+
+### 修复
+
+- **智能体 Responses 协议流式工具调用解析缺失**：修复 `mergeResponsesChunks` 未拼装 `function_call` 事件流导致 Responses 模式下工具调用被吞的缺陷；补齐 `messagesToResponseInput` 中的 `type: 'message'` 规范契约字段，解决官方标准端点 400 校验错误。
+- **Responses 协议智能自愈降级**：对不支持 `/v1/responses` 的上游端点（返回 404/405/400 等），自动优雅降级为 `/v1/chat/completions` 协议重试，避免将端点协议错误误判为“模型不支持工具”而盲目剥离 tools。
+- **全链路中断信号（AbortSignal）打通与取消兜底**：在 Agent 工具执行上下文与底层 RAG、批量 Embedding 循环中全面接入 `signal` 中断检查，用户点击取消时立即停止计算与网络请求；前端增加 500ms 防御性超时恢复，彻底杜绝取消按钮无法生效与 UI 锁死问题。
+
 ## [0.1.43] - 2026-09-13
 
 ### 修复

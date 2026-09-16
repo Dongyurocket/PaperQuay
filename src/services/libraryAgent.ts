@@ -35,6 +35,7 @@ import {
   type AgentVisionCandidate,
 } from './agentVision';
 import { resolveLocalRag } from './localRag';
+import { embedRagText, ragRetrieveDocumentChunks } from './rag';
 import {
   paperAuthors,
   paperPdfPath,
@@ -972,8 +973,15 @@ async function loadPaperContext(
   requestReason: string,
   options?: {
     ragEnabled?: boolean;
+    signal?: AbortSignal;
   },
 ): Promise<PaperContextPayload> {
+  if (options?.signal?.aborted) {
+    const error = new Error('Context loading aborted');
+    error.name = 'AbortError';
+    throw error;
+  }
+
   if (mode === 'summary') {
     const context = fallbackSummaryContext(paper);
 
@@ -1005,6 +1013,11 @@ async function loadPaperContext(
     let normalizedPdfText = '';
 
     if (!mineruContext || ragSettings.ragSourceMode === 'pdf-text') {
+      if (options?.signal?.aborted) {
+        const error = new Error('Context loading aborted');
+        error.name = 'AbortError';
+        throw error;
+      }
       try {
         const pdfData = await readLocalBinaryFile(pdfPath);
         const pdfText = await extractPdfTextByPdfJs(pdfData);
@@ -1024,6 +1037,11 @@ async function loadPaperContext(
       ragSettings.embeddingBaseUrl.trim() &&
       ragSettings.embeddingModel.trim()
     ) {
+      if (options?.signal?.aborted) {
+        const error = new Error('Context loading aborted');
+        error.name = 'AbortError';
+        throw error;
+      }
       try {
         const ragResolution = await resolveLocalRag({
           item: workspaceItem,
@@ -1039,6 +1057,8 @@ async function loadPaperContext(
           mineruBlocks: mineruContext?.blocks ?? [],
           mineruDocumentText: mineruContext?.text ?? '',
           pdfDocumentText: normalizedPdfText,
+          signal: options?.signal,
+          syncIndexing: false,
         });
 
         if (ragResolution.kind === 'retrieved' && ragResolution.documentText.trim()) {
@@ -2953,12 +2973,23 @@ export async function runConversationalLibraryAgent({
   const getPaperContext = async (
     paper: LiteraturePaper,
     input: { mode: 'summary' | 'pdf-text'; query: string },
+    contextOptions?: { signal?: AbortSignal },
   ): Promise<AgentPaperContextResult> => {
+    const effectiveSignal = contextOptions?.signal ?? signal;
+    if (effectiveSignal?.aborted) {
+      const error = new Error('Agent run aborted');
+      error.name = 'AbortError';
+      throw error;
+    }
+
     const current = contexts.get(paper.id);
     const loadedMode = contextModes.get(paper.id);
     const shouldReload = !current || (input.mode === 'pdf-text' && loadedMode !== 'pdf-text');
     const context = shouldReload
-      ? await loadPaperContext(paper, input.mode, input.query || normalizedInstruction, { ragEnabled })
+      ? await loadPaperContext(paper, input.mode, input.query || normalizedInstruction, {
+        ragEnabled,
+        signal: effectiveSignal,
+      })
       : current;
 
     if (!context) {
@@ -2979,8 +3010,105 @@ export async function runConversationalLibraryAgent({
     return context;
   };
 
+  const ragSettings = normalizeStoredReaderSettings(persisted.settings);
+  const ragReady = Boolean(
+    ragEnabled &&
+    persisted.secrets.embeddingApiKey?.trim() &&
+    ragSettings.embeddingBaseUrl.trim() &&
+    ragSettings.embeddingModel.trim(),
+  );
+
+  const searchRag = async (
+    input: { query: string; paperIds?: string[]; topK?: number },
+    searchOptions?: { signal?: AbortSignal },
+  ) => {
+    const effectiveSignal = searchOptions?.signal ?? signal;
+    if (effectiveSignal?.aborted) {
+      const error = new Error('RAG search aborted');
+      error.name = 'AbortError';
+      throw error;
+    }
+
+    const embeddingApiKey = persisted.secrets.embeddingApiKey?.trim() || '';
+    if (!ragReady || !embeddingApiKey) {
+      return { chunks: [], ragErrors: ['Local RAG is not configured or ready.'] };
+    }
+
+    try {
+      const queryEmbedding = await embedRagText(
+        input.query,
+        {
+          baseUrl: ragSettings.embeddingBaseUrl,
+          apiKey: embeddingApiKey,
+          model: ragSettings.embeddingModel,
+          dimensions: ragSettings.embeddingDimensions,
+          timeoutSeconds: ragSettings.embeddingRequestTimeoutSeconds,
+        },
+      );
+
+      if (effectiveSignal?.aborted) {
+        const error = new Error('RAG search aborted');
+        error.name = 'AbortError';
+        throw error;
+      }
+
+      const topK = Math.max(1, Math.min(30, input.topK ?? 12));
+      const targetKeys = Array.isArray(input.paperIds) && input.paperIds.length > 0
+        ? input.paperIds.filter(Boolean)
+        : undefined;
+
+      const rawResults = await ragRetrieveDocumentChunks({
+        documentKeys: targetKeys,
+        queryEmbedding,
+        queryText: input.query,
+        topK,
+      });
+
+      const paperById = new Map(papers.map((p) => [p.id, p]));
+      const chunks = rawResults.map((chunk) => {
+        const paper = chunk.documentKey ? paperById.get(chunk.documentKey) : undefined;
+        return {
+          paperId: chunk.documentKey || '',
+          paperTitle: paper?.title,
+          page: chunk.pageIndex === null || chunk.pageIndex === undefined ? null : chunk.pageIndex + 1,
+          blockId: chunk.blockId ?? null,
+          snippet: chunk.text ?? '',
+          hasImage: false,
+        };
+      });
+
+      for (const chunk of rawResults) {
+        if (!chunk.documentKey) continue;
+        const paper = paperById.get(chunk.documentKey);
+        if (!paper) continue;
+        const citationId = `agent-rag:${paper.id}:${chunk.pageIndex ?? 'na'}:${chunk.blockId ?? 'na'}`;
+        if (!citations.some((c) => c.id === citationId)) {
+          citations.push({
+            id: citationId,
+            label: String(citations.length + 1),
+            sourceType: chunk.sourceType ?? 'pdf-text',
+            pageIndex: chunk.pageIndex ?? null,
+            blockId: chunk.blockId ?? null,
+            previewText: chunk.text?.slice(0, 300) ?? '',
+            paperId: paper.id,
+            paperTitle: paper.title,
+          });
+        }
+      }
+
+      return { chunks, ragErrors: [] };
+    } catch (error) {
+      if (effectiveSignal?.aborted || (error instanceof Error && error.name === 'AbortError')) {
+        throw error;
+      }
+      return { chunks: [], ragErrors: [error instanceof Error ? error.message : String(error)] };
+    }
+  };
+
   const tools = createLibraryAgentTools({
     papers,
+    currentPaperScopeIds,
+    searchRag,
     getPaperContext,
     memory: {
       read: async (file) => (await readAgentMemory(file)).content,
@@ -3040,13 +3168,6 @@ export async function runConversationalLibraryAgent({
   });
   let streamedAnswer = '';
   let streamedThinking = '';
-  const ragSettings = normalizeStoredReaderSettings(persisted.settings);
-  const ragReady = Boolean(
-    ragEnabled &&
-    persisted.secrets.embeddingApiKey?.trim() &&
-    ragSettings.embeddingBaseUrl.trim() &&
-    ragSettings.embeddingModel.trim(),
-  );
   let memoryContext = { topics: '', synthesis: '' };
   const nonVisionAttachments = (attachments ?? []).filter((attachment) =>
     attachment.kind !== 'image' &&

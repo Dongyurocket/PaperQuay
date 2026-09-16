@@ -51,6 +51,7 @@ export interface AgentToolMountContext {
 }
 
 export interface AgentToolRuntimeContext {
+  signal?: AbortSignal;
   [key: string]: unknown;
 }
 
@@ -376,18 +377,21 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<LibraryAg
         const memoryPlans: AgentMemoryWritePlan[] = [];
 
         for (const call of writeCalls) {
+          throwIfAborted(options.signal);
           const tool = toolByName.get(call.name);
           if (!tool) continue;
           const args = normalizeToolArguments(call.arguments);
           emit({ kind: 'tool_call', turn, callId: call.id, name: call.name, args });
 
           try {
-            const result = await tool.execute(args, options.runtimeContext);
+            const toolContext: AgentToolRuntimeContext = { ...options.runtimeContext, signal: options.signal };
+            const result = await tool.execute(args, toolContext);
             const content = truncateToolContent(result.content);
             emit({ kind: 'tool_result', turn, callId: call.id, name: call.name, ok: true, preview: content.slice(0, 500) });
             if (result.plan) plans.push(result.plan);
             if (result.memoryPlan) memoryPlans.push(result.memoryPlan);
           } catch (error) {
+            throwIfAborted(options.signal);
             const message = resultErrorMessage(error);
             emit({ kind: 'tool_result', turn, callId: call.id, name: call.name, ok: false, preview: message.slice(0, 500) });
             emit({ kind: 'error', turn, message });
@@ -441,6 +445,7 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<LibraryAg
       });
 
       const results = await Promise.all(toolCalls.map(async (call) => {
+        throwIfAborted(options.signal);
         const tool = toolByName.get(call.name);
         const args = normalizeToolArguments(call.arguments);
         emit({ kind: 'tool_call', turn, callId: call.id, name: call.name, args });
@@ -457,7 +462,8 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<LibraryAg
         }
 
         try {
-          const result = await tool.execute(args, options.runtimeContext);
+          const toolContext: AgentToolRuntimeContext = { ...options.runtimeContext, signal: options.signal };
+          const result = await tool.execute(args, toolContext);
           const content = truncateToolContent(result.content);
           emit({ kind: 'tool_result', turn, callId: call.id, name: call.name, ok: true, preview: content.slice(0, 500) });
           return {
@@ -467,6 +473,7 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<LibraryAg
             isError: false,
           };
         } catch (error) {
+          throwIfAborted(options.signal);
           const content = resultErrorMessage(error);
           emit({ kind: 'tool_result', turn, callId: call.id, name: call.name, ok: false, preview: content.slice(0, 500) });
           return { call, content, attachments: undefined, isError: true };

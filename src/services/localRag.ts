@@ -150,7 +150,13 @@ export async function ensurePreparedSourceIndexed(input: {
   batchSize: number;
   /** 手动触发时传 true：绕过失败冷却与内存失败缓存，立即重试。 */
   force?: boolean;
+  signal?: AbortSignal;
 }): Promise<RagIndexEnsureResult> {
+  if (input.signal?.aborted) {
+    const error = new Error('Indexing aborted');
+    error.name = 'AbortError';
+    throw error;
+  }
   const embeddingModelKey = buildRagEmbeddingModelKey(input.embedding);
   const currentStatus = await ragGetDocumentIndexStatus(input.documentKey, input.sourceType);
   const cachedFailure = getCachedRagIndexFailure(
@@ -223,6 +229,11 @@ export async function ensurePreparedSourceIndexed(input: {
 
   try {
     for (const batch of chunkItems(remainingChunks, input.batchSize)) {
+      if (input.signal?.aborted) {
+        const error = new Error('Indexing aborted');
+        error.name = 'AbortError';
+        throw error;
+      }
       const indexedChunks = await embedRagChunks(batch, input.embedding);
       const indexedChunkById = new Map(indexedChunks.map((chunk) => [chunk.chunkId, chunk]));
       const contiguousReadyChunks = [];
@@ -334,7 +345,16 @@ export async function resolveLocalRag(input: {
   mineruBlocks: PositionedMineruBlock[];
   mineruDocumentText: string;
   pdfDocumentText: string;
+  signal?: AbortSignal;
+  /** 为 false 时不阻塞当前检索调用，未就绪的来源在后台异步调度索引。缺省为 true。 */
+  syncIndexing?: boolean;
 }): Promise<LocalRagResolution> {
+  if (input.signal?.aborted) {
+    const error = new Error('RAG resolution aborted');
+    error.name = 'AbortError';
+    throw error;
+  }
+
   if (!input.settings.localRagEnabled || input.settings.ragSourceMode === 'off') {
     return {
       kind: 'disabled',
@@ -356,22 +376,53 @@ export async function resolveLocalRag(input: {
   }
 
   try {
-    for (const source of preparedDocument.sources) {
-      await ensurePreparedSourceIndexed({
-        documentKey: preparedDocument.documentKey,
-        title: preparedDocument.title,
-        sourceType: source.sourceType,
-        sourceSignature: source.sourceSignature,
-        chunks: source.chunks,
-        embedding: input.embedding,
-        batchSize: Math.max(1, input.settings.embeddingBatchSize || 24),
-      });
+    if (input.syncIndexing === false) {
+      for (const source of preparedDocument.sources) {
+        void ensurePreparedSourceIndexed({
+          documentKey: preparedDocument.documentKey,
+          title: preparedDocument.title,
+          sourceType: source.sourceType,
+          sourceSignature: source.sourceSignature,
+          chunks: source.chunks,
+          embedding: input.embedding,
+          batchSize: Math.max(1, input.settings.embeddingBatchSize || 24),
+        }).catch((err) => {
+          console.warn('[paperquay] Background RAG indexing failed:', err);
+        });
+      }
+    } else {
+      for (const source of preparedDocument.sources) {
+        if (input.signal?.aborted) {
+          const error = new Error('RAG resolution aborted');
+          error.name = 'AbortError';
+          throw error;
+        }
+        await ensurePreparedSourceIndexed({
+          documentKey: preparedDocument.documentKey,
+          title: preparedDocument.title,
+          sourceType: source.sourceType,
+          sourceSignature: source.sourceSignature,
+          chunks: source.chunks,
+          embedding: input.embedding,
+          batchSize: Math.max(1, input.settings.embeddingBatchSize || 24),
+          signal: input.signal,
+        });
+      }
     }
   } catch (error) {
+    if (input.signal?.aborted || (error instanceof Error && error.name === 'AbortError')) {
+      throw error;
+    }
     return {
       kind: 'failed',
       errorMessage: error instanceof Error ? error.message : String(error),
     };
+  }
+
+  if (input.signal?.aborted) {
+    const error = new Error('RAG resolution aborted');
+    error.name = 'AbortError';
+    throw error;
   }
 
   const statuses = await Promise.all(

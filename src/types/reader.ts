@@ -232,12 +232,14 @@ export interface RagDocumentIndexStatus {
 }
 
 export interface RagRetrievalResult {
+  documentKey?: string;
   chunkId: string;
   sourceType: Exclude<RagSourceMode, "off" | "hybrid">;
   pageIndex: number | null;
   blockId?: string | null;
   text: string;
   score: number;
+  rrfScore?: number;
 }
 
 export interface RagReportDocumentIndexFailureRequest {

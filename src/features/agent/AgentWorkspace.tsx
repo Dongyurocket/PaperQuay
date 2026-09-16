@@ -1387,11 +1387,21 @@ function AgentWorkspace() {
     const controller = abortControllersRef.current.get(activeSessionId);
 
     if (!controller) {
+      setAgentSessionRunning(activeSessionId, false);
       return;
     }
 
     controller.abort();
     setStatusMessage(l('正在取消当前运行...', 'Cancelling the current run...'));
+
+    const sid = activeSessionId;
+    window.setTimeout(() => {
+      if (abortControllersRef.current.has(sid)) {
+        abortControllersRef.current.delete(sid);
+        setAgentSessionRunning(sid, false);
+        setStatusMessage(l('已取消当前运行。', 'Current run cancelled.'));
+      }
+    }, 500);
   };
 
   const submitPrompt = (value: string) => {

@@ -374,37 +374,56 @@ function isLikelyReasoningSupportError(error) {
   ].some((signal) => normalized.includes(signal));
 }
 
+function shouldFallbackToChatCompletions(error) {
+  const message = error instanceof Error && error.message ? error.message : String(error ?? '');
+  return (
+    /responses HTTP (?:400|404|405|415|422|429|500|502|503|504)/i.test(message) ||
+    /upstream request failed|upstream_error|bad gateway|gateway timeout|not found|method not allowed/i.test(message)
+  );
+}
+
 async function openAiChatWithAgentFallback(options, messages, requestExtras, allowPaperContextTool) {
-  try {
-    return await openAiChat(options, messages, requestExtras);
-  } catch (error) {
-    const shouldRetryWithoutTools = allowPaperContextTool && isLikelyToolSupportError(error);
-    const shouldRetryWithoutReasoningSummary =
-      Boolean(requestExtras?.reasoningSummary) && isLikelyReasoningSupportError(error);
-
-    if (!shouldRetryWithoutTools && !shouldRetryWithoutReasoningSummary) {
-      throw error;
-    }
-
-    const nextExtras = {
-      ...requestExtras,
-      tools: shouldRetryWithoutTools ? undefined : requestExtras?.tools,
-      toolChoice: shouldRetryWithoutTools ? undefined : requestExtras?.toolChoice,
-      reasoningSummary: shouldRetryWithoutReasoningSummary ? undefined : requestExtras?.reasoningSummary,
-    };
-
+  const execute = async (currentOptions) => {
     try {
-      return await openAiChat(options, messages, nextExtras);
-    } catch (retryError) {
-      if (nextExtras.reasoningSummary && isLikelyReasoningSupportError(retryError)) {
-        return openAiChat(options, messages, {
-          ...nextExtras,
-          reasoningSummary: undefined,
-        });
+      return await openAiChat(currentOptions, messages, requestExtras);
+    } catch (error) {
+      const shouldRetryWithoutTools = allowPaperContextTool && isLikelyToolSupportError(error);
+      const shouldRetryWithoutReasoningSummary =
+        Boolean(requestExtras?.reasoningSummary) && isLikelyReasoningSupportError(error);
+
+      if (!shouldRetryWithoutTools && !shouldRetryWithoutReasoningSummary) {
+        throw error;
       }
 
-      throw retryError;
+      const nextExtras = {
+        ...requestExtras,
+        tools: shouldRetryWithoutTools ? undefined : requestExtras?.tools,
+        toolChoice: shouldRetryWithoutTools ? undefined : requestExtras?.toolChoice,
+        reasoningSummary: shouldRetryWithoutReasoningSummary ? undefined : requestExtras?.reasoningSummary,
+      };
+
+      try {
+        return await openAiChat(currentOptions, messages, nextExtras);
+      } catch (retryError) {
+        if (nextExtras.reasoningSummary && isLikelyReasoningSupportError(retryError)) {
+          return openAiChat(currentOptions, messages, {
+            ...nextExtras,
+            reasoningSummary: undefined,
+          });
+        }
+
+        throw retryError;
+      }
     }
+  };
+
+  try {
+    return await execute(options);
+  } catch (error) {
+    if (options?.apiMode === 'responses' && shouldFallbackToChatCompletions(error)) {
+      return execute({ ...options, apiMode: 'chat_completions' });
+    }
+    throw error;
   }
 }
 
@@ -507,44 +526,55 @@ function buildLibraryAgentModelRequest(options) {
 }
 
 async function openAiChatAgentStreamWithFallback(options, messages, requestExtras, allowPaperContextTool) {
-  const request = async (extras) => {
-    const response = await openAiChat(options, messages, { ...extras, stream: true });
+  const execute = async (currentOptions) => {
+    const request = async (extras) => {
+      const response = await openAiChat(currentOptions, messages, { ...extras, stream: true });
 
-    if (response.ok && response.body) {
-      return response;
-    }
+      if (response.ok && response.body) {
+        return { response, effectiveOptions: currentOptions };
+      }
 
-    const text = await response.text().catch(() => '');
-    throw new Error(`OpenAI-compatible agent stream HTTP ${response.status}: ${text}`);
-  };
-
-  try {
-    return await request(requestExtras);
-  } catch (error) {
-    const shouldRetryWithoutTools = allowPaperContextTool && isLikelyToolSupportError(error);
-    const shouldRetryWithoutReasoningSummary =
-      Boolean(requestExtras?.reasoningSummary) && isLikelyReasoningSupportError(error);
-
-    if (!shouldRetryWithoutTools && !shouldRetryWithoutReasoningSummary) {
-      throw error;
-    }
-
-    const nextExtras = {
-      ...requestExtras,
-      tools: shouldRetryWithoutTools ? undefined : requestExtras?.tools,
-      toolChoice: shouldRetryWithoutTools ? undefined : requestExtras?.toolChoice,
-      reasoningSummary: shouldRetryWithoutReasoningSummary ? undefined : requestExtras?.reasoningSummary,
+      const text = await response.text().catch(() => '');
+      throw new Error(`OpenAI-compatible agent stream HTTP ${response.status}: ${text}`);
     };
 
     try {
-      return await request(nextExtras);
-    } catch (retryError) {
-      if (nextExtras.reasoningSummary && isLikelyReasoningSupportError(retryError)) {
-        return request({ ...nextExtras, reasoningSummary: undefined });
+      return await request(requestExtras);
+    } catch (error) {
+      const shouldRetryWithoutTools = allowPaperContextTool && isLikelyToolSupportError(error);
+      const shouldRetryWithoutReasoningSummary =
+        Boolean(requestExtras?.reasoningSummary) && isLikelyReasoningSupportError(error);
+
+      if (!shouldRetryWithoutTools && !shouldRetryWithoutReasoningSummary) {
+        throw error;
       }
 
-      throw retryError;
+      const nextExtras = {
+        ...requestExtras,
+        tools: shouldRetryWithoutTools ? undefined : requestExtras?.tools,
+        toolChoice: shouldRetryWithoutTools ? undefined : requestExtras?.toolChoice,
+        reasoningSummary: shouldRetryWithoutReasoningSummary ? undefined : requestExtras?.reasoningSummary,
+      };
+
+      try {
+        return await request(nextExtras);
+      } catch (retryError) {
+        if (nextExtras.reasoningSummary && isLikelyReasoningSupportError(retryError)) {
+          return request({ ...nextExtras, reasoningSummary: undefined });
+        }
+
+        throw retryError;
+      }
     }
+  };
+
+  try {
+    return await execute(options);
+  } catch (error) {
+    if (options?.apiMode === 'responses' && shouldFallbackToChatCompletions(error)) {
+      return execute({ ...options, apiMode: 'chat_completions' });
+    }
+    throw error;
   }
 }
 
@@ -758,15 +788,17 @@ async function runAgentChatTurn(request, event) {
     const sender = event?.sender;
 
     try {
-      const response = await openAiChatAgentStreamWithFallback(
+      const streamResult = await openAiChatAgentStreamWithFallback(
         options,
         messages,
         requestExtras,
         supportsToolFallback,
       );
+      const response = streamResult?.response || streamResult;
+      const effectiveOptions = streamResult?.effectiveOptions || options;
       const data = await readAgentStreamResponse({
         requestId,
-        options,
+        options: effectiveOptions,
         response,
         sender: {
           send(_channel, eventName, payload) {
@@ -1663,14 +1695,16 @@ function createAiCommands(context) {
       const { allowPaperContextTool, messages, requestExtras } = buildLibraryAgentModelRequest(options);
 
       try {
-        const response = await openAiChatAgentStreamWithFallback(
+        const streamResult = await openAiChatAgentStreamWithFallback(
           options,
           messages,
           requestExtras,
           allowPaperContextTool,
         );
-        const data = await readAgentStreamResponse({ requestId, options, response, sender });
-        const result = parseLibraryAgentModelOutput(data, options);
+        const response = streamResult?.response || streamResult;
+        const effectiveOptions = streamResult?.effectiveOptions || options;
+        const data = await readAgentStreamResponse({ requestId, options: effectiveOptions, response, sender });
+        const result = parseLibraryAgentModelOutput(data, effectiveOptions);
 
         sender.send('paperquay:event', AGENT_STREAM_EVENT, { requestId, kind: 'done' });
         return result;

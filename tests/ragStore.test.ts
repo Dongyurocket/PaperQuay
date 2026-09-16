@@ -684,3 +684,64 @@ test('RAG store cleans up orphan zero-chunk failed statuses when mineru-markdown
     rmSync(dataDir, { recursive: true, force: true });
   }
 });
+
+test('RAG store supports global multi-document retrieval and documentKeys filtering', () => {
+  const { dataDir, store } = createStore();
+
+  try {
+    store.indexDocument({
+      documentKey: 'doc-alpha',
+      title: 'Alpha Paper',
+      sourceType: 'mineru-markdown',
+      sourceSignature: 'sig-alpha',
+      embeddingModelKey: 'embedding-test',
+      totalChunkCount: 1,
+      chunks: [{
+        chunkId: 'chunk-alpha',
+        chunkIndex: 0,
+        pageIndex: 0,
+        blockId: 'b1',
+        text: 'Attention mechanisms and Transformer networks.',
+        embedding: [1, 0, 0, 0],
+      }],
+    });
+
+    store.indexDocument({
+      documentKey: 'doc-beta',
+      title: 'Beta Paper',
+      sourceType: 'mineru-markdown',
+      sourceSignature: 'sig-beta',
+      embeddingModelKey: 'embedding-test',
+      totalChunkCount: 1,
+      chunks: [{
+        chunkId: 'chunk-beta',
+        chunkIndex: 0,
+        pageIndex: 1,
+        blockId: 'b2',
+        text: 'Convolutional neural networks for image classification.',
+        embedding: [0, 1, 0, 0],
+      }],
+    });
+
+    const globalResults = store.retrieveDocumentChunks({
+      queryEmbedding: [1, 0, 0, 0],
+      queryText: 'Transformer',
+      topK: 5,
+    });
+    assert.equal(globalResults.length, 2);
+    assert.equal(globalResults[0]?.chunkId, 'chunk-alpha');
+    assert.equal(globalResults[0]?.documentKey, 'doc-alpha');
+
+    const filteredResults = store.retrieveDocumentChunks({
+      documentKeys: ['doc-beta'],
+      queryEmbedding: [1, 0, 0, 0],
+      queryText: 'Transformer',
+      topK: 5,
+    });
+    assert.equal(filteredResults.length, 1);
+    assert.equal(filteredResults[0]?.documentKey, 'doc-beta');
+  } finally {
+    store.close();
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});

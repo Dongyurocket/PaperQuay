@@ -261,6 +261,8 @@ function mergeChatCompletionChunks(chunks) {
 function mergeResponsesChunks(chunks) {
   const outputParts = [];
   const reasoningSummaryParts = [];
+  const functionCallsById = new Map();
+  const functionCallsByIndex = new Map();
   let base = null;
 
   for (const chunk of chunks) {
@@ -268,8 +270,16 @@ function mergeResponsesChunks(chunks) {
       base = {
         id: chunk.response?.id ?? chunk.id,
         object: 'response',
-        output: [{ type: 'message', content: [{ type: 'output_text', text: '' }] }],
+        output: [],
       };
+    }
+
+    if (chunk.response?.id) {
+      base.id = chunk.response.id;
+    }
+
+    if (chunk.response?.usage || chunk.usage) {
+      base.usage = chunk.response?.usage ?? chunk.usage;
     }
 
     const eventType = cleanString(chunk.type).toLowerCase();
@@ -291,24 +301,87 @@ function mergeResponsesChunks(chunks) {
       outputParts.push(chunk.text);
     }
 
+    const outputIndex = Number.isFinite(chunk.output_index) ? chunk.output_index : null;
+    const item = chunk.item || chunk.output_item;
+
+    if (item && (item.type === 'function_call' || eventType === 'response.output_item.added' || eventType === 'response.output_item.done')) {
+      const callId = cleanString(item.call_id || item.id);
+      const name = cleanString(item.name);
+      const args = typeof item.arguments === 'string' ? item.arguments : '';
+      const existing = (callId ? functionCallsById.get(callId) : null) ||
+        (outputIndex !== null ? functionCallsByIndex.get(outputIndex) : null) || {
+          id: callId,
+          call_id: callId,
+          type: 'function_call',
+          name,
+          arguments: '',
+        };
+
+      const updated = {
+        ...existing,
+        id: existing.id || callId,
+        call_id: existing.call_id || callId,
+        name: existing.name || name,
+        arguments: args || existing.arguments,
+      };
+
+      if (updated.call_id) functionCallsById.set(updated.call_id, updated);
+      if (outputIndex !== null) functionCallsByIndex.set(outputIndex, updated);
+    }
+
+    if (
+      eventType === 'response.function_call_arguments.delta' ||
+      eventType === 'response.function_call.arguments.delta'
+    ) {
+      const callId = cleanString(chunk.call_id || chunk.item_id);
+      const existing = (callId ? functionCallsById.get(callId) : null) ||
+        (outputIndex !== null ? functionCallsByIndex.get(outputIndex) : null) || {
+          id: callId,
+          call_id: callId,
+          type: 'function_call',
+          name: '',
+          arguments: '',
+        };
+
+      const delta = typeof chunk.delta === 'string' ? chunk.delta : '';
+      existing.arguments = (existing.arguments || '') + delta;
+
+      if (existing.call_id) functionCallsById.set(existing.call_id, existing);
+      if (outputIndex !== null) functionCallsByIndex.set(outputIndex, existing);
+    }
+
+    if (
+      eventType === 'response.function_call_arguments.done' ||
+      eventType === 'response.function_call.arguments.done'
+    ) {
+      const callId = cleanString(chunk.call_id || chunk.item_id);
+      const existing = (callId ? functionCallsById.get(callId) : null) ||
+        (outputIndex !== null ? functionCallsByIndex.get(outputIndex) : null);
+
+      if (existing && typeof chunk.arguments === 'string') {
+        existing.arguments = chunk.arguments;
+      }
+    }
+
     if ((chunk.type === 'response.completed' || chunk.type === 'response.done') && chunk.response) {
-      base = chunk.response;
+      base = {
+        ...chunk.response,
+        id: chunk.response.id || base?.id,
+        usage: chunk.response.usage || base?.usage,
+      };
     }
   }
 
   const outputText = outputParts.join('');
   const reasoningSummaryText = reasoningSummaryParts.join('');
 
-  if (Array.isArray(base?.output) && base.output.length > 0) {
-    return {
-      ...base,
-      output_text: cleanString(base.output_text) || outputText,
-    };
-  }
+  const collectedToolCalls = Array.from(
+    new Set([...functionCallsById.values(), ...functionCallsByIndex.values()]),
+  ).filter((call) => call && call.name);
 
-  if (outputText || reasoningSummaryText) {
-    const output = [];
+  let output = Array.isArray(base?.output) ? [...base.output] : [];
 
+  if (output.length === 0) {
     if (reasoningSummaryText) {
       output.push({
         type: 'reasoning',
@@ -320,14 +393,25 @@ function mergeResponsesChunks(chunks) {
       output.push({ type: 'message', content: [{ type: 'output_text', text: outputText }] });
     }
 
-    return {
-      ...base,
-      output_text: outputText,
-      output,
-    };
+    for (const toolCall of collectedToolCalls) {
+      output.push(toolCall);
+    }
+  } else {
+    const hasFunctionCall = output.some((item) =>
+      item?.type === 'function_call' ||
+      (Array.isArray(item?.content) && item.content.some((c) => c?.type === 'function_call'))
+    );
+
+    if (!hasFunctionCall && collectedToolCalls.length > 0) {
+      output.push(...collectedToolCalls);
+    }
   }
 
-  return base;
+  return {
+    ...base,
+    output_text: cleanString(base?.output_text) || outputText,
+    output,
+  };
 }
 
 function parseSseJsonResponse(text, label) {
@@ -549,9 +633,25 @@ function messagesToResponseInput(messages) {
           output: content || '{}',
         });
       } else if (content) {
-        inputItems.push({ role: 'user', content: [{ type: 'input_text', text: `[Tool result]\n${content}` }] });
+        inputItems.push({ type: 'message', role: 'user', content: [{ type: 'input_text', text: `[Tool result]\n${content}` }] });
       }
       continue;
+    }
+
+    const parts = [];
+    if (content) {
+      parts.push({ type: role === 'assistant' ? 'output_text' : 'input_text', text: content });
+    }
+
+    for (const attachment of Array.isArray(message?.attachments) ? message.attachments : []) {
+      const imageUrl = attachmentToImageUrl(attachment);
+      if (imageUrl && role === 'user') {
+        parts.push({ type: 'input_image', image_url: imageUrl });
+      }
+    }
+
+    if (parts.length > 0) {
+      inputItems.push({ type: 'message', role, content: parts });
     }
 
     if (role === 'assistant' && Array.isArray(message?.toolCalls)) {
@@ -570,22 +670,6 @@ function messagesToResponseInput(messages) {
           });
         }
       }
-    }
-
-    const parts = [];
-    if (content) {
-      parts.push({ type: role === 'assistant' ? 'output_text' : 'input_text', text: content });
-    }
-
-    for (const attachment of Array.isArray(message?.attachments) ? message.attachments : []) {
-      const imageUrl = attachmentToImageUrl(attachment);
-      if (imageUrl && role === 'user') {
-        parts.push({ type: 'input_image', image_url: imageUrl });
-      }
-    }
-
-    if (parts.length > 0) {
-      inputItems.push({ role, content: parts });
     }
   }
 
@@ -966,6 +1050,14 @@ function pickStreamThinkingDelta(data, apiMode) {
 }
 
 function mergeOpenAiStreamChunks(chunks, apiMode) {
+  if (chunks.some((chunk) => Array.isArray(chunk?.choices))) {
+    return mergeChatCompletionChunks(chunks);
+  }
+
+  if (chunks.some((chunk) => typeof chunk?.type === 'string' && chunk.type.startsWith('response.'))) {
+    return mergeResponsesChunks(chunks);
+  }
+
   return normalizeApiMode(apiMode) === 'responses'
     ? mergeResponsesChunks(chunks)
     : mergeChatCompletionChunks(chunks);
@@ -981,7 +1073,7 @@ async function readOpenAiStreamResponse(response, options = {}, handlers = {}) {
     throw new Error('OpenAI-compatible stream returned no readable body');
   }
 
-  const apiMode = normalizeApiMode(options?.apiMode);
+  let effectiveApiMode = normalizeApiMode(options?.apiMode);
   const chunks = [];
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
@@ -999,15 +1091,19 @@ async function readOpenAiStreamResponse(response, options = {}, handlers = {}) {
         throw new Error(chunk?.error?.message || chunk?.message || 'OpenAI-compatible stream failed');
       }
 
+      if (effectiveApiMode === 'responses' && Array.isArray(chunk?.choices)) {
+        effectiveApiMode = 'chat_completions';
+      }
+
       chunks.push(chunk);
       handlers.onEvent?.(chunk);
 
-      const textDelta = pickStreamTextDelta(chunk, apiMode);
+      const textDelta = pickStreamTextDelta(chunk, effectiveApiMode);
       if (textDelta) {
         handlers.onTextDelta?.(textDelta, chunk);
       }
 
-      const thinkingDelta = pickStreamThinkingDelta(chunk, apiMode);
+      const thinkingDelta = pickStreamThinkingDelta(chunk, effectiveApiMode);
       if (thinkingDelta) {
         handlers.onThinkingDelta?.(thinkingDelta, chunk);
       }
@@ -1039,7 +1135,7 @@ async function readOpenAiStreamResponse(response, options = {}, handlers = {}) {
     throw new Error('OpenAI-compatible stream returned empty SSE response');
   }
 
-  return mergeOpenAiStreamChunks(chunks, apiMode);
+  return mergeOpenAiStreamChunks(chunks, effectiveApiMode);
 }
 
 function parseJsonObject(text) {
@@ -1065,6 +1161,12 @@ async function embedTexts(texts, embedding) {
     body.dimensions = embedding.dimensions;
   }
 
+  const timeoutMs = Math.max(5, (embedding.timeoutSeconds ?? 30)) * 1000;
+  const timeoutSignal = AbortSignal.timeout(timeoutMs);
+  const signal = embedding.signal && typeof AbortSignal.any === 'function'
+    ? AbortSignal.any([embedding.signal, timeoutSignal])
+    : timeoutSignal;
+
   const response = await fetch(embeddingsEndpoint(embedding.baseUrl), {
     method: 'POST',
     headers: {
@@ -1072,7 +1174,7 @@ async function embedTexts(texts, embedding) {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(Math.max(10, embedding.timeoutSeconds ?? 180) * 1000),
+    signal,
   });
   const data = await readRequestJson(response, 'Embedding');
 

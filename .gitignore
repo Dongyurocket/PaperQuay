@@ -16,6 +16,7 @@ release/
 out/
 dist-electron/
 dist_electron/
+dist-release/
 electron-dist/
 coverage/
 .vite/

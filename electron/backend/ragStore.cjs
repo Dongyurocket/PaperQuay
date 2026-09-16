@@ -889,7 +889,8 @@ function buildFtsMatchQuery(value) {
 }
 
 function ragResultKey(row) {
-  return `${row.sourceType}::${row.chunkId}`;
+  const doc = row.documentKey ? `${row.documentKey}::` : '';
+  return `${doc}${row.sourceType}::${row.chunkId}`;
 }
 
 function rrfFuse(vectorRows, ftsRows, { k = 60 } = {}) {
@@ -1232,50 +1233,117 @@ function createRagStore(appPaths, options = {}) {
     });
   }
 
-  function retrieveVectorChunks({ documentKey, sourceType, queryEmbedding, dimension, limit }) {
+  function retrieveVectorChunks({ documentKey, documentKeys, sourceType, queryEmbedding, dimension, limit }) {
     if (!hasVectorTable(db, dimension)) {
       return [];
     }
 
     const vectorTable = vectorTableName(dimension);
-    const sourceRows = indexedSourceRows(db, documentKey, sourceType, dimension);
-    const search = db.prepare(`
+
+    if (documentKey && (!documentKeys || documentKeys.length <= 1)) {
+      const sourceRows = indexedSourceRows(db, documentKey, sourceType, dimension);
+      const search = db.prepare(`
+        SELECT
+          c.document_key AS documentKey,
+          c.chunk_id,
+          c.source_type,
+          c.page_index,
+          c.block_id,
+          c.text,
+          v.distance
+        FROM ${vectorTable} v
+        JOIN rag_chunks c ON c.id = v.rowid
+        WHERE v.embedding MATCH ?
+          AND k = ?
+          AND v.document_key = ?
+          AND v.source_type = ?
+        ORDER BY v.distance
+      `);
+      const results = [];
+
+      for (const row of sourceRows) {
+        results.push(
+          ...search.all(queryEmbedding, limit, documentKey, row.source_type).map((chunk) => ({
+            documentKey: chunk.documentKey || documentKey,
+            chunkId: chunk.chunk_id,
+            sourceType: chunk.source_type,
+            pageIndex: chunk.page_index ?? null,
+            blockId: chunk.block_id ?? null,
+            text: chunk.text,
+            score: Number(chunk.distance) || 0,
+          })),
+        );
+      }
+
+      return results
+        .sort((left, right) => left.score - right.score)
+        .slice(0, limit);
+    }
+
+    const targetKeys = Array.isArray(documentKeys) && documentKeys.length > 0
+      ? documentKeys.filter(Boolean)
+      : null;
+
+    let filterClause = '';
+    const params = [dimension];
+
+    if (sourceType) {
+      filterClause += ' AND v.source_type = ?';
+      params.push(sourceType);
+    }
+
+    if (targetKeys && targetKeys.length > 0) {
+      const placeholders = targetKeys.map(() => '?').join(', ');
+      filterClause += ` AND c.document_key IN (${placeholders})`;
+      params.push(...targetKeys);
+    }
+
+    const globalSearchSql = `
       SELECT
-        c.chunk_id,
-        c.source_type,
-        c.page_index,
-        c.block_id,
+        c.document_key AS documentKey,
+        c.chunk_id AS chunkId,
+        c.source_type AS sourceType,
+        c.page_index AS pageIndex,
+        c.block_id AS blockId,
         c.text,
         v.distance
       FROM ${vectorTable} v
       JOIN rag_chunks c ON c.id = v.rowid
+      JOIN rag_indexes i
+        ON i.document_key = c.document_key
+       AND i.source_type = c.source_type
+       AND i.status = 'ready'
+       AND i.embedding_dimension = ?
       WHERE v.embedding MATCH ?
         AND k = ?
-        AND v.document_key = ?
-        AND v.source_type = ?
+        ${filterClause}
       ORDER BY v.distance
-    `);
-    const results = [];
+    `;
 
-    for (const row of sourceRows) {
-      results.push(
-        ...search.all(queryEmbedding, limit, documentKey, row.source_type).map((chunk) => ({
-          chunkId: chunk.chunk_id,
-          sourceType: chunk.source_type,
-          pageIndex: chunk.page_index ?? null,
-          blockId: chunk.block_id ?? null,
-          text: chunk.text,
-          score: Number(chunk.distance) || 0,
-        })),
+    try {
+      const rows = db.prepare(globalSearchSql).all(
+        params[0],
+        queryEmbedding,
+        limit,
+        ...params.slice(1),
       );
-    }
 
-    return results
-      .sort((left, right) => left.score - right.score)
-      .slice(0, limit);
+      return rows.map((chunk) => ({
+        documentKey: chunk.documentKey,
+        chunkId: chunk.chunkId,
+        sourceType: chunk.sourceType,
+        pageIndex: chunk.pageIndex ?? null,
+        blockId: chunk.blockId ?? null,
+        text: chunk.text,
+        score: Number(chunk.distance) || 0,
+      }));
+    } catch (error) {
+      console.warn('[paperquay] Global vector retrieval failed', toError(error));
+      return [];
+    }
   }
 
-  function searchFts({ documentKey, sourceType, queryText, dimension, limit }) {
+  function searchFts({ documentKey, documentKeys, sourceType, queryText, dimension, limit }) {
     if (!ftsAvailable) {
       return [];
     }
@@ -1286,18 +1354,79 @@ function createRagStore(appPaths, options = {}) {
       return [];
     }
 
-    const sourceClause = sourceType ? 'AND c.source_type = ?' : '';
-    const args = [matchQuery, documentKey, dimension];
+    if (documentKey && (!documentKeys || documentKeys.length <= 1)) {
+      const sourceClause = sourceType ? 'AND c.source_type = ?' : '';
+      const args = [matchQuery, documentKey, dimension];
 
-    if (sourceType) {
-      args.push(sourceType);
+      if (sourceType) {
+        args.push(sourceType);
+      }
+
+      args.push(limit);
+
+      try {
+        const rows = db.prepare(`
+          SELECT
+            c.document_key AS documentKey,
+            c.chunk_id,
+            c.source_type,
+            c.page_index,
+            c.block_id,
+            c.text,
+            bm25(rag_chunks_fts) AS rank
+          FROM rag_chunks_fts
+          JOIN rag_chunks c ON c.id = rag_chunks_fts.rowid
+          JOIN rag_indexes i
+            ON i.document_key = c.document_key
+           AND i.source_type = c.source_type
+           AND i.status = 'ready'
+           AND i.embedding_dimension = ?
+          WHERE rag_chunks_fts MATCH ?
+            AND c.document_key = ?
+            ${sourceClause}
+          ORDER BY rank
+          LIMIT ?
+        `).all(dimension, matchQuery, documentKey, ...(sourceType ? [sourceType] : []), limit);
+
+        return rows.map((chunk) => ({
+          documentKey: chunk.documentKey || documentKey,
+          chunkId: chunk.chunk_id,
+          sourceType: chunk.source_type,
+          pageIndex: chunk.page_index ?? null,
+          blockId: chunk.block_id ?? null,
+          text: chunk.text,
+          score: Number(chunk.rank) || 0,
+        }));
+      } catch (error) {
+        console.warn('[paperquay] FTS retrieval failed; local RAG used vector retrieval only.', toError(error));
+        return [];
+      }
     }
 
-    args.push(limit);
+    const targetKeys = Array.isArray(documentKeys) && documentKeys.length > 0
+      ? documentKeys.filter(Boolean)
+      : null;
+
+    let filterClause = '';
+    const params = [dimension, matchQuery];
+
+    if (sourceType) {
+      filterClause += ' AND c.source_type = ?';
+      params.push(sourceType);
+    }
+
+    if (targetKeys && targetKeys.length > 0) {
+      const placeholders = targetKeys.map(() => '?').join(', ');
+      filterClause += ` AND c.document_key IN (${placeholders})`;
+      params.push(...targetKeys);
+    }
+
+    params.push(limit);
 
     try {
       const rows = db.prepare(`
         SELECT
+          c.document_key AS documentKey,
           c.chunk_id,
           c.source_type,
           c.page_index,
@@ -1312,13 +1441,13 @@ function createRagStore(appPaths, options = {}) {
          AND i.status = 'ready'
          AND i.embedding_dimension = ?
         WHERE rag_chunks_fts MATCH ?
-          AND c.document_key = ?
-          ${sourceClause}
+          ${filterClause}
         ORDER BY rank
         LIMIT ?
-      `).all(dimension, matchQuery, documentKey, ...(sourceType ? [sourceType] : []), limit);
+      `).all(...params);
 
       return rows.map((chunk) => ({
+        documentKey: chunk.documentKey,
         chunkId: chunk.chunk_id,
         sourceType: chunk.source_type,
         pageIndex: chunk.page_index ?? null,
@@ -1327,13 +1456,18 @@ function createRagStore(appPaths, options = {}) {
         score: Number(chunk.rank) || 0,
       }));
     } catch (error) {
-      console.warn('[paperquay] FTS retrieval failed; local RAG used vector retrieval only.', toError(error));
+      console.warn('[paperquay] Global FTS retrieval failed', toError(error));
       return [];
     }
   }
 
   function retrieveDocumentChunks(request) {
-    const documentKey = normalizeDocumentKey(request?.documentKey);
+    const rawDocKey = cleanString(request?.documentKey);
+    const rawDocKeys = Array.isArray(request?.documentKeys)
+      ? request.documentKeys.map(cleanString).filter(Boolean)
+      : [];
+    const documentKey = rawDocKey || null;
+    const documentKeys = rawDocKeys.length > 0 ? rawDocKeys : (documentKey ? [documentKey] : null);
     const sourceType = request?.sourceType ? normalizeSourceType(request.sourceType) : null;
     const topK = Math.min(
       MAX_RAG_RETRIEVAL_TOP_K,
@@ -1343,6 +1477,7 @@ function createRagStore(appPaths, options = {}) {
     const candidateLimit = Math.min(MAX_RAG_RETRIEVAL_TOP_K, Math.max(topK, topK * 2));
     const vectorRows = retrieveVectorChunks({
       documentKey,
+      documentKeys,
       sourceType,
       queryEmbedding: toFloat32Array(request.queryEmbedding),
       dimension,
@@ -1350,6 +1485,7 @@ function createRagStore(appPaths, options = {}) {
     });
     const ftsRows = searchFts({
       documentKey,
+      documentKeys,
       sourceType,
       queryText: normalizeBoundedString(request?.queryText, 'RAG queryText', { maxLength: 2000 }),
       dimension,

@@ -75,13 +75,30 @@ export interface AgentFigureResult {
 
 export interface CreateLibraryAgentToolsOptions {
   papers: LiteraturePaper[];
+  currentPaperScopeIds?: string[];
+  searchRag?: (
+    input: { query: string; paperIds?: string[]; topK?: number },
+    options?: { signal?: AbortSignal },
+  ) => Promise<{
+    chunks: Array<{
+      paperId: string;
+      paperTitle?: string;
+      page: number | null;
+      blockId: string | null;
+      snippet: string;
+      hasImage?: boolean;
+    }>;
+    ragErrors?: string[];
+  }>;
   getPaperContext?: (
     paper: LiteraturePaper,
     input: { mode: 'summary' | 'pdf-text'; query: string },
+    options?: { signal?: AbortSignal },
   ) => Promise<AgentPaperContextResult>;
   getFigure?: (
     paper: LiteraturePaper,
     input: { blockId?: string; pageIndex?: number },
+    options?: { signal?: AbortSignal },
   ) => Promise<AgentFigureResult | null>;
   createWritePlan: (tool: LibraryAgentTool, args: Record<string, unknown>) => LibraryAgentPlan;
   memory?: {
@@ -229,7 +246,7 @@ export function createLibraryAgentTools(options: CreateLibraryAgentToolsOptions)
     },
     {
       name: 'rag_search',
-      description: 'Search selected papers with local RAG and return page-aware evidence snippets.',
+      description: 'Search local paper library with hybrid RAG (vector + full-text) and return page-aware evidence snippets. When paperIds is omitted, it performs a global search across the entire library.',
       kind: 'read',
       available: (ctx: AgentToolMountContext) => ctx.ragReady,
       parameters: {
@@ -240,17 +257,41 @@ export function createLibraryAgentTools(options: CreateLibraryAgentToolsOptions)
         },
         required: ['query'],
       },
-      async execute(args) {
-        if (!getContext) {
-          throw new Error('Local RAG context is unavailable for this Agent run.');
+      async execute(args, ctx) {
+        if (ctx.signal?.aborted) {
+          const error = new Error('RAG search aborted');
+          error.name = 'AbortError';
+          throw error;
         }
 
         const query = stringValue(args.query);
         const paperIds = stringArray(args.paperIds);
+
+        if (options.searchRag) {
+          const result = await options.searchRag(
+            { query, paperIds: paperIds.length > 0 ? paperIds : undefined, topK: 12 },
+            { signal: ctx.signal },
+          );
+
+          return {
+            content: JSON.stringify({
+              chunks: result.chunks,
+              ragErrors: result.ragErrors ?? [],
+            }),
+            cards: [{ kind: 'citations', title: `${result.chunks.length} RAG evidence snippets` }],
+          };
+        }
+
+        if (!getContext) {
+          throw new Error('Local RAG context is unavailable for this Agent run.');
+        }
+
         const targetPapers = paperIds.length > 0
           ? paperIds.map((paperId) => paperById.get(paperId)).filter((paper): paper is LiteraturePaper => Boolean(paper))
           : options.papers;
-        const contexts = await Promise.all(targetPapers.map((paper) => getContext(paper, { mode: 'pdf-text', query })));
+        const contexts = await Promise.all(
+          targetPapers.map((paper) => getContext(paper, { mode: 'pdf-text', query }, { signal: ctx.signal })),
+        );
         const chunks = contexts.flatMap((context, index) => (context.citations ?? []).map((citation) => ({
           paperId: targetPapers[index]?.id,
           page: citation.pageIndex === null || citation.pageIndex === undefined ? null : citation.pageIndex + 1,
@@ -279,7 +320,13 @@ export function createLibraryAgentTools(options: CreateLibraryAgentToolsOptions)
         },
         required: ['mode', 'reason', 'paperIds'],
       },
-      async execute(args) {
+      async execute(args, ctx) {
+        if (ctx.signal?.aborted) {
+          const error = new Error('Request paper context aborted');
+          error.name = 'AbortError';
+          throw error;
+        }
+
         if (!getContext) {
           throw new Error('Paper context loading is unavailable for this Agent run.');
         }
@@ -287,10 +334,12 @@ export function createLibraryAgentTools(options: CreateLibraryAgentToolsOptions)
         const mode = args.mode === 'summary' ? 'summary' : 'pdf-text';
         const query = stringValue(args.reason);
         const requestedIds = stringArray(args.paperIds);
-        const targetPapers = requestedIds.length > 0
+        const targetPapers = (requestedIds.length > 0
           ? requestedIds.map((paperId) => paperById.get(paperId)).filter((paper): paper is LiteraturePaper => Boolean(paper))
-          : options.papers;
-        const contexts = await Promise.all(targetPapers.map((paper) => getContext(paper, { mode, query })));
+          : options.papers).slice(0, 5);
+        const contexts = await Promise.all(
+          targetPapers.map((paper) => getContext(paper, { mode, query }, { signal: ctx.signal })),
+        );
 
         return {
           content: JSON.stringify({

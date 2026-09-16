@@ -14,12 +14,11 @@ Download the native installer for your operating system from the Assets section 
 
 ## Highlights
 
-- **Fix MinerU detection hang on library launch**: The batch path existence check IPC `paths_exist` previously returned an array of unawaited Promises from an async helper. Electron's structured clone failed to serialize the Promise array, causing the renderer's `invoke` promise to hang forever and stranding all papers in the library list with a perpetual "MinerU Checking" badge. The backend now uses `Promise.all` to await all asynchronous checks and return concrete booleans, and the cancel branch rolls back checking state properly.
-- **Fix RAG indexing fixed-point loop on interrupted documents**: The incremental indexing flow previously assumed chunks were indexed in exact sequential order using positional slicing (`chunks.slice(alreadyIndexedCount)`). When an interrupted document lacked low-index chunks, slicing repeatedly resent already-indexed chunks, preventing the database row count from ever reaching the total while erroneously reporting completion. The store and local RAG service now query existing `chunkId` sets to compute true gaps by set difference, automatically self-healing interrupted documents and pruning obsolete chunks via `finalizeDocumentIndex`.
-- **Improve RAG error visibility**: Single-paper context menu indexing now captures errors and surfaces them in the status bar instead of failing silently, and batch indexing reports the first failure error in the completion summary.
-- **Connect full library to RAG index management**: Previously, only papers opened in active reader tabs were recognized as indexable items. Viewing the library with no documents open resulted in an empty item pool, forcing all papers to display fallback "RAG Not Indexed" badges, showing 0/0/0 counts in settings, and silently aborting rebuild requests. All library papers are now injected into the workspace item pool and synchronized with real-time MinerU parse statuses.
-- **Support multi-part MinerU page-dictionary format**: Large documents (such as 200–300+ page dissertations) merged from multi-volume splits store `content_list_v2.json` as an array of page dictionary objects (`Array<Record<string, Block>>`). The parser now properly unwraps these page dictionaries, restoring full structured block and RAG chunk extraction for long papers that previously yielded 0 chunks and were skipped.
-- **Self-heal orphan failure statuses for ready documents**: Automatically clean up obsolete zero-chunk `pdf-text:failed` records when `mineru-markdown` is already ready, preventing old legacy failures from permanently pinning healthy papers into a failed state.
+- **Native Global KNN Vector and FTS5 Hybrid Retrieval**: The underlying `ragStore` removes per-document constraints and enables single-query global KNN vector distance searches alongside FTS5 BM25 keyword searches across the entire library with RRF fusion. The Agent `rag_search` tool is upgraded to direct global hybrid retrieval, answering broad library questions in milliseconds without arbitrary paper count truncation.
+- **Decoupled Asynchronous Indexing from Query Path**: Real-time RAG and conversational query flows now schedule unready documents for background indexing without blocking the main retrieval thread, preventing JIT synchronous embedding bottlenecks and preserving snappy interaction.
+- **Fix Responses Protocol Tool-Calling in Agent Loop**: Resolved an issue where streaming SSE parsing in `mergeResponsesChunks` failed to aggregate `function_call` event streams, causing model tool calls to be silently swallowed in Responses mode. Aligned polymorphic items with `type: "message"` according to OpenAI specification, preventing HTTP 400 validation rejections.
+- **Auto-Fallback from Responses to Chat Completions**: Added protocol auto-fallback so that model endpoints without `/v1/responses` support (such as Ollama, vLLM, DeepSeek, or third-party proxies) automatically fall back to `/v1/chat/completions` instead of falsely classifying the failure as a lack of tool support.
+- **End-to-End AbortSignal Pipeline & Cancel Fallback**: Injected cancellation signals across the ReAct agent loop, tool execution, and batch embedding iterations. The UI cancel button immediately aborts in-flight network requests and local tasks, backed by a 500ms safety unlock timer to eliminate stuck run states.
 
 ## Notes
 
@@ -44,14 +43,13 @@ PaperQuay 是一个开源 AI 论文工作台，覆盖文献管理、PDF 阅读�
 
 ## 本次更新
 
-- **修复启动后文献库全部卡在「MinerU 检测中」**：后端批量检查 IPC `paths_exist` 此前因直接返回未等待的 Promise 数组导致 Electron 结构化克隆挂起，前端调用永久未响应并使全库文献停留于检测中。现已修复为 `Promise.all` 并完善了取消回滚。
-- **修复 RAG 索引断续续跑陷入不动点死循环**：续跑逻辑由「位置切片」全面升级为「分块 ID 差集补齐」，精确挑出未入库分块重补并新增 `finalizeDocumentIndex` 自动收敛状态与清理历史陈旧分块，彻底解决中断文献重复点击无法收敛的问题。
-- **增强 RAG 索引错误反馈**：单篇右键索引入口补充异常捕获，在底层异常时向状态栏给出明确反馈；批量索引记录首个失败原因并在总结中提示。
-- **文献库全量文献接入 RAG 索引与状态池**：修复阅读器层此前仅将已在标签页打开的文献纳入条目池，导致在文库主页未打开文档时条目池为空、全库角标回退为“未索引”、设置面板统计为 0 且右键与批量索引无响应的问题。全例文献现已注入条目池并与 MinerU 状态实时同步。
-- **兼容超页大文件 MinerU 合并产物解析**：解决 200~300+ 页长篇学位论文经多卷拆分合并后，`content_list_v2.json` 采用页面字典结构导致文本提取为空、分块数为 0 且建索引被静默跳过的问题，完全恢复结构化向量切块提取。
-- **自愈清理已就绪文献的陈旧空壳失败记录**：自动清理主来源 `mineru-markdown` 已经 ready 但残留无数据 `pdf-text:failed` 导致的永久误报失败问题。
+- **全库单次原生 KNN 向量与 FTS5 混合检索**：底层存储移除单篇文献硬编码限制，单次 SQL 跨全库执行 KNN 向量相似度计算与 FTS5 BM25 全文检索并由 RRF 融合排序；智能体 `rag_search` 工具全面升级为全局混合检索，未指定 `paperIds` 时自动针对全库文献毫秒级召回证据切片，彻底废除人工切片防爆限制。
+- **检索与建库解耦异步化**：在智能体问答与检索链路中，未就绪文献调度后台异步索引，当前轮次立即可用已就绪切片或 FTS 关键词秒级返回，彻底杜绝 JIT 同步切块与 embedding 造成的交互假死。
+- **修复智能体 Responses 协议流式工具调用解析**：修复 `mergeResponsesChunks` 未拼装 `function_call` 事件流导致 Responses 模式下工具调用被吞的缺陷；补齐 `messagesToResponseInput` 中的 `type: 'message'` 规范契约字段，解决官方标准端点 400 校验错误。
+- **Responses 协议智能自愈降级**：对不支持 `/v1/responses` 的上游端点（返回 404/405/400 等），自动优雅降级为 `/v1/chat/completions` 协议重试，避免将端点协议错误误判为“模型不支持工具”而盲目剥离 tools。
+- **全链路中断信号（AbortSignal）打通与取消兜底**：在 Agent 工具执行上下文与底层 RAG、批量 Embedding 循环中全面接入 `signal` 中断检查，用户点击取消时立即停止计算与网络请求；前端增加 500ms 防御性超时恢复，彻底杜绝取消按钮无法生效与 UI 锁死问题。
 
-## 备注
+## 使用提示
 
-- AI 特性需要在“设置”中配置你自己的兼容模型接口与 API 密钥。
-- 发布产物由 GitHub Actions 自动构建生成。
+- AI 功能需要在「设置」中配置兼容的模型服务地址和 API 密钥。
+- Release 安装包由 GitHub Actions 自动构建与发布。

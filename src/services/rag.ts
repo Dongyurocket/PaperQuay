@@ -20,7 +20,8 @@ interface RagEmbeddingOptions {
 }
 
 interface RagRetrieveRequest {
-  documentKey: string;
+  documentKey?: string;
+  documentKeys?: string[];
   sourceType?: Exclude<RagSourceMode, 'off' | 'hybrid'> | null;
   queryEmbedding: number[];
   /** The original retrieval text used by the FTS5 keyword channel. */
