@@ -40,6 +40,7 @@ import {
   type NotesContextMenuEntry,
 } from './NotesContextMenu';
 import { extractOutline, noteContentToTiptap } from './notesTiptap';
+import { resolveNoteAnchorLocation } from './noteAnchorLocation.ts';
 import { extractNoteReferences } from './noteReferences';
 
 const NOTE_FOLDERS_STORAGE_KEY = 'paperquay:note-folders:v1';
@@ -1081,6 +1082,9 @@ export function NotesWorkspace() {
   }, [activeNote]);
 
   const handleJumpToNoteAnchor = useCallback((note: Note, anchor: NoteAnchor) => {
+    // 与阅读器侧共用同一套位置推导：锚点缺少 blockId / pageIndex 时从 id 与页码标签还原。
+    const location = resolveNoteAnchorLocation(anchor);
+
     emitJumpToNoteAnchor({
       requestId: createNoteAnchorJumpRequestId(),
       targetPaperId: resolveNoteAnchorTargetPaperId(note, anchor),
@@ -1090,15 +1094,11 @@ export function NotesWorkspace() {
       anchorId: anchor.id,
       anchorPaperId: anchor.paperId,
       anchorLabel: anchor.label,
-      blockId: anchor.blockId ?? null,
-      pageIndex: typeof anchor.pageIndex === 'number'
-        ? anchor.pageIndex
-        : typeof anchor.pdfLocation?.pageNumber === 'number'
-          ? Math.max(0, anchor.pdfLocation.pageNumber - 1)
-          : null,
+      blockId: location.blockId,
+      pageIndex: location.pageIndex,
       previewText: anchor.excerpt || null,
       sourceType: anchor.source ?? null,
-      pdfLocation: anchor.pdfLocation ?? null,
+      pdfLocation: location.pdfLocation,
     });
   }, []);
 

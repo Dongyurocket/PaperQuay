@@ -132,6 +132,54 @@ test('extractNoteReferences resolves polish anchors via note anchors and anchor 
   assert.equal(references[1].locations[0].pageIndex, null);
 });
 
+test('extractNoteReferences recovers locations from polish anchor ids and page labels', () => {
+  // 历史笔记的锚点只剩 id / label（blockId、pageIndex 曾被持久化层丢掉）。
+  const doc = {
+    type: 'doc',
+    content: [
+      {
+        type: 'noteAnchorBlock',
+        attrs: {
+          anchorId: 'note-polish:paper-1:mineru:page-20-block-3:0',
+          label: 'P20',
+          sourceTitle: '',
+          excerpt: 'z',
+        },
+      },
+      {
+        type: 'noteAnchorBlock',
+        attrs: { anchorId: 'paper-ref:paper-2', label: 'P9', sourceTitle: '', excerpt: 'w' },
+      },
+    ],
+  };
+  const anchors = [
+    {
+      id: 'note-polish:paper-1:mineru:page-20-block-3:0',
+      paperId: 'paper-1',
+      label: 'P20',
+      excerpt: 'z',
+      source: 'blocks',
+      createdAt: 1,
+    },
+    {
+      id: 'paper-ref:paper-2',
+      paperId: 'paper-2',
+      label: 'P9',
+      excerpt: 'w',
+      source: 'manual',
+      createdAt: 2,
+    },
+  ] as NoteAnchor[];
+
+  const references = extractNoteReferences(doc, anchors);
+
+  assert.equal(references[0].locations[0].blockId, 'page-20-block-3');
+  assert.equal(references[0].locations[0].pageIndex, 19);
+  // 只有页码标签时至少能定位到页。
+  assert.equal(references[1].locations[0].blockId, null);
+  assert.equal(references[1].locations[0].pageIndex, 8);
+});
+
 test('formatReferenceListEntryText renders title, authors and year', () => {
   const entry = { paperId: 'paper-1', label: 'Fallback', locations: [] };
   assert.equal(

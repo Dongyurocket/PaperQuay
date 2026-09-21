@@ -7,6 +7,7 @@ import type {
   NotePdfLocation,
 } from '../../types/notes';
 import type { PdfHighlightTarget, SelectedExcerpt } from '../../types/reader';
+import { resolveNoteAnchorLocation } from '../notes/noteAnchorLocation.ts';
 
 export const READER_NOTES_EDITOR_SOURCE_ID_PREFIX = 'paperquay:reader-notes-sidebar';
 
@@ -46,6 +47,9 @@ export function resolveNoteAnchorWorkspaceId(note: Note, anchor?: NoteAnchor): s
 
 export function buildNoteAnchorJumpDetail(note: Note, anchor: NoteAnchor): JumpToNoteAnchorEventDetail {
   const targetPaperId = resolveNoteAnchorWorkspaceId(note, anchor) || anchor.paperId || note.paperId;
+  // 锚点的 blockId / pageIndex 可能没有随笔记持久化（历史笔记只剩 id 与页码标签），
+  // 这里统一从 id 中的分块信息与 `P20` 标签降级还原，避免「能打开文献但跳不过去」。
+  const location = resolveNoteAnchorLocation(anchor);
 
   return {
     requestId: createNoteAnchorJumpRequestId(),
@@ -56,16 +60,11 @@ export function buildNoteAnchorJumpDetail(note: Note, anchor: NoteAnchor): JumpT
     anchorId: anchor.id,
     anchorPaperId: anchor.paperId,
     anchorLabel: anchor.label,
-    blockId: anchor.blockId ?? null,
-    pageIndex:
-      typeof anchor.pageIndex === 'number'
-        ? anchor.pageIndex
-        : typeof anchor.pdfLocation?.pageNumber === 'number'
-          ? Math.max(0, anchor.pdfLocation.pageNumber - 1)
-          : null,
+    blockId: location.blockId,
+    pageIndex: location.pageIndex,
     sourceType: anchor.source ?? null,
     previewText: anchor.excerpt || null,
-    pdfLocation: anchor.pdfLocation ?? null,
+    pdfLocation: location.pdfLocation,
   };
 }
 
@@ -111,6 +110,70 @@ export function buildNoteAnchorPdfHighlightTarget(
     `note-anchor:${detail.noteId}:${detail.anchorId}`,
     detail.pdfLocation,
   );
+}
+
+/** 跳转所需的锚点字段（笔记 id / 结构块 id / 页码 / 精确 PDF 位置）。 */
+export type NoteAnchorJumpDetail = Pick<
+  JumpToNoteAnchorEventDetail,
+  'noteId' | 'anchorId' | 'blockId' | 'pageIndex' | 'pdfLocation'
+>;
+
+export interface NoteAnchorJumpBlock {
+  blockId: string;
+  pageIndex: number;
+  type?: string;
+}
+
+export interface NoteAnchorJumpTarget<TBlock extends NoteAnchorJumpBlock> {
+  /** 命中的结构块（精确命中，或引用所在页的正文块）。 */
+  block: TBlock | null;
+  pageIndex: number | null;
+  /** 结构块缺失时的整页高亮兜底。 */
+  highlightTarget: PdfHighlightTarget | null;
+  /** 该文献确有结构块但还没加载完，值得挂起等待更精确的定位（无页码兜底时才等待）。 */
+  shouldWaitForBlocks: boolean;
+}
+
+/**
+ * 解析笔记跳转该落在哪里：精确块 → 引用所在页的正文块 → 整页高亮。
+ *
+ * 锚点的结构块信息可能已被历史数据丢掉（只剩页码标签），此时靠页码兜底，
+ * 保证「芯片显示 P20 就一定跳到 P20」，不会只打开文献而停在原地。
+ */
+export function resolveNoteAnchorJumpTarget<TBlock extends NoteAnchorJumpBlock>(
+  detail: NoteAnchorJumpDetail,
+  blocks: TBlock[],
+): NoteAnchorJumpTarget<TBlock> {
+  const pageIndex =
+    typeof detail.pageIndex === 'number' && Number.isFinite(detail.pageIndex)
+      ? Math.max(0, Math.trunc(detail.pageIndex))
+      : null;
+  const samePageBlocks =
+    pageIndex !== null ? blocks.filter((block) => block.pageIndex === pageIndex) : [];
+  const samePageBodyBlock =
+    samePageBlocks.find((block) => block.type !== 'title') ?? samePageBlocks[0] ?? null;
+  const block =
+    (detail.blockId ? blocks.find((item) => item.blockId === detail.blockId) : null) ??
+    samePageBodyBlock ??
+    null;
+  const pageHighlightTarget: PdfHighlightTarget | null =
+    pageIndex !== null
+      ? {
+          blockId: `agent-rag:${detail.anchorId || pageIndex}`,
+          pageIndex,
+          bbox: [0, 0, 1000, 1000],
+          bboxCoordinateSystem: 'normalized-1000',
+          bboxPageSize: [1000, 1000],
+        }
+      : null;
+  const highlightTarget = buildNoteAnchorPdfHighlightTarget(detail) ?? pageHighlightTarget;
+
+  return {
+    block,
+    pageIndex,
+    highlightTarget,
+    shouldWaitForBlocks: Boolean(detail.blockId) && blocks.length === 0 && !highlightTarget,
+  };
 }
 
 export function isNoteEventRecord(value: unknown): value is Note {

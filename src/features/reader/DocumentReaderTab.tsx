@@ -163,6 +163,7 @@ import {
   buildReaderNotesEditorSourceId,
   buildSelectedExcerptNoteCreateRequest,
   isNoteEventRecord,
+  resolveNoteAnchorJumpTarget,
   resolveReaderNoteAnchorTarget,
   resolveNoteAnchorWorkspaceId,
   sortReaderNotes,
@@ -2618,54 +2619,17 @@ function DocumentReaderTab({
   const applyNoteAnchorJump = useCallback((detail: JumpToNoteAnchorEventDetail) => {
     const agentRagJump = detail.jumpSource === 'agent-rag';
     const label = detail.anchorLabel || detail.noteTitle || lRef.current('未命名引用', 'Untitled reference');
-    const targetBlock = detail.blockId
-      ? flatBlocks.find((block) => block.blockId === detail.blockId)
-      : null;
+    // 精确块 → 引用所在页的正文块 → 整页高亮，逐级降级，避免只打开文献却不跳转。
+    const { block: targetBlock, highlightTarget, shouldWaitForBlocks } =
+      resolveNoteAnchorJumpTarget(detail, flatBlocks);
 
-    if (targetBlock) {
-      setSelectedAnnotationId(null);
-      setWorkspaceStage('reading');
-      setPendingBlockAnchorJump((current) =>
-        current?.requestId === detail.requestId ? null : current,
-      );
-
-      if (!agentRagJump) {
-        setActiveNoteId(detail.noteId);
-        setAssistantActivePanel('notes');
-      }
-
-      activateBlock(
-        targetBlock,
-        lRef.current(`已定位到引用：${label}`, `Located reference: ${label}`),
-      );
-      return true;
-    }
-
-    if (detail.blockId && flatBlocks.length === 0) {
-      setPendingBlockAnchorJump(detail);
-      return false;
-    }
-
-    const pageIndex =
-      typeof detail.pageIndex === 'number' && Number.isFinite(detail.pageIndex)
-        ? Math.max(0, Math.trunc(detail.pageIndex))
-        : null;
-    const pageHighlightTarget: PdfHighlightTarget | null =
-      pageIndex !== null
-        ? {
-            blockId: `agent-rag:${detail.anchorId || pageIndex}`,
-            pageIndex,
-            bbox: [0, 0, 1000, 1000] as [number, number, number, number],
-            bboxCoordinateSystem: 'normalized-1000',
-            bboxPageSize: [1000, 1000],
-          }
-        : null;
-    const highlightTarget = buildNoteAnchorPdfHighlightTarget(detail) ?? pageHighlightTarget;
-
-    if (!highlightTarget) {
-      if (detail.blockId) {
+    if (!targetBlock && !highlightTarget) {
+      // 有 blockId 说明该文献确有结构块，可能还没加载完成：挂起等待，flatBlocks 到位后自动重放。
+      if (shouldWaitForBlocks) {
         setPendingBlockAnchorJump(detail);
+        return false;
       }
+
       setStatusMessage(lRef.current('该引用没有绑定 PDF 位置', 'This reference is not linked to a PDF location'));
       return false;
     }
@@ -2679,6 +2643,14 @@ function DocumentReaderTab({
     if (!agentRagJump) {
       setActiveNoteId(detail.noteId);
       setAssistantActivePanel('notes');
+    }
+
+    if (targetBlock) {
+      activateBlock(
+        targetBlock,
+        lRef.current(`已定位到引用：${label}`, `Located reference: ${label}`),
+      );
+      return true;
     }
 
     setActivePdfHighlight(highlightTarget);

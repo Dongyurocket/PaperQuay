@@ -9,6 +9,7 @@ import {
   buildReaderNotesEditorSourceId,
   buildSelectedExcerptNoteCreateRequest,
   isNoteEventRecord,
+  resolveNoteAnchorJumpTarget,
   resolveReaderNoteAnchorTarget,
   resolveNotePdfLocation,
   resolveNoteAnchorWorkspaceId,
@@ -156,6 +157,111 @@ test('buildNoteAnchorPdfHighlightTarget converts jump details into highlight tar
     buildNoteAnchorPdfHighlightTarget({ ...detail, pdfLocation: { pageNumber: 1 } }),
     null,
   );
+});
+
+test('buildNoteAnchorJumpDetail recovers location for anchors that lost blockId/pageIndex', () => {
+  // 润色锚点的历史数据：位置只留在 id 与页码标签里（blockId/pageIndex 曾被持久化层丢掉）。
+  const detail = buildNoteAnchorJumpDetail(
+    note({ id: 'n1', paperId: 'paper-1' }),
+    anchor({
+      id: 'note-polish:paper-1:mineru:page-20-block-3:0',
+      label: 'P20',
+      blockId: null,
+      pageIndex: null,
+    }),
+  );
+
+  assert.equal(detail.blockId, 'page-20-block-3');
+  assert.equal(detail.pageIndex, 19);
+  assert.equal(detail.anchorLabel, 'P20');
+});
+
+test('buildNoteAnchorJumpDetail falls back to the page label when only id and label survive', () => {
+  const detail = buildNoteAnchorJumpDetail(
+    note({ id: 'n1' }),
+    anchor({ id: 'paper-ref:paper-1', label: 'P20', blockId: null, pageIndex: null }),
+  );
+
+  assert.equal(detail.blockId, null);
+  assert.equal(detail.pageIndex, 19);
+});
+
+function jumpBlock(blockId: string, pageIndex: number, type = 'text') {
+  return { blockId, pageIndex, type };
+}
+
+test('resolveNoteAnchorJumpTarget prefers the exact structural block', () => {
+  const detail = buildNoteAnchorJumpDetail(
+    note({ id: 'n1' }),
+    anchor({ id: 'a1', label: 'P20', blockId: 'page-20-block-3', pageIndex: 19 }),
+  );
+  const target = resolveNoteAnchorJumpTarget(detail, [
+    jumpBlock('page-20-block-1', 19, 'title'),
+    jumpBlock('page-20-block-3', 19),
+  ]);
+
+  assert.equal(target.block?.blockId, 'page-20-block-3');
+  assert.equal(target.shouldWaitForBlocks, false);
+});
+
+test('resolveNoteAnchorJumpTarget falls back to the referenced page body block', () => {
+  const detail = buildNoteAnchorJumpDetail(
+    note({ id: 'n1' }),
+    anchor({ id: 'a1', label: 'P20', blockId: 'page-20-block-9', pageIndex: 19 }),
+  );
+  const target = resolveNoteAnchorJumpTarget(detail, [
+    jumpBlock('page-20-block-1', 19, 'title'),
+    jumpBlock('page-20-block-2', 19),
+    jumpBlock('page-21-block-1', 20),
+  ]);
+
+  // 块 id 变了（重新解析）时退到同页正文块，而不是停在原地。
+  assert.equal(target.block?.blockId, 'page-20-block-2');
+  assert.equal(target.shouldWaitForBlocks, false);
+});
+
+test('resolveNoteAnchorJumpTarget highlights the whole page when no structural blocks exist', () => {
+  const detail = buildNoteAnchorJumpDetail(
+    note({ id: 'n1' }),
+    anchor({ id: 'a1', label: 'P20', blockId: 'page-20-block-3', pageIndex: 19 }),
+  );
+  const target = resolveNoteAnchorJumpTarget(detail, []);
+
+  assert.equal(target.block, null);
+  assert.equal(target.pageIndex, 19);
+  assert.equal(target.highlightTarget?.pageIndex, 19);
+  assert.deepEqual(target.highlightTarget?.bbox, [0, 0, 1000, 1000]);
+  // 有页码兜底就不再挂起等待，否则用户会看到「打开了文献但没跳过去」。
+  assert.equal(target.shouldWaitForBlocks, false);
+});
+
+test('resolveNoteAnchorJumpTarget waits for blocks only when no page fallback exists', () => {
+  const pageOnly = {
+    noteId: 'n1',
+    anchorId: 'a1',
+    blockId: null,
+    pageIndex: 19,
+    pdfLocation: null,
+  };
+  assert.equal(resolveNoteAnchorJumpTarget(pageOnly, []).shouldWaitForBlocks, false);
+  assert.equal(resolveNoteAnchorJumpTarget(pageOnly, []).highlightTarget?.pageIndex, 19);
+
+  const noLocation = {
+    noteId: 'n1',
+    anchorId: 'a2',
+    blockId: 'page-20-block-3',
+    pageIndex: null,
+    pdfLocation: null,
+  };
+  const waiting = resolveNoteAnchorJumpTarget(noLocation, []);
+  assert.equal(waiting.highlightTarget, null);
+  assert.equal(waiting.block, null);
+  assert.equal(waiting.shouldWaitForBlocks, true);
+
+  // 块加载完成后同一 detail 能精确定位。
+  const resolved = resolveNoteAnchorJumpTarget(noLocation, [jumpBlock('page-20-block-3', 19)]);
+  assert.equal(resolved.block?.blockId, 'page-20-block-3');
+  assert.equal(resolved.shouldWaitForBlocks, false);
 });
 
 test('isNoteEventRecord validates note-like event payloads', () => {

@@ -265,6 +265,15 @@ function normalizeAnchors(value) {
       ? item.source
       : undefined;
     const pdfLocation = normalizePdfLocation(item.pdfLocation);
+    // 位置字段必须原样保留：润色锚点只带 blockId/pageIndex，丢了就再也跳不回原文。
+    const blockId = cleanString(item.blockId) || undefined;
+    const pageIndexValue = Math.trunc(Number(item.pageIndex));
+    const pageIndex =
+      item.pageIndex === null || item.pageIndex === undefined
+        ? undefined
+        : Number.isSafeInteger(pageIndexValue) && pageIndexValue >= 0
+          ? pageIndexValue
+          : undefined;
     const createdAt = normalizeTimestamp(item.createdAt) || now();
 
     seen.add(idValue);
@@ -275,6 +284,8 @@ function normalizeAnchors(value) {
       sourceTitle: sourceTitle || undefined,
       excerpt,
       source,
+      blockId,
+      pageIndex,
       pdfLocation: pdfLocation ?? undefined,
       createdAt,
     });

@@ -1,6 +1,7 @@
 import type { Editor } from '@tiptap/core';
 import type { LiteraturePaper } from '../../types/library';
 import type { NoteAnchor } from '../../types/notes';
+import { resolveNoteAnchorLocation } from './noteAnchorLocation.ts';
 
 export const REFERENCE_LIST_HEADING = '参考文献';
 export const NOTE_POLISH_ANCHOR_PREFIX = 'note-polish:';
@@ -99,10 +100,18 @@ export function extractNoteReferences(doc: unknown, anchors?: NoteAnchor[]): Not
           (typeof attrs.sourceTitle === 'string' && attrs.sourceTitle.trim()) ||
           anchor?.label ||
           paperId;
+        // 锚点位置可能未随笔记持久化，统一降级还原，保证参考文献列表里的位置芯片也能跳转。
+        const location = resolveNoteAnchorLocation({
+          id: anchorId,
+          label: anchor?.label ?? (typeof attrs.label === 'string' ? attrs.label : ''),
+          blockId: anchor?.blockId ?? null,
+          pageIndex: anchor?.pageIndex ?? null,
+          pdfLocation: anchor?.pdfLocation ?? undefined,
+        });
         resolve(paperId, label, {
           anchorId,
-          blockId: anchor?.blockId ?? null,
-          pageIndex: anchor && typeof anchor.pageIndex === 'number' ? anchor.pageIndex : null,
+          blockId: location.blockId,
+          pageIndex: location.pageIndex,
           sourceType: anchor?.source ?? null,
         });
       }
