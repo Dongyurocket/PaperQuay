@@ -55,6 +55,12 @@
 
 ## Latest Update
 
+### v0.1.50 - Note references, polish retrieval fix, and long-document reader windowing
+
+- **Note references**: insert paper citations from the toolbar, slash menu, or `@`; clicking a citation opens the paper and can jump to a page or block. The sidebar and end-of-note list are derived live from the note JSON and are not stored separately.
+- **AI polish retrieval fix**: queries now match both the bare `paper.id` and the `native-library:` prefix; evidence is ranked globally and truncated to the top 8. Dimension mismatches and missing model citations get explicit notices. Polish defaults to the note's linked papers.
+- **Long-document reader windowing**: dual-pane reading windows structure blocks, thumbnails, and PDF overlay hosts to the viewport, unloads off-screen Markdown/KaTeX, and disables PDF.js eager `getPage`, so dissertations and textbooks no longer slow down linearly with page count.
+
 ### v0.1.49 - MCP Library Write & Category Management Tools
 
 - **MCP toolset grows to 15 tools**: new `import_pdfs` (batch PDF import with content-hash dedupe, copy/move/keep modes and find-or-create categories by name), `list_categories`, `manage_category` (create/rename/move/delete with cycle detection and cascading unlink), `set_paper_categories` (batch assignment with all-or-nothing validation), `update_paper` (whitelisted metadata updates), and `delete_papers` (optional file removal) — write semantics fully aligned with the desktop app.
