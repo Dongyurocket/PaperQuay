@@ -4,6 +4,14 @@
 
 各平台安装包见 [GitHub Releases](https://github.com/Dongyurocket/PaperQuay/releases)。
 
+## [0.1.49] - 2026-09-21
+
+### 新增
+
+- **知识库 MCP 文库写入与分类管理工具（6 项）**：MCP 服务由 9 个只读/同步工具扩展为 15 个工具。新增 `import_pdfs`（批量导入本地 PDF，内容哈希查重，支持 copy/move/keep 与按名称自动建分类）、`list_categories`（分类树与文献计数）、`manage_category`（分类创建/重命名/移动/删除，含环检测与级联解绑）、`set_paper_categories`（批量调整分类归属，全量校验原子写入）、`update_paper`（元数据白名单更新）、`delete_papers`（批量删除，可选同时删除库内文件）。写入语义与桌面端 `libraryCommands` 完全一致。
+- **写入安全护栏**：所有 MCP 写工具执行前自动检测 PaperQuay 桌面应用进程——桌面端以内存态整体落盘，运行中的外部写入会被静默覆盖，因此检测到运行时显式拒绝并提示关闭应用；可传 `allowWhileAppRunning: true` 强制覆盖；设环境变量 `PAPERQUAY_MCP_WRITE=off` 可将服务切换为全局只读。Zotero 同步纳入同一护栏。
+- **MCP 读取增强**：`search_papers` 支持 `categoryId` 过滤（非系统分类含全部后代，支持系统分类语义）；`get_paper_details` 返回文献所属分类 ID 列表。
+
 ## [0.1.48] - 2026-09-17
 
 ### 修复

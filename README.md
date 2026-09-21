@@ -55,6 +55,12 @@
 
 ## 近期更新
 
+### v0.1.49 - 知识库 MCP 文库写入与分类管理工具
+
+- **MCP 工具扩展至 15 个**：新增 `import_pdfs`（批量导入 PDF，内容哈希查重，支持 copy/move/keep 与按名称自动建分类）、`list_categories`、`manage_category`（分类创建/重命名/移动/删除，含环检测与级联解绑）、`set_paper_categories`（批量分类归属，原子校验）、`update_paper`（元数据白名单更新）、`delete_papers`（可选同时删除文件），写入语义与桌面端完全一致。
+- **写入安全护栏**：写工具执行前自动检测桌面应用运行状态，运行时显式拒绝（避免应用内存态保存静默覆盖外部写入），`allowWhileAppRunning: true` 可覆盖，`PAPERQUAY_MCP_WRITE=off` 可全局只读；Zotero 同步纳入同一护栏。
+- **读取增强**：`search_papers` 支持 `categoryId` 分类过滤（含后代分类），`get_paper_details` 返回所属分类 ID。
+
 ### v0.1.48 - 正文渲染、PDF 图片重析与 OCR 状态修复
 
 - **正文不再误变符号表**：保留普通段落和行内公式，不在渲染时自动重建符号表。

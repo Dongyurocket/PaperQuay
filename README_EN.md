@@ -55,6 +55,12 @@
 
 ## Latest Update
 
+### v0.1.49 - MCP Library Write & Category Management Tools
+
+- **MCP toolset grows to 15 tools**: new `import_pdfs` (batch PDF import with content-hash dedupe, copy/move/keep modes and find-or-create categories by name), `list_categories`, `manage_category` (create/rename/move/delete with cycle detection and cascading unlink), `set_paper_categories` (batch assignment with all-or-nothing validation), `update_paper` (whitelisted metadata updates), and `delete_papers` (optional file removal) — write semantics fully aligned with the desktop app.
+- **Write safety guard**: every write tool detects the running desktop app and explicitly refuses to write while it is active (the app's in-memory save would silently overwrite external writes); `allowWhileAppRunning: true` overrides, and `PAPERQUAY_MCP_WRITE=off` makes the server globally read-only. Zotero sync is covered by the same guard.
+- **Read enhancements**: `search_papers` supports `categoryId` filtering (including descendant categories), and `get_paper_details` returns category IDs.
+
 ### v0.1.48 - Prose Rendering, PDF-image Reparsing and OCR Task State Fixes
 
 - **Preserve prose**: ordinary paragraphs and inline mathematics are no longer automatically reconstructed as symbol tables.
