@@ -7,6 +7,8 @@ import {
   buildScrollRestoreKey,
   buildThumbnailPageIndexes,
   clampScrollRatio,
+  resolveThumbnailWindow,
+  THUMBNAIL_ITEM_STRIDE_PX,
   getPdfAnnotationColorLabel,
   getPercentProgress,
   isPdfLifecycleCancellation,
@@ -39,6 +41,16 @@ test('buildThumbnailPageIndexes includes leading pages and current-page neighbor
     buildThumbnailPageIndexes(30, 20),
     [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 15, 16, 17, 18, 19, 20, 21, 22, 23],
   );
+});
+
+test('resolveThumbnailWindow keeps only nearby page buttons for a long PDF', () => {
+  const window = resolveThumbnailWindow(400, THUMBNAIL_ITEM_STRIDE_PX * 50, 600, 2);
+
+  assert.equal(window.totalSize, THUMBNAIL_ITEM_STRIDE_PX * 400);
+  assert.equal(window.startIndex, 47);
+  assert.equal(window.endIndex, 56);
+  assert.ok(window.endIndex - window.startIndex < 20);
+  assert.ok(window.endIndex - window.startIndex < 400);
 });
 
 test('scroll helpers clamp ratios and build stable rounded restore keys', () => {

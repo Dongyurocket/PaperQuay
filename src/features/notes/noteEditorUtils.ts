@@ -243,6 +243,8 @@ export const BASE_SLASH_COMMANDS: NoteSlashCommandItem[] = [
   { id: 'table', label: 'Table', description: 'Insert a 3 x 3 table', aliases: ['grid'] },
   { id: 'component', label: 'Component block', description: 'Structured editable card block', aliases: ['card', 'block'] },
   { id: 'math', label: 'Math', description: 'Inline LaTeX expression', aliases: ['formula', 'latex'] },
+  { id: 'paper-reference', label: 'Paper reference', description: 'Cite a library paper', aliases: ['reference', 'cite', 'citation', 'paper', '文献', '引用'] },
+  { id: 'reference-list', label: 'Reference list', description: 'Insert or refresh the bibliography at the end', aliases: ['references', 'bibliography', '参考文献'] },
   ...NOTE_TEMPLATES.map((template): NoteSlashCommandItem => ({
     id: `template:${template.id}`,
     label: template.label,

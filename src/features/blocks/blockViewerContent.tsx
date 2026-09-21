@@ -14,7 +14,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type CSSProperties,
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from 'react';
@@ -780,15 +779,6 @@ function BlockItemComponent({
   };
 
   const metaScale = Math.min(scale, 1.1);
-  const contentVisibilityStyle = {
-    contentVisibility: 'auto',
-    containIntrinsicSize:
-      block.type === 'title'
-        ? '88px'
-        : block.type === 'image' || block.type === 'table'
-          ? '360px'
-          : '160px',
-  } as CSSProperties;
 
   return (
     <div
@@ -802,7 +792,6 @@ function BlockItemComponent({
       }}
       onClick={handleClick}
       onContextMenu={(event) => onContextMenu?.(block, event)}
-      style={contentVisibilityStyle}
       className={cn(
         'group relative cursor-text select-text rounded-[18px] border border-transparent transition-all duration-200',
         compactMode ? 'px-3 py-2' : 'px-5 py-3',

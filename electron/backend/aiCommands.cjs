@@ -1247,6 +1247,8 @@ function parseNotePolishResponse(value) {
   }
 }
 
+const NOTE_POLISH_RAG_TOP_K = 8;
+
 function uniqueNotePolishEvidence(values) {
   const seen = new Set();
   return values.filter((value) => {
@@ -1449,43 +1451,55 @@ function createAiCommands(context) {
             if (!Array.isArray(queryEmbedding) || queryEmbedding.length === 0) {
               notices.push('未能生成知识库检索向量，已按纯文本润色执行。');
             } else {
+              // 索引 documentKey 为裸 paper.id（readerRag.ts buildReaderRagDocumentKey），
+              // 旧库可能写入过 native-library: 前缀键；两键同查做全局 topK 排序，
+              // 替代逐篇检索后用局部 sourceRank 排序的旧实现。
+              const documentKeys = scopedPaperIds.flatMap((paperId) => [paperId, `native-library:${paperId}`]);
+              const chunks = ragStore.retrieveDocumentChunks({
+                documentKeys,
+                queryEmbedding,
+                queryText: text.slice(0, 2_000),
+                topK: NOTE_POLISH_RAG_TOP_K,
+              });
               const candidates = [];
-              for (const [paperIndex, paperId] of scopedPaperIds.entries()) {
+              for (const chunk of Array.isArray(chunks) ? chunks : []) {
+                const paperId = String(chunk.documentKey || '').replace(/^native-library:/, '');
                 const paper = paperById.get(paperId);
                 if (!paper) continue;
-
-                for (const sourceType of ['mineru-markdown', 'pdf-text']) {
-                  const chunks = ragStore.retrieveDocumentChunks({
-                    documentKey: `native-library:${paperId}`,
-                    sourceType,
-                    queryEmbedding,
-                    queryText: text.slice(0, 2_000),
-                    topK: 3,
-                  });
-                  for (const [sourceRank, chunk] of chunks.entries()) {
-                    candidates.push({
-                      paperId,
-                      paperTitle: typeof paper.title === 'string' ? paper.title : paperId,
-                      chunkId: chunk.chunkId,
-                      blockId: chunk.blockId ?? null,
-                      pageIndex: chunk.pageIndex ?? null,
-                      excerpt: String(chunk.text ?? '').slice(0, 1_600),
-                      sourceType: chunk.sourceType ?? sourceType,
-                      sourceRank,
-                    });
-                  }
-                }
-
-                // Keep a full-library request responsive while scanning indexed documents.
-                if (scope === 'library' && paperIndex > 0 && paperIndex % 12 === 0) {
-                  await new Promise((resolve) => setImmediate(resolve));
-                }
+                candidates.push({
+                  paperId,
+                  paperTitle: typeof paper.title === 'string' ? paper.title : paperId,
+                  chunkId: chunk.chunkId,
+                  blockId: chunk.blockId ?? null,
+                  pageIndex: chunk.pageIndex ?? null,
+                  excerpt: String(chunk.text ?? '').slice(0, 1_600),
+                  sourceType: chunk.sourceType ?? null,
+                });
               }
               evidence = uniqueNotePolishEvidence(candidates)
-                .sort((left, right) => left.sourceRank - right.sourceRank)
-                .slice(0, 8)
-                .map(({ sourceRank, ...entry }, index) => ({ ...entry, id: `S${index + 1}` }));
-              if (evidence.length === 0) notices.push('未检索到与笔记相关的已索引文献内容。');
+                .slice(0, NOTE_POLISH_RAG_TOP_K)
+                .map((entry, index) => ({ ...entry, id: `S${index + 1}` }));
+              if (evidence.length === 0) {
+                // 区分"未生成索引"与"索引维度与当前向量模型不一致"（后者旧提示语会误导）
+                let dimensionMismatch = false;
+                if (typeof ragStore.listIndexStatuses === 'function') {
+                  try {
+                    const scopedKeys = new Set(documentKeys);
+                    dimensionMismatch = (ragStore.listIndexStatuses() || []).some((status) => (
+                      status
+                      && scopedKeys.has(String(status.documentKey ?? ''))
+                      && status.status === 'ready'
+                      && Number(status.embeddingDimension) > 0
+                      && Number(status.embeddingDimension) !== queryEmbedding.length
+                    ));
+                  } catch {
+                    dimensionMismatch = false;
+                  }
+                }
+                notices.push(dimensionMismatch
+                  ? '已索引文献的向量维度与当前向量模型不一致，请重建索引后再试，已按纯文本润色执行。'
+                  : '未检索到与笔记相关的已索引文献内容。');
+              }
             }
           } catch (error) {
             console.warn('[paperquay] Note polish RAG retrieval failed.', error);
@@ -1512,6 +1526,11 @@ function createAiCommands(context) {
       const citations = normalizedStringArray(parsed.citations, evidence.length)
         .map((id) => evidenceById.get(id))
         .filter(Boolean);
+
+      // 检索到了证据但模型没有标注引用（或 provider 不支持 JSON 输出导致引用丢失）时显式提示。
+      if (evidence.length > 0 && citations.length === 0) {
+        notices.push(`已检索到 ${evidence.length} 条相关知识库内容，但模型未标注引用来源。`);
+      }
 
       return {
         text: polishedText,

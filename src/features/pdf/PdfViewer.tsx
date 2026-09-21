@@ -459,6 +459,8 @@ function PdfViewer({
 
     return Array.from(indexes).sort((left, right) => left - right);
   }, [activeBlock, activeHighlight, currentPage, hoveredBlock, pageCount]);
+  const overlayPageIndexesRef = useRef(overlayPageIndexes);
+  overlayPageIndexesRef.current = overlayPageIndexes;
 
   const resolvePageOverlaySources = useCallback(
     (pageIndex: number): BBoxPageSizeSource[] => {
@@ -584,11 +586,13 @@ function PdfViewer({
     const nextHosts: Record<number, PageHostState> = {};
     const nextObservedElements = new Set<HTMLDivElement>();
 
-    viewer.querySelectorAll<HTMLDivElement>('.page').forEach((element) => {
-      const pageNumber = Number(element.dataset.pageNumber ?? 0);
+    for (const pageIndex of overlayPageIndexesRef.current) {
+      const element = viewer.querySelector<HTMLDivElement>(
+        `.page[data-page-number="${pageIndex + 1}"]`,
+      );
 
-      if (!Number.isFinite(pageNumber) || pageNumber <= 0) {
-        return;
+      if (!element) {
+        continue;
       }
 
       const overlayElement = ensurePageOverlayElement(element);
@@ -598,13 +602,13 @@ function PdfViewer({
         observer.observe(element);
       }
 
-      nextHosts[pageNumber - 1] = {
+      nextHosts[pageIndex] = {
         element,
         overlayElement,
         width: element.clientWidth || element.getBoundingClientRect().width,
         height: element.clientHeight || element.getBoundingClientRect().height,
       };
-    });
+    }
 
     for (const element of observedPageElementsRef.current) {
       if (!nextObservedElements.has(element)) {
@@ -1630,6 +1634,14 @@ function PdfViewer({
       mutationObserverRef.current = null;
     };
   }, [active, refreshPdfViewerLayout, retrySavedScrollRestore, syncPageHosts]);
+
+  useEffect(() => {
+    if (!active) {
+      return;
+    }
+
+    syncPageHosts();
+  }, [active, overlayPageIndexes, syncPageHosts]);
 
   useEffect(() => {
     if (!active || !documentInit) {

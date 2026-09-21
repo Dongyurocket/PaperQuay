@@ -131,9 +131,9 @@ PaperQuay uses a translation workflow designed for long paper reading sessions. 
 
 ### Tiptap-Based Notes Workspace
 
-PaperQuay includes a dedicated Notes workspace built on Tiptap. Each note is stored locally as Tiptap JSON, rendered HTML, and searchable plain text. The editor supports headings, lists, task lists, code blocks, tables, images, math, highlights, links, slash-style insertions, folders, pin and favorite states, outline, backlinks, and autosave.
+PaperQuay includes a dedicated Notes workspace built on Tiptap. Each note is stored locally as Tiptap JSON, rendered HTML, and searchable plain text. The editor supports headings, lists, task lists, code blocks, tables, images, math, highlights, links, slash-style insertions, folders, pin and favorite states, outline, backlinks, a derived reference list, and autosave.
 
-Notes are designed to stay inline with the research workflow. You can connect ideas with `[[note]]` links, organize topics with `#tags`, reference library papers with `@paper`, and jump through those inline references instead of keeping reading notes in a separate note silo.
+Notes are designed to stay inline with the research workflow. You can connect ideas with `[[note]]` links, organize topics with `#tags`, cite library papers with `@paper`, and open the cited paper (jumping to a page or block when the reference carries a location). AI polishing defaults to retrieving the note's linked papers from the local knowledge base and writes locatable citations back into the note.
 
 ### Fast Paper Screening from the Overview Panel
 
@@ -204,10 +204,10 @@ These items are implemented in the current desktop app.
 | Metadata          | OpenAlex enrichment by DOI or title, optional OpenAlex API key / mailto settings, Crossref fallback, LLM-based extraction for Chinese papers when remote lookups miss, and manual editing before import |
 | Categories        | System categories, custom categories, nested subcategories, collapsible branches, context menus, drag sorting, hierarchy changes, and favorites |
 | Paper details     | Title, authors, year, venue, DOI, URL, abstract, keywords, tags, notes, citation, favorite state, and a reading-time chart                      |
-| Notes workspace   | Dedicated Tiptap notes workspace with folders, search, tags, pinned notes, favorites, outline, backlinks, and local autosave                    |
-| Notes editor      | Rich text, headings, lists, task lists, code blocks, tables, images, math, highlights, links, component blocks, and slash-style insertions       |
-| Inline note links | `[[note]]` wiki links, `#tag` references, `@paper` references, autocomplete menus, and inline navigation across notes and papers                 |
-| Reader & Typography | PDF reader with MinerU structured block views, region-based linkage, reading heat progress, reading-time recording, and annotation tools; auto-cleans ligatures and cross-reference fake superscripts, renders semantic academic `<sup>`/`<sub>`, fixes drop-caps, and restructures nomenclature |
+| Notes workspace   | Dedicated Tiptap notes workspace with folders, search, tags, pinned notes, favorites, outline, backlinks, a derived reference list, and local autosave |
+| Notes editor      | Rich text, headings, lists, task lists, code blocks, tables, images, math, highlights, links, component blocks, and slash-style insertions; insert paper references from the toolbar, `@`, or slash menu, and upsert an end-of-note reference list; AI polishing defaults to the note's linked papers |
+| Inline note links | `[[note]]` wiki links, `#tag` references, `@paper` citations, autocomplete menus; clicking a citation opens the paper and can jump to a page or block |
+| Reader & Typography | PDF reader with MinerU structured block views, region-based linkage, reading heat progress, reading-time recording, and annotation tools; long documents (theses/textbooks/reports) window structured blocks and page thumbnails to the viewport so dual-pane scrolling stays responsive; auto-cleans ligatures and cross-reference fake superscripts, renders semantic academic `<sup>`/`<sub>`, fixes drop-caps, and restructures nomenclature |
 | Raw Crop & AI Re-parsing | PDF raw vector slice (BBox Crop) fallback with KaTeX formula failure safeguards; LLM-powered block re-parsing (smart typography, table/nomenclature, math extraction) with diff preview and one-click undo |
 | Translation       | Full-text translation, cached block translations, and selection translation through OpenAI-compatible models, plus batch paper title translation; Chinese-dominant papers skip translation automatically and Chinese titles are adopted directly; centralized translated PDF storage |
 | Citation export   | Batch Bib export for selected papers as one merged .bib file or one file per paper, with deduplicated citation keys and heuristic entry types       |

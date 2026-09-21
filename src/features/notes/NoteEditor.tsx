@@ -77,7 +77,7 @@ import type {
 import { cn } from '../../utils/cn';
 import { HashTag } from './extensions/HashTag';
 import { NoteAnchorLink } from './extensions/NoteAnchorLink';
-import { PaperReference } from './extensions/PaperReference';
+import { PaperReference, type PaperReferenceLocation } from './extensions/PaperReference';
 import { SlashCommand } from './extensions/SlashCommand';
 import { WikiLink } from './extensions/WikiLink';
 import type { NoteSuggestionItem } from './extensions/suggestionMenu';
@@ -96,6 +96,7 @@ import {
 } from './notesTiptap';
 import { NoteBlockControls } from './NoteBlockControls';
 import { NoteEditorToolbar } from './NoteEditorToolbar';
+import { extractNoteReferences, upsertNoteReferenceList } from './noteReferences';
 import { buildNotePolishNodes, normalizeNotePolishScope } from './notePolish';
 import { polishNote } from '../../services/notePolish';
 import {
@@ -604,7 +605,7 @@ interface NoteEditorProps {
   onExternalUpdateApply?: (note: Note) => void;
   onOpenNote?: (noteId: string) => void;
   onTagClick?: (tag: string) => void;
-  onPaperClick?: (paperId: string) => void;
+  onPaperClick?: (paperId: string, location?: PaperReferenceLocation) => void;
   onJumpToNoteAnchor?: (note: Note, anchor: NoteAnchor) => void;
 }
 
@@ -650,10 +651,12 @@ export function NoteEditor({
   const [revision, setRevision] = useState(0);
   const [externalUpdateAvailable, setExternalUpdateAvailable] = useState(false);
   const [polishOpen, setPolishOpen] = useState(false);
-  const [polishScope, setPolishScope] = useState<NotePolishScope>('none');
+  // 默认走「笔记关联文献」，让知识库检索开箱即用；无关联文献时后端会显式提示并回退纯文本润色。
+  const [polishScope, setPolishScope] = useState<NotePolishScope>('linked-papers');
   const [polishLoading, setPolishLoading] = useState(false);
   const [polishError, setPolishError] = useState('');
   const [polishResult, setPolishResult] = useState<NotePolishResult | null>(null);
+  const [referencePickerOpen, setReferencePickerOpen] = useState(false);
   const [editorContextMenu, setEditorContextMenu] = useState<NoteEditorContextMenuState | null>(null);
   const snapshotRef = useRef<EditorSnapshot>({
     contentJson: noteContentToTiptap(null),
@@ -664,6 +667,7 @@ export function NoteEditor({
   const editorSourceIdRef = useRef(editorSourceId ?? createNoteEditorSourceId());
   const lastSavedSignatureRef = useRef('');
   const latestCandidatesRef = useRef({ notes, tags, papers });
+  const latestAnchorsRef = useRef<NoteAnchor[]>(note?.anchors ?? []);
   const latestNoteRef = useRef<Note | null>(note);
   const externalNoteRef = useRef<Note | null>(null);
   const tagEditorRef = useRef<HTMLDivElement | null>(null);
@@ -687,6 +691,10 @@ export function NoteEditor({
   useEffect(() => {
     latestCandidatesRef.current = { notes, tags, papers };
   }, [notes, papers, tags]);
+
+  useEffect(() => {
+    latestAnchorsRef.current = note?.anchors ?? [];
+  }, [note?.anchors]);
 
   useEffect(() => {
     if (!tagEditorOpen) return undefined;
@@ -752,7 +760,24 @@ export function NoteEditor({
     }),
     SlashCommand.configure({
       items: slashCommandItems,
-      command: ({ editor, range, item }) => runSlashCommand(editor, range, item),
+      command: ({ editor, range, item }) => {
+        if (item.id === 'paper-reference') {
+          // 打开工具栏的参考文献选择器（由 NoteEditor 状态驱动，与工具栏按钮共用）。
+          editor.chain().focus().deleteRange(range).run();
+          setReferencePickerOpen(true);
+          return;
+        }
+        if (item.id === 'reference-list') {
+          editor.chain().focus().deleteRange(range).run();
+          upsertNoteReferenceList(
+            editor,
+            extractNoteReferences(editor.getJSON(), latestAnchorsRef.current),
+            latestCandidatesRef.current.papers ?? [],
+          );
+          return;
+        }
+        runSlashCommand(editor, range, item);
+      },
     }),
     NoteAnchorLink.configure({
       HTMLAttributes: { class: 'pq-tiptap-token pq-tiptap-note-anchor' },
@@ -811,7 +836,7 @@ export function NoteEditor({
             description: paper.authors.map((author) => author.name).join(', ') || paper.year || paper.id,
           }));
       },
-      onClick: (paperId) => onPaperClick?.(paperId),
+      onClick: (paperId, location) => onPaperClick?.(paperId, location),
     }),
   ], [jumpToAnchorId, note?.id, onOpenNote, onPaperClick, onTagClick]);
 
@@ -1780,6 +1805,10 @@ export function NoteEditor({
         onPolish={openPolish}
         polishActive={polishOpen}
         polishDisabled={!note || polishLoading}
+        papers={papers ?? []}
+        referencePickerOpen={referencePickerOpen}
+        onReferencePickerToggle={() => setReferencePickerOpen((open) => !open)}
+        onReferencePickerClose={() => setReferencePickerOpen(false)}
       />
 
       {polishOpen ? (

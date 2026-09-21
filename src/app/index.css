@@ -699,6 +699,7 @@ textarea,
 .paperquay-pdf-linked .pdfViewer .page {
   margin: 0 auto 20px;
   overflow: hidden;
+  contain: layout paint;
   border-radius: var(--pq-radius-md);
   box-shadow: 0 4px 18px rgba(0, 0, 0, 0.08);
 }

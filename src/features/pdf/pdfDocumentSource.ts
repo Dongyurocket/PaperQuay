@@ -26,6 +26,7 @@ export interface PdfJsDocumentInit {
 
 const PDF_LOADING_OPTIONS = {
   ...PDFJS_COMPATIBILITY_OPTIONS,
+  disableAutoFetch: true,
   enableHWA: true,
   isEvalSupported: false,
   isOffscreenCanvasSupported: true,
@@ -34,7 +35,6 @@ const PDF_LOADING_OPTIONS = {
 
 const URL_PDF_LOADING_OPTIONS = {
   ...PDF_LOADING_OPTIONS,
-  disableAutoFetch: false,
   disableStream: false,
 } as const;
 

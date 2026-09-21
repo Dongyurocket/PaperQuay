@@ -22,6 +22,7 @@ import {
 import {
   NOTE_CHANGED_EVENT,
   emitJumpToNoteAnchor,
+  emitOpenLibraryPaper,
   type NoteChangedEventDetail,
 } from '../../app/appEvents';
 import { listLibraryPapers } from '../../services/library';
@@ -31,6 +32,7 @@ import type { LiteraturePaper } from '../../types/library';
 import type { Note, NoteAnchor } from '../../types/notes';
 import { cn } from '../../utils/cn';
 import { NoteEditor } from './NoteEditor';
+import type { PaperReferenceLocation } from './extensions/PaperReference';
 import {
   copyTextToClipboard,
   NotesContextMenu,
@@ -38,6 +40,7 @@ import {
   type NotesContextMenuEntry,
 } from './NotesContextMenu';
 import { extractOutline, noteContentToTiptap } from './notesTiptap';
+import { extractNoteReferences } from './noteReferences';
 
 const NOTE_FOLDERS_STORAGE_KEY = 'paperquay:note-folders:v1';
 const UNCATEGORIZED_FOLDER_ID = '__uncategorized__';
@@ -564,14 +567,23 @@ function resolveNoteAnchorTargetPaperId(note: Note, anchor: NoteAnchor) {
 
 function NotesRightPanel({
   note,
+  papers,
   onOpenNote,
+  onOpenPaper,
   onClose,
 }: {
   note: Note | null;
+  papers: LiteraturePaper[];
   onOpenNote: (noteId: string) => void;
+  onOpenPaper: (paperId: string, location?: PaperReferenceLocation) => void;
   onClose: () => void;
 }) {
   const outline = useMemo(() => extractOutline(noteContentToTiptap(note)), [note]);
+  const references = useMemo(
+    () => extractNoteReferences(noteContentToTiptap(note), note?.anchors ?? []),
+    [note],
+  );
+  const paperById = useMemo(() => new Map(papers.map((paper) => [paper.id, paper])), [papers]);
 
   return (
     <aside className="flex h-full min-h-0 flex-col overflow-hidden border-l border-[var(--pq-border)] bg-[var(--pq-surface-1)]">
@@ -602,6 +614,75 @@ function NotesRightPanel({
           )) : (
             <div className="px-2 py-1 text-xs text-[var(--pq-text-faint)]">
               No outline
+            </div>
+          )}
+        </div>
+      </section>
+
+      <section className="border-b border-[var(--pq-border)] p-4">
+        <div className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--pq-text-faint)]">
+          参考文献
+        </div>
+        <div className="mt-3 space-y-2">
+          {references.length > 0 ? references.map((entry, index) => {
+            const paper = paperById.get(entry.paperId);
+            const title = paper?.title || entry.label || entry.paperId;
+            const meta = paper
+              ? [
+                  paper.authors.map((author) => author.name).filter(Boolean).join(', '),
+                  paper.year ?? '',
+                ].filter(Boolean).join(' · ')
+              : '';
+
+            return (
+              <div
+                key={entry.paperId}
+                className="rounded-[var(--pq-radius-sm)] border border-[var(--pq-border)] bg-[var(--pq-surface-2)] px-3 py-2"
+              >
+                <button
+                  type="button"
+                  onClick={() => onOpenPaper(entry.paperId, entry.locations[0] ? {
+                    anchorId: entry.locations[0].anchorId,
+                    blockId: entry.locations[0].blockId,
+                    pageIndex: entry.locations[0].pageIndex,
+                    sourceType: entry.locations[0].sourceType,
+                  } : undefined)}
+                  className="block w-full text-left"
+                  title="打开文献"
+                >
+                  <div className="text-xs font-semibold text-[var(--pq-text)]">
+                    <span className="mr-1.5 text-[var(--pq-text-faint)]">[{index + 1}]</span>
+                    {title}
+                  </div>
+                  {meta ? (
+                    <div className="mt-0.5 truncate text-[11px] text-[var(--pq-text-muted)]">{meta}</div>
+                  ) : null}
+                </button>
+                {entry.locations.length > 0 ? (
+                  <div className="mt-1.5 flex flex-wrap gap-1">
+                    {entry.locations.map((location, locationIndex) => (
+                      <button
+                        key={`${location.anchorId ?? ''}-${location.blockId ?? ''}-${location.pageIndex ?? ''}-${locationIndex}`}
+                        type="button"
+                        onClick={() => onOpenPaper(entry.paperId, {
+                          anchorId: location.anchorId,
+                          blockId: location.blockId,
+                          pageIndex: location.pageIndex,
+                          sourceType: location.sourceType,
+                        })}
+                        className="rounded-full border border-[var(--pq-border)] px-2 py-0.5 text-[11px] text-[var(--pq-text-muted)] transition hover:border-[var(--pq-accent)] hover:text-[var(--pq-accent)]"
+                        title="跳转到引用位置"
+                      >
+                        {location.pageIndex !== null ? `第 ${location.pageIndex + 1} 页` : '定位'}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            );
+          }) : (
+            <div className="px-2 py-1 text-xs text-[var(--pq-text-faint)]">
+              暂无参考文献，使用 @ 或工具栏「引用」插入
             </div>
           )}
         </div>
@@ -974,10 +1055,30 @@ export function NotesWorkspace() {
     moveNoteToFolder(noteId, null);
   }, [moveNoteToFolder]);
 
-  const handleOpenPaper = useCallback((paperId: string) => {
-    const paper = papers.find((item) => item.id === paperId);
-    setSearch(paper?.title || paperId);
-  }, [papers, setSearch]);
+  const handleOpenPaper = useCallback((paperId: string, location?: PaperReferenceLocation) => {
+    const pageIndex = typeof location?.pageIndex === 'number' ? location.pageIndex : null;
+    const hasPreciseLocation = Boolean(location && (location.blockId || pageIndex !== null));
+
+    // 引用带有具体位置（润色锚点等）时直接跳到文献相应页/块，否则只打开文献。
+    if (hasPreciseLocation && location && activeNote) {
+      emitJumpToNoteAnchor({
+        requestId: createNoteAnchorJumpRequestId(),
+        targetPaperId: paperId.startsWith('native-library:') ? paperId : `native-library:${paperId}`,
+        noteId: activeNote.id,
+        noteTitle: activeNote.title,
+        notePaperId: activeNote.paperId,
+        anchorId: location.anchorId || `paper-ref:${paperId}`,
+        anchorPaperId: paperId,
+        anchorLabel: '',
+        blockId: location.blockId ?? null,
+        pageIndex,
+        sourceType: location.sourceType ?? null,
+      });
+      return;
+    }
+
+    emitOpenLibraryPaper(paperId);
+  }, [activeNote]);
 
   const handleJumpToNoteAnchor = useCallback((note: Note, anchor: NoteAnchor) => {
     emitJumpToNoteAnchor({
@@ -1447,7 +1548,13 @@ export function NotesWorkspace() {
       </main>
 
       {rightPanelOpen ? (
-        <NotesRightPanel note={activeNote} onOpenNote={openNote} onClose={() => setRightPanelOpen(false)} />
+        <NotesRightPanel
+          note={activeNote}
+          papers={papers}
+          onOpenNote={openNote}
+          onOpenPaper={handleOpenPaper}
+          onClose={() => setRightPanelOpen(false)}
+        />
       ) : null}
 
       {contextMenu ? (

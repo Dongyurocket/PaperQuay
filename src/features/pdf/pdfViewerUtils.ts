@@ -7,9 +7,14 @@ import type {
 import { buildSiblingPath } from '../../utils/mineruCache.ts';
 import type { PageSize } from '../../utils/bbox';
 import { getFileNameFromPath } from '../../utils/text.ts';
+import { resolveVirtualWindow, type VirtualWindow } from '../../utils/virtualWindow.ts';
 
 export const MAX_EAGER_THUMBNAILS = 36;
 export const THUMBNAIL_NEIGHBOR_RADIUS = 4;
+export const THUMBNAIL_ITEM_HEIGHT_PX = 188;
+export const THUMBNAIL_ITEM_GAP_PX = 10;
+export const THUMBNAIL_ITEM_STRIDE_PX = THUMBNAIL_ITEM_HEIGHT_PX + THUMBNAIL_ITEM_GAP_PX;
+export const THUMBNAIL_WINDOW_OVERSCAN = 8;
 
 export type PdfAnnotationColorPresetId = 'yellow' | 'green' | 'blue' | 'pink' | 'red';
 type Localize = (zh: string, en: string) => string;
@@ -88,6 +93,21 @@ export function loadStoredBoolean(key: string, fallback = false): boolean {
   } catch {
     return fallback;
   }
+}
+
+export function resolveThumbnailWindow(
+  pageCount: number,
+  scrollTop: number,
+  viewportHeight: number,
+  overscan = THUMBNAIL_WINDOW_OVERSCAN,
+): VirtualWindow {
+  return resolveVirtualWindow({
+    itemCount: Math.max(0, pageCount),
+    getItemSize: () => THUMBNAIL_ITEM_STRIDE_PX,
+    scrollOffset: scrollTop,
+    viewportSize: viewportHeight,
+    overscan,
+  });
 }
 
 export function buildThumbnailPageIndexes(pageCount: number, currentPage: number): number[] {

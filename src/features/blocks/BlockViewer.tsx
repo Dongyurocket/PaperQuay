@@ -2,6 +2,7 @@ import {
   memo,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -34,8 +35,20 @@ import type {
 import { isValidBBox } from '../../utils/bbox';
 import { cn } from '../../utils/cn';
 import { normalizeSelectionText } from '../../utils/text';
+import {
+  areVirtualWindowsEqual,
+  getVirtualOffset,
+  resolveVirtualWindow,
+  type VirtualWindow,
+} from '../../utils/virtualWindow';
 import { BlockItem } from './blockViewerContent';
 import { BlockReparseModal } from './BlockReparseModal';
+import {
+  BLOCK_ITEM_GAP_PX,
+  BLOCK_WINDOW_OVERSCAN,
+  BLOCK_WINDOW_VIEWPORT_FALLBACK_PX,
+  estimateBlockHeight,
+} from './blockViewerWindow';
 
 interface BlockViewerProps {
   blocks: PositionedMineruBlock[];
@@ -63,9 +76,6 @@ interface BlockViewerProps {
 const CONTENT_MIN_SCALE = 0.85;
 const CONTENT_MAX_SCALE = 1.45;
 const CONTENT_SCALE_STEP = 0.05;
-const INITIAL_RENDER_BLOCK_COUNT = 80;
-const RENDER_BLOCK_BATCH_SIZE = 120;
-const ACTIVE_BLOCK_RENDER_MARGIN = 24;
 
 function hasActiveTextSelection() {
   const selection = window.getSelection();
@@ -170,21 +180,6 @@ function selectionBelongsToContainer(container: HTMLElement | null) {
   return container.contains(selection.getRangeAt(0).commonAncestorContainer);
 }
 
-function requestDeferredRender(callback: () => void) {
-  const idleWindow = window as Window & {
-    requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
-    cancelIdleCallback?: (handle: number) => void;
-  };
-
-  if (typeof idleWindow.requestIdleCallback === 'function') {
-    const handle = idleWindow.requestIdleCallback(callback, { timeout: 160 });
-    return () => idleWindow.cancelIdleCallback?.(handle);
-  }
-
-  const handle = window.setTimeout(callback, 32);
-  return () => window.clearTimeout(handle);
-}
-
 function BlockViewer({
   blocks,
   mineruPath,
@@ -223,19 +218,44 @@ function BlockViewer({
     },
     [blocks, hidePageDecorations],
   );
-  const [renderedBlockCount, setRenderedBlockCount] = useState(() =>
-    Math.min(INITIAL_RENDER_BLOCK_COUNT, visibleBlocks.length),
+  const [blockWindow, setBlockWindow] = useState<VirtualWindow>(() =>
+    resolveVirtualWindow({
+      itemCount: visibleBlocks.length,
+      getItemSize: (index) => {
+        const block = visibleBlocks[index];
+
+        if (!block) {
+          return 0;
+        }
+
+        return (
+          estimateBlockHeight(block, {
+            scale: 1,
+            compactMode,
+            bilingual: translationDisplayMode === 'bilingual',
+          }) + BLOCK_ITEM_GAP_PX
+        );
+      },
+      scrollOffset: 0,
+      viewportSize: BLOCK_WINDOW_VIEWPORT_FALLBACK_PX,
+      overscan: BLOCK_WINDOW_OVERSCAN,
+    }),
   );
-  const renderedVisibleBlocks = useMemo(
-    () => visibleBlocks.slice(0, Math.min(renderedBlockCount, visibleBlocks.length)),
-    [renderedBlockCount, visibleBlocks],
+  const windowedVisibleBlocks = useMemo(
+    () => visibleBlocks.slice(blockWindow.startIndex, blockWindow.endIndex),
+    [blockWindow.endIndex, blockWindow.startIndex, visibleBlocks],
   );
   const renderableBlocks = useMemo(
-    () => buildRenderableBlocks(renderedVisibleBlocks, mineruPath),
-    [mineruPath, renderedVisibleBlocks],
+    () => buildRenderableBlocks(windowedVisibleBlocks, mineruPath),
+    [mineruPath, windowedVisibleBlocks],
   );
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const listRef = useRef<HTMLDivElement | null>(null);
   const blockRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const heightMapRef = useRef<Record<string, number>>({});
+  const itemResizeObserverRef = useRef<ResizeObserver | null>(null);
+  const windowRafRef = useRef(0);
+  const visibleBlocksIdentityRef = useRef(visibleBlocks);
   const lastSelectionRef = useRef<{ text: string; emittedAt: number } | null>(null);
   const selectionStartedInsideRef = useRef(false);
   const selectionCommitTimerRef = useRef<number | null>(null);
@@ -302,52 +322,182 @@ function BlockViewer({
     });
   }, []);
   const [contentScale, setContentScale] = useState(1);
+  const bilingualReading = translationDisplayMode === 'bilingual';
+  const windowParamsRef = useRef({
+    visibleBlocks,
+    contentScale,
+    compactMode,
+    bilingual: bilingualReading,
+  });
+  windowParamsRef.current = {
+    visibleBlocks,
+    contentScale,
+    compactMode,
+    bilingual: bilingualReading,
+  };
+
+  const getItemSize = useCallback((index: number) => {
+    const params = windowParamsRef.current;
+    const block = params.visibleBlocks[index];
+
+    if (!block) {
+      return 0;
+    }
+
+    const measured = heightMapRef.current[block.blockId];
+    const content =
+      measured ??
+      estimateBlockHeight(block, {
+        scale: params.contentScale,
+        compactMode: params.compactMode,
+        bilingual: params.bilingual,
+      });
+
+    return content + (index < params.visibleBlocks.length - 1 ? BLOCK_ITEM_GAP_PX : 0);
+  }, []);
+
+  const updateListWindow = useCallback(() => {
+    const scroller = listRef.current;
+    const next = resolveVirtualWindow({
+      itemCount: windowParamsRef.current.visibleBlocks.length,
+      getItemSize,
+      scrollOffset: scroller?.scrollTop ?? 0,
+      viewportSize: scroller?.clientHeight || BLOCK_WINDOW_VIEWPORT_FALLBACK_PX,
+      overscan: BLOCK_WINDOW_OVERSCAN,
+    });
+
+    setBlockWindow((current) => (areVirtualWindowsEqual(current, next) ? current : next));
+  }, [getItemSize]);
+
+  const scheduleListWindowUpdate = useCallback(() => {
+    if (windowRafRef.current) {
+      return;
+    }
+
+    windowRafRef.current = window.requestAnimationFrame(() => {
+      windowRafRef.current = 0;
+      updateListWindow();
+    });
+  }, [updateListWindow]);
+
+  useLayoutEffect(() => {
+    if (visibleBlocksIdentityRef.current !== visibleBlocks) {
+      heightMapRef.current = {};
+      blockRefs.current = {};
+      visibleBlocksIdentityRef.current = visibleBlocks;
+
+      if (listRef.current) {
+        listRef.current.scrollTop = 0;
+      }
+    }
+
+    updateListWindow();
+  }, [compactMode, contentScale, translationDisplayMode, updateListWindow, visibleBlocks]);
 
   useEffect(() => {
-    blockRefs.current = {};
-    setRenderedBlockCount(Math.min(INITIAL_RENDER_BLOCK_COUNT, visibleBlocks.length));
-  }, [visibleBlocks]);
+    const observer = new ResizeObserver((entries) => {
+      let changed = false;
+      let scrollAdjust = 0;
+      const scroller = listRef.current;
+      const items = windowParamsRef.current.visibleBlocks;
+      const scrollTop = scroller?.scrollTop ?? 0;
+
+      for (const entry of entries) {
+        const element = entry.target as HTMLElement;
+        const blockId = element.dataset.blockId;
+
+        if (!blockId) {
+          continue;
+        }
+
+        const nextHeight = element.getBoundingClientRect().height;
+
+        if (nextHeight <= 0) {
+          continue;
+        }
+
+        const index = items.findIndex((block) => block.blockId === blockId);
+
+        if (index < 0) {
+          continue;
+        }
+
+        const measuredBlock = items[index];
+
+        if (!measuredBlock) {
+          continue;
+        }
+
+        const previous = heightMapRef.current[blockId];
+        const oldContent =
+          previous ??
+          estimateBlockHeight(measuredBlock, {
+            scale: windowParamsRef.current.contentScale,
+            compactMode: windowParamsRef.current.compactMode,
+            bilingual: windowParamsRef.current.bilingual,
+          });
+
+        if (previous != null && Math.abs(previous - nextHeight) < 0.5) {
+          continue;
+        }
+
+        const offsetBefore = getVirtualOffset(index, getItemSize);
+        heightMapRef.current[blockId] = nextHeight;
+
+        if (offsetBefore < scrollTop) {
+          scrollAdjust += nextHeight - oldContent;
+        }
+
+        changed = true;
+      }
+
+      if (scrollAdjust && scroller) {
+        scroller.scrollTop += scrollAdjust;
+      }
+
+      if (changed) {
+        scheduleListWindowUpdate();
+      }
+    });
+
+    itemResizeObserverRef.current = observer;
+
+    for (const element of Object.values(blockRefs.current)) {
+      if (element) {
+        observer.observe(element);
+      }
+    }
+
+    return () => {
+      observer.disconnect();
+      itemResizeObserverRef.current = null;
+    };
+  }, [getItemSize, scheduleListWindowUpdate]);
 
   useEffect(() => {
-    if (!active || renderedBlockCount >= visibleBlocks.length) {
+    const scroller = listRef.current;
+
+    if (!scroller) {
       return undefined;
     }
 
-    let cancelled = false;
-    const cancelDeferredRender = requestDeferredRender(() => {
-      if (cancelled) {
-        return;
-      }
-
-      setRenderedBlockCount((current) =>
-        Math.min(visibleBlocks.length, Math.max(current, current + RENDER_BLOCK_BATCH_SIZE)),
-      );
+    const observer = new ResizeObserver(() => {
+      scheduleListWindowUpdate();
     });
 
-    return () => {
-      cancelled = true;
-      cancelDeferredRender();
-    };
-  }, [active, renderedBlockCount, visibleBlocks.length]);
+    observer.observe(scroller);
+
+    return () => observer.disconnect();
+  }, [scheduleListWindowUpdate, visibleBlocks.length]);
 
   useEffect(() => {
-    if (!activeBlockId) {
-      return;
-    }
-
-    const activeBlockIndex = visibleBlocks.findIndex((block) => block.blockId === activeBlockId);
-
-    if (activeBlockIndex < 0) {
-      return;
-    }
-
-    const requiredCount = Math.min(
-      visibleBlocks.length,
-      activeBlockIndex + 1 + ACTIVE_BLOCK_RENDER_MARGIN,
-    );
-
-    setRenderedBlockCount((current) => (current >= requiredCount ? current : requiredCount));
-  }, [activeBlockId, visibleBlocks]);
+    return () => {
+      if (windowRafRef.current) {
+        window.cancelAnimationFrame(windowRafRef.current);
+        windowRafRef.current = 0;
+      }
+    };
+  }, []);
 
   const translatedCount = useMemo(
     () => Object.values(translations).filter((value) => value.trim()).length,
@@ -384,8 +534,16 @@ function BlockViewer({
   }, []);
 
   const registerBlockRef = useCallback((blockId: string, element: HTMLDivElement | null) => {
+    const observer = itemResizeObserverRef.current;
+    const previous = blockRefs.current[blockId];
+
+    if (previous && previous !== element) {
+      observer?.unobserve(previous);
+    }
+
     if (element) {
       blockRefs.current[blockId] = element;
+      observer?.observe(element);
       return;
     }
 
@@ -416,10 +574,20 @@ function BlockViewer({
 
     const entries: ContextMenuEntry[] = [];
 
-    if (onAddBlockToNote) {
-      const blockText = renderableBlocks
-        .find((item) => item.block.blockId === contextMenu.block.blockId)
+    const resolveContextMarkdown = (block: PositionedMineruBlock) => {
+      const fromWindow = renderableBlocks
+        .find((item) => item.block.blockId === block.blockId)
         ?.markdown.trim();
+
+      if (fromWindow) {
+        return fromWindow;
+      }
+
+      return buildRenderableBlocks([block], mineruPath)[0]?.markdown.trim() ?? '';
+    };
+
+    if (onAddBlockToNote) {
+      const blockText = resolveContextMarkdown(contextMenu.block);
 
       entries.push({
         id: 'add-block-to-note',
@@ -470,9 +638,7 @@ function BlockViewer({
     }
 
     const blockTextForReparse =
-      blockOverrides[contextMenu.block.blockId] ||
-      renderableBlocks.find((item) => item.block.blockId === contextMenu.block.blockId)?.markdown.trim() ||
-      '';
+      blockOverrides[contextMenu.block.blockId] || resolveContextMarkdown(contextMenu.block);
 
     entries.push({
       id: 'reparse-block-ai',
@@ -493,6 +659,7 @@ function BlockViewer({
     handleOpenReparse,
     handleToggleBlockCrop,
     l,
+    mineruPath,
     onAddBlockToNote,
     onRetranslateBlock,
     pdfSource,
@@ -550,10 +717,30 @@ function BlockViewer({
     }, delay);
   };
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!active || !activeBlockId) {
       return undefined;
     }
+
+    const items = windowParamsRef.current.visibleBlocks;
+    const index = items.findIndex((block) => block.blockId === activeBlockId);
+
+    if (index < 0) {
+      return undefined;
+    }
+
+    const scroller = listRef.current;
+
+    if (scroller) {
+      const offset = getVirtualOffset(index, getItemSize);
+      const target = Math.max(0, offset - scroller.clientHeight / 3);
+
+      if (Math.abs(scroller.scrollTop - target) > 2) {
+        scroller.scrollTop = target;
+      }
+    }
+
+    updateListWindow();
 
     const scrollToActiveBlock = (behavior: ScrollBehavior) => {
       const element = blockRefs.current[activeBlockId];
@@ -569,10 +756,18 @@ function BlockViewer({
       return true;
     };
 
-    const didScroll = scrollToActiveBlock(smoothScroll ? 'smooth' : 'auto');
+    const mounted = Boolean(blockRefs.current[activeBlockId]);
+    const didScroll = scrollToActiveBlock(mounted && smoothScroll ? 'smooth' : 'auto');
+    const retryFrame = window.requestAnimationFrame(() => {
+      updateListWindow();
+      window.requestAnimationFrame(() => {
+        scrollToActiveBlock('auto');
+      });
+    });
     const retryTimer = didScroll
       ? 0
       : window.setTimeout(() => {
+          updateListWindow();
           scrollToActiveBlock('auto');
         }, 80);
 
@@ -583,12 +778,13 @@ function BlockViewer({
     }, 1200);
 
     return () => {
+      window.cancelAnimationFrame(retryFrame);
       if (retryTimer) {
         window.clearTimeout(retryTimer);
       }
       window.clearTimeout(timer);
     };
-  }, [active, activeBlockId, renderedBlockCount, scrollSignal, smoothScroll]);
+  }, [active, activeBlockId, getItemSize, scrollSignal, smoothScroll, updateListWindow, visibleBlocks.length]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -674,7 +870,7 @@ function BlockViewer({
     };
   }, [active, onTextSelect]);
 
-  if (renderableBlocks.length === 0) {
+  if (visibleBlocks.length === 0) {
     return (
       <EmptyState
         title={l('Waiting for Structured Content', 'Waiting for Structured Content')}
@@ -761,31 +957,43 @@ function BlockViewer({
         </div>
       </div>
 
-      <div className={cn('min-h-0 flex-1 overflow-y-auto', compactMode ? 'px-6 py-6' : 'px-8 py-8')}>
+      <div
+        ref={listRef}
+        data-block-viewer-scroll
+        className={cn('min-h-0 flex-1 overflow-y-auto', compactMode ? 'px-6 py-6' : 'px-8 py-8')}
+        onScroll={scheduleListWindowUpdate}
+      >
         <article className={cn('mx-auto max-w-[960px]', compactMode ? 'pb-12' : 'pb-16')}>
-          <div className="space-y-1">
-            {renderableBlocks.map((renderable) => (
-              <BlockItem
-                key={renderable.block.blockId}
-                renderable={renderable}
-                pdfSource={pdfSource}
-                showPdfCrop={cropBlockIds.has(renderable.block.blockId)}
-                onTogglePdfCrop={() => handleToggleBlockCrop(renderable.block.blockId)}
-                active={renderable.block.blockId === activeBlockId}
-                hovered={renderable.block.blockId === hoveredBlockId}
-                flashing={renderable.block.blockId === flashBlockId}
-                scale={contentScale}
-                showBlockMeta={showBlockMeta}
-                compactMode={compactMode}
-                translatedText={translations[renderable.block.blockId]}
-                translationDisplayMode={translationDisplayMode}
-                customOverrideMarkdown={blockOverrides[renderable.block.blockId]}
-                onOpenReparse={handleOpenReparse}
-                onClick={onBlockClick}
-                onContextMenu={handleBlockContextMenu}
-                registerRef={registerBlockRef}
-              />
-            ))}
+          <div
+            style={{
+              paddingTop: blockWindow.paddingStart,
+              paddingBottom: blockWindow.paddingEnd,
+            }}
+          >
+            <div className="space-y-1">
+              {renderableBlocks.map((renderable) => (
+                <BlockItem
+                  key={renderable.block.blockId}
+                  renderable={renderable}
+                  pdfSource={pdfSource}
+                  showPdfCrop={cropBlockIds.has(renderable.block.blockId)}
+                  onTogglePdfCrop={() => handleToggleBlockCrop(renderable.block.blockId)}
+                  active={renderable.block.blockId === activeBlockId}
+                  hovered={renderable.block.blockId === hoveredBlockId}
+                  flashing={renderable.block.blockId === flashBlockId}
+                  scale={contentScale}
+                  showBlockMeta={showBlockMeta}
+                  compactMode={compactMode}
+                  translatedText={translations[renderable.block.blockId]}
+                  translationDisplayMode={translationDisplayMode}
+                  customOverrideMarkdown={blockOverrides[renderable.block.blockId]}
+                  onOpenReparse={handleOpenReparse}
+                  onClick={onBlockClick}
+                  onContextMenu={handleBlockContextMenu}
+                  registerRef={registerBlockRef}
+                />
+              ))}
+            </div>
           </div>
 
           <div className="mt-8 flex justify-center">

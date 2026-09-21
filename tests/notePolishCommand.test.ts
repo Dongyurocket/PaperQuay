@@ -5,7 +5,7 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const { createAiCommands } = require('../electron/backend/aiCommands.cjs');
 
-function createContext() {
+function createContext(receivedDocumentKeySets: string[][]) {
   return {
     agentMemoryStore: {},
     store: {
@@ -14,13 +14,16 @@ function createContext() {
       },
     },
     ragStore: {
-      retrieveDocumentChunks({ documentKey, sourceType }: { documentKey: string; sourceType: string }) {
-        if (documentKey !== 'native-library:paper-1' || sourceType !== 'mineru-markdown') return [];
+      retrieveDocumentChunks({ documentKeys }: { documentKeys?: string[] }) {
+        const keys = Array.isArray(documentKeys) ? documentKeys : [];
+        receivedDocumentKeySets.push(keys);
+        if (!keys.includes('paper-1')) return [];
         return [{
+          documentKey: 'paper-1',
           chunkId: 'chunk-1',
           blockId: 'block-1',
           pageIndex: 2,
-          sourceType,
+          sourceType: 'mineru-markdown',
           text: 'The indexed supporting passage.',
           score: 0.1,
         }];
@@ -30,6 +33,7 @@ function createContext() {
 }
 
 test('note polish maps only server-known citation IDs to scoped RAG evidence', async (t) => {
+  const receivedDocumentKeySets: string[][] = [];
   let callCount = 0;
   t.mock.method(globalThis, 'fetch', async () => {
     callCount += 1;
@@ -49,7 +53,7 @@ test('note polish maps only server-known citation IDs to scoped RAG evidence', a
     });
   });
 
-  const commands = createAiCommands(createContext());
+  const commands = createAiCommands(createContext(receivedDocumentKeySets));
   const result = await commands.notes_polish_openai_compatible({
     options: {
       baseUrl: 'https://example.test/v1',
@@ -65,6 +69,11 @@ test('note polish maps only server-known citation IDs to scoped RAG evidence', a
       },
     },
   });
+
+  // 回归：索引 documentKey 为裸 paper.id，检索必须带裸键（兼容旧前缀键）。
+  assert.equal(receivedDocumentKeySets.length > 0, true);
+  assert.equal(receivedDocumentKeySets[0].includes('paper-1'), true);
+  assert.equal(receivedDocumentKeySets[0].includes('native-library:paper-1'), true);
 
   assert.equal(result.text, '## Polished note\n\nClearer wording.');
   assert.deepEqual(result.citations, [{
@@ -84,7 +93,7 @@ test('note polish falls back to plain text when a provider ignores JSON mode', a
     choices: [{ message: { content: '<think>hidden</think>\nPolished plain text.' } }],
   }));
 
-  const commands = createAiCommands(createContext());
+  const commands = createAiCommands(createContext([]));
   const result = await commands.notes_polish_openai_compatible({
     options: {
       baseUrl: 'https://example.test/v1',

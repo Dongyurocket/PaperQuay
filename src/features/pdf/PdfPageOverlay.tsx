@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import type {
   PaperAnnotation,
   PdfHighlightTarget,
@@ -25,7 +26,7 @@ interface PdfPageOverlayProps {
   l: LocaleText;
 }
 
-export function PdfPageOverlay({
+export const PdfPageOverlay = memo(function PdfPageOverlay({
   pageIndex,
   originalPage,
   renderedPage,
@@ -42,26 +43,32 @@ export function PdfPageOverlay({
 }: PdfPageOverlayProps) {
   return (
     <div className="paperquay-page-overlay relative h-full w-full pointer-events-none">
-      {pageBlocks.map((block) => (
-        <div
-          key={block.blockId}
-          aria-label={block.blockId}
-          className={cn(
-            'absolute rounded-lg border transition-all duration-150',
-            hoveredBlockId === block.blockId && 'border-amber-300 bg-amber-200/18',
-            activeBlockId === block.blockId &&
-              'border-indigo-400 bg-indigo-300/14 shadow-[0_0_0_1px_rgba(99,102,241,0.18)]',
-            hoveredBlockId !== block.blockId &&
-              activeBlockId !== block.blockId &&
-              'border-transparent bg-transparent',
-          )}
-          style={bboxToCssStyle(
-            block.bbox!,
-            resolveBBoxBaseSize(block, originalPage),
-            renderedPage,
-          )}
-        />
-      ))}
+      {pageBlocks.map((block) => {
+        const isHovered = hoveredBlockId === block.blockId;
+        const isActive = activeBlockId === block.blockId;
+
+        if (!isHovered && !isActive) {
+          return null;
+        }
+
+        return (
+          <div
+            key={block.blockId}
+            aria-label={block.blockId}
+            className={cn(
+              'absolute rounded-lg border transition-all duration-150',
+              isHovered && 'border-amber-300 bg-amber-200/18',
+              isActive &&
+                'border-indigo-400 bg-indigo-300/14 shadow-[0_0_0_1px_rgba(99,102,241,0.18)]',
+            )}
+            style={bboxToCssStyle(
+              block.bbox!,
+              resolveBBoxBaseSize(block, originalPage),
+              renderedPage,
+            )}
+          />
+        );
+      })}
 
       {pageAnnotations.map((annotation, index) => {
         const isNoteAnchor = annotation.id.startsWith('note-anchor:');
@@ -150,4 +157,4 @@ export function PdfPageOverlay({
       ) : null}
     </div>
   );
-}
+});

@@ -4,6 +4,7 @@ import type { Editor } from '@tiptap/core';
 import { useEditorState } from '@tiptap/react';
 import {
   Bold,
+  BookMarked,
   ChevronDown,
   Code2,
   FileText,
@@ -34,6 +35,8 @@ import {
   paragraphNode,
   type NoteTemplate,
 } from './noteEditorUtils';
+import { extractNoteReferences, upsertNoteReferenceList } from './noteReferences';
+import type { LiteraturePaper } from '../../types/library';
 
 const TOOLBAR_TEXT = {
   editorLoading: 'Loading editor...',
@@ -133,16 +136,26 @@ export function NoteEditorToolbar({
   onPolish,
   polishActive = false,
   polishDisabled = false,
+  papers = [],
+  referencePickerOpen = false,
+  onReferencePickerToggle,
+  onReferencePickerClose,
 }: {
   editor: Editor | null;
   onPolish?: () => void;
   polishActive?: boolean;
   polishDisabled?: boolean;
+  papers?: LiteraturePaper[];
+  referencePickerOpen?: boolean;
+  onReferencePickerToggle?: () => void;
+  onReferencePickerClose?: () => void;
 }) {
   const [tableOpen, setTableOpen] = useState(false);
   const [tableSize, setTableSize] = useState({ rows: 3, cols: 3 });
   const [tableMenuPosition, setTableMenuPosition] = useState<{ left: number; top: number } | null>(null);
   const [templateOpen, setTemplateOpen] = useState(false);
+  const [referenceQuery, setReferenceQuery] = useState('');
+  const [referenceListHint, setReferenceListHint] = useState('');
   const [inputMenu, setInputMenu] = useState<null | {
     kind: 'link' | 'image' | 'math';
     value: string;
@@ -217,6 +230,13 @@ export function NoteEditorToolbar({
     };
   }, [tableOpen]);
 
+  useEffect(() => {
+    if (referencePickerOpen) {
+      setReferenceQuery('');
+      setReferenceListHint('');
+    }
+  }, [referencePickerOpen]);
+
   if (!editor) {
     return (
       <div className="flex h-10 items-center border-b border-[var(--pq-border)] px-3 text-xs text-[var(--pq-text-faint)]">
@@ -255,6 +275,37 @@ export function NoteEditorToolbar({
       .insertContent(componentBlockNode('Component'), { updateSelection: false })
       .run();
     focusTextPosition(editor, insertAt + 2);
+  };
+  const normalizedReferenceQuery = referenceQuery.trim().toLocaleLowerCase();
+  const filteredReferencePapers = papers
+    .filter((paper) =>
+      !normalizedReferenceQuery ||
+      paper.id.toLocaleLowerCase().includes(normalizedReferenceQuery) ||
+      (paper.title ?? '').toLocaleLowerCase().includes(normalizedReferenceQuery))
+    .slice(0, 8);
+  const closeReferencePicker = () => {
+    setReferenceQuery('');
+    setReferenceListHint('');
+    onReferencePickerClose?.();
+  };
+  const insertPaperReference = (paper: LiteraturePaper) => {
+    chain()
+      .insertContent([
+        { type: 'paperReference', attrs: { paperId: paper.id, label: paper.title || paper.id } },
+        { type: 'text', text: ' ' },
+      ])
+      .run();
+    closeReferencePicker();
+  };
+  const insertReferenceList = () => {
+    // 实时从当前文档派生，保证与编辑器内容一致（点击时才读取，避免 stale render）。
+    const entries = extractNoteReferences(editor.getJSON());
+    if (entries.length === 0) {
+      setReferenceListHint('笔记中还没有参考文献引用，请先插入引用。');
+      return;
+    }
+    upsertNoteReferenceList(editor, entries, papers);
+    closeReferencePicker();
   };
   const submitInputMenu = () => {
     if (!inputMenu) return;
@@ -354,6 +405,70 @@ export function NoteEditorToolbar({
                 </span>
               </button>
             ))}
+          </div>
+        ) : null}
+      </div>
+      <div className="relative">
+        <button
+          type="button"
+          className="pq-button h-7 gap-1 px-2 text-xs"
+          onClick={() => {
+            setInputMenu(null);
+            setTableOpen(false);
+            setTemplateOpen(false);
+            onReferencePickerToggle?.();
+          }}
+          title="插入参考文献引用"
+        >
+          <BookMarked className="h-3.5 w-3.5" strokeWidth={1.8} />
+          <span>引用</span>
+          <ChevronDown className="h-3 w-3" strokeWidth={1.8} />
+        </button>
+        {referencePickerOpen ? (
+          <div className="pq-note-toolbar-menu absolute left-0 top-9 z-30 w-72">
+            <div className="border-b border-[var(--pq-border-subtle)] p-2">
+              <input
+                autoFocus
+                value={referenceQuery}
+                onChange={(event) => setReferenceQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape') closeReferencePicker();
+                  if (event.key === 'Enter' && filteredReferencePapers[0]) {
+                    event.preventDefault();
+                    insertPaperReference(filteredReferencePapers[0]);
+                  }
+                }}
+                placeholder="搜索文献标题或 ID"
+                className="pq-input h-8 w-full px-2 text-xs"
+              />
+            </div>
+            <div className="max-h-56 overflow-y-auto">
+              {filteredReferencePapers.length === 0 ? (
+                <div className="px-3 py-2 text-xs text-[var(--pq-text-faint)]">没有匹配的文献</div>
+              ) : filteredReferencePapers.map((paper) => (
+                <button key={paper.id} type="button" onClick={() => insertPaperReference(paper)}>
+                  <BookMarked className="h-4 w-4" strokeWidth={1.8} />
+                  <span className="min-w-0">
+                    <span className="block truncate">{paper.title || paper.id}</span>
+                    <span className="block truncate text-[11px] font-normal text-[var(--pq-text-faint)]">
+                      {paper.authors.map((author) => author.name).join(', ') || paper.year || paper.id}
+                    </span>
+                  </span>
+                </button>
+              ))}
+            </div>
+            <div className="border-t border-[var(--pq-border-subtle)] p-2">
+              <button
+                type="button"
+                className="pq-button h-7 w-full px-2 text-xs"
+                onClick={insertReferenceList}
+              >
+                插入/更新文末参考文献列表
+              </button>
+              {referenceListHint ? (
+                <div className="mt-1.5 px-1 text-[11px] text-[var(--pq-text-faint)]">{referenceListHint}</div>
+              ) : null}
+            </div>
           </div>
         ) : null}
       </div>
