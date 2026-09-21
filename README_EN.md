@@ -219,24 +219,25 @@ These items are implemented in the current desktop app.
 
 ## MCP Server & External Agent Integration
 
-PaperQuay includes a built-in server adhering to the standard **Model Context Protocol (MCP)** (entry point: `bin/paperquay-mcp.cjs`). External AI Agents (such as Proma, Claude Desktop, Cursor, Pi Agent, and Codex) can connect via stdio to access the local PaperQuay SQLite knowledge base with millisecond read latency, retrieve grounded citations with page numbers, and perform selective Zotero library imports.
+PaperQuay includes a built-in server adhering to the standard **Model Context Protocol (MCP)** (entry point: `bin/paperquay-mcp.cjs`). External AI Agents (such as Proma, Claude Desktop, Cursor, Pi Agent, and Codex) can connect via stdio to access the local PaperQuay SQLite knowledge base with millisecond read latency, retrieve grounded citations with page numbers, perform selective Zotero library imports, and execute guarded library writes (PDF import, metadata updates, category management, paper deletion).
 
 ### Highlights
 
-1. **Zero Runtime Dependency**: Direct read-only connection to SQLite databases via Node.js—**the PaperQuay desktop application does not need to be running**.
+1. **Zero Runtime Dependency**: Direct connection to SQLite databases via Node.js—**the PaperQuay desktop application does not need to be running**.
 2. **Lock-Free Concurrency**: Operates under SQLite WAL mode; external Agent read queries never lock or block user operations in the desktop application.
 3. **Hybrid Vector Retrieval (KNN + FTS5 + RRF)**: When an Embedding API is configured in PaperQuay reader settings, `search_knowledge_base` automatically vectors queries, retrieves candidates across both `sqlite-vec` vector index and FTS5 BM25 pools, and merges results via Reciprocal Rank Fusion (RRF); automatically falls back to keyword search if unconfigured or unreachable.
 4. **Academic Evidence Chain with Absolute Page Numbers**: Returns structured evidence chunks with paper titles, 1-based page numbers (`pageNumber`), block IDs (`blockId`), and matched retrieval channels (`channels: ['vector', 'fts']`), enabling hallucination-free citations.
+5. **Write Safety Guard**: Before every mutation, write tools detect whether the PaperQuay desktop app is running—if so, the write is explicitly refused (the app's in-memory save would silently overwrite external writes). Pass `allowWhileAppRunning: true` to override, or set `PAPERQUAY_MCP_WRITE=off` to make the server globally read-only.
 
 ### Available MCP Tools
 
-The server registers 9 standard MCP tools across two operational domains:
+The server registers 15 standard MCP tools across three operational domains:
 
 #### 1. Knowledge Base Read-Only Tools (5 tools)
 | Tool Name | Description | Key Parameters | Return Fields |
 | :--- | :--- | :--- | :--- |
-| `search_papers` | Search literature metadata | `query`, `tag`, `limit` | Paper ID, titles, authors, year, DOI, tags |
-| `get_paper_details` | Full bibliographic metadata & details | `paperId` (required) | Bibliographic info, abstract, AI overview, notes, publication |
+| `search_papers` | Search literature metadata | `query`, `tag`, `categoryId` (incl. descendant categories), `limit` | Paper ID, titles, authors, year, DOI, tags |
+| `get_paper_details` | Full bibliographic metadata & details | `paperId` (required) | Bibliographic info, abstract, AI overview, notes, publication, category IDs |
 | `search_knowledge_base` | **Hybrid vector retrieval** for RAG chunks | `query` (required), `paperId`, `limit`, `mode` (`auto`/`hybrid`/`keyword`) | Paper title, page number, text snippet, relevance score, `retrievalMode`, `channels` |
 | `read_paper_content` | Read MinerU structured text by page | `paperId` (required), `pageIndex` (0-based), `limit` | Sequential structured markdown & text blocks |
 | `search_notes` | Search user reading notes and highlights | `query`, `paperId`, `limit` | Reading notes, excerpt highlights, and thoughts |
@@ -248,6 +249,19 @@ The server registers 9 standard MCP tools across two operational domains:
 | `zotero_search_items` | Search Zotero literature conditionally | `query`, `collectionKey`, `limit`, `dataDir` | Candidates, title, creators, year, DOI, local PDF availability |
 | `zotero_preview_sync` | **Pre-sync diffing & deduplication** | `itemKeys`, `collectionKey`, `dataDir` | Diff report: `ready`, `alreadyExists`, `missingPdf` |
 | `paperquay_sync_from_zotero` | **Execute safe sync & PDF copying** | `itemKeys`, `collectionKey`, `targetCategoryId`, `createCollectionCategory` | Import stats: succeeded count, skipped count, assigned categories |
+
+#### 3. Library Write & Management Tools (6 tools, guarded)
+
+These tools modify the local library database. Each one checks the desktop app process before writing and **explicitly refuses while it is running** (override with `allowWhileAppRunning: true`; disable all writes globally with `PAPERQUAY_MCP_WRITE=off`).
+
+| Tool Name | Description | Key Parameters | Return Fields |
+| :--- | :--- | :--- | :--- |
+| `import_pdfs` | Batch-import local PDFs (content-hash dedupe) | `paths` (required), `metadata` (keyed by path), `targetCategoryId` or `categoryName`, `importMode` (`copy`/`move`/`keep`) | `imported`/`duplicates`/`errors` breakdown + summary |
+| `list_categories` | Read category tree with paper counts (read-only) | — | Categories (incl. system ones, `parentId`, `paperCount` incl. descendants) |
+| `manage_category` | Create/rename/move/delete categories | `action`, `categoryId`, `name`, `parentId` | Mutated category; delete cascades sub-categories and unlinks papers |
+| `set_paper_categories` | Batch-assign paper categories | `paperIds`, `add`/`remove` or `replace` | Updated `categoryIds` per paper (all-or-nothing validation) |
+| `update_paper` | Update paper metadata (whitelisted fields) | `paperId` + `title`/`authors`/`tags`/`isFavorite` etc. | Updated paper object |
+| `delete_papers` | Batch-delete papers | `paperIds`, `deleteFiles` (default `false`) | Deletion report (`deletedFileCount`, `fileErrors`) |
 
 ### Hybrid Search Modes & Configuration
 

@@ -1,15 +1,16 @@
 # PaperQuay 知识库 MCP 接入指南
 
-PaperQuay 提供了基于标准 **Model Context Protocol (MCP)** 的只读知识库服务。Proma、Pi、Codex 等各类 AI Agent 可以通过 stdio 协议免侵入地调用 PaperQuay 本地知识库，进行文献检索、证据定位与学术问答。
+PaperQuay 提供了基于标准 **Model Context Protocol (MCP)** 的知识库服务。Proma、Pi、Codex 等各类 AI Agent 可以通过 stdio 协议直连 PaperQuay 本地知识库，进行文献检索、证据定位、学术问答，以及受安全护栏约束的文库写入与分类管理（导入 PDF、更新元数据、调整分类等）。
 
 ---
 
 ## 特性亮点
 
-1. **零服务依赖**：基于 Node.js 原生只读直连 SQLite，无需 Electron 桌面应用保持运行即可查询。
+1. **零服务依赖**：基于 Node.js 原生直连 SQLite，无需 Electron 桌面应用保持运行即可查询与管理。
 2. **并发安全无锁**：数据库开启 WAL 模式，外部只读查询与桌面应用读写互不阻塞、无锁冲突。
 3. **精准段落引用**：`search_knowledge_base` 返回段落所在的**文献 ID、文献标题、页码与结构块 ID**，便于 Agent 依据事实回答并自动生成 `[1] (Paper Title, P.x)` 格式引用。
 4. **向量混合检索**：在阅读器设置中配置了 Embedding API 时，`search_knowledge_base` 自动将查询向量化，与 FTS5 全文检索双通道召回，经 RRF（Reciprocal Rank Fusion）融合排序；未配置或接口异常时自动降级为关键词检索，并在分词或特殊字符场景下无缝降级到模糊匹配。
+5. **写入安全护栏**：所有写工具在执行前检测 PaperQuay 桌面应用是否运行——桌面应用持有文库内存态，外部写入会在应用下一次保存时被整体覆盖，因此检测到运行中会**显式拒绝并提示关闭应用**；确需并行写入时可传 `allowWhileAppRunning: true` 强制覆盖，设环境变量 `PAPERQUAY_MCP_WRITE=off` 可将服务切换为全局只读。
 
 ---
 
@@ -18,8 +19,8 @@ PaperQuay 提供了基于标准 **Model Context Protocol (MCP)** 的只读知识
 ### 知识库只读检索工具
 | 工具名称 | 说明 | 核心参数 | 返回内容 |
 | :--- | :--- | :--- | :--- |
-| `search_papers` | 检索文献库元数据 | `query`（关键词）、`tag`（标签）、`limit` | 匹配文献列表（ID、中英文标题、作者、年份、DOI、标签） |
-| `get_paper_details` | 读取单篇文献完整详情 | `paperId`（必填） | 完整元数据、摘要、用户笔记、AI 概览、文献类型、出版物等 |
+| `search_papers` | 检索文献库元数据 | `query`（关键词）、`tag`（标签）、`categoryId`（分类过滤，含后代分类）、`limit` | 匹配文献列表（ID、中英文标题、作者、年份、DOI、标签） |
+| `get_paper_details` | 读取单篇文献完整详情 | `paperId`（必填） | 完整元数据、摘要、用户笔记、AI 概览、文献类型、出版物、所属分类 ID 等 |
 | `search_knowledge_base` | 向量 + 全文混合检索 RAG 知识库证据 | `query`（必填）、`paperId`（可选）、`limit`、`mode`（`auto`/`hybrid`/`keyword`） | 带文献标题、页码、段落预览、匹配分数与命中通道（`vector`/`fts`）的证据切片 |
 | `read_paper_content` | 读取文献在知识库中的分块正文 | `paperId`（必填）、`pageIndex`（可选）、`limit` | 按页面或顺序排列的结构化正文内容 |
 | `search_notes` | 检索用户的阅读笔记与批注摘录 | `query`（可选）、`paperId`（可选）、`limit` | 用户个人笔记、高亮批注与摘录内容 |
@@ -31,6 +32,33 @@ PaperQuay 提供了基于标准 **Model Context Protocol (MCP)** 的只读知识
 | `zotero_search_items` | 条件检索本地 Zotero 文献条目 | `query`、`collectionKey`、`limit`、`dataDir` | 匹配文献列表（包含是否有本地 PDF 附件、DOI 等） |
 | `zotero_preview_sync` | 同步前差量比对与去重预检 | `itemKeys`、`collectionKey`、`dataDir` | 差量清单（`ready` 待同步、`alreadyExists` 重复跳过、`missingPdf` 缺 PDF） |
 | `paperquay_sync_from_zotero` | 精准导入文献至 PaperQuay | `itemKeys`、`collectionKey`、`targetCategoryId`、`createCollectionCategory` | 导入报告（成功导入数、重复数、自动创建的分类） |
+
+### 文库写入与管理工具（带运行护栏）
+
+以下工具会修改本地文库数据库，执行前均会检查桌面应用运行状态（见下文「写入安全护栏」），并在检测到运行时**显式拒绝**，可传 `allowWhileAppRunning: true` 覆盖。
+
+| 工具名称 | 说明 | 核心参数 | 返回内容 |
+| :--- | :--- | :--- | :--- |
+| `import_pdfs` | 批量导入本地 PDF 文件 | `paths`（必填，PDF 绝对路径数组）、`metadata`（按路径键控的元数据，含 `title`/`titleZh`/`authors`/`tags` 等）、`targetCategoryId` 或 `categoryName`（互斥，按名称不存在则自动创建）、`importMode`（`copy`/`move`/`keep`，默认取应用设置） | 导入报告（`imported`/`duplicates`/`errors` 明细与汇总；重复文献按内容哈希查重并补挂目标分类） |
+| `list_categories` | 读取分类树及各分类文献数（只读） | 无 | 分类列表（含系统分类、`parentId`、`sortOrder`、`paperCount` 含后代分类计数） |
+| `manage_category` | 分类全生命周期管理 | `action`（`create`/`rename`/`move`/`delete`）、`categoryId`、`name`、`parentId` | 操作后的分类对象；`delete` 级联删除全部子分类并把文献从其中解绑（不删除文献），返回 `deletedCategoryIds` |
+| `set_paper_categories` | 批量调整文献的分类归属 | `paperIds`（必填）、`add`/`remove`（可与 `remove` 组合）或 `replace`（互斥） | 每篇文献更新后的 `categoryIds`；任一文献或分类不存在则整体拒绝，不留部分写入 |
+| `update_paper` | 更新文献元数据（白名单字段） | `paperId`（必填）+ `title`/`titleZh`/`authors`/`keywords`/`tags`/`isFavorite` 等可更新字段 | 更新后的文献对象；未知字段显式报错 |
+| `delete_papers` | 批量删除文献 | `paperIds`（必填）、`deleteFiles`（默认 `false`，为 `true` 时同时删除已入库的 PDF 文件） | 删除报告（`deleted`、`deletedFileCount`、`fileErrors`）；数据库先提交再删文件 |
+
+---
+
+## 写入安全护栏
+
+文库数据库采用「应用内存态 + 整体落盘」的持久化模型：**桌面应用运行时持有文库的内存副本，其任何保存动作都会全量覆盖数据库**。因此 MCP 写工具默认遵循以下规则：
+
+1. 每次写入前检测 `PaperQuay.exe`（Windows）或 `PaperQuay` 进程（macOS/Linux）是否在运行；
+2. 检测到运行时，写入被**拒绝**并返回明确错误提示（引导先关闭桌面应用），数据库不产生任何修改；
+3. 明确知道风险时可传 `allowWhileAppRunning: true` 强制写入（桌面应用随后的保存可能覆盖本次写入）；
+4. 进程探测失败（权限不足等）时写入放行，但在返回结果中附带 `warning` 说明未能完成检测；
+5. 设环境变量 `PAPERQUAY_MCP_WRITE=off` 可禁用全部写工具（此时服务等价于纯只读），该开关优先级高于 `allowWhileAppRunning`。
+
+Zotero 同步工具（`paperquay_sync_from_zotero`）同样受该护栏保护。建议让 Agent 形成「写前确认桌面应用已关闭」的标准作业程序。
 
 ---
 

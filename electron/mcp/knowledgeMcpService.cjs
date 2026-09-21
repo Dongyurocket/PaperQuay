@@ -13,7 +13,8 @@ const {
   getLocalItemsByKeys,
   searchLocalLibraryItems,
 } = require('../backend/zoteroLocal.cjs');
-const { createLibraryStore } = require('../backend/libraryStore.cjs');
+const { execFileSync } = require('node:child_process');
+const { attachCategoryCounts, createLibraryStore, normalizeAuthor, normalizeTag } = require('../backend/libraryStore.cjs');
 const { id, now, safeFileName, fileNameFromPath, hashBytes, isPdf } = require('../backend/utils.cjs');
 
 function cleanString(value) {
@@ -203,6 +204,50 @@ function ragResultKey(row) {
   return `${row.sourceType}::${row.chunkId}`;
 }
 
+// ---- 写工具运行护栏 ----
+// 桌面应用将文献库缓存在内存中，且 store.save() 是全量重写：应用运行时的任何保存
+// 都会静默覆盖 MCP 写入。写工具默认在检测到应用运行时显式拒绝。
+
+// 返回 true（在运行）/ false（未运行）/ null（无法检测）。
+// 注意：仅覆盖已安装的桌面应用（PaperQuay.exe / PaperQuay）；开发模式（electron .）无法可靠识别。
+function detectDesktopAppRunning() {
+  try {
+    if (process.platform === 'win32') {
+      const output = execFileSync('tasklist', ['/FI', 'IMAGENAME eq PaperQuay.exe', '/NH'], { encoding: 'utf8' });
+      return /PaperQuay\.exe/i.test(output);
+    }
+    execFileSync('pgrep', ['-x', 'PaperQuay'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    return true;
+  } catch (error) {
+    // pgrep 无匹配时退出码为 1，视为未运行；其它错误（命令缺失等）视为无法检测。
+    if (error && typeof error === 'object' && error.status === 1) return false;
+    return null;
+  }
+}
+
+// 与 libraryCommands.cjs 的 library_update_paper 白名单保持一致。
+const UPDATABLE_PAPER_FIELDS = [
+  'title',
+  'titleZh',
+  'year',
+  'publication',
+  'doi',
+  'url',
+  'abstractText',
+  'itemType',
+  'publisher',
+  'institution',
+  'reportNumber',
+  'volume',
+  'issue',
+  'pages',
+  'isbn',
+  'issn',
+  'userNote',
+  'aiSummary',
+  'citation',
+];
+
 class PaperQuayKnowledgeService {
   constructor(options = {}) {
     this.appPaths = resolveAppPaths(options.dataDir);
@@ -210,6 +255,10 @@ class PaperQuayKnowledgeService {
     this.embedFn = typeof options.embedFn === 'function'
       ? options.embedFn
       : async (text, embedding) => (await embedTexts([text], embedding))[0];
+    // 测试可注入 isAppRunning() => true/false/null，默认检测已安装的桌面应用进程。
+    this.isAppRunning = typeof options.isAppRunning === 'function'
+      ? options.isAppRunning
+      : detectDesktopAppRunning;
   }
 
   getLibraryDb() {
@@ -224,7 +273,7 @@ class PaperQuayKnowledgeService {
     return openReadOnlyDb(this.appPaths.notesDatabasePath);
   }
 
-  searchPapers({ query = '', tag = '', limit = 10 } = {}) {
+  searchPapers({ query = '', tag = '', categoryId = '', limit = 10 } = {}) {
     const db = this.getLibraryDb();
     if (!db) {
       return {
@@ -246,6 +295,41 @@ class PaperQuayKnowledgeService {
       if (cleanTag) {
         conditions.push(`p.id IN (SELECT paper_id FROM tags WHERE lower(name) = ?)`);
         params.push(cleanTag);
+      }
+
+      // 按分类过滤，语义与 libraryStore.cjs 的 paperMatches 对齐：
+      // 非系统分类包含全部后代分类；recent/uncategorized/favorites 由系统维护。
+      const cleanCategoryId = cleanString(categoryId);
+      if (cleanCategoryId) {
+        const categoryRow = db.prepare(
+          `SELECT id, is_system AS isSystem, system_key AS systemKey FROM categories WHERE id = ?`,
+        ).get(cleanCategoryId);
+        if (!categoryRow) throw new Error(`Category does not exist: ${cleanCategoryId}`);
+
+        if (categoryRow.systemKey === 'favorites') {
+          conditions.push(`p.is_favorite = 1`);
+        } else if (categoryRow.systemKey === 'uncategorized') {
+          conditions.push(`p.id NOT IN (SELECT paper_id FROM paper_categories)`);
+        } else if (categoryRow.systemKey === 'recent') {
+          conditions.push(`p.id IN (SELECT id FROM papers ORDER BY imported_at DESC, title LIMIT 30)`);
+        } else if (!categoryRow.systemKey) {
+          const allowed = new Set([cleanCategoryId]);
+          const allCategories = db.prepare(`SELECT id, parent_id AS parentId FROM categories`).all();
+          let changed = true;
+          while (changed) {
+            changed = false;
+            for (const row of allCategories) {
+              if (row.parentId && allowed.has(row.parentId) && !allowed.has(row.id)) {
+                allowed.add(row.id);
+                changed = true;
+              }
+            }
+          }
+          const placeholders = [...allowed].map(() => '?').join(', ');
+          conditions.push(`p.id IN (SELECT paper_id FROM paper_categories WHERE category_id IN (${placeholders}))`);
+          params.push(...allowed);
+        }
+        // system-all：不加过滤
       }
 
       const titleZhMatch = paperCols.has('title_zh') ? "OR lower(COALESCE(p.title_zh, '')) LIKE ?" : '';
@@ -365,6 +449,10 @@ class PaperQuayKnowledgeService {
         SELECT keyword FROM paper_keywords WHERE paper_id = ? ORDER BY sort_order
       `).all(id).map((r) => r.keyword);
 
+      const categoryIds = db.prepare(`
+        SELECT category_id FROM paper_categories WHERE paper_id = ? ORDER BY sort_order
+      `).all(id).map((r) => r.category_id);
+
       const attachments = db.prepare(`
         SELECT id, kind, stored_path AS storedPath, file_name AS fileName, file_size AS fileSize, missing
         FROM attachments WHERE paper_id = ? ORDER BY created_at
@@ -393,6 +481,7 @@ class PaperQuayKnowledgeService {
         issn: paper.issn || null,
         abstractText: paper.abstract_text || null,
         keywords,
+        categoryIds,
         tags: tags.map((t) => t.name),
         userNote: paper.user_note || null,
         aiSummary: paper.ai_summary || null,
@@ -1263,6 +1352,517 @@ class PaperQuayKnowledgeService {
       missingPdfs,
       errors,
       categoryId: resolvedCategoryId,
+    };
+  }
+
+  // ---- 文库写入工具 ----
+  // 写入语义与 electron/backend/libraryCommands.cjs 的对应命令保持一致，
+  // 统一经 withWritableLibrary 走「护栏检查 → load → 变更 → save → close」。
+
+  // 写操作护栏：显式失败，绝不静默。返回 { warning } 供响应透传。
+  assertWritable(allowWhileAppRunning) {
+    if (String(process.env.PAPERQUAY_MCP_WRITE || '').trim().toLowerCase() === 'off') {
+      throw new Error('MCP write tools are disabled (PAPERQUAY_MCP_WRITE=off)');
+    }
+    if (allowWhileAppRunning === true) return { warning: null };
+    const running = this.isAppRunning();
+    if (running === true) {
+      throw new Error(
+        '检测到 PaperQuay 桌面应用正在运行，已拒绝写入。应用将文献库保存在内存中，'
+        + '其下一次保存会覆盖 MCP 写入的数据（store.save 为全量重写）。'
+        + '请关闭 PaperQuay 后重试；若确认需要并行写入，显式传入 allowWhileAppRunning: true。',
+      );
+    }
+    return {
+      warning: running === null
+        ? '未能检测 PaperQuay 桌面应用是否在运行；若应用处于打开状态，本次写入可能被其覆盖。'
+        : null,
+    };
+  }
+
+  withWritableLibrary(mutator, { allowWhileAppRunning = false } = {}) {
+    const guard = this.assertWritable(allowWhileAppRunning);
+    const store = createLibraryStore(this.appPaths);
+    try {
+      const library = store.load();
+      const result = mutator(library);
+      store.save(library);
+      if (guard.warning && result && typeof result === 'object' && !Array.isArray(result)) {
+        return { ...result, warning: guard.warning };
+      }
+      return result;
+    } finally {
+      store.close();
+    }
+  }
+
+  // 只读：列出全部分类（含系统分类）及文献计数，供写工具发现 categoryId。
+  listCategories() {
+    if (!fs.existsSync(this.appPaths.libraryDatabasePath)) {
+      return {
+        categories: [],
+        total: 0,
+        message: `Library database not found at: ${this.appPaths.libraryDatabasePath}`,
+      };
+    }
+    const store = createLibraryStore(this.appPaths);
+    try {
+      const library = store.load();
+      const categories = attachCategoryCounts(library).map((category) => ({
+        id: category.id,
+        name: category.name,
+        parentId: category.parentId ?? null,
+        sortOrder: category.sortOrder ?? 0,
+        isSystem: Boolean(category.isSystem),
+        systemKey: category.systemKey ?? null,
+        paperCount: category.paperCount ?? 0,
+      }));
+      return { categories, total: categories.length };
+    } finally {
+      store.close();
+    }
+  }
+
+  // 与 library_import_pdfs 对齐：查重（contentHash，另加元数据 DOI/标题）→ 复制/移动/引用 → 建记录。
+  // 不触发 Crossref 参考文献抓取（桌面端行为），避免 MCP 调用引入隐藏网络副作用。
+  importPdfs({
+    paths = [],
+    metadata = {},
+    targetCategoryId = '',
+    categoryName = '',
+    importMode = '',
+    allowWhileAppRunning = false,
+  } = {}) {
+    const sourcePaths = (Array.isArray(paths) ? paths : []).map(cleanString).filter(Boolean);
+    if (sourcePaths.length === 0) {
+      throw new Error('paths must be a non-empty array of local PDF file paths');
+    }
+    const metadataByPath = metadata && typeof metadata === 'object' ? metadata : {};
+    const wantedCategoryId = cleanString(targetCategoryId);
+    const wantedCategoryName = cleanString(categoryName);
+    if (wantedCategoryId && wantedCategoryName) {
+      throw new Error('targetCategoryId and categoryName are mutually exclusive');
+    }
+    const mode = cleanString(importMode).toLowerCase();
+    if (mode && !['copy', 'move', 'keep'].includes(mode)) {
+      throw new Error(`importMode must be one of: copy, move, keep (got: ${importMode})`);
+    }
+
+    return this.withWritableLibrary((library) => {
+      const storageDir = library.settings.storageDir || path.join(this.appPaths.dataDir, 'paperquay-data');
+      fs.mkdirSync(storageDir, { recursive: true });
+
+      let resolvedCategoryId = null;
+      if (wantedCategoryId) {
+        const target = library.categories.find((item) => item.id === wantedCategoryId);
+        if (!target) throw new Error(`Category does not exist: ${wantedCategoryId}`);
+        if (target.isSystem) {
+          throw new Error(`系统分类由应用自动维护，不能作为导入目标分类: ${target.name} (${wantedCategoryId})`);
+        }
+        resolvedCategoryId = target.id;
+      } else if (wantedCategoryName) {
+        const existing = library.categories.find(
+          (item) => !item.isSystem && item.parentId === null
+            && item.name.toLowerCase() === wantedCategoryName.toLowerCase(),
+        );
+        if (existing) {
+          resolvedCategoryId = existing.id;
+        } else {
+          const category = {
+            id: id('cat'),
+            name: wantedCategoryName,
+            parentId: null,
+            sortOrder: library.categories.filter((item) => item.parentId === null && !item.isSystem).length,
+            isSystem: false,
+            systemKey: null,
+            createdAt: now(),
+            updatedAt: now(),
+            paperCount: 0,
+          };
+          library.categories.push(category);
+          resolvedCategoryId = category.id;
+        }
+      }
+
+      const effectiveMode = mode || library.settings.importMode || 'copy';
+      const imported = [];
+      const duplicates = [];
+      const errors = [];
+
+      for (const sourcePath of sourcePaths) {
+        try {
+          if (!isPdf(sourcePath)) throw new Error('Only PDF files can be imported');
+          if (!fs.existsSync(sourcePath) || !fs.statSync(sourcePath).isFile()) {
+            throw new Error(`File not found: ${sourcePath}`);
+          }
+
+          const bytes = fs.readFileSync(sourcePath);
+          const contentHash = hashBytes(bytes);
+          const itemMeta = metadataByPath[sourcePath] && typeof metadataByPath[sourcePath] === 'object'
+            ? metadataByPath[sourcePath]
+            : {};
+          const metaDoi = cleanString(itemMeta.doi);
+          const metaTitle = cleanString(itemMeta.title);
+
+          const existing = library.papers.find((paper) =>
+            paper.attachments?.some((attachment) => attachment.contentHash === contentHash)
+            || (metaDoi && paper.doi && String(paper.doi).toLowerCase() === metaDoi.toLowerCase())
+            || (metaTitle && paper.title && paper.title.trim().toLowerCase() === metaTitle.toLowerCase()));
+
+          if (existing) {
+            if (resolvedCategoryId && !(existing.categoryIds || []).includes(resolvedCategoryId)) {
+              existing.categoryIds = [...(existing.categoryIds || []), resolvedCategoryId];
+              existing.updatedAt = now();
+            }
+            duplicates.push({
+              sourcePath,
+              existingPaperId: existing.id,
+              title: existing.title,
+              reason: '文献已在文库中存在（内容哈希/DOI/标题匹配）',
+            });
+            continue;
+          }
+
+          const paperId = id('paper');
+          const fileName = safeFileName(fileNameFromPath(sourcePath));
+          let storedPath = sourcePath;
+          let relativePath = null;
+          if (effectiveMode !== 'keep') {
+            storedPath = path.join(storageDir, `${paperId}-${fileName}`);
+            if (effectiveMode === 'move') fs.renameSync(sourcePath, storedPath);
+            else fs.copyFileSync(sourcePath, storedPath);
+            relativePath = path.relative(storageDir, storedPath);
+          }
+          const stat = fs.statSync(storedPath);
+          const authors = Array.isArray(itemMeta.authors)
+            ? itemMeta.authors.map(cleanString).filter(Boolean).map(normalizeAuthor)
+            : [];
+          const tags = Array.isArray(itemMeta.tags)
+            ? itemMeta.tags.map(cleanString).filter(Boolean).map(normalizeTag)
+            : [];
+
+          const paper = {
+            id: paperId,
+            title: metaTitle || path.basename(fileName, path.extname(fileName)),
+            titleZh: cleanString(itemMeta.titleZh) || null,
+            year: itemMeta.year ?? null,
+            publication: itemMeta.publication ?? null,
+            doi: itemMeta.doi ?? null,
+            url: itemMeta.url ?? null,
+            abstractText: itemMeta.abstractText ?? null,
+            itemType: itemMeta.itemType || 'journalArticle',
+            publisher: itemMeta.publisher ?? null,
+            institution: itemMeta.institution ?? null,
+            reportNumber: itemMeta.reportNumber ?? null,
+            volume: itemMeta.volume ?? null,
+            issue: itemMeta.issue ?? null,
+            pages: itemMeta.pages ?? null,
+            isbn: itemMeta.isbn ?? null,
+            issn: itemMeta.issn ?? null,
+            keywords: Array.isArray(itemMeta.keywords) ? itemMeta.keywords.map(cleanString).filter(Boolean) : [],
+            importedAt: now(),
+            updatedAt: now(),
+            lastReadAt: null,
+            readingProgress: 0,
+            isFavorite: false,
+            userNote: null,
+            aiSummary: null,
+            citation: null,
+            source: 'local',
+            sortOrder: Math.min(0, ...library.papers.map((item) => item.sortOrder ?? 0)) - 1,
+            authors,
+            tags,
+            categoryIds: resolvedCategoryId ? [resolvedCategoryId] : [],
+            attachments: [{
+              id: id('att'),
+              paperId,
+              kind: 'pdf',
+              originalPath: sourcePath,
+              storedPath,
+              relativePath,
+              fileName,
+              mimeType: 'application/pdf',
+              fileSize: stat.size,
+              contentHash,
+              createdAt: now(),
+              missing: false,
+            }],
+          };
+          library.papers.push(paper);
+          imported.push({
+            id: paperId,
+            title: paper.title,
+            sourcePath,
+            storedPath,
+            categoryId: resolvedCategoryId,
+          });
+        } catch (error) {
+          errors.push({
+            sourcePath,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+
+      return {
+        summary: {
+          totalRequested: sourcePaths.length,
+          importedCount: imported.length,
+          duplicateCount: duplicates.length,
+          failedCount: errors.length,
+        },
+        imported,
+        duplicates,
+        errors,
+        categoryId: resolvedCategoryId,
+        importMode: effectiveMode,
+      };
+    }, { allowWhileAppRunning });
+  }
+
+  // 与 library_update_paper 对齐的元数据白名单更新；未知字段显式拒绝。
+  updatePaper({ paperId, allowWhileAppRunning = false, ...patch } = {}) {
+    const targetId = cleanString(paperId);
+    if (!targetId) throw new Error('paperId is required');
+    const specialFields = ['keywords', 'authors', 'tags', 'isFavorite'];
+    const unknown = Object.keys(patch).filter(
+      (key) => !UPDATABLE_PAPER_FIELDS.includes(key) && !specialFields.includes(key),
+    );
+    if (unknown.length > 0) {
+      throw new Error(
+        `Unsupported update fields: ${unknown.join(', ')}. `
+        + `Updatable fields: ${[...UPDATABLE_PAPER_FIELDS, ...specialFields].join(', ')}`,
+      );
+    }
+    if (Object.keys(patch).length === 0) throw new Error('No fields to update');
+
+    return this.withWritableLibrary((library) => {
+      const paper = library.papers.find((item) => item.id === targetId);
+      if (!paper) throw new Error(`Paper does not exist: ${targetId}`);
+
+      for (const key of UPDATABLE_PAPER_FIELDS) {
+        if (patch[key] !== undefined) paper[key] = patch[key];
+      }
+      if (patch.keywords !== undefined) {
+        if (!Array.isArray(patch.keywords)) throw new Error('keywords must be an array of strings');
+        paper.keywords = patch.keywords.map(cleanString).filter(Boolean);
+      }
+      if (patch.authors !== undefined) {
+        if (!Array.isArray(patch.authors)) throw new Error('authors must be an array of author names');
+        paper.authors = patch.authors.map(cleanString).filter(Boolean).map(normalizeAuthor);
+      }
+      if (patch.tags !== undefined) {
+        if (!Array.isArray(patch.tags)) throw new Error('tags must be an array of tag names');
+        paper.tags = patch.tags.map(cleanString).filter(Boolean).map(normalizeTag);
+      }
+      if (patch.isFavorite != null) paper.isFavorite = Boolean(patch.isFavorite);
+      paper.updatedAt = now();
+
+      return {
+        paper: {
+          id: paper.id,
+          title: paper.title,
+          titleZh: paper.titleZh ?? null,
+          year: paper.year ?? null,
+          doi: paper.doi ?? null,
+          categoryIds: paper.categoryIds ?? [],
+          updatedAt: paper.updatedAt,
+        },
+      };
+    }, { allowWhileAppRunning });
+  }
+
+  // 批量分配/移除/重设非系统分类。系统分类由应用维护，显式拒绝。
+  setPaperCategories({
+    paperIds = [],
+    add = [],
+    remove = [],
+    replace,
+    allowWhileAppRunning = false,
+  } = {}) {
+    const ids = (Array.isArray(paperIds) ? paperIds : []).map(cleanString).filter(Boolean);
+    if (ids.length === 0) throw new Error('paperIds must be a non-empty array');
+    const cleanIdList = (value) => (Array.isArray(value) ? value.map(cleanString).filter(Boolean) : []);
+    const addIds = cleanIdList(add);
+    const removeIds = cleanIdList(remove);
+    const replaceIds = replace === undefined ? null : cleanIdList(replace);
+    if (replaceIds && (addIds.length > 0 || removeIds.length > 0)) {
+      throw new Error('replace cannot be combined with add/remove');
+    }
+    if (!replaceIds && addIds.length === 0 && removeIds.length === 0) {
+      throw new Error('Provide add, remove, or replace with at least one category ID');
+    }
+
+    return this.withWritableLibrary((library) => {
+      const requestedIds = [...new Set(replaceIds ?? [...addIds, ...removeIds])];
+      for (const categoryId of requestedIds) {
+        const category = library.categories.find((item) => item.id === categoryId);
+        if (!category) throw new Error(`Category does not exist: ${categoryId}`);
+        if (category.isSystem) {
+          throw new Error(`系统分类不可手动分配: ${category.name} (${categoryId})。收藏请使用 update_paper 的 isFavorite 字段。`);
+        }
+      }
+      const papers = ids.map((targetId) => {
+        const paper = library.papers.find((item) => item.id === targetId);
+        if (!paper) throw new Error(`Paper does not exist: ${targetId}`);
+        return paper;
+      });
+
+      const updated = papers.map((paper) => {
+        let next = replaceIds ? [...replaceIds] : [...(paper.categoryIds || [])];
+        for (const categoryId of addIds) {
+          if (!next.includes(categoryId)) next.push(categoryId);
+        }
+        next = next.filter((categoryId) => !removeIds.includes(categoryId));
+        paper.categoryIds = next;
+        paper.updatedAt = now();
+        return { id: paper.id, title: paper.title, categoryIds: next };
+      });
+
+      return { updated, total: updated.length };
+    }, { allowWhileAppRunning });
+  }
+
+  // 分类管理：create / rename / move / delete。delete 与应用一致级联删除子孙分类，
+  // 文献仅解除关联，不删除文献本身。系统分类显式拒绝修改/删除。
+  manageCategory({
+    action,
+    categoryId = '',
+    name = '',
+    parentId,
+    sortOrder,
+    allowWhileAppRunning = false,
+  } = {}) {
+    const op = cleanString(action);
+    if (!['create', 'rename', 'move', 'delete'].includes(op)) {
+      throw new Error(`action must be one of: create, rename, move, delete (got: ${action})`);
+    }
+
+    return this.withWritableLibrary((library) => {
+      if (op === 'create') {
+        const categoryName = cleanString(name);
+        if (!categoryName) throw new Error('name is required for create');
+        let parent = null;
+        const wantedParentId = cleanString(parentId);
+        if (wantedParentId) {
+          parent = library.categories.find((item) => item.id === wantedParentId) || null;
+          if (!parent) throw new Error(`Parent category does not exist: ${wantedParentId}`);
+          if (parent.isSystem) throw new Error('系统分类不能作为父级分类');
+        }
+        const category = {
+          id: id('cat'),
+          name: categoryName,
+          parentId: parent ? parent.id : null,
+          sortOrder: library.categories.filter(
+            (item) => (item.parentId ?? null) === (parent ? parent.id : null) && !item.isSystem,
+          ).length,
+          isSystem: false,
+          systemKey: null,
+          createdAt: now(),
+          updatedAt: now(),
+          paperCount: 0,
+        };
+        library.categories.push(category);
+        return { category };
+      }
+
+      const target = library.categories.find((item) => item.id === cleanString(categoryId));
+      if (!target) throw new Error(`Category does not exist: ${categoryId}`);
+      if (target.isSystem) throw new Error('系统分类不能修改或删除');
+
+      if (op === 'rename') {
+        const nextName = cleanString(name);
+        if (!nextName) throw new Error('name is required for rename');
+        target.name = nextName;
+        target.updatedAt = now();
+        return { category: target };
+      }
+
+      if (op === 'move') {
+        const nextParentId = cleanString(parentId) || null;
+        if (nextParentId) {
+          if (nextParentId === target.id) throw new Error('分类不能移动到自身之下');
+          const parent = library.categories.find((item) => item.id === nextParentId);
+          if (!parent) throw new Error(`Parent category does not exist: ${nextParentId}`);
+          if (parent.isSystem) throw new Error('系统分类不能作为父级分类');
+          // 环检测：目标父级不能位于 target 的子树内
+          const seen = new Set([target.id]);
+          let cursor = parent;
+          while (cursor) {
+            if (seen.has(cursor.id)) throw new Error('分类不能移动到其子分类之下');
+            seen.add(cursor.id);
+            cursor = library.categories.find((item) => item.id === cursor.parentId) || null;
+          }
+        }
+        target.parentId = nextParentId;
+        if (sortOrder != null) target.sortOrder = sortOrder;
+        target.updatedAt = now();
+        return { category: target };
+      }
+
+      // delete：级联收集子孙分类，文献解除关联（与 library_delete_category 一致）
+      const removeIds = new Set([target.id]);
+      let changed = true;
+      while (changed) {
+        changed = false;
+        for (const category of library.categories) {
+          if (category.parentId && removeIds.has(category.parentId) && !removeIds.has(category.id)) {
+            removeIds.add(category.id);
+            changed = true;
+          }
+        }
+      }
+      library.categories = library.categories.filter((item) => !removeIds.has(item.id));
+      for (const paper of library.papers) {
+        paper.categoryIds = (paper.categoryIds || []).filter((item) => !removeIds.has(item));
+      }
+      return { deletedCategoryIds: [...removeIds] };
+    }, { allowWhileAppRunning });
+  }
+
+  // 删除文献记录；deleteFiles=true 时一并删除库内存储的附件文件。
+  // 先提交数据库再删文件：文件删除失败不会留下指向已删文件的记录。
+  deletePapers({ paperIds = [], deleteFiles = false, allowWhileAppRunning = false } = {}) {
+    const ids = (Array.isArray(paperIds) ? paperIds : []).map(cleanString).filter(Boolean);
+    if (ids.length === 0) throw new Error('paperIds must be a non-empty array');
+    const idSet = new Set(ids);
+
+    const result = this.withWritableLibrary((library) => {
+      const papers = ids.map((targetId) => {
+        const paper = library.papers.find((item) => item.id === targetId);
+        if (!paper) throw new Error(`Paper does not exist: ${targetId}`);
+        return paper;
+      });
+      const filesToDelete = [];
+      const deleted = papers.map((paper) => {
+        if (deleteFiles) {
+          for (const attachment of paper.attachments || []) {
+            if (attachment.storedPath) filesToDelete.push(attachment.storedPath);
+          }
+        }
+        return { id: paper.id, title: paper.title };
+      });
+      library.papers = library.papers.filter((paper) => !idSet.has(paper.id));
+      return { deleted, filesToDelete };
+    }, { allowWhileAppRunning });
+
+    const fileErrors = [];
+    if (deleteFiles) {
+      for (const filePath of result.filesToDelete) {
+        try {
+          fs.rmSync(filePath, { force: true });
+        } catch (error) {
+          fileErrors.push({ path: filePath, error: error instanceof Error ? error.message : String(error) });
+        }
+      }
+    }
+
+    return {
+      deleted: result.deleted,
+      total: result.deleted.length,
+      deletedFileCount: deleteFiles ? result.filesToDelete.length - fileErrors.length : 0,
+      fileErrors,
+      ...(result.warning ? { warning: result.warning } : {}),
     };
   }
 }

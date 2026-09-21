@@ -219,7 +219,7 @@ Agent 工作区不是普通聊天框，而是面向文献库操作设计。它�
 
 ## MCP 服务与外部 Agent 接入
 
-PaperQuay 内置了基于标准 **Model Context Protocol (MCP)** 的独立服务（入口文件：`bin/paperquay-mcp.cjs`）。外部 AI Agent（如 Proma、Claude Desktop、Cursor、Pi Agent、Codex 等）可以通过 stdio 协议免侵入直连 PaperQuay 本地 SQLite 知识库，完成学术文献检索、带页码证据定位以及与本地 Zotero 的精准选择性同步。
+PaperQuay 内置了基于标准 **Model Context Protocol (MCP)** 的独立服务（入口文件：`bin/paperquay-mcp.cjs`）。外部 AI Agent（如 Proma、Claude Desktop、Cursor、Pi Agent、Codex 等）可以通过 stdio 协议免侵入直连 PaperQuay 本地 SQLite 知识库，完成学术文献检索、带页码证据定位、与本地 Zotero 的精准选择性同步，以及带运行护栏的文库写入与分类管理（导入 PDF、更新元数据、调整分类、删除文献）。
 
 ### 核心特性
 
@@ -227,16 +227,17 @@ PaperQuay 内置了基于标准 **Model Context Protocol (MCP)** 的独立服务
 2. **并发安全与无锁访问**：SQLite 数据库开启 WAL 模式，外部 Agent 的只读检索与桌面端用户的读写操作完全互不阻塞、零锁冲突。
 3. **向量 + 全文混合检索（KNN + FTS5 + RRF）**：当 PaperQuay 阅读器设置中配置了 Embedding API 时，`search_knowledge_base` 自动将查询向量化，在本地 `sqlite-vec` 向量索引与 FTS5 BM25 候选池间双通道召回，经倒数排名融合（RRF）输出高质量证据；配置缺失或网络异常时自动降级为关键词检索。
 4. **精准到页码与结构块的学术证据链**：检索结果直接携带文献标题、1-based 绝对页码（`pageNumber`）、结构块 ID（`blockId`）及命中的检索通道（`channels: ['vector', 'fts']`），便于 Agent 输出严谨真实的学术引用。
+5. **写入安全护栏**：写工具执行前自动检测 PaperQuay 桌面应用运行状态——检测到运行时显式拒绝写入（桌面端的内存态保存会整体覆盖外部写入），可传 `allowWhileAppRunning: true` 强制覆盖；设 `PAPERQUAY_MCP_WRITE=off` 可将服务切换为全局只读。
 
 ### 提供的 MCP 工具清单
 
-服务内置 9 个标准 MCP 工具，涵盖知识库检索与 Zotero 同步两大领域：
+服务内置 15 个标准 MCP 工具，涵盖知识库检索、Zotero 同步与文库写入管理三大领域：
 
 #### 1. 知识库只读检索工具（5 项）
 | 工具名称 | 功能说明 | 核心参数 | 返回关键字段 |
 | :--- | :--- | :--- | :--- |
-| `search_papers` | 检索文献库元数据 | `query`（关键词）、`tag`（标签）、`limit` | 文献 ID、中英文标题、作者、年份、DOI、标签 |
-| `get_paper_details` | 获取单篇文献完整详情 | `paperId`（必填） | 完整学术元数据、摘要、AI 速读概览、用户笔记、文献类型、出版物 |
+| `search_papers` | 检索文献库元数据 | `query`（关键词）、`tag`（标签）、`categoryId`（分类过滤，含后代分类）、`limit` | 文献 ID、中英文标题、作者、年份、DOI、标签 |
+| `get_paper_details` | 获取单篇文献完整详情 | `paperId`（必填） | 完整学术元数据、摘要、AI 速读概览、用户笔记、文献类型、出版物、所属分类 ID |
 | `search_knowledge_base` | **向量混合检索** RAG 证据切片 | `query`（必填）、`paperId`（可选）、`limit`、`mode`（`auto`/`hybrid`/`keyword`） | 文献标题、页码、段落文本、匹配分值、`retrievalMode`、`channels`（命中渠道标记） |
 | `read_paper_content` | 分页读取文献 MinerU 结构化正文 | `paperId`（必填）、`pageIndex`（0-based 页码）、`limit` | 按页面或块顺序展开的纯文本与 Markdown 结构块 |
 | `search_notes` | 检索用户的阅读笔记与摘录批注 | `query`、`paperId`、`limit` | 用户个人笔记内容、高亮批注与学术摘录 |
@@ -248,6 +249,19 @@ PaperQuay 内置了基于标准 **Model Context Protocol (MCP)** 的独立服务
 | `zotero_search_items` | 条件模糊检索待同步文献 | `query`、`collectionKey`、`limit`、`dataDir` | 候选条目列表、标题、作者、年份、DOI、是否有本地 PDF 附件 |
 | `zotero_preview_sync` | **入库前差量比对与去重预检** | `itemKeys`、`collectionKey`、`dataDir` | 差量清单：`ready`（可同步）、`alreadyExists`（已存在去重）、`missingPdf`（缺本地 PDF） |
 | `paperquay_sync_from_zotero` | **精准安全入库** | `itemKeys`、`collectionKey`、`targetCategoryId`、`createCollectionCategory` | 同步报告：成功篇数、跳过篇数、自动创建/关联的分类名称 |
+
+#### 3. 文库写入与管理工具（6 项，带运行护栏）
+
+以下工具会修改本地文库数据库，执行前自动检测桌面应用运行状态，检测到运行时**显式拒绝**（可传 `allowWhileAppRunning: true` 覆盖；`PAPERQUAY_MCP_WRITE=off` 可全局禁用写入）。
+
+| 工具名称 | 功能说明 | 核心参数 | 返回关键字段 |
+| :--- | :--- | :--- | :--- |
+| `import_pdfs` | 批量导入本地 PDF（内容哈希查重） | `paths`（必填）、`metadata`（按路径键控）、`targetCategoryId` 或 `categoryName`、`importMode`（`copy`/`move`/`keep`） | `imported`/`duplicates`/`errors` 明细与汇总统计 |
+| `list_categories` | 读取分类树及文献数（只读） | 无 | 分类列表（含系统分类、`parentId`、`paperCount` 含后代计数） |
+| `manage_category` | 分类创建/重命名/移动/删除 | `action`、`categoryId`、`name`、`parentId` | 操作后的分类；删除级联子分类并解绑文献 |
+| `set_paper_categories` | 批量调整文献分类归属 | `paperIds`、`add`/`remove` 或 `replace` | 每篇更新后的 `categoryIds`（失败整体拒绝） |
+| `update_paper` | 更新文献元数据（白名单字段） | `paperId` + `title`/`authors`/`tags`/`isFavorite` 等 | 更新后的文献对象 |
+| `delete_papers` | 批量删除文献 | `paperIds`、`deleteFiles`（默认 `false`） | 删除报告（`deletedFileCount`、`fileErrors`） |
 
 ### 向量混合检索与模式说明
 

@@ -70,6 +70,12 @@ function setupTestEnvironment() {
       keyword TEXT NOT NULL,
       sort_order INTEGER NOT NULL
     );
+    CREATE TABLE paper_categories (
+      paper_id TEXT NOT NULL,
+      category_id TEXT NOT NULL,
+      sort_order INTEGER NOT NULL,
+      PRIMARY KEY (paper_id, category_id)
+    );
     CREATE TABLE attachments (
       id TEXT PRIMARY KEY,
       paper_id TEXT NOT NULL,
@@ -267,6 +273,12 @@ test('paperquay-mcp stdio server handles JSON-RPC 2.0 requests', async () => {
     assert.ok(toolNames.includes('zotero_search_items'));
     assert.ok(toolNames.includes('zotero_preview_sync'));
     assert.ok(toolNames.includes('paperquay_sync_from_zotero'));
+    assert.ok(toolNames.includes('import_pdfs'));
+    assert.ok(toolNames.includes('list_categories'));
+    assert.ok(toolNames.includes('manage_category'));
+    assert.ok(toolNames.includes('set_paper_categories'));
+    assert.ok(toolNames.includes('update_paper'));
+    assert.ok(toolNames.includes('delete_papers'));
 
     // 3. tools/call search_knowledge_base
     const callRes = (await call(3, 'tools/call', {

@@ -4,7 +4,10 @@
  * PaperQuay Knowledge Base MCP Server (Stdio)
  *
  * Designed for Proma, Pi, Codex, Claude Code, and any Model Context Protocol compliant agents.
- * Connects read-only to PaperQuay local SQLite databases for fast, conflict-free retrieval.
+ * Read tools connect read-only to PaperQuay local SQLite databases for fast, conflict-free retrieval.
+ * Write tools (import_pdfs, manage_category, set_paper_categories, update_paper, delete_papers)
+ * go through the shared library store and are refused while the PaperQuay desktop app is running,
+ * unless allowWhileAppRunning: true is passed explicitly.
  */
 
 const readline = require('node:readline');
@@ -31,7 +34,14 @@ const options = parseArgs();
 const service = new PaperQuayKnowledgeService({ dataDir: options.dataDir });
 
 const SERVER_NAME = 'paperquay-knowledge-mcp';
-const SERVER_VERSION = '0.1.40';
+const SERVER_VERSION = '0.1.48';
+
+const ALLOW_WHILE_APP_RUNNING_SCHEMA = {
+  type: 'boolean',
+  description:
+    'Force the write even while the PaperQuay desktop app is running. Dangerous: the app keeps the library in memory and silently overwrites external writes on its next save. Prefer closing the app first.',
+  default: false,
+};
 
 const TOOLS = [
   {
@@ -48,6 +58,10 @@ const TOOLS = [
         tag: {
           type: 'string',
           description: 'Filter by a specific tag name.',
+        },
+        categoryId: {
+          type: 'string',
+          description: 'Filter by a category ID (see list_categories). Non-system categories include their descendants; system categories all/recent/uncategorized/favorites follow the app semantics.',
         },
         limit: {
           type: 'integer',
@@ -246,6 +260,174 @@ const TOOLS = [
       },
     },
   },
+  {
+    name: 'import_pdfs',
+    description:
+      'Import local PDF files into the PaperQuay library. Copies each file into the library storage directory (per importMode), deduplicates by content hash and by metadata DOI/title when provided, and optionally assigns papers to a category (existing targetCategoryId, or categoryName which is created when missing). Refused while the PaperQuay desktop app is running unless allowWhileAppRunning is true. Does not fetch Crossref references (unlike the desktop import).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        paths: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Absolute paths of the local PDF files to import.',
+        },
+        metadata: {
+          type: 'object',
+          description:
+            'Optional per-file metadata overrides, keyed by the exact source path. Supported keys: title, titleZh, authors (string[]), year, publication, doi, url, abstractText, itemType, publisher, institution, reportNumber, volume, issue, pages, isbn, issn, keywords (string[]), tags (string[]).',
+          additionalProperties: { type: 'object' },
+        },
+        targetCategoryId: {
+          type: 'string',
+          description: 'Existing non-system category ID to assign all imported papers to (mutually exclusive with categoryName). Use list_categories to discover IDs.',
+        },
+        categoryName: {
+          type: 'string',
+          description: 'Root category name to assign imported papers to; created when no non-system root category with that name (case-insensitive) exists.',
+        },
+        importMode: {
+          type: 'string',
+          enum: ['copy', 'move', 'keep'],
+          description: "File handling mode; defaults to the library's importMode setting ('copy'). 'copy' copies into the storage dir, 'move' moves the original file, 'keep' references the original path without copying.",
+        },
+        allowWhileAppRunning: ALLOW_WHILE_APP_RUNNING_SCHEMA,
+      },
+      required: ['paths'],
+    },
+  },
+  {
+    name: 'list_categories',
+    description:
+      'List all PaperQuay library categories (system and user) with parent/child structure and paper counts. Read-only. Use it to discover categoryId values for import_pdfs, manage_category, set_paper_categories, and the search_papers categoryId filter.',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  {
+    name: 'manage_category',
+    description:
+      'Create, rename, move, or delete a PaperQuay library category. delete cascades to all descendant categories and only unlinks papers (never deletes papers). System categories (all/recent/uncategorized/favorites) cannot be modified, moved, deleted, or used as a parent. Refused while the desktop app is running unless allowWhileAppRunning is true.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: {
+          type: 'string',
+          enum: ['create', 'rename', 'move', 'delete'],
+          description: 'The operation to perform.',
+        },
+        categoryId: {
+          type: 'string',
+          description: 'Target category ID (required for rename/move/delete).',
+        },
+        name: {
+          type: 'string',
+          description: 'Category name (required for create/rename).',
+        },
+        parentId: {
+          type: 'string',
+          description: 'Parent category ID for create/move; omit or empty for root level. Moving a category under itself or its own descendant is rejected.',
+        },
+        sortOrder: {
+          type: 'integer',
+          description: 'Optional explicit sort order applied by move.',
+        },
+        allowWhileAppRunning: ALLOW_WHILE_APP_RUNNING_SCHEMA,
+      },
+      required: ['action'],
+    },
+  },
+  {
+    name: 'set_paper_categories',
+    description:
+      'Assign or remove non-system categories on one or more papers. Use replace to set the exact category list, or add/remove to adjust it (replace cannot be combined with add/remove). System categories are computed by the app and cannot be assigned; use update_paper isFavorite for favorites. Refused while the desktop app is running unless allowWhileAppRunning is true.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        paperIds: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Paper IDs to update. Every ID must exist, otherwise nothing is changed.',
+        },
+        add: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Category IDs to add to each paper.',
+        },
+        remove: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Category IDs to remove from each paper.',
+        },
+        replace: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Exact category list to set on each paper (mutually exclusive with add/remove).',
+        },
+        allowWhileAppRunning: ALLOW_WHILE_APP_RUNNING_SCHEMA,
+      },
+      required: ['paperIds'],
+    },
+  },
+  {
+    name: 'update_paper',
+    description:
+      'Update bibliographic metadata of an existing paper. Only whitelisted fields are accepted: title, titleZh, authors (string[]), year, publication, doi, url, abstractText, itemType, publisher, institution, reportNumber, volume, issue, pages, isbn, issn, keywords (string[]), tags (string[]), userNote, aiSummary, citation, isFavorite. Unknown fields are rejected. Refused while the desktop app is running unless allowWhileAppRunning is true.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        paperId: { type: 'string', description: 'The unique ID of the paper in PaperQuay.' },
+        title: { type: 'string' },
+        titleZh: { type: 'string', description: 'Chinese title.' },
+        authors: { type: 'array', items: { type: 'string' }, description: 'Full author list, replacing the existing one.' },
+        year: { description: 'Publication year.' },
+        publication: { type: 'string' },
+        doi: { type: 'string' },
+        url: { type: 'string' },
+        abstractText: { type: 'string' },
+        itemType: { type: 'string', description: 'e.g. journalArticle, conferencePaper, book, thesis, report.' },
+        publisher: { type: 'string' },
+        institution: { type: 'string' },
+        reportNumber: { type: 'string' },
+        volume: { type: 'string' },
+        issue: { type: 'string' },
+        pages: { type: 'string' },
+        isbn: { type: 'string' },
+        issn: { type: 'string' },
+        keywords: { type: 'array', items: { type: 'string' }, description: 'Full keyword list, replacing the existing one.' },
+        tags: { type: 'array', items: { type: 'string' }, description: 'Full tag list, replacing the existing one.' },
+        userNote: { type: 'string' },
+        aiSummary: { type: 'string' },
+        citation: { type: 'string' },
+        isFavorite: { type: 'boolean' },
+        allowWhileAppRunning: ALLOW_WHILE_APP_RUNNING_SCHEMA,
+      },
+      required: ['paperId'],
+    },
+  },
+  {
+    name: 'delete_papers',
+    description:
+      'Delete one or more papers from the PaperQuay library. By default only the database records are removed; pass deleteFiles: true to also delete the stored PDF files (the database is committed before files are touched). Every paperId must exist, otherwise nothing is changed. Refused while the desktop app is running unless allowWhileAppRunning is true.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        paperIds: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Paper IDs to delete.',
+        },
+        deleteFiles: {
+          type: 'boolean',
+          description: 'Also delete the stored PDF files from the library storage directory (default false).',
+          default: false,
+        },
+        allowWhileAppRunning: ALLOW_WHILE_APP_RUNNING_SCHEMA,
+      },
+      required: ['paperIds'],
+    },
+  },
 ];
 
 function sendJsonRpc(response) {
@@ -292,6 +474,18 @@ async function handleToolCall(name, args) {
       return service.zoteroPreviewSync(args || {});
     case 'paperquay_sync_from_zotero':
       return service.paperquaySyncFromZotero(args || {});
+    case 'import_pdfs':
+      return service.importPdfs(args || {});
+    case 'list_categories':
+      return service.listCategories(args || {});
+    case 'manage_category':
+      return service.manageCategory(args || {});
+    case 'set_paper_categories':
+      return service.setPaperCategories(args || {});
+    case 'update_paper':
+      return service.updatePaper(args || {});
+    case 'delete_papers':
+      return service.deletePapers(args || {});
     default:
       throw new Error(`Unknown tool: ${name}`);
   }
