@@ -55,6 +55,12 @@
 
 ## Latest Update
 
+### v0.1.51 - Fixed jump-to-position for note citations
+
+- **Excerpt cards and reference locations jump again**: fixed anchor `blockId` / `pageIndex` being dropped on save, so the page button on note excerpt cards (e.g. `P20`) and the location chips in the reference list scroll to the matching position in the paper.
+- **No migration for existing notes**: positions are recovered at click time from the anchor id (`…:mineru:page-20-block-3:0`) and the page label.
+- **Resilient fallback**: exact MinerU block → same-page body block → whole-page highlight; papers without structure blocks no longer wait forever, and the notice only appears when there is genuinely no location.
+
 ### v0.1.50 - Note references, polish retrieval fix, and long-document reader windowing
 
 - **Note references**: insert paper citations from the toolbar, slash menu, or `@`; clicking a citation opens the paper and can jump to a page or block. The sidebar and end-of-note list are derived live from the note JSON and are not stored separately.

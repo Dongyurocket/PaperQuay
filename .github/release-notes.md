@@ -1,13 +1,9 @@
 # PaperQuay v{{VERSION}}
 
-## New Features
-
-- **Note references**: insert paper citations from the toolbar, slash menu, or `@`. Clicking a citation opens the paper; citations that carry a page or block location jump to that position. The sidebar and end-of-note numbered list are derived live from the note JSON and are not stored separately.
-- **Long-document reader windowing**: dual-pane reading of dissertations, textbooks, and long reports no longer mounts every MinerU block, thumbnail button, and PDF overlay host in the DOM. Visible structure blocks are windowed (off-screen Markdown/KaTeX is unloaded), the thumbnail list is virtualized, PDF.js eager `getPage` is disabled, and overlay hosts are observed only near the current page.
-
 ## Fixes
 
-- **Note AI polish retrieval key mismatch**: RAG indexes used the bare `paper.id`, while polish queries used the `native-library:` prefix, so already-indexed papers returned no evidence. Queries now match both keys; evidence is ranked globally and truncated to the top 8. Embedding-dimension mismatches and missing model citations get explicit notices. Polish defaults to the note's linked papers.
+- **Note citations could open the paper but never jump to the cited position**: the anchor `blockId` / `pageIndex` were dropped when the note was persisted, because the anchor whitelist in the note store only kept `pdfLocation`-style fields while AI-polish anchors carry just the block id and page index. Clicking the page button on an excerpt card (e.g. `P20`) or a location chip in the reference list therefore had no position to jump to, and the reader only showed "this citation has no bound PDF position". Anchor positions are now persisted, and existing notes need no migration: the position is recovered at click time from the explicit fields, then from the anchor id (`note-polish:<paperId>:mineru:page-20-block-3:0`), then from the page label.
+- **Jump requests no longer hang on papers without structure blocks**: when a paper had no MinerU block data, a note-anchor jump waited forever instead of doing anything. Jumps now degrade gracefully — exact block, then a body block on the same page, then a whole-page highlight — and only report "no bound PDF position" when there is genuinely no location at all.
 
 ## Downloads
 
@@ -15,21 +11,17 @@ Select the installer matching your system and architecture from Assets: Windows 
 
 ## Notes
 
-- Existing notes keep working: `PaperReference` still parses `{paperId, label}`; page/block location fields are optional.
-- Reader windowing is a rendering-path change only. Jump-to-block, PDF↔block linking, translation overlays, and RAG are unchanged.
+- Existing notes keep working with no data migration: positions are derived on the fly when you click.
+- The fix applies to the note excerpt cards, the reference-list location chips, and the reader-side jump detail, which now share one position resolver.
 
 ---
 
 # PaperQuay v{{VERSION}} 中文说明
 
-## 新增
-
-- **笔记参考文献**：工具栏、斜杠命令和 `@` 均可插入文献引用。点击打开对应论文；带页/块位置时可跳到原文。右侧栏与文末编号列表从笔记内容实时派生，不落库。
-- **长文档阅读窗口化**：学位论文、教材和长篇报告的双栏阅读不再把全部结构块、缩略图按钮和 PDF overlay 主机挂进 DOM。可见结构块按视口窗口化（卸载离屏 Markdown/KaTeX），缩略图列表虚拟化，PDF.js 关闭 eager `getPage`，仅观察当前页附近的 overlay 主机。
-
 ## 修复
 
-- **笔记 AI 润色检索键不一致**：索引使用裸 `paper.id`，查询却带 `native-library:` 前缀，导致已索引文献也检索为空。现同时查询两种键，证据按全局相关度取 top 8；embedding 维度不匹配或模型未返回引用时给出明确提示。润色范围默认改为「笔记关联文献」。
+- **笔记引用只能打开文献、无法跳转到引用位置**：锚点的 `blockId` / `pageIndex` 在笔记保存时被丢弃——锚点字段白名单只保留了 `pdfLocation` 一类字段，而 AI 润色生成的锚点只带块 id 与页下标。因此点击摘录卡片上的页码按钮（如 `P20`）或参考文献列表里的位置芯片时，跳转没有位置可用，阅读器只提示「该引用没有绑定 PDF 位置」。现锚点位置正常落库，且旧笔记无需迁移：位置按「显式字段 → 锚点 id（`note-polish:<paperId>:mineru:page-20-block-3:0`）→ 页码标签」逐级实时还原。
+- **没有结构块的文献不再挂起跳转**：此前文献缺少 MinerU 结构块时，笔记跳转请求会一直等待而永不执行。现按「精确块 → 同页正文块 → 整页高亮」逐级降级，只有确实没有任何位置信息时才提示「没有绑定 PDF 位置」。
 
 ## 下载
 
@@ -37,5 +29,5 @@ Select the installer matching your system and architecture from Assets: Windows 
 
 ## 使用提示
 
-- 旧笔记无需迁移：`PaperReference` 仍解析 `{paperId, label}`，页/块位置字段为可选。
-- 阅读器窗口化只改渲染路径；跳转到块、PDF↔块几何关联、翻译 overlay 与 RAG 行为不变。
+- 旧笔记无需迁移：点击时即时推导位置，无需改动既有笔记数据。
+- 本次修复覆盖笔记摘录卡片、参考文献位置芯片与阅读器跳转参数三处入口，它们现在共用同一套位置解析。
