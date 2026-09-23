@@ -162,7 +162,9 @@ function normalizeTag(name) {
 
 function paperMatches(paper, request, library) {
   if (request?.categoryId) {
-    const category = library.categories.find((item) => item.id === request.categoryId);
+    const category = library.categories.find(
+      (item) => item.id === request.categoryId || (item.isSystem && item.systemKey === request.categoryId),
+    );
 
     if (category?.systemKey === 'recent') {
       const recentIds = new Set(

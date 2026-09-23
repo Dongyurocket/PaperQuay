@@ -158,6 +158,8 @@ test('SQL query matches JS filter sets and keeps a stable page order', () => {
       { sortBy: 'manual', sortDirection: 'asc' },
       { sortBy: 'title', sortDirection: 'asc' },
       { sortBy: 'year', sortDirection: 'desc' },
+      { categoryId: 'system-all' },
+      { categoryId: 'all' },
       { categoryId: 'system-favorites' },
       { categoryId: 'system-uncategorized' },
       { categoryId: 'system-recent' },
@@ -201,9 +203,15 @@ test('SQL query matches JS filter sets and keeps a stable page order', () => {
     const beyond = store.queryPapers({ limit: 10, offset: 10_000 });
     assert.deepEqual(beyond.papers, []);
     assert.equal(beyond.total, library.papers.length);
+    assert.equal(store.countPapers({ categoryId: 'system-all' }), library.papers.length);
+    assert.equal(store.countPapers({ categoryId: 'all' }), library.papers.length);
     assert.equal(store.countPapers({ search: 'quantum' }), oracleIds(library, { search: 'quantum' }).length);
     assert.deepEqual(
       store.listPaperIds({ sortBy: 'manual', sortDirection: 'asc', limit: 5000 }),
+      manual,
+    );
+    assert.deepEqual(
+      store.listPaperIds({ categoryId: 'system-all', sortBy: 'manual', sortDirection: 'asc', limit: 5000 }),
       manual,
     );
   } finally {

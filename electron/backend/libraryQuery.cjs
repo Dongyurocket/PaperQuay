@@ -44,8 +44,10 @@ function buildLibraryFilter(db, request = {}) {
   const categoryId = cleanString(request.categoryId);
   if (categoryId) {
     const category = db
-      .prepare('SELECT id, system_key AS systemKey FROM categories WHERE id = ?')
-      .get(categoryId);
+      .prepare(
+        'SELECT id, system_key AS systemKey FROM categories WHERE id = ? OR (is_system = 1 AND system_key = ?)',
+      )
+      .get(categoryId, categoryId);
 
     if (category?.systemKey === 'recent') {
       where.push(
@@ -55,18 +57,20 @@ function buildLibraryFilter(db, request = {}) {
       where.push('NOT EXISTS (SELECT 1 FROM paper_categories pc WHERE pc.paper_id = p.id)');
     } else if (category?.systemKey === 'favorites') {
       where.push('p.is_favorite = 1');
-    } else if (category) {
+    } else if (category?.systemKey === 'all') {
+      // "所有文献"系统分类：不限制分类，与 JS paperMatches 语义保持一致。
+    } else if (category && !category.systemKey) {
       cteSql = `WITH RECURSIVE filter_cat_ids(id) AS (
         SELECT ?
         UNION ALL
         SELECT c.id FROM categories c JOIN filter_cat_ids f ON c.parent_id = f.id
       )`;
-      params.push(categoryId);
+      params.push(category.id);
       where.push(
         'EXISTS (SELECT 1 FROM paper_categories pc WHERE pc.paper_id = p.id AND pc.category_id IN (SELECT id FROM filter_cat_ids))',
       );
     } else {
-      // 未知名类：与 JS paperMatches 一致，匹配为空。
+      // 未知分类：与 JS paperMatches 一致，匹配为空。
       where.push('1 = 0');
     }
   }
