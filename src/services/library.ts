@@ -13,6 +13,7 @@ import type {
   LibrarySettings,
   LibrarySnapshot,
   ListPapersRequest,
+  QueryPapersResult,
   PaperReference,
   LiteratureAttachment,
   LiteratureCategory,
@@ -126,6 +127,39 @@ export async function listLibraryPapers(
     return await invoke<LiteraturePaper[]>('library_list_papers', { request });
   } catch (error) {
     throw new Error(toErrorMessage(error, '读取文献列表失败'));
+  }
+}
+
+/** SQL 分页查询（P2-1）：筛选/排序/分页在 SQLite 完成，返回当前筛选的完整匹配数。 */
+export async function queryLibraryPapers(
+  request: ListPapersRequest = {},
+): Promise<QueryPapersResult> {
+  try {
+    return await invoke<QueryPapersResult>('library_query_papers', { request });
+  } catch (error) {
+    throw new Error(toErrorMessage(error, '读取文献列表失败'));
+  }
+}
+
+/** 当前筛选的完整匹配计数（供全选三态与批量目标管理，P2-2）。 */
+export async function countLibraryPapers(
+  request: ListPapersRequest = {},
+): Promise<number> {
+  try {
+    return await invoke<number>('library_count_papers', { request });
+  } catch (error) {
+    throw new Error(toErrorMessage(error, '统计文献数量失败'));
+  }
+}
+
+/** 与 queryLibraryPapers 同筛选同排序，分批枚举文献 id（供全选目标展开，P2-2）。 */
+export async function listLibraryPaperIds(
+  request: ListPapersRequest = {},
+): Promise<string[]> {
+  try {
+    return await invoke<string[]>('library_list_paper_ids', { request });
+  } catch (error) {
+    throw new Error(toErrorMessage(error, '枚举文献失败'));
   }
 }
 

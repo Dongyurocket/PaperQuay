@@ -38,7 +38,7 @@ function isSubPath(root, candidate) {
   return Boolean(relative) && !relative.startsWith('..') && !path.isAbsolute(relative);
 }
 
-function canDeleteLibraryOwnedFile(library, attachment, allowedDirs) {
+function canDeleteLibraryOwnedFile(store, attachment, allowedDirs) {
   if (!attachment?.storedPath) {
     return false;
   }
@@ -53,11 +53,11 @@ function canDeleteLibraryOwnedFile(library, attachment, allowedDirs) {
     return false;
   }
 
-  return !library.papers.some((paper) =>
-    paper.attachments.some((other) =>
-      other.id !== attachment.id && isSamePath(other.storedPath, attachment.storedPath),
-    ),
-  );
+  // SQL 预筛同路径（大小写不敏感），再用 comparablePath 精确判定（P2-1：
+  // 不再为删除判定加载全库）。
+  return !store
+    .findAttachmentsByStoredPath(attachment.storedPath)
+    .some((other) => other.id !== attachment.id && isSamePath(other.storedPath, attachment.storedPath));
 }
 
 function resolveTranslatedPdfStorageDir(settings, appPaths) {
@@ -599,7 +599,7 @@ function createLibraryCommands(context) {
     },
 
     async library_list_categories() {
-      return attachCategoryCounts(store.load());
+      return store.listCategoriesWithCounts();
     },
 
     async library_create_category({ request }) {
@@ -621,7 +621,7 @@ function createLibraryCommands(context) {
       };
       library.categories.push(category);
       await store.save(library);
-      return attachCategoryCounts(library).find((item) => item.id === category.id);
+      return store.listCategoriesWithCounts().find((item) => item.id === category.id);
     },
 
     async library_update_category({ request }) {
@@ -636,7 +636,7 @@ function createLibraryCommands(context) {
       category.updatedAt = now();
 
       await store.save(library);
-      return attachCategoryCounts(library).find((item) => item.id === category.id);
+      return store.listCategoriesWithCounts().find((item) => item.id === category.id);
     },
 
     async library_move_category({ request }) {
@@ -678,6 +678,24 @@ function createLibraryCommands(context) {
       const library = store.load();
       const limit = Math.max(1, Math.min(1000, request.limit ?? 300));
       return sortPapers(library.papers.filter((paper) => paperMatches(paper, request, library)), request).slice(0, limit);
+    },
+
+    /**
+     * SQL 分页查询（P2-1）：筛选/搜索/排序/分页下推到 SQLite，返回
+     * { papers, total, offset, limit }；total 为当前筛选的完整匹配数，不受分页限制。
+     */
+    async library_query_papers({ request = {} }) {
+      return store.queryPapers(request);
+    },
+
+    /** 与 library_query_papers 同筛选同排序，仅分批枚举 id（供全选/批量目标管理，P2-2）。 */
+    async library_list_paper_ids({ request = {} }) {
+      return store.listPaperIds(request);
+    },
+
+    /** 当前筛选的完整匹配计数（供全选三态与批量目标校验，P2-2）。 */
+    async library_count_papers({ request = {} }) {
+      return store.countPapers(request);
     },
 
     async library_reorder_papers({ request }) {
@@ -800,18 +818,16 @@ function createLibraryCommands(context) {
     },
 
     async library_assign_paper_category({ request }) {
-      const library = store.load();
-      const paper = library.papers.find((item) => item.id === request.paperId);
+      const paper = store.getPaper(request.paperId);
       if (!paper) throw new Error('Paper does not exist');
       if (!paper.categoryIds.includes(request.categoryId)) paper.categoryIds.push(request.categoryId);
       paper.updatedAt = now();
-      await store.save(library);
+      store.savePaper(paper);
       return paper;
     },
 
     async library_update_paper({ request }) {
-      const library = store.load();
-      const paper = library.papers.find((item) => item.id === request.paperId);
+      const paper = store.getPaper(request.paperId);
       if (!paper) throw new Error('Paper does not exist');
 
       for (const key of [
@@ -843,14 +859,12 @@ function createLibraryCommands(context) {
       if (request.isFavorite != null) paper.isFavorite = Boolean(request.isFavorite);
       paper.updatedAt = now();
 
-      await store.save(library);
+      store.savePaper(paper);
       return paper;
     },
 
     async library_delete_paper({ request }) {
-      const library = store.load();
-      const paper = library.papers.find((item) => item.id === request.paperId);
-      library.papers = library.papers.filter((item) => item.id !== request.paperId);
+      const paper = store.getPaper(request.paperId);
 
       if (request.deleteFiles && paper) {
         for (const attachment of paper.attachments) {
@@ -858,12 +872,12 @@ function createLibraryCommands(context) {
         }
       }
 
-      await store.save(library);
+      store.deletePaper(request.paperId);
     },
 
     async library_relocate_attachment({ request }) {
-      const library = store.load();
-      const paper = library.papers.find((item) => item.attachments.some((attachment) => attachment.id === request.attachmentId));
+      const paperId = store.getPaperIdByAttachment(request.attachmentId);
+      const paper = paperId ? store.getPaper(paperId) : null;
       if (!paper) throw new Error('Attachment does not exist');
 
       const attachment = paper.attachments.find((item) => item.id === request.attachmentId);
@@ -876,7 +890,7 @@ function createLibraryCommands(context) {
       attachment.missing = false;
       paper.updatedAt = now();
 
-      await store.save(library);
+      store.savePaper(paper);
       return attachment;
     },
 
@@ -885,8 +899,7 @@ function createLibraryCommands(context) {
     },
 
     async library_add_attachment({ request }) {
-      const library = store.load();
-      const paper = library.papers.find((item) => item.id === request.paperId);
+      const paper = store.getPaper(request.paperId);
       if (!paper) throw new Error('Paper does not exist');
 
       const sourcePath = cleanString(request.sourcePath);
@@ -896,8 +909,9 @@ function createLibraryCommands(context) {
       if (!isPdf(sourcePath)) throw new Error('Only PDF files can be attached');
       await ensureFile(sourcePath);
 
-      const storageDir = library.settings.storageDir || path.join(appPaths.dataDir, 'paperquay-data');
-      const targetDir = resolveTranslatedPdfStorageDir(library.settings, appPaths);
+      const settings = store.loadSettings();
+      const storageDir = settings.storageDir || path.join(appPaths.dataDir, 'paperquay-data');
+      const targetDir = resolveTranslatedPdfStorageDir(settings, appPaths);
       await fsp.mkdir(targetDir, { recursive: true });
 
       const bytes = await fsp.readFile(sourcePath);
@@ -933,7 +947,7 @@ function createLibraryCommands(context) {
         });
         paper.updatedAt = now();
 
-        await store.save(library);
+        store.savePaper(paper);
       } catch (error) {
         if (copiedToLibrary) {
           await fsp.rm(storedPath, { force: true }).catch(() => {});
@@ -948,7 +962,7 @@ function createLibraryCommands(context) {
         if (
           attachment.storedPath &&
           !isSamePath(attachment.storedPath, storedPath) &&
-          canDeleteLibraryOwnedFile(library, attachment, allowedDirs)
+          canDeleteLibraryOwnedFile(store, attachment, allowedDirs)
         ) {
           await fsp.rm(attachment.storedPath, { force: true }).catch(() => {});
         }
@@ -958,12 +972,11 @@ function createLibraryCommands(context) {
     },
 
     async library_remove_attachment({ request }) {
-      const library = store.load();
-      const storageDir = library.settings.storageDir || path.join(appPaths.dataDir, 'paperquay-data');
-      const targetDir = resolveTranslatedPdfStorageDir(library.settings, appPaths);
-      const paper = library.papers.find((item) =>
-        item.attachments.some((attachment) => attachment.id === request.attachmentId),
-      );
+      const settings = store.loadSettings();
+      const storageDir = settings.storageDir || path.join(appPaths.dataDir, 'paperquay-data');
+      const targetDir = resolveTranslatedPdfStorageDir(settings, appPaths);
+      const paperId = store.getPaperIdByAttachment(request.attachmentId);
+      const paper = paperId ? store.getPaper(paperId) : null;
       if (!paper) throw new Error('Attachment does not exist');
 
       const attachment = paper.attachments.find((item) => item.id === request.attachmentId);
@@ -974,12 +987,12 @@ function createLibraryCommands(context) {
       paper.attachments = paper.attachments.filter((item) => item.id !== request.attachmentId);
       paper.updatedAt = now();
 
-      await store.save(library);
+      store.savePaper(paper);
 
       const allowedDirs = [storageDir, targetDir];
       if (
         request.deleteFile !== false &&
-        canDeleteLibraryOwnedFile(library, attachment, allowedDirs)
+        canDeleteLibraryOwnedFile(store, attachment, allowedDirs)
       ) {
         await fsp.rm(attachment.storedPath, { force: true }).catch(() => {});
       }

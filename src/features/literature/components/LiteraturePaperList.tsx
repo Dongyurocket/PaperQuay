@@ -1,5 +1,6 @@
 import clsx from 'clsx';
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -54,6 +55,10 @@ interface LiteraturePaperListProps {
   loading: boolean;
   working: boolean;
   papers: LiteraturePaper[];
+  /** SQL 分页（P2-1）：当前筛选的完整匹配数；papers.length < total 时滚动到底自动加载下一页。 */
+  papersTotal?: number;
+  loadingMore?: boolean;
+  onLoadMore?: () => void;
   paperStatuses: Record<string, LiteraturePaperListStatus>;
   showReadingHeatmap?: boolean;
   storageDir?: string;
@@ -100,6 +105,9 @@ export default function LiteraturePaperList({
   loading,
   working,
   papers,
+  papersTotal,
+  loadingMore = false,
+  onLoadMore,
   paperStatuses,
   showReadingHeatmap = true,
   storageDir = '',
@@ -157,6 +165,18 @@ export default function LiteraturePaperList({
   const sortValue = `${sortBy}:${sortDirection}`;
   const multiSelectedSet = useMemo(() => new Set(multiSelectedPaperIds), [multiSelectedPaperIds]);
   const multiSelectActive = multiSelectedPaperIds.length > 0;
+  const resolvedTotal = typeof papersTotal === 'number' ? Math.max(papersTotal, papers.length) : papers.length;
+  const hasMorePapers = papers.length < resolvedTotal;
+  const handleListScroll = useCallback(
+    (event: React.UIEvent<HTMLDivElement>) => {
+      if (!hasMorePapers || loadingMore || !onLoadMore) return;
+      const target = event.currentTarget;
+      if (target.scrollTop + target.clientHeight >= target.scrollHeight - 400) {
+        onLoadMore();
+      }
+    },
+    [hasMorePapers, loadingMore, onLoadMore],
+  );
   const heatmapsByPaperId = useMemo(() => {
     if (!showReadingHeatmap || papers.length === 0) {
       return {} as Record<string, PdfReadingHeatmap | null>;
@@ -535,6 +555,7 @@ export default function LiteraturePaperList({
       <div
         data-wheel-scroll-target
         className="h-0 min-h-0 flex-1 overflow-y-auto overscroll-y-contain p-3"
+        onScroll={handleListScroll}
       >
         {loading ? (
           <div className="pq-card p-6 text-sm text-[var(--pq-text-muted)]">
@@ -784,6 +805,13 @@ export default function LiteraturePaperList({
                 </div>
               );
             })}
+            {hasMorePapers || loadingMore ? (
+              <div className="py-2 text-center text-xs text-[var(--pq-text-muted)]">
+                {loadingMore
+                  ? l('正在加载更多…', 'Loading more…')
+                  : l(`已加载 ${papers.length} / ${resolvedTotal} 条，滚动加载更多`, `Loaded ${papers.length} / ${resolvedTotal}; scroll for more`)}
+              </div>
+            ) : null}
           </div>
         )}
       </div>

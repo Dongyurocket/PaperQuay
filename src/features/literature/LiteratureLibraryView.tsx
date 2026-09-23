@@ -28,7 +28,7 @@ import {
   importPdfsToLibrary,
   initializeLiteratureLibrary,
   listLibraryCategories,
-  listLibraryPapers,
+  queryLibraryPapers,
   moveLibraryCategory,
   removeLibraryAttachment,
   reorderLibraryPapers,
@@ -261,6 +261,28 @@ type LiteraturePaperSortBy = NonNullable<ListPapersRequest['sortBy']>;
 type LiteraturePaperSortDirection = NonNullable<ListPapersRequest['sortDirection']>;
 
 const PAPER_SORT_STORAGE_KEY = 'paperquay-literature-paper-sort-v1';
+/** SQL 分页每页条数（P2-1）：首屏只取一页，滚动接近底部再追加。 */
+const PAPER_PAGE_SIZE = 500;
+
+/** 需要「全库文献」的后台任务（MinerU 状态/批量元数据）按页取齐，不再受 1000 条硬上限截断。 */
+async function fetchAllLibraryPapers(): Promise<LiteraturePaper[]> {
+  const all: LiteraturePaper[] = [];
+  let offset = 0;
+
+  for (;;) {
+    const result = await queryLibraryPapers({
+      sortBy: 'manual',
+      sortDirection: 'asc',
+      limit: 1000,
+      offset,
+    });
+    all.push(...result.papers);
+    if (result.papers.length === 0 || all.length >= result.total) break;
+    offset += result.papers.length;
+  }
+
+  return all;
+}
 const PAPER_SORT_FIELDS: LiteraturePaperSortBy[] = [
   'manual',
   'title',
@@ -317,6 +339,15 @@ export default function LiteratureLibraryView({
   const [settings, setSettings] = useState<LibrarySettings | null>(null);
   const [categories, setCategories] = useState<LiteratureCategory[]>([]);
   const [papers, setPapers] = useState<LiteraturePaper[]>([]);
+  // SQL 分页（P2-1）：papers 是「当前筛选结果」的已加载前缀；papersTotal 是完整匹配数。
+  const [papersTotal, setPapersTotal] = useState(0);
+  const [papersLoadingMore, setPapersLoadingMore] = useState(false);
+  const papersRef = useRef<LiteraturePaper[]>([]);
+  const papersQueryGenerationRef = useRef(0);
+
+  useEffect(() => {
+    papersRef.current = papers;
+  }, [papers]);
   const [paperStatuses, setPaperStatuses] = useState<Record<string, LiteraturePaperListStatus>>({});
 
   useEffect(() => {
@@ -631,24 +662,75 @@ export default function LiteratureLibraryView({
         const nextPapers = resolveDemoPapers(nextCategoryId);
 
         setPapers(nextPapers);
+        setPapersTotal(nextPapers.length);
         setSelectedPaperId((current) => resolveSelectedPaperId(current, nextPapers));
         return nextPapers;
       }
 
-      const nextPapers = await listLibraryPapers({
+      const generation = papersQueryGenerationRef.current + 1;
+      papersQueryGenerationRef.current = generation;
+      const result = await queryLibraryPapers({
         categoryId: nextCategoryId,
         search: searchQuery,
         sortBy: paperSort.sortBy,
         sortDirection: paperSort.sortDirection,
-        limit: 500,
+        limit: PAPER_PAGE_SIZE,
+        offset: 0,
       });
+      const nextPapers = result.papers;
+      if (generation !== papersQueryGenerationRef.current) {
+        return nextPapers;
+      }
 
       setPapers(nextPapers);
+      setPapersTotal(result.total);
       setSelectedPaperId((current) => resolveSelectedPaperId(current, nextPapers));
       return nextPapers;
     },
     [demoLibrary, paperSort.sortBy, paperSort.sortDirection, resolveDemoPapers, searchQuery, selectedCategoryId],
   );
+
+  // 滚动接近底部时按当前筛选追加下一页；按 id 去重防止翻页期间并发写入造成重复行。
+  const loadMorePapers = useCallback(async () => {
+    if (demoLibrary || papersLoadingMore) return;
+
+    const generation = papersQueryGenerationRef.current;
+    setPapersLoadingMore(true);
+    try {
+      const snapshot = papersRef.current;
+      const result = await queryLibraryPapers({
+        categoryId: selectedCategoryId,
+        search: searchQuery,
+        sortBy: paperSort.sortBy,
+        sortDirection: paperSort.sortDirection,
+        limit: PAPER_PAGE_SIZE,
+        offset: snapshot.length,
+      });
+      if (generation !== papersQueryGenerationRef.current) {
+        return;
+      }
+
+      if (result.papers.length === 0) {
+        setPapersTotal(result.total);
+        return;
+      }
+
+      setPapers((current) => {
+        const seen = new Set(current.map((paper) => paper.id));
+        return [...current, ...result.papers.filter((paper) => !seen.has(paper.id))];
+      });
+      setPapersTotal(result.total);
+    } finally {
+      setPapersLoadingMore(false);
+    }
+  }, [
+    demoLibrary,
+    paperSort.sortBy,
+    paperSort.sortDirection,
+    papersLoadingMore,
+    searchQuery,
+    selectedCategoryId,
+  ]);
 
   const refreshAll = useCallback(async () => {
     if (demoLibrary) {
@@ -665,11 +747,7 @@ export default function LiteratureLibraryView({
     const [nextCategories, visiblePapers, allPapers] = await Promise.all([
       listLibraryCategories(),
       refreshPapers(),
-      listLibraryPapers({
-        sortBy: 'manual',
-        sortDirection: 'asc',
-        limit: 5000,
-      }),
+      fetchAllLibraryPapers(),
     ]);
 
     allPapersSnapshotRef.current = allPapers;
@@ -1624,11 +1702,7 @@ export default function LiteratureLibraryView({
     setError('');
 
     try {
-      const allPapers = await listLibraryPapers({
-        sortBy: 'manual',
-        sortDirection: 'asc',
-        limit: 1000,
-      });
+      const allPapers = await fetchAllLibraryPapers();
 
       if (allPapers.length === 0) {
         setStatusMessage(l('当前文库没有可解析的文献', 'There are no papers to parse.'));
@@ -1880,19 +1954,28 @@ export default function LiteratureLibraryView({
   };
 
   const reloadAfterPaperUpdate = async (updatedPaper: LiteraturePaper) => {
-    const [nextCategories, nextPapers] = await Promise.all([
+    const generation = papersQueryGenerationRef.current + 1;
+    papersQueryGenerationRef.current = generation;
+    const [nextCategories, queryResult] = await Promise.all([
       listLibraryCategories(),
-      listLibraryPapers({
+      queryLibraryPapers({
         categoryId: selectedCategoryId,
         search: searchQuery,
         sortBy: paperSort.sortBy,
         sortDirection: paperSort.sortDirection,
-        limit: 500,
+        limit: PAPER_PAGE_SIZE,
+        offset: 0,
       }),
     ]);
 
+    if (generation !== papersQueryGenerationRef.current) {
+      return;
+    }
+
+    const nextPapers = queryResult.papers;
     setCategories(nextCategories);
     setPapers(nextPapers);
+    setPapersTotal(queryResult.total);
     setSelectedPaperId(
       nextPapers.some((paper) => paper.id === updatedPaper.id)
         ? updatedPaper.id
@@ -2522,19 +2605,28 @@ export default function LiteratureLibraryView({
         paperId: tagDialogPaper.id,
         tags: [...existingTags, normalizedTag],
       });
-      const [nextCategories, nextPapers] = await Promise.all([
+      const generation = papersQueryGenerationRef.current + 1;
+      papersQueryGenerationRef.current = generation;
+      const [nextCategories, queryResult] = await Promise.all([
         listLibraryCategories(),
-      listLibraryPapers({
-        categoryId: selectedCategoryId,
-        search: searchQuery,
-        sortBy: paperSort.sortBy,
-        sortDirection: paperSort.sortDirection,
-        limit: 500,
-      }),
+        queryLibraryPapers({
+          categoryId: selectedCategoryId,
+          search: searchQuery,
+          sortBy: paperSort.sortBy,
+          sortDirection: paperSort.sortDirection,
+          limit: PAPER_PAGE_SIZE,
+          offset: 0,
+        }),
       ]);
 
+      if (generation !== papersQueryGenerationRef.current) {
+        return;
+      }
+
+      const nextPapers = queryResult.papers;
       setCategories(nextCategories);
       setPapers(nextPapers);
+      setPapersTotal(queryResult.total);
       setSelectedPaperId(
         nextPapers.some((paper) => paper.id === updatedPaper.id)
           ? updatedPaper.id
@@ -2707,6 +2799,9 @@ export default function LiteratureLibraryView({
             loading={loading}
             working={working}
             papers={papers}
+            papersTotal={papersTotal}
+            loadingMore={papersLoadingMore}
+            onLoadMore={() => void loadMorePapers()}
             paperStatuses={paperStatuses}
             showReadingHeatmap={showReadingHeatmap}
             storageDir={libraryStorageDir}

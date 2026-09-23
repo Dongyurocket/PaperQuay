@@ -157,6 +157,15 @@ export interface ListPapersRequest {
   sortBy?: 'manual' | 'title' | 'year' | 'author' | 'importedAt' | 'updatedAt' | 'lastReadAt';
   sortDirection?: 'asc' | 'desc';
   limit?: number;
+  offset?: number;
+}
+
+/** SQL 分页查询结果（P2-1）：total 为当前筛选的完整匹配数，不受 offset/limit 限制。 */
+export interface QueryPapersResult {
+  papers: LiteraturePaper[];
+  total: number;
+  offset: number;
+  limit: number;
 }
 
 export interface CreateCategoryRequest {

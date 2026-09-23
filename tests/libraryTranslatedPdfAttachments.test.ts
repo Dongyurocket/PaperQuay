@@ -219,8 +219,8 @@ test('translated PDF replacement preserves the previous attachment when persiste
     const firstAttachment = firstUpdate.attachments.find(
       (item: AttachmentResult) => item.kind === 'translated-pdf',
     ) as AttachmentResult;
-    const originalSave = store.save.bind(store);
-    store.save = async () => {
+    const originalSavePaper = store.savePaper.bind(store);
+    store.savePaper = () => {
       throw new Error('simulated persistence failure');
     };
 
@@ -235,7 +235,7 @@ test('translated PDF replacement preserves the previous attachment when persiste
       /simulated persistence failure/,
     );
 
-    store.save = originalSave;
+    store.savePaper = originalSavePaper;
     const persistedPaper = store.load().papers.find((paper) => paper.id === 'paper-save-failure');
     const persistedTranslated = persistedPaper?.attachments.find(
       (item) => item.kind === 'translated-pdf',

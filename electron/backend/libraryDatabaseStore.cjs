@@ -3,6 +3,11 @@ const fsp = require('node:fs/promises');
 const path = require('node:path');
 const { DatabaseSync, sqlStringLiteral, withTransaction } = require('./nodeSqlite.cjs');
 const { cleanString, readJson, writeJsonSync } = require('./utils.cjs');
+const {
+  buildLibraryFilter,
+  libraryOrderClause,
+  normalizePage,
+} = require('./libraryQuery.cjs');
 
 function openDatabase(databasePath) {
   fs.mkdirSync(path.dirname(databasePath), { recursive: true });
@@ -140,6 +145,8 @@ function createSchema(db) {
     );
 
     CREATE INDEX IF NOT EXISTS idx_papers_sort_order ON papers(sort_order);
+    CREATE INDEX IF NOT EXISTS idx_papers_imported_at ON papers(imported_at);
+    CREATE INDEX IF NOT EXISTS idx_papers_is_favorite ON papers(is_favorite);
     CREATE INDEX IF NOT EXISTS idx_attachments_paper_id ON attachments(paper_id);
     CREATE INDEX IF NOT EXISTS idx_authors_paper_id ON authors(paper_id, sort_order);
     CREATE INDEX IF NOT EXISTS idx_tags_paper_id ON tags(paper_id, sort_order);
@@ -268,6 +275,224 @@ function rowsByPaperId(rows) {
   return grouped;
 }
 
+const PAPER_SELECT_COLUMNS = `
+  id,
+  title,
+  title_zh AS titleZh,
+  year,
+  publication,
+  doi,
+  url,
+  abstract_text AS abstractText,
+  item_type AS itemType,
+  publisher,
+  institution,
+  report_number AS reportNumber,
+  volume,
+  issue,
+  pages,
+  isbn,
+  issn,
+  imported_at AS importedAt,
+  updated_at AS updatedAt,
+  last_read_at AS lastReadAt,
+  reading_progress AS readingProgress,
+  is_favorite AS isFavorite,
+  user_note AS userNote,
+  ai_summary AS aiSummary,
+  citation,
+  source,
+  sort_order AS sortOrder
+`;
+
+function mapPaperRows(paperRows, { keywordRows, authorRows, tagRows, categoryRows, attachmentRows }) {
+  return paperRows.map((paper) => ({
+    ...paper,
+    isFavorite: Boolean(paper.isFavorite),
+    keywords: (keywordRows.get(paper.id) ?? []).map((row) => row.keyword),
+    authors: (authorRows.get(paper.id) ?? []).map(({ paper_id: _paperId, ...author }) => author),
+    tags: (tagRows.get(paper.id) ?? []).map(({ paper_id: _paperId, ...tag }) => tag),
+    categoryIds: (categoryRows.get(paper.id) ?? []).map((row) => row.category_id),
+    attachments: (attachmentRows.get(paper.id) ?? []).map(({ paper_id: _paperId, missing, ...attachment }) => ({
+      ...attachment,
+      paperId: paper.id,
+      missing: Boolean(missing),
+    })),
+  }));
+}
+
+/**
+ * 只为给定 papers 行加载关联表（keywords/authors/tags/categories/attachments），
+ * 供 SQL 分页按页水合，避免全库关联扫描。
+ */
+function hydratePaperRows(db, paperRows) {
+  if (paperRows.length === 0) return [];
+
+  const ids = paperRows.map((row) => row.id);
+  const placeholders = ids.map(() => '?').join(', ');
+  const keywordRows = rowsByPaperId(db.prepare(`
+    SELECT paper_id, keyword
+    FROM paper_keywords
+    WHERE paper_id IN (${placeholders})
+    ORDER BY paper_id, sort_order
+  `).all(...ids));
+  const authorRows = rowsByPaperId(db.prepare(`
+    SELECT
+      paper_id,
+      id,
+      name,
+      given_name AS givenName,
+      family_name AS familyName,
+      sort_order AS sortOrder
+    FROM authors
+    WHERE paper_id IN (${placeholders})
+    ORDER BY paper_id, sort_order
+  `).all(...ids));
+  const tagRows = rowsByPaperId(db.prepare(`
+    SELECT
+      paper_id,
+      id,
+      name,
+      color,
+      sort_order AS sortOrder
+    FROM tags
+    WHERE paper_id IN (${placeholders})
+    ORDER BY paper_id, sort_order
+  `).all(...ids));
+  const categoryRows = rowsByPaperId(db.prepare(`
+    SELECT paper_id, category_id
+    FROM paper_categories
+    WHERE paper_id IN (${placeholders})
+    ORDER BY paper_id, sort_order
+  `).all(...ids));
+  const attachmentRows = rowsByPaperId(db.prepare(`
+    SELECT
+      paper_id,
+      id,
+      kind,
+      original_path AS originalPath,
+      stored_path AS storedPath,
+      relative_path AS relativePath,
+      file_name AS fileName,
+      mime_type AS mimeType,
+      file_size AS fileSize,
+      content_hash AS contentHash,
+      created_at AS createdAt,
+      missing
+    FROM attachments
+    WHERE paper_id IN (${placeholders})
+    ORDER BY paper_id, created_at, id
+  `).all(...ids));
+
+  return mapPaperRows(paperRows, { keywordRows, authorRows, tagRows, categoryRows, attachmentRows });
+}
+
+/** SQL 分页查询（P2-1）：筛选/搜索/排序/分页全部下推，返回 { papers, total, offset, limit }。 */
+function queryPapersFromDb(db, request = {}) {
+  const { limit, offset } = normalizePage(request);
+  const filter = buildLibraryFilter(db, request);
+  const total = db
+    .prepare(`${filter.cteSql} SELECT COUNT(*) AS n FROM papers p ${filter.whereSql}`)
+    .get(...filter.params).n;
+  const rows = db
+    .prepare(
+      `${filter.cteSql} SELECT ${PAPER_SELECT_COLUMNS} FROM papers p ${filter.whereSql} ${libraryOrderClause(request)} LIMIT ? OFFSET ?`,
+    )
+    .all(...filter.params, limit, offset);
+
+  return { papers: hydratePaperRows(db, rows), total, offset, limit };
+}
+
+/** 与 queryPapersFromDb 同筛选的完整匹配计数（独立 COUNT 查询，不取行）。 */
+function countPapersFromDb(db, request = {}) {
+  const filter = buildLibraryFilter(db, request);
+  return db
+    .prepare(`${filter.cteSql} SELECT COUNT(*) AS n FROM papers p ${filter.whereSql}`)
+    .get(...filter.params).n;
+}
+
+/** 与 queryPapersFromDb 同筛选同排序，仅枚举 id（供全选/批量目标分批枚举，P2-2）。 */
+function listPaperIdsFromDb(db, request = {}) {
+  const { limit, offset } = normalizePage({ ...request, limit: request?.limit ?? 1000 });
+  const filter = buildLibraryFilter(db, request);
+  const rows = db
+    .prepare(
+      `${filter.cteSql} SELECT p.id FROM papers p ${filter.whereSql} ${libraryOrderClause(request)} LIMIT ? OFFSET ?`,
+    )
+    .all(...filter.params, limit, offset);
+
+  return rows.map((row) => row.id);
+}
+
+/** 分类计数独立查询（P2-1）：与 libraryStore.categoryCounts 语义一致，但不加载全库。 */
+function categoryCountsFromDb(db) {
+  const total = db.prepare('SELECT COUNT(*) AS n FROM papers').get().n;
+  const counts = new Map();
+  counts.set('all', total);
+  counts.set('recent', Math.min(30, total));
+  counts.set(
+    'uncategorized',
+    db.prepare('SELECT COUNT(*) AS n FROM papers p WHERE NOT EXISTS (SELECT 1 FROM paper_categories pc WHERE pc.paper_id = p.id)').get().n,
+  );
+  counts.set('favorites', db.prepare('SELECT COUNT(*) AS n FROM papers WHERE is_favorite = 1').get().n);
+
+  const categories = db.prepare('SELECT id, is_system AS isSystem FROM categories').all();
+  const countDescendants = db.prepare(`
+    WITH RECURSIVE d(id) AS (
+      SELECT ?
+      UNION ALL
+      SELECT c.id FROM categories c JOIN d ON c.parent_id = d.id
+    )
+    SELECT COUNT(DISTINCT pc.paper_id) AS n FROM paper_categories pc WHERE pc.category_id IN (SELECT id FROM d)
+  `);
+
+  for (const category of categories) {
+    if (category.isSystem) continue;
+    counts.set(category.id, countDescendants.get(category.id).n);
+  }
+
+  return counts;
+}
+
+/** 分类列表 + 计数（替代 attachCategoryCounts(store.load())，不加载 papers）。 */
+function listCategoriesWithCountsFromDb(db) {
+  const counts = categoryCountsFromDb(db);
+  const categories = db.prepare(`
+    SELECT
+      id,
+      name,
+      parent_id AS parentId,
+      sort_order AS sortOrder,
+      is_system AS isSystem,
+      system_key AS systemKey,
+      created_at AS createdAt,
+      updated_at AS updatedAt
+    FROM categories
+    ORDER BY is_system DESC, (parent_id IS NOT NULL), sort_order, name
+  `).all();
+
+  return categories.map((category) => ({
+    ...category,
+    isSystem: Boolean(category.isSystem),
+    paperCount: category.isSystem ? counts.get(category.systemKey) ?? 0 : counts.get(category.id) ?? 0,
+  }));
+}
+
+function getPaperFromDb(db, paperId) {
+  const id = cleanString(paperId);
+  if (!id) return null;
+  const row = db.prepare(`SELECT ${PAPER_SELECT_COLUMNS} FROM papers WHERE id = ?`).get(id);
+  if (!row) return null;
+  return hydratePaperRows(db, [row])[0];
+}
+
+function getPaperIdByAttachmentId(db, attachmentId) {
+  const row = db
+    .prepare('SELECT paper_id AS paperId FROM attachments WHERE id = ?')
+    .get(cleanString(attachmentId));
+  return row?.paperId ?? null;
+}
+
 function loadLibraryFromDb(db, appPaths, normalizeLibrary) {
   const settings = loadKeyValueTable(db, 'library_settings');
   const webdav = loadKeyValueTable(db, 'webdav_settings');
@@ -336,50 +561,10 @@ function loadLibraryFromDb(db, appPaths, normalizeLibrary) {
     FROM attachments
     ORDER BY paper_id, created_at, id
   `).all());
-  const papers = db.prepare(`
-    SELECT
-      id,
-      title,
-      title_zh AS titleZh,
-      year,
-      publication,
-      doi,
-      url,
-      abstract_text AS abstractText,
-      item_type AS itemType,
-      publisher,
-      institution,
-      report_number AS reportNumber,
-      volume,
-      issue,
-      pages,
-      isbn,
-      issn,
-      imported_at AS importedAt,
-      updated_at AS updatedAt,
-      last_read_at AS lastReadAt,
-      reading_progress AS readingProgress,
-      is_favorite AS isFavorite,
-      user_note AS userNote,
-      ai_summary AS aiSummary,
-      citation,
-      source,
-      sort_order AS sortOrder
-    FROM papers
-    ORDER BY sort_order, title
-  `).all().map((paper) => ({
-    ...paper,
-    isFavorite: Boolean(paper.isFavorite),
-    keywords: (keywordRows.get(paper.id) ?? []).map((row) => row.keyword),
-    authors: (authorRows.get(paper.id) ?? []).map(({ paper_id: _paperId, ...author }) => author),
-    tags: (tagRows.get(paper.id) ?? []).map(({ paper_id: _paperId, ...tag }) => tag),
-    categoryIds: (categoryRows.get(paper.id) ?? []).map((row) => row.category_id),
-    attachments: (attachmentRows.get(paper.id) ?? []).map(({ paper_id: _paperId, missing, ...attachment }) => ({
-      ...attachment,
-      paperId: paper.id,
-      missing: Boolean(missing),
-    })),
-  }));
+  const papers = mapPaperRows(
+    db.prepare(`SELECT ${PAPER_SELECT_COLUMNS} FROM papers ORDER BY sort_order, title`).all(),
+    { keywordRows, authorRows, tagRows, categoryRows, attachmentRows },
+  );
 
   return normalizeLibrary({
     version: 1,
@@ -534,143 +719,131 @@ function restoreReferenceRows(db, refs, paperIds) {
   }
 }
 
-function saveLibraryToDb(db, appPaths, normalizeLibrary, library) {
-  const normalized = normalizeLibrary(library, appPaths);
+const PAPER_TABLE_COLUMNS = [
+  'id',
+  'title',
+  'title_zh',
+  'year',
+  'publication',
+  'doi',
+  'url',
+  'abstract_text',
+  'item_type',
+  'publisher',
+  'institution',
+  'report_number',
+  'volume',
+  'issue',
+  'pages',
+  'isbn',
+  'issn',
+  'imported_at',
+  'updated_at',
+  'last_read_at',
+  'reading_progress',
+  'is_favorite',
+  'user_note',
+  'ai_summary',
+  'citation',
+  'source',
+  'sort_order',
+];
 
-  withTransaction(db, () => {
-    const referenceCache = loadReferenceRows(db);
-    clearData(db);
-    saveKeyValueTable(db, 'library_settings', normalized.settings);
-    saveKeyValueTable(db, 'webdav_settings', normalized.webdav);
-    db.prepare(`
-      INSERT INTO library_meta (key, value)
-      VALUES ('initialized', '1'), ('version', '1')
-      ON CONFLICT (key) DO UPDATE SET value = excluded.value
-    `).run();
+const PAPER_UPSERT_ASSIGNMENTS = PAPER_TABLE_COLUMNS.filter((column) => column !== 'id')
+  .map((column) => `${column} = excluded.${column}`)
+  .join(', ');
 
-    const insertCategory = db.prepare(`
-      INSERT INTO categories (
-        id,
-        name,
-        parent_id,
-        sort_order,
-        is_system,
-        system_key,
-        created_at,
-        updated_at
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    const insertPaper = db.prepare(`
-      INSERT INTO papers (
-        id,
-        title,
-        title_zh,
-        year,
-        publication,
-        doi,
-        url,
-        abstract_text,
-        item_type,
-        publisher,
-        institution,
-        report_number,
-        volume,
-        issue,
-        pages,
-        isbn,
-        issn,
-        imported_at,
-        updated_at,
-        last_read_at,
-        reading_progress,
-        is_favorite,
-        user_note,
-        ai_summary,
-        citation,
-        source,
-        sort_order
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    const insertKeyword = db.prepare(`
-      INSERT INTO paper_keywords (paper_id, keyword, sort_order)
-      VALUES (?, ?, ?)
-    `);
-    const insertAuthor = db.prepare(`
-      INSERT INTO authors (id, paper_id, name, given_name, family_name, sort_order)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `);
-    const insertTag = db.prepare(`
-      INSERT INTO tags (id, paper_id, name, color, sort_order)
-      VALUES (?, ?, ?, ?, ?)
-    `);
-    const insertPaperCategory = db.prepare(`
-      INSERT INTO paper_categories (paper_id, category_id, sort_order)
-      VALUES (?, ?, ?)
-    `);
-    const insertAttachment = db.prepare(`
-      INSERT INTO attachments (
-        id,
-        paper_id,
-        kind,
-        original_path,
-        stored_path,
-        relative_path,
-        file_name,
-        mime_type,
-        file_size,
-        content_hash,
-        created_at,
-        missing
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
+function paperRowValues(paper) {
+  return [
+    paper.id,
+    paper.title,
+    paper.titleZh ?? null,
+    paper.year ?? null,
+    paper.publication ?? null,
+    paper.doi ?? null,
+    paper.url ?? null,
+    paper.abstractText ?? null,
+    paper.itemType ?? 'journalArticle',
+    paper.publisher ?? null,
+    paper.institution ?? null,
+    paper.reportNumber ?? null,
+    paper.volume ?? null,
+    paper.issue ?? null,
+    paper.pages ?? null,
+    paper.isbn ?? null,
+    paper.issn ?? null,
+    Number(paper.importedAt) || 0,
+    Number(paper.updatedAt) || 0,
+    paper.lastReadAt ?? null,
+    Number(paper.readingProgress) || 0,
+    boolToInteger(paper.isFavorite),
+    paper.userNote ?? null,
+    paper.aiSummary ?? null,
+    paper.citation ?? null,
+    paper.source || 'local',
+    Number(paper.sortOrder) || 0,
+  ];
+}
 
-    for (const category of normalized.categories) {
-      insertCategory.run(
-        category.id,
-        category.name,
-        category.parentId ?? null,
-        Number(category.sortOrder) || 0,
-        boolToInteger(category.isSystem),
-        category.systemKey ?? null,
-        Number(category.createdAt) || 0,
-        Number(category.updatedAt) || 0,
-      );
-    }
+/**
+ * 单篇/批量共用的 papers 写入器（P2-1 增量事务）：行写入 + 关联表重建。
+ * 关联表（keywords/authors/tags/paper_categories/attachments）按 paper_id
+ * 删除后重插；paper_references 不在此触碰，由引用命令单独维护。
+ */
+function createPaperWriters(db) {
+  const placeholders = PAPER_TABLE_COLUMNS.map(() => '?').join(', ');
+  const insertPaper = db.prepare(
+    `INSERT INTO papers (${PAPER_TABLE_COLUMNS.join(', ')}) VALUES (${placeholders})`,
+  );
+  const upsertPaper = db.prepare(
+    `INSERT INTO papers (${PAPER_TABLE_COLUMNS.join(', ')}) VALUES (${placeholders})
+     ON CONFLICT (id) DO UPDATE SET ${PAPER_UPSERT_ASSIGNMENTS}`,
+  );
+  const deleteRelations = ['paper_keywords', 'authors', 'tags', 'paper_categories', 'attachments'].map(
+    (table) => db.prepare(`DELETE FROM ${table} WHERE paper_id = ?`),
+  );
+  const insertKeyword = db.prepare(`
+    INSERT INTO paper_keywords (paper_id, keyword, sort_order)
+    VALUES (?, ?, ?)
+  `);
+  const insertAuthor = db.prepare(`
+    INSERT INTO authors (id, paper_id, name, given_name, family_name, sort_order)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `);
+  const insertTag = db.prepare(`
+    INSERT INTO tags (id, paper_id, name, color, sort_order)
+    VALUES (?, ?, ?, ?, ?)
+  `);
+  const insertPaperCategory = db.prepare(`
+    INSERT INTO paper_categories (paper_id, category_id, sort_order)
+    VALUES (?, ?, ?)
+  `);
+  const insertAttachment = db.prepare(`
+    INSERT INTO attachments (
+      id,
+      paper_id,
+      kind,
+      original_path,
+      stored_path,
+      relative_path,
+      file_name,
+      mime_type,
+      file_size,
+      content_hash,
+      created_at,
+      missing
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
 
-    for (const paper of normalized.papers) {
-      insertPaper.run(
-        paper.id,
-        paper.title,
-        paper.titleZh ?? null,
-        paper.year ?? null,
-        paper.publication ?? null,
-        paper.doi ?? null,
-        paper.url ?? null,
-        paper.abstractText ?? null,
-        paper.itemType ?? 'journalArticle',
-        paper.publisher ?? null,
-        paper.institution ?? null,
-        paper.reportNumber ?? null,
-        paper.volume ?? null,
-        paper.issue ?? null,
-        paper.pages ?? null,
-        paper.isbn ?? null,
-        paper.issn ?? null,
-        Number(paper.importedAt) || 0,
-        Number(paper.updatedAt) || 0,
-        paper.lastReadAt ?? null,
-        Number(paper.readingProgress) || 0,
-        boolToInteger(paper.isFavorite),
-        paper.userNote ?? null,
-        paper.aiSummary ?? null,
-        paper.citation ?? null,
-        paper.source || 'local',
-        Number(paper.sortOrder) || 0,
-      );
-
+  const writers = {
+    insertRow(paper) {
+      insertPaper.run(...paperRowValues(paper));
+    },
+    upsertRow(paper) {
+      upsertPaper.run(...paperRowValues(paper));
+    },
+    insertRelations(paper) {
       (paper.keywords ?? []).forEach((keyword, index) => {
         insertKeyword.run(paper.id, String(keyword), index);
       });
@@ -706,6 +879,81 @@ function saveLibraryToDb(db, appPaths, normalizeLibrary, library) {
           boolToInteger(attachment.missing),
         );
       });
+    },
+    replaceRelations(paper) {
+      for (const statement of deleteRelations) statement.run(paper.id);
+      writers.insertRelations(paper);
+    },
+  };
+
+  return writers;
+}
+
+/** 单项增量事务（P2-1）：UPSERT 一篇文献并重建其关联表，不重写全库。 */
+function savePaperToDb(db, paper) {
+  withTransaction(db, () => {
+    const writers = createPaperWriters(db);
+    writers.upsertRow(paper);
+    writers.replaceRelations(paper);
+  });
+  return paper;
+}
+
+/** 单篇删除：papers 行删除后关联表（含 paper_references）经外键级联清理。 */
+function deletePaperFromDb(db, paperId) {
+  const id = cleanString(paperId);
+  if (!id) return;
+
+  withTransaction(db, () => {
+    db.prepare('DELETE FROM papers WHERE id = ?').run(id);
+  });
+}
+
+function saveLibraryToDb(db, appPaths, normalizeLibrary, library) {
+  const normalized = normalizeLibrary(library, appPaths);
+
+  withTransaction(db, () => {
+    const referenceCache = loadReferenceRows(db);
+    clearData(db);
+    saveKeyValueTable(db, 'library_settings', normalized.settings);
+    saveKeyValueTable(db, 'webdav_settings', normalized.webdav);
+    db.prepare(`
+      INSERT INTO library_meta (key, value)
+      VALUES ('initialized', '1'), ('version', '1')
+      ON CONFLICT (key) DO UPDATE SET value = excluded.value
+    `).run();
+
+    const insertCategory = db.prepare(`
+      INSERT INTO categories (
+        id,
+        name,
+        parent_id,
+        sort_order,
+        is_system,
+        system_key,
+        created_at,
+        updated_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const writers = createPaperWriters(db);
+
+    for (const category of normalized.categories) {
+      insertCategory.run(
+        category.id,
+        category.name,
+        category.parentId ?? null,
+        Number(category.sortOrder) || 0,
+        boolToInteger(category.isSystem),
+        category.systemKey ?? null,
+        Number(category.createdAt) || 0,
+        Number(category.updatedAt) || 0,
+      );
+    }
+
+    for (const paper of normalized.papers) {
+      writers.insertRow(paper);
+      writers.insertRelations(paper);
     }
 
     restoreReferenceRows(
@@ -756,6 +1004,50 @@ function createLibraryDatabaseStore(appPaths, helpers) {
 
     saveSync(library) {
       saveLibraryToDb(db, appPaths, normalizeLibrary, library);
+    },
+
+    queryPapers(request) {
+      return queryPapersFromDb(db, request);
+    },
+
+    listPaperIds(request) {
+      return listPaperIdsFromDb(db, request);
+    },
+
+    countPapers(request) {
+      return countPapersFromDb(db, request);
+    },
+
+    listCategoriesWithCounts() {
+      return listCategoriesWithCountsFromDb(db);
+    },
+
+    getPaper(paperId) {
+      return getPaperFromDb(db, paperId);
+    },
+
+    getPaperIdByAttachment(attachmentId) {
+      return getPaperIdByAttachmentId(db, attachmentId);
+    },
+
+    findAttachmentsByStoredPath(storedPath) {
+      return db
+        .prepare(
+          'SELECT id, paper_id AS paperId, stored_path AS storedPath FROM attachments WHERE lower(stored_path) = lower(?)',
+        )
+        .all(cleanString(storedPath));
+    },
+
+    savePaper(paper) {
+      return savePaperToDb(db, paper);
+    },
+
+    deletePaper(paperId) {
+      deletePaperFromDb(db, paperId);
+    },
+
+    loadSettings() {
+      return loadKeyValueTable(db, 'library_settings');
     },
 
     saveReferences(paperId, refs) {
