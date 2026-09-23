@@ -44,6 +44,7 @@ import { formatFileSize } from '../../utils/files';
 interface AgentWorkspaceViewProps {
   activeSessionId: string;
   activeSessionRunning: boolean;
+  activeSessionCancelling: boolean;
   agentAttachments: DocumentChatAttachment[];
   agentModelPresets: QaModelPreset[];
   agentRagEnabled: boolean;
@@ -272,6 +273,7 @@ function AgentReasoningPicker({
 export default function AgentWorkspaceView({
   activeSessionId,
   activeSessionRunning,
+  activeSessionCancelling,
   agentAttachments,
   agentModelPresets,
   agentRagEnabled,
@@ -977,18 +979,26 @@ export default function AgentWorkspaceView({
 
                     <button
                       type={activeSessionRunning ? 'button' : 'submit'}
-                      onClick={activeSessionRunning ? onCancelAgentRun : undefined}
-                      disabled={activeSessionRunning ? false : !canSubmitPrompt}
+                      onClick={activeSessionRunning && !activeSessionCancelling ? onCancelAgentRun : undefined}
+                      disabled={activeSessionRunning ? activeSessionCancelling : !canSubmitPrompt}
                       className={activeSessionRunning
-                        ? 'pq-button h-11 shrink-0 border-rose-200 px-5 text-sm text-rose-600 dark:border-rose-300/20 dark:text-rose-300'
+                        ? 'pq-button h-11 shrink-0 border-rose-200 px-5 text-sm text-rose-600 disabled:opacity-60 dark:border-rose-300/20 dark:text-rose-300'
                         : 'pq-button-primary h-11 shrink-0 px-5 text-sm disabled:opacity-50'}
                     >
                       {activeSessionRunning ? (
-                        <X className="h-4 w-4" strokeWidth={2} />
+                        activeSessionCancelling ? (
+                          <Loader2 className="h-4 w-4 animate-spin" strokeWidth={2} />
+                        ) : (
+                          <X className="h-4 w-4" strokeWidth={2} />
+                        )
                       ) : (
                         <Send className="h-4 w-4" strokeWidth={2} />
                       )}
-                      {activeSessionRunning ? l('取消', 'Cancel') : l('发送', 'Send')}
+                      {activeSessionRunning
+                        ? activeSessionCancelling
+                          ? l('正在取消', 'Cancelling')
+                          : l('取消', 'Cancel')
+                        : l('发送', 'Send')}
                     </button>
                   </div>
                 </form>

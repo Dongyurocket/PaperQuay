@@ -24,22 +24,47 @@ function recoveredLoopMessage(value: unknown): AgentLoopMessage | null {
   if (!isRecord(value)) return null;
   const role = value.role;
   const content = typeof value.content === 'string' ? value.content : '';
+  const toolCalls = Array.isArray(value.toolCalls)
+    ? value.toolCalls.map(recoveredToolCall).filter((call): call is NonNullable<typeof call> => Boolean(call))
+    : undefined;
 
-  if (
-    (role !== 'system' && role !== 'assistant' && role !== 'user' && role !== 'tool') ||
-    !content
-  ) {
+  if (role !== 'system' && role !== 'assistant' && role !== 'user' && role !== 'tool') {
+    return null;
+  }
+
+  // 工具调用轮的 assistant 消息 content 通常为空，但它是后续 tool 消息的合法前置，必须保留。
+  if (!content && !(role === 'assistant' && toolCalls && toolCalls.length > 0)) {
     return null;
   }
 
   return {
     role,
-    content,
+    content: content || ' ',
     toolCallId: typeof value.toolCallId === 'string' ? value.toolCallId : undefined,
-    toolCalls: Array.isArray(value.toolCalls)
-      ? value.toolCalls.map(recoveredToolCall).filter((call): call is NonNullable<typeof call> => Boolean(call))
-      : undefined,
+    toolCalls,
   };
+}
+
+/** 双向清理孤儿消息：无应答的 assistant toolCalls 与没有前置 toolCalls 的 tool 消息都会被 provider 拒绝。 */
+function sanitizeRecoveredLoopMessages(messages: AgentLoopMessage[]): AgentLoopMessage[] {
+  const answeredCallIds = new Set(
+    messages.filter((message) => message.role === 'tool').map((message) => message.toolCallId),
+  );
+  const declaredCallIds = new Set(
+    messages.flatMap((message) => (message.toolCalls ?? []).map((call) => call.id)),
+  );
+
+  return messages.filter((message) => {
+    if (message.role === 'tool') {
+      return Boolean(message.toolCallId && declaredCallIds.has(message.toolCallId));
+    }
+
+    if (message.role === 'assistant' && message.toolCalls && message.toolCalls.length > 0) {
+      return message.toolCalls.every((call) => answeredCallIds.has(call.id));
+    }
+
+    return true;
+  });
 }
 
 export function latestComparativeSurveyCheckpoint(
@@ -94,9 +119,11 @@ export function latestAgentRecoveryCheckpoint(events: AgentRunEventRecord[]): Ag
       continue;
     }
 
-    const messages = event.payload.messages
-      .map(recoveredLoopMessage)
-      .filter((message): message is AgentLoopMessage => Boolean(message));
+    const messages = sanitizeRecoveredLoopMessages(
+      event.payload.messages
+        .map(recoveredLoopMessage)
+        .filter((message): message is AgentLoopMessage => Boolean(message)),
+    );
 
     if (messages.length > 0) {
       return messages;

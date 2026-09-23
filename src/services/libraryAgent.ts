@@ -1989,13 +1989,40 @@ function isLikelyAgentStreamUnsupportedError(message: string): boolean {
   ].some((signal) => normalized.includes(signal));
 }
 
+function legacyAgentAbortError(): Error {
+  const error = new Error('Agent run aborted');
+  error.name = 'AbortError';
+  return error;
+}
+
+/** legacy IPC 调用无法直接接收 AbortSignal，改用 requestId + agent_chat_turn_cancel 实现取消。 */
+function wireLegacyAgentTurnCancel(signal: AbortSignal | undefined, requestId: string): () => void {
+  if (!signal) {
+    return () => {};
+  }
+
+  const cancel = () => {
+    void invoke('agent_chat_turn_cancel', { requestId }).catch(() => {});
+  };
+
+  if (signal.aborted) {
+    cancel();
+  }
+
+  signal.addEventListener('abort', cancel, { once: true });
+  return () => signal.removeEventListener('abort', cancel);
+}
+
 async function generateLibraryAgentPlanOpenAICompatible(
   options: OpenAICompatibleLibraryAgentOptions,
   streamHandlers?: LibraryAgentStreamHandlers,
+  signal?: AbortSignal,
 ): Promise<LibraryAgentGeneratedResponse> {
+  const requestId = crypto.randomUUID();
+  const unwireCancel = wireLegacyAgentTurnCancel(signal, requestId);
+
   try {
     if (streamHandlers) {
-      const requestId = crypto.randomUUID();
       let answer = '';
       let thinking = '';
       let streamError = '';
@@ -2054,6 +2081,7 @@ async function generateLibraryAgentPlanOpenAICompatible(
 
         if (isLikelyAgentStreamUnsupportedError(message)) {
           return await invoke<LibraryAgentGeneratedResponse>('generate_library_agent_plan_openai_compatible', {
+            requestId,
             options,
           });
         }
@@ -2066,27 +2094,43 @@ async function generateLibraryAgentPlanOpenAICompatible(
     }
 
     return await invoke<LibraryAgentGeneratedResponse>('generate_library_agent_plan_openai_compatible', {
+      requestId,
       options,
     });
   } catch (error) {
+    if (signal?.aborted) {
+      throw legacyAgentAbortError();
+    }
     throw new Error(toErrorMessage(error, '调用大模型 Agent 工具失败'));
+  } finally {
+    unwireCancel();
   }
 }
 
 async function decideLibraryAgentPaperContextOpenAICompatible(
   options: OpenAICompatibleLibraryAgentOptions,
+  signal?: AbortSignal,
 ): Promise<LibraryAgentPaperContextDecision | null> {
   if (!Array.isArray(options.papers) || options.papers.length === 0) {
     return null;
   }
 
+  const requestId = crypto.randomUUID();
+  const unwireCancel = wireLegacyAgentTurnCancel(signal, requestId);
+
   try {
     return await invoke<LibraryAgentPaperContextDecision>('decide_library_agent_paper_context_openai_compatible', {
+      requestId,
       options,
     });
   } catch (error) {
+    if (signal?.aborted) {
+      throw legacyAgentAbortError();
+    }
     console.warn('Failed to run paper-context decision', error);
     return null;
+  } finally {
+    unwireCancel();
   }
 }
 
@@ -2104,6 +2148,7 @@ async function retryWithoutUserChoice({
   paperInputs,
   citations,
   reason,
+  signal,
 }: {
   papers: LiteraturePaper[];
   categories?: LiteratureCategory[];
@@ -2118,6 +2163,7 @@ async function retryWithoutUserChoice({
   paperInputs?: LibraryAgentPaperInput[];
   citations?: LibraryAgentRagCitation[];
   reason?: string;
+  signal?: AbortSignal;
 }): Promise<LibraryAgentRunResult> {
   const categoryPayload = buildAgentCategoryPayload(categories);
   const retryResponse = await generateLibraryAgentPlanOpenAICompatible(
@@ -2151,6 +2197,7 @@ async function retryWithoutUserChoice({
       )),
     },
     streamHandlers,
+    signal,
   );
 
   const parsed = resultFromGeneratedResponse({
@@ -2189,6 +2236,7 @@ async function requestDynamicUserChoices({
   historyMessages = [],
   currentPaperScopeIds = [],
   paperScopes = [],
+  signal,
 }: {
   papers: LiteraturePaper[];
   categories?: LiteratureCategory[];
@@ -2200,6 +2248,7 @@ async function requestDynamicUserChoices({
   historyMessages?: LibraryAgentConversationMessage[];
   currentPaperScopeIds?: string[];
   paperScopes?: LibraryAgentPaperScopeInput[];
+  signal?: AbortSignal;
 }): Promise<LibraryAgentRunResult> {
   const categoryPayload = buildAgentCategoryPayload(categories);
   const response = await generateLibraryAgentPlanOpenAICompatible(
@@ -2227,6 +2276,7 @@ async function requestDynamicUserChoices({
       papers: papers.map((paper) => paperToAgentInput(paper, undefined, categoryPayload.categoryPathById)),
     },
     streamHandlers,
+    signal,
   );
 
   if (response.kind === 'choice-request' && hasValidUserChoices(response.userChoices)) {
@@ -2323,6 +2373,7 @@ async function runLegacyConversationalLibraryAgent({
   paperScopes = [],
   responseLanguage,
   ragEnabled = true,
+  signal,
 }: {
   papers: LiteraturePaper[];
   categories?: LiteratureCategory[];
@@ -2334,6 +2385,7 @@ async function runLegacyConversationalLibraryAgent({
   paperScopes?: LibraryAgentPaperScopeInput[];
   responseLanguage?: string;
   ragEnabled?: boolean;
+  signal?: AbortSignal;
 }): Promise<LibraryAgentRunResult> {
   if (!preset.baseUrl.trim() || !preset.apiKey.trim() || !preset.model.trim()) {
     throw new Error('请先在设置里配置支持 tool/function calling 的 OpenAI-compatible 模型。');
@@ -2370,6 +2422,7 @@ async function runLegacyConversationalLibraryAgent({
       categories: categoryPayload.categories,
       papers: paperInputsWithoutContext,
     },
+    signal,
   );
 
   if (paperContextDecision?.action === 'ask-user-to-select-papers' && paperContextDecision.paperIds.length === 0) {
@@ -2415,6 +2468,7 @@ async function runLegacyConversationalLibraryAgent({
       papers: paperInputsWithoutContext,
     },
     streamHandlers,
+    signal,
   );
 
   if (generatedResponse.kind === 'answer') {
@@ -2435,6 +2489,7 @@ async function runLegacyConversationalLibraryAgent({
         historyMessages,
         currentPaperScopeIds,
         paperScopes,
+        signal,
       });
     }
 
@@ -2461,6 +2516,7 @@ async function runLegacyConversationalLibraryAgent({
           paperScopes,
           contextLabel: metadataContextLabel,
           reason: 'Model returned choice-request without valid options even though target papers were already provided.',
+          signal,
         });
       }
 
@@ -2533,6 +2589,7 @@ async function runLegacyConversationalLibraryAgent({
           papers: enrichedContext.inputs,
         },
         streamHandlers,
+        signal,
       );
     } catch (contextError) {
       if (!isLikelyContextSizeError(contextError)) {
@@ -2555,6 +2612,7 @@ async function runLegacyConversationalLibraryAgent({
         historyMessages,
         currentPaperScopeIds,
         paperScopes,
+        signal,
       });
     }
 
@@ -2593,6 +2651,7 @@ async function runLegacyConversationalLibraryAgent({
           paperInputs: enrichedContext.inputs,
           citations: enrichedContext.citations,
           reason: 'Model returned choice-request without valid options after paper context was loaded.',
+          signal,
         });
       }
 
@@ -2889,6 +2948,7 @@ export async function runConversationalLibraryAgent({
       paperScopes,
       responseLanguage,
       ragEnabled,
+      signal,
     });
   }
 
@@ -2922,7 +2982,7 @@ export async function runConversationalLibraryAgent({
     paperScopes,
     categories: categoryPayload.categories,
     papers: paperInputs,
-  });
+  }, signal);
 
   if (paperContextDecision?.action === 'ask-user-to-select-papers' && paperContextDecision.paperIds.length === 0) {
     return paperSelectionResultFromContextRequest(

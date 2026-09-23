@@ -103,7 +103,16 @@ function createCapabilityView() {
 }
 
 function recoverySnapshotMessages(messages: AgentLoopMessage[]) {
-  return messages.slice(-32).map((message) => ({
+  // 始终保留系统提示；窗口不从 tool 消息开始，避免产生没有前置 assistant toolCalls 的孤儿消息。
+  const root = messages[0]?.role === 'system' ? messages[0] : null;
+  const rest = root ? messages.slice(1) : messages;
+  let windowed = rest.slice(-32);
+
+  while (windowed.length > 0 && windowed[0]?.role === 'tool') {
+    windowed = windowed.slice(1);
+  }
+
+  return [...(root ? [root] : []), ...windowed].map((message) => ({
     role: message.role,
     content: message.content.slice(0, 8000),
     toolCallId: message.toolCallId,
@@ -181,6 +190,7 @@ function AgentWorkspace() {
   const [loading, setLoading] = useState(true);
   const [applyingPlan, setApplyingPlan] = useState(false);
   const [runningSessionIds, setRunningSessionIds] = useState<Set<string>>(() => new Set());
+  const [cancellingSessionIds, setCancellingSessionIds] = useState<Set<string>>(() => new Set());
   const runningSessionIdsRef = useRef(runningSessionIds);
   const activeSessionIdRef = useRef(activeSessionId);
   const [statusMessage, setStatusMessage] = useState('');
@@ -902,7 +912,8 @@ function AgentWorkspace() {
     let runTurns = 0;
     const runTokens = { promptTokens: 0, completionTokens: 0 };
     const appendRunEvent = (event: AgentLoopEvent) => {
-      if (!runId || event.kind === 'thinking_delta') {
+      // delta 事件没有重放/恢复价值，不落库，避免每个 token 产生一次 IPC + SQLite 写入。
+      if (!runId || event.kind === 'thinking_delta' || event.kind === 'answer_delta') {
         return;
       }
 
@@ -914,8 +925,6 @@ function AgentWorkspace() {
             return { kind: 'tool_call', turn: event.turn, payload: { turn: event.turn, callId: event.callId, name: event.name, args: event.args } };
           case 'tool_result':
             return { kind: 'tool_result', turn: event.turn, payload: { turn: event.turn, callId: event.callId, name: event.name, ok: event.ok, preview: event.preview } };
-          case 'answer_delta':
-            return { kind: 'answer_delta', payload: { characters: event.text.length } };
           case 'context_compacted':
             return {
               kind: 'context_compacted',
@@ -1442,8 +1451,20 @@ function AgentWorkspace() {
           // The primary answer has already been delivered; avoid surfacing telemetry-only failures.
         }
       }
-      setAgentSessionRunning(sessionId, false);
-      abortControllersRef.current.delete(sessionId);
+      // 仅当 controller 仍是本 run 的实例时才收敛运行状态，
+      // 避免旧 run 的 finally 误清新 run 的 controller 与 running 标志。
+      if (abortControllersRef.current.get(sessionId) === abortController) {
+        abortControllersRef.current.delete(sessionId);
+        setAgentSessionRunning(sessionId, false);
+        setCancellingSessionIds((current) => {
+          if (!current.has(sessionId)) {
+            return current;
+          }
+          const next = new Set(current);
+          next.delete(sessionId);
+          return next;
+        });
+      }
     }
   };
 
@@ -1456,16 +1477,9 @@ function AgentWorkspace() {
     }
 
     controller.abort();
+    setCancellingSessionIds((current) => new Set(current).add(activeSessionId));
+    // 取消的收敛完全交给 run 自身的 finally，不用定时器强制清态，避免双 run 竞态。
     setStatusMessage(l('正在取消当前运行...', 'Cancelling the current run...'));
-
-    const sid = activeSessionId;
-    window.setTimeout(() => {
-      if (abortControllersRef.current.has(sid)) {
-        abortControllersRef.current.delete(sid);
-        setAgentSessionRunning(sid, false);
-        setStatusMessage(l('已取消当前运行。', 'Current run cancelled.'));
-      }
-    }, 500);
   };
 
   const submitPrompt = (value: string) => {
@@ -1858,13 +1872,24 @@ function AgentWorkspace() {
 
     void (async () => {
       try {
-        const [interruptedRun] = await listInterruptedAgentRuns(session.id);
+        // 本进程内仍有活跃 controller 的会话，其 running 行属于正在执行的 run，不视为中断。
+        if (abortControllersRef.current.has(session.id)) {
+          return;
+        }
+
+        const interruptedRuns = await listInterruptedAgentRuns(session.id);
+        const [interruptedRun, ...staleRuns] = interruptedRuns;
 
         if (!interruptedRun || activeSessionIdRef.current !== session.id) {
           return;
         }
 
-        const events = await getAgentRunEvents(interruptedRun.runId);
+        // 同会话其余遗留 running 行一并清理，避免每次打开会话重复提示。
+        for (const staleRun of staleRuns) {
+          await finishAgentRun({ runId: staleRun.runId, status: 'aborted' }).catch(() => {});
+        }
+
+        const events = await getAgentRunEvents(interruptedRun.runId, 0, { order: 'desc', limit: 200 });
         const checkpoint = latestAgentRecoveryCheckpoint(events);
         const capabilityCheckpoint = latestComparativeSurveyCheckpoint(events);
 
@@ -1998,6 +2023,7 @@ function AgentWorkspace() {
     <AgentWorkspaceView
       activeSessionId={activeSessionId}
       activeSessionRunning={activeSessionRunning}
+      activeSessionCancelling={cancellingSessionIds.has(activeSessionId)}
       agentAttachments={agentAttachments}
       agentModelPresets={agentModelPresets}
       agentRagEnabled={agentRagEnabled}

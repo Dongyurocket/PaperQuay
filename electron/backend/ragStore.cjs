@@ -1906,6 +1906,18 @@ function createRagStore(appPaths, options = {}) {
     const afterId = normalizeNonNegativeInteger(request?.afterId);
     const limit = Math.min(500, Math.max(1, normalizeNonNegativeInteger(request?.limit, 200)));
 
+    // order=desc 时取最新 N 条（再反转为时间升序返回），供中断恢复读取最近的 checkpoint，
+    // 避免流式事件把 checkpoint 挤出最旧 200 条的读取窗口。
+    if (request?.order === 'desc') {
+      return db.prepare(`
+        SELECT *
+        FROM agent_run_events
+        WHERE run_id = ? AND id > ?
+        ORDER BY id DESC
+        LIMIT ?
+      `).all(runId, afterId, limit).reverse().map(rowToAgentRunEvent);
+    }
+
     return db.prepare(`
       SELECT *
       FROM agent_run_events

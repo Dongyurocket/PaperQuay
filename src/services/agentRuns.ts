@@ -89,10 +89,14 @@ export async function finishAgentRun(input: {
   }
 }
 
-export async function getAgentRunEvents(runId: string, afterId = 0): Promise<AgentRunEventRecord[]> {
+export async function getAgentRunEvents(
+  runId: string,
+  afterId = 0,
+  options?: { limit?: number; order?: 'asc' | 'desc' },
+): Promise<AgentRunEventRecord[]> {
   try {
     return await invoke<AgentRunEventRecord[]>('agent_run_events_get', {
-      request: { runId, afterId },
+      request: { runId, afterId, limit: options?.limit, order: options?.order },
     });
   } catch (error) {
     throw new Error(toErrorMessage(error, '读取 Agent 运行事件失败'));
