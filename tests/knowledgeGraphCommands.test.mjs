@@ -103,8 +103,8 @@ function createContext(overrides = {}) {
   };
 }
 
-test('knowledge graph snapshot includes library, note, tag, category, and embedding edges', () => {
-  const snapshot = createKnowledgeGraphSnapshot(createContext(), {
+test('knowledge graph snapshot includes library, note, tag, category, and embedding edges', async () => {
+  const snapshot = await createKnowledgeGraphSnapshot(createContext(), {
     embeddingMinSimilarity: 0.8,
     embeddingEdgeLimit: 10,
   });
@@ -131,8 +131,8 @@ test('knowledge graph snapshot includes library, note, tag, category, and embedd
   assert.equal(semanticEdge?.weight, 0.91);
 });
 
-test('knowledge graph builds citation edges from cached paper references', () => {
-  const snapshot = createKnowledgeGraphSnapshot(createContext({
+test('knowledge graph builds citation edges from cached paper references', async () => {
+  const snapshot = await createKnowledgeGraphSnapshot(createContext({
     paperReferences: [
       {
         id: 'ref:paper-2:1',
@@ -207,7 +207,7 @@ test('knowledge graph includes persisted custom and AI-approved relations', asyn
       'utf8',
     );
 
-    const snapshot = createKnowledgeGraphSnapshot(createContext({ dataDir: dir }));
+    const snapshot = await createKnowledgeGraphSnapshot(createContext({ dataDir: dir }));
     const customEdge = snapshot.edges.find((edge) => edge.id === 'rel-1');
     const aiEdge = snapshot.edges.find((edge) => edge.id === 'rel-2');
 
@@ -230,8 +230,8 @@ test('knowledge graph AI generation falls back when responses upstream fails', (
   assert.equal(shouldFallbackToChatCompletions(new Error('Model returned invalid JSON')), false);
 });
 
-test('knowledge graph local mode keeps only nodes within the requested depth', () => {
-  const snapshot = createKnowledgeGraphSnapshot(createContext(), {
+test('knowledge graph local mode keeps only nodes within the requested depth', async () => {
+  const snapshot = await createKnowledgeGraphSnapshot(createContext(), {
     localNodeId: 'paper:paper-1',
     localDepth: 1,
   });

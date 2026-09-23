@@ -11,7 +11,7 @@ type ReadLocalTextFileIfExists = (path: string) => Promise<string | null>;
 // 缓存 manifest 的 PDF 路径校验只需要存在性检查；此前用整份 PDF 读取做隐式校验，
 // 大文献每次打开都会全量读盘且字节未被复用。
 type LocalPathExists = (path: string) => Promise<boolean>;
-type ParseMineruPages = (payload: string | unknown) => MineruPage[];
+type ParseMineruPages = (payload: string | unknown) => MineruPage[] | Promise<MineruPage[]>;
 type ParseMineruMarkdownPages = (markdownText: string) => MineruPage[];
 type SummaryCacheEnvelope = {
   sourceKey: string;
@@ -140,7 +140,7 @@ export async function loadSavedMineruPages({
         if (!jsonText) continue;
 
         return {
-          pages: parsePages(jsonText),
+          pages: await Promise.resolve(parsePages(jsonText)),
           path: candidatePath,
           message: l(
             `已从本地缓存恢复《${item.title}》的解析结果`,

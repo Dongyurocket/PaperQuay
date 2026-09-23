@@ -904,3 +904,158 @@ test('RAG chunk context reports not-ready, not-found and stays source-isolated',
     rmSync(dataDir, { recursive: true, force: true });
   }
 });
+
+test('RAG chunk context stays inside the chunk generation and section', () => {
+  const { dataDir, store } = createStore({ deferVectorBackfill: true });
+
+  try {
+    store.indexDocument({
+      documentKey: 'doc-section',
+      title: 'Sectioned Document',
+      sourceType: 'mineru-markdown',
+      sourceSignature: 'sig-section',
+      embeddingModelKey: 'embedding-test',
+      generationId: 'gen-1',
+      totalChunkCount: 3,
+      chunks: [
+        {
+          chunkId: 's-1',
+          chunkIndex: 0,
+          text: 'intro',
+          sectionId: 'sec-a',
+          sectionPath: ['Introduction'],
+          startOffset: 0,
+          endOffset: 5,
+          embedding: [0.1, 0.1, 0.1, 0.1],
+        },
+        {
+          chunkId: 's-2',
+          chunkIndex: 1,
+          text: 'method',
+          sectionId: 'sec-b',
+          sectionPath: ['Methods'],
+          embedding: [0.2, 0.2, 0.2, 0.2],
+        },
+        {
+          chunkId: 's-3',
+          chunkIndex: 2,
+          text: 'old generation',
+          generationId: 'gen-0',
+          sectionId: 'sec-a',
+          embedding: [0.3, 0.3, 0.3, 0.3],
+        },
+      ],
+    });
+
+    const bounded = store.getChunkContext({
+      documentKey: 'doc-section',
+      sourceType: 'mineru-markdown',
+      chunkId: 's-1',
+      before: 2,
+      after: 2,
+    });
+    assert.equal(bounded.status, 'ready');
+    assert.deepEqual(bounded.sectionPath, ['Introduction']);
+    assert.equal(bounded.generationId, 'gen-1');
+    assert.deepEqual(bounded.slices.map((slice) => slice.chunkId), ['s-1']);
+    assert.equal(bounded.truncationReason, 'boundary');
+
+    const wholeDocument = store.getChunkContext({
+      documentKey: 'doc-section',
+      sourceType: 'mineru-markdown',
+      chunkId: 's-1',
+      before: 2,
+      after: 2,
+      boundary: 'document',
+    });
+    assert.deepEqual(wholeDocument.slices.map((slice) => slice.chunkId), ['s-1', 's-2']);
+    assert.equal(wholeDocument.truncationReason, null);
+  } finally {
+    store.close();
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('vector backfill advances by document key without dropping chunks', () => {
+  const { dataDir, store } = createStore({ deferVectorBackfill: true });
+
+  try {
+    for (const key of ['doc-a', 'doc-b']) {
+      store.indexDocument({
+        documentKey: key,
+        title: key,
+        sourceType: 'pdf-text',
+        sourceSignature: `sig-${key}`,
+        embeddingModelKey: 'embedding-test',
+        totalChunkCount: 1,
+        chunks: [{
+          chunkId: `${key}-1`,
+          chunkIndex: 0,
+          text: `text ${key}`,
+          embedding: [0.1, 0.2, 0.3, 0.4],
+        }],
+      });
+    }
+
+    const first = store.stepVectorBackfill(1);
+    assert.equal(first.done, false);
+    assert.equal(first.processed, 1);
+    assert.equal(store.vectorBackfillStatus().done, false);
+    assert.equal(store.vectorBackfillStatus().cursor, 'doc-a');
+
+    const stillThere = store.getChunkContext({
+      documentKey: 'doc-b',
+      sourceType: 'pdf-text',
+      chunkId: 'doc-b-1',
+    });
+    assert.equal(stillThere.status, 'ready');
+    assert.equal(stillThere.slices[0].text, 'text doc-b');
+
+    assert.equal(store.stepVectorBackfill(1).done, false);
+    const finished = store.stepVectorBackfill(1);
+    assert.equal(finished.done, true);
+    assert.equal(store.vectorBackfillStatus().done, true);
+    assert.equal(store.vectorBackfillStatus().cursor, '');
+  } finally {
+    store.close();
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('RAG worker answers chunk context from its own thread', async () => {
+  const { createRagWorkerStore } = require('../electron/backend/ragWorkerHost.cjs');
+  const dataDir = mkdtempSync(path.join(tmpdir(), 'paperquay-rag-worker-'));
+  const store = createRagWorkerStore({
+    ragDatabasePath: path.join(dataDir, 'paperquay-rag.sqlite'),
+  }, { deferVectorBackfill: true });
+
+  try {
+    await store.indexDocument({
+      documentKey: 'doc-worker',
+      title: 'Worker Document',
+      sourceType: 'pdf-text',
+      sourceSignature: 'sig-worker',
+      embeddingModelKey: 'embedding-test',
+      totalChunkCount: 2,
+      chunks: [0, 1].map((chunkIndex) => ({
+        chunkId: `w-${chunkIndex}`,
+        chunkIndex,
+        text: `worker chunk ${chunkIndex}`,
+        embedding: [0.2, 0.2, 0.2, 0.2],
+      })),
+    });
+
+    const context = await store.getChunkContext({
+      documentKey: 'doc-worker',
+      sourceType: 'pdf-text',
+      chunkId: 'w-0',
+      before: 0,
+      after: 1,
+    });
+    assert.equal(context.status, 'ready');
+    assert.deepEqual(context.slices.map((slice) => slice.chunkId), ['w-0', 'w-1']);
+  } finally {
+    await store.close();
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});

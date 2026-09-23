@@ -443,7 +443,7 @@ function filterLocalGraph(snapshot, localNodeId, depth) {
   };
 }
 
-function createKnowledgeGraphSnapshot(context, request = {}) {
+async function createKnowledgeGraphSnapshot(context, request = {}) {
   const { appPaths, noteStore, ragStore, store } = context;
   const includePapers = normalizeBoolean(request.includePapers, true);
   const includeNotes = normalizeBoolean(request.includeNotes, true);
@@ -696,11 +696,12 @@ function createKnowledgeGraphSnapshot(context, request = {}) {
       paper.id,
       `${NATIVE_LIBRARY_PREFIX}${paper.id}`,
     ]);
-    for (const similarity of ragStore.listDocumentSimilarities({
+    const similarities = await Promise.resolve(ragStore.listDocumentSimilarities({
       documentKeys,
       limit: embeddingEdgeLimit,
       minSimilarity: embeddingMinSimilarity,
-    })) {
+    }));
+    for (const similarity of similarities) {
       const sourcePaperId = resolvePaperReference(similarity.sourceDocumentKey);
       const targetPaperId = resolvePaperReference(similarity.targetDocumentKey);
 
@@ -849,7 +850,7 @@ async function openAiChatWithGraphFallback(options, messages, extra) {
 
 async function suggestAiRelations(context, request = {}, options = {}) {
   const maxRelations = normalizeLimit(request.maxRelations, 8, 1, MAX_AI_GRAPH_SUGGESTIONS);
-  const snapshot = createKnowledgeGraphSnapshot(context, {
+  const snapshot = await createKnowledgeGraphSnapshot(context, {
     includeEmbeddingEdges: true,
     includeCustomRelations: true,
     embeddingEdgeLimit: 80,
@@ -937,7 +938,7 @@ async function suggestAiRelations(context, request = {}, options = {}) {
 
 function createKnowledgeGraphCommands(context) {
   return {
-    knowledge_graph_get({ request = {} }) {
+    async knowledge_graph_get({ request = {} }) {
       return createKnowledgeGraphSnapshot(context, request);
     },
     knowledge_graph_list_relations() {

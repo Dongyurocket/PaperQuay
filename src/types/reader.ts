@@ -207,6 +207,11 @@ export interface RagChunkInput {
   pageIndex: number | null;
   blockId?: string | null;
   text: string;
+  sectionId?: string | null;
+  sectionPath?: string[] | null;
+  startOffset?: number | null;
+  endOffset?: number | null;
+  textVersion?: string | null;
 }
 
 export interface RagIndexedChunkInput extends RagChunkInput {
@@ -220,6 +225,8 @@ export interface RagIndexDocumentRequest {
   sourceSignature: string;
   embeddingModelKey: string;
   totalChunkCount: number;
+  /** 同一次索引共用的代次。缺省时由库写成空字符串，不因此强制重嵌。 */
+  generationId?: string;
   chunks: RagIndexedChunkInput[];
 }
 

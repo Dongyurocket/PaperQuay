@@ -173,7 +173,7 @@ async function collectBackupSources(context, backupId) {
   const ragSnapshotPath = path.join(snapshotDir, 'paperquay-rag.sqlite');
   store.snapshotTo(librarySnapshotPath);
   noteStore.snapshotTo(notesSnapshotPath);
-  ragStore.snapshotTo(ragSnapshotPath);
+  await Promise.resolve(ragStore.snapshotTo(ragSnapshotPath));
 
   const sources = [{
     kind: 'database',

@@ -149,13 +149,13 @@ app.whenReady().then(() => {
     app.setAppUserModelId('dev.paperquay.app');
   }
 
-  getBackend();
-  perfMark('backend:ready');
-  perfMeasure('startup:backend-init', 'app:ready');
   registerLocalPdfProtocol();
   createWindow();
   perfMark('window:created');
   perfMeasure('startup:window-created', 'app:ready');
+  getBackend();
+  perfMark('backend:ready');
+  perfMeasure('startup:backend-init', 'app:ready');
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

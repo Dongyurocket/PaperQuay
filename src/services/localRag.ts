@@ -255,8 +255,12 @@ export async function ensurePreparedSourceIndexed(input: {
           sourceType: input.sourceType,
           sourceSignature: input.sourceSignature,
           embeddingModelKey,
+          generationId: input.sourceSignature,
           totalChunkCount: input.chunks.length,
-          chunks: contiguousReadyChunks,
+          chunks: contiguousReadyChunks.map((chunk) => ({
+            ...chunk,
+            textVersion: chunk.textVersion ?? input.sourceSignature,
+          })),
         });
       }
 

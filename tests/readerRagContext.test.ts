@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildRagContextText } from '../src/features/reader/readerRag.ts';
+import { buildMineruRagChunks, buildRagContextText } from '../src/features/reader/readerRag.ts';
 import type { RagChunkInput, RagRetrievalResult } from '../src/types/reader.ts';
 
 const BODY_SEED_TEXT =
@@ -148,4 +148,45 @@ test('buildRagContextText keeps heading expansion and marks supplements as conte
   const supplement = context.retrievals.find((r) => r.chunkId === 'mineru:b-p1:0');
   assert.equal(supplement?.retrievalRole, 'context');
   assert.equal(supplement?.expandedFrom, 'mineru:b-title:0');
+});
+
+test('MinerU chunks keep the current heading and do not cross into the next section', () => {
+  const chunks = buildMineruRagChunks([
+    {
+      type: 'title',
+      blockId: 'h1',
+      pageIndex: 0,
+      blockIndex: 0,
+      content: { text: 'Introduction', text_level: 1 },
+    },
+    {
+      type: 'paragraph',
+      blockId: 'p1',
+      pageIndex: 0,
+      blockIndex: 1,
+      content: { text: 'Opening paragraph.' },
+    },
+    {
+      type: 'title',
+      blockId: 'h2',
+      pageIndex: 0,
+      blockIndex: 2,
+      content: { text: 'Methods', text_level: 1 },
+    },
+    {
+      type: 'paragraph',
+      blockId: 'p2',
+      pageIndex: 0,
+      blockIndex: 3,
+      content: { text: 'Method paragraph.' },
+    },
+  ]);
+
+  const opening = chunks.find((chunk) => chunk.blockId === 'p1');
+  const method = chunks.find((chunk) => chunk.blockId === 'p2');
+  assert.equal(opening?.sectionId, 'h1');
+  assert.deepEqual(opening?.sectionPath, ['Introduction']);
+  assert.equal(opening?.startOffset, 0);
+  assert.equal(method?.sectionId, 'h2');
+  assert.deepEqual(method?.sectionPath, ['Methods']);
 });

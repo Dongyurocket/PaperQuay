@@ -156,6 +156,53 @@ function getTableColumns(db, tableName) {
   }
 }
 
+// 命中后补上同一代次、同一章节的前后各一片。没有新列的旧库仍只返回命中文本。
+function snippetWithNeighbors(ragDb, row) {
+  const text = typeof row?.text === 'string' ? row.text : '';
+  const columns = getTableColumns(ragDb, 'rag_chunks');
+  if (!columns.has('chunk_index') || !row?.paperId || !row?.sourceType || !row?.chunkId) {
+    return text;
+  }
+
+  const hasGeneration = columns.has('generation_id');
+  const hasSection = columns.has('section_id');
+  const current = ragDb.prepare(`
+    SELECT chunk_index AS chunkIndex,
+           ${hasGeneration ? 'generation_id' : "''"} AS generationId,
+           ${hasSection ? 'section_id' : 'NULL'} AS sectionId
+    FROM rag_chunks
+    WHERE document_key = ? AND source_type = ? AND chunk_id = ?
+  `).get(row.paperId, row.sourceType, row.chunkId);
+
+  if (!current) {
+    return text;
+  }
+
+  const params = [row.paperId, row.sourceType, Number(current.chunkIndex) - 1, Number(current.chunkIndex) + 1];
+  let generationClause = '';
+  let sectionClause = '';
+  if (hasGeneration) {
+    generationClause = 'AND generation_id = ?';
+    params.push(current.generationId ?? '');
+  }
+  if (hasSection && current.sectionId) {
+    sectionClause = 'AND section_id = ?';
+    params.push(current.sectionId);
+  }
+
+  const neighbors = ragDb.prepare(`
+    SELECT text
+    FROM rag_chunks
+    WHERE document_key = ? AND source_type = ?
+      AND chunk_index BETWEEN ? AND ?
+      ${generationClause}
+      ${sectionClause}
+    ORDER BY chunk_index
+  `).all(...params);
+  const combined = neighbors.map((item) => item.text).filter((item) => item).join('\n\n');
+  return combined || text;
+}
+
 // ---- 向量混合检索（与桌面端 ragStore.cjs 的混合检索逻辑对齐） ----
 
 const MAX_VECTOR_FANOUT_SOURCES = 500;
@@ -696,7 +743,7 @@ class PaperQuayKnowledgeService {
         pageNumber: row.pageIndex !== null && row.pageIndex !== undefined ? Number(row.pageIndex) + 1 : null,
         blockId: row.blockId || null,
         sourceType: row.sourceType,
-        snippet: row.text,
+        snippet: snippetWithNeighbors(ragDb, row),
         score: row.score,
         channels,
       });

@@ -52,17 +52,36 @@ function createUnavailableRagStore(error) {
   };
 }
 
+function createInProcessRagStore(appPaths) {
+  const { createRagStore } = require('./backend/ragStore.cjs');
+  return {
+    available: true,
+    execution: 'in-process',
+    ...createRagStore(appPaths),
+  };
+}
+
 function createRagStoreSafely(appPaths) {
+  if (process.env.PAPERQUAY_RAG_INPROCESS === '1') {
+    try {
+      return createInProcessRagStore(appPaths);
+    } catch (error) {
+      console.error('[paperquay] Local RAG storage failed to initialize', error);
+      return createUnavailableRagStore(error);
+    }
+  }
+
   try {
-    const { createRagStore } = require('./backend/ragStore.cjs');
-    const ragStore = createRagStore(appPaths);
-    return {
-      available: true,
-      ...ragStore,
-    };
+    const { createRagWorkerStore } = require('./backend/ragWorkerHost.cjs');
+    return createRagWorkerStore(appPaths);
   } catch (error) {
-    console.error('[paperquay] Local RAG storage failed to initialize', error);
-    return createUnavailableRagStore(error);
+    console.error('[paperquay] RAG worker failed to start; falling back to the main process.', error);
+    try {
+      return createInProcessRagStore(appPaths);
+    } catch (fallbackError) {
+      console.error('[paperquay] Local RAG storage failed to initialize', fallbackError);
+      return createUnavailableRagStore(fallbackError);
+    }
   }
 }
 
@@ -80,14 +99,19 @@ function createBackend({ app }) {
   const legacyRagIndexes = store.loadLegacyRagIndexes();
 
   if (ragStore.available && Object.keys(legacyRagIndexes).length > 0) {
-    const migration = ragStore.migrateFromLibraryRagIndexes(legacyRagIndexes);
-    perfMeasure('backend:init legacy-rag-migration', 'backend:init-start');
-
-    if (migration.failedCount === 0) {
-      store.clearLegacyRagIndexesSync();
-    } else {
-      console.warn('PaperQuay legacy RAG index migration had failures; legacy JSON indexes were kept for retry.', migration);
-    }
+    // 迁移在 RAG 执行单元的队列里继续，不挡住窗口。失败时保留旧 JSON，下次启动再试。
+    Promise.resolve(ragStore.migrateFromLibraryRagIndexes(legacyRagIndexes))
+      .then((migration) => {
+        perfMeasure('backend:init legacy-rag-migration', 'backend:init-start');
+        if (migration?.failedCount === 0) {
+          store.clearLegacyRagIndexesSync();
+        } else {
+          console.warn('PaperQuay legacy RAG index migration had failures; legacy JSON indexes were kept for retry.', migration);
+        }
+      })
+      .catch((error) => {
+        console.warn('PaperQuay legacy RAG index migration did not finish; legacy JSON indexes were kept.', error);
+      });
   }
 
   const context = {
@@ -118,7 +142,9 @@ function createBackend({ app }) {
   return {
     close() {
       noteStore.close();
-      ragStore.close();
+      void Promise.resolve(ragStore.close()).catch((error) => {
+        console.warn('[paperquay] RAG store close failed.', error);
+      });
       store.close();
     },
     async invoke(command, args, event) {

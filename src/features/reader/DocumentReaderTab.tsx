@@ -31,9 +31,9 @@ import {
   extractTranslatableMarkdownFromMineruBlock,
   flattenMineruPages,
   parseMineruMarkdownPages,
-  parseMineruPages,
   resolveMineruBlockContentSource,
 } from '../../services/mineru';
+import { parseMineruPagesOffThread } from './mineruParseWorker';
 import { askDocumentOpenAICompatibleStream } from '../../services/qa';
 import {
   getMissingParseCredentialMessage,
@@ -990,11 +990,11 @@ function DocumentReaderTab({
       if (task.status === 'success' && task.contentJsonPath && loadedTaskId !== task.taskId) {
         loadedTaskId = task.taskId;
         const jsonPath = task.contentJsonPath;
-        void readLocalTextFile(jsonPath).then((text) => {
+        void readLocalTextFile(jsonPath).then(async (text) => {
           if (disposed || getDocumentParseTask(currentDocument.workspaceId)?.taskId !== task.taskId
             || parseViewRef.current.mineruPath !== view.mineruPath
             || !shouldShowParseTask(task, parseViewRef.current.libraryOperation)) return;
-          applyMineruPages(parseMineruPages(text), jsonPath, { item: parseViewRef.current.currentDocument,
+          applyMineruPages(await parseMineruPagesOffThread(text), jsonPath, { item: parseViewRef.current.currentDocument,
             statusMessage: toPaperParseTaskState(task, parseViewRef.current.locale).message });
         }).catch((error) => {
           if (!disposed && getDocumentParseTask(task.documentKey)?.taskId === task.taskId
@@ -1098,7 +1098,7 @@ function DocumentReaderTab({
         mineruCacheDir: settings.mineruCacheDir,
         l: lRef.current,
         readText: readLocalTextFileIfExists,
-        parsePages: parseMineruPages,
+        parsePages: parseMineruPagesOffThread,
         parseMarkdownPages: parseMineruMarkdownPages,
         repairCacheImages: async (directory) => {
           await repairMineruCacheImages(directory);
@@ -1319,7 +1319,7 @@ function DocumentReaderTab({
                   continue;
                 }
 
-                const pages = parseMineruPages(jsonText);
+                const pages = await parseMineruPagesOffThread(jsonText);
 
                 if (!isCurrentOpen()) {
                   return;
@@ -1555,7 +1555,7 @@ function DocumentReaderTab({
       }
 
       const jsonText = await readLocalTextFile(path);
-      const pages = parseMineruPages(jsonText);
+      const pages = await parseMineruPagesOffThread(jsonText);
 
       applyMineruPages(pages, path, {
         item: currentDocument,
@@ -1762,7 +1762,7 @@ function DocumentReaderTab({
         );
       }
 
-      const pages = parseMineruPages(jsonText);
+      const pages = await parseMineruPagesOffThread(jsonText);
       let nextMineruPath =
         result.contentJsonPath || result.middleJsonPath || `cloud:${result.fileName}:${result.batchId}`;
       let nextStatusMessage = lRef.current(

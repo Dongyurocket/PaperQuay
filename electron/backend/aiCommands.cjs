@@ -1259,6 +1259,42 @@ function uniqueNotePolishEvidence(values) {
   });
 }
 
+const NOTE_POLISH_EXCERPT_LIMIT = 4_000;
+
+async function expandNotePolishExcerpt(ragStore, chunk) {
+  const fallback = String(chunk?.text ?? '').slice(0, 1_600);
+  if (
+    typeof ragStore?.getChunkContext !== 'function'
+    || !chunk?.chunkId
+    || !chunk?.documentKey
+    || !chunk?.sourceType
+  ) {
+    return fallback;
+  }
+
+  try {
+    const context = await Promise.resolve(ragStore.getChunkContext({
+      documentKey: chunk.documentKey,
+      sourceType: chunk.sourceType,
+      chunkId: chunk.chunkId,
+      before: 1,
+      after: 1,
+    }));
+    const slices = Array.isArray(context?.slices) ? context.slices : [];
+    if (context?.status !== 'ready' || slices.length === 0) {
+      return fallback;
+    }
+
+    const text = slices
+      .map((slice) => String(slice?.text ?? '').trim())
+      .filter(Boolean)
+      .join('\n\n');
+    return text.slice(0, NOTE_POLISH_EXCERPT_LIMIT) || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 function createAiCommands(context) {
   const { agentMemoryStore, ragStore, store } = context;
 
@@ -1455,12 +1491,12 @@ function createAiCommands(context) {
               // 旧库可能写入过 native-library: 前缀键；两键同查做全局 topK 排序，
               // 替代逐篇检索后用局部 sourceRank 排序的旧实现。
               const documentKeys = scopedPaperIds.flatMap((paperId) => [paperId, `native-library:${paperId}`]);
-              const chunks = ragStore.retrieveDocumentChunks({
+              const chunks = await Promise.resolve(ragStore.retrieveDocumentChunks({
                 documentKeys,
                 queryEmbedding,
                 queryText: text.slice(0, 2_000),
                 topK: NOTE_POLISH_RAG_TOP_K,
-              });
+              }));
               const candidates = [];
               for (const chunk of Array.isArray(chunks) ? chunks : []) {
                 const paperId = String(chunk.documentKey || '').replace(/^native-library:/, '');
@@ -1472,7 +1508,7 @@ function createAiCommands(context) {
                   chunkId: chunk.chunkId,
                   blockId: chunk.blockId ?? null,
                   pageIndex: chunk.pageIndex ?? null,
-                  excerpt: String(chunk.text ?? '').slice(0, 1_600),
+                  excerpt: await expandNotePolishExcerpt(ragStore, chunk),
                   sourceType: chunk.sourceType ?? null,
                 });
               }
@@ -1485,7 +1521,7 @@ function createAiCommands(context) {
                 if (typeof ragStore.listIndexStatuses === 'function') {
                   try {
                     const scopedKeys = new Set(documentKeys);
-                    dimensionMismatch = (ragStore.listIndexStatuses() || []).some((status) => (
+                    dimensionMismatch = ((await Promise.resolve(ragStore.listIndexStatuses())) || []).some((status) => (
                       status
                       && scopedKeys.has(String(status.documentKey ?? ''))
                       && status.status === 'ready'
@@ -1606,43 +1642,43 @@ function createAiCommands(context) {
     },
 
     async rag_index_document({ request }) {
-      ragStore.indexDocument(request);
+      await Promise.resolve(ragStore.indexDocument(request));
     },
 
     async rag_report_document_index_failure({ request }) {
-      ragStore.reportFailure(request);
+      await Promise.resolve(ragStore.reportFailure(request));
     },
 
     async rag_get_document_index_status({ request }) {
-      return ragStore.getDocumentIndexStatus(request);
+      return Promise.resolve(ragStore.getDocumentIndexStatus(request));
     },
 
     async rag_list_indexed_chunk_ids({ request }) {
-      return ragStore.listIndexedChunkIds(request);
+      return Promise.resolve(ragStore.listIndexedChunkIds(request));
     },
 
     async rag_finalize_document_index({ request }) {
-      return ragStore.finalizeDocumentIndex(request);
+      return Promise.resolve(ragStore.finalizeDocumentIndex(request));
     },
 
     async rag_list_index_statuses() {
-      return ragStore.listIndexStatuses();
+      return Promise.resolve(ragStore.listIndexStatuses());
     },
 
     async rag_retrieve_document_chunks({ request }) {
-      return ragStore.retrieveDocumentChunks(request);
+      return Promise.resolve(ragStore.retrieveDocumentChunks(request));
     },
 
     async rag_get_chunk_context({ request }) {
-      return ragStore.getChunkContext(request);
+      return Promise.resolve(ragStore.getChunkContext(request));
     },
 
     async agent_run_start({ request }) {
-      return ragStore.createAgentRun(request);
+      return Promise.resolve(ragStore.createAgentRun(request));
     },
 
     async agent_run_event_append({ request }) {
-      const record = ragStore.appendAgentRunEvent(request);
+      const record = await Promise.resolve(ragStore.appendAgentRunEvent(request));
 
       try {
         agentMemoryStore?.appendTrace(record);
@@ -1654,23 +1690,23 @@ function createAiCommands(context) {
     },
 
     async agent_run_finish({ request }) {
-      return ragStore.finishAgentRun(request);
+      return Promise.resolve(ragStore.finishAgentRun(request));
     },
 
     async agent_run_get({ request }) {
-      return ragStore.getAgentRun(request);
+      return Promise.resolve(ragStore.getAgentRun(request));
     },
 
     async agent_run_events_get({ request }) {
-      return ragStore.getAgentRunEvents(request);
+      return Promise.resolve(ragStore.getAgentRunEvents(request));
     },
 
     async agent_run_list_interrupted({ request }) {
-      return ragStore.listInterruptedAgentRuns(request);
+      return Promise.resolve(ragStore.listInterruptedAgentRuns(request));
     },
 
     async agent_run_usage_by_session({ request }) {
-      return ragStore.listAgentRunUsageBySession(request);
+      return Promise.resolve(ragStore.listAgentRunUsageBySession(request));
     },
 
     async agent_memory_list({ request }) {

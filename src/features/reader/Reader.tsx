@@ -45,6 +45,7 @@ import type {
   WorkspaceItem,
 } from '../../types/reader';
 import DocumentReaderTab from './DocumentReaderTab';
+import { chooseMountedReaderTabIds } from './readerResourceBudget';
 import { AssistantSidebar } from './AssistantSidebar';
 import LiteratureLibraryView from '../literature/LiteratureLibraryView';
 import {
@@ -180,6 +181,7 @@ function Reader({ workspaceActive = true }: ReaderProps) {
   const [selectedLibraryItemId, setSelectedLibraryItemId] = useState<string | null>(null);
   const [libraryLoading, setLibraryLoading] = useState(false);
   const [readerBridges, setReaderBridges] = useState<Record<string, ReaderTabBridgeState>>({});
+  const [recentReaderTabIds, setRecentReaderTabIds] = useState<string[]>([]);
   const [readerAssistantActivePanel, setReaderAssistantActivePanel] = useState<AssistantPanelKey>('chat');
   const [readerAssistantDetached, setReaderAssistantDetached] = useState(false);
   const [readerAssistantPanelWidth, setReaderAssistantPanelWidth] = useState(() =>
@@ -347,6 +349,28 @@ function Reader({ workspaceActive = true }: ReaderProps) {
     () => tabs.filter((tab): tab is ReaderTab => tab.type === 'reader'),
     [tabs],
   );
+  const mountedReaderTabIds = useMemo(
+    () => chooseMountedReaderTabIds({
+      readerTabIds: readerTabs.map((tab) => tab.id),
+      activeTabId,
+      recentTabIds: recentReaderTabIds,
+      busyTabIds: readerTabs
+        .filter((tab) => readerBridges[tab.id]?.translating)
+        .map((tab) => tab.id),
+    }),
+    [activeTabId, readerBridges, readerTabs, recentReaderTabIds],
+  );
+
+  useEffect(() => {
+    if (!readerTabs.some((tab) => tab.id === activeTabId)) {
+      return;
+    }
+
+    setRecentReaderTabIds((current) => [
+      activeTabId,
+      ...current.filter((id) => id !== activeTabId),
+    ].slice(0, 8));
+  }, [activeTabId, readerTabs]);
 
   const selectedLibraryItem = useMemo(() => {
     if (!selectedLibraryItemId) {
@@ -1051,8 +1075,11 @@ function Reader({ workspaceActive = true }: ReaderProps) {
                 return null;
               }
 
+              const mounted = mountedReaderTabIds.includes(tab.id);
+
               return (
                 <div key={tab.id} className="h-full min-h-0 overflow-hidden" hidden={tab.id !== activeTabId}>
+                  {mounted ? (
                   <DocumentReaderTab
                     tabId={tab.id}
                     document={item}
@@ -1121,6 +1148,7 @@ function Reader({ workspaceActive = true }: ReaderProps) {
                     onPendingNoteAnchorJumpHandled={handlePendingNoteAnchorJumpHandled}
                     translationSnapshot={libraryTranslationSnapshots[item.workspaceId] ?? null}
                   />
+                  ) : null}
                 </div>
               );
               })}

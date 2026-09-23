@@ -104,8 +104,8 @@ function findNextChunkStart(text: string, previousStart: number, previousEnd: nu
   return nextWhitespace < 0 ? previousEnd : overlapStart + nextWhitespace;
 }
 
-function splitTextWithOverlap(text: string): string[] {
-  const chunks: string[] = [];
+function splitTextWithOverlap(text: string): Array<{ text: string; startOffset: number; endOffset: number }> {
+  const chunks: Array<{ text: string; startOffset: number; endOffset: number }> = [];
   let start = 0;
 
   while (start < text.length) {
@@ -114,7 +114,7 @@ function splitTextWithOverlap(text: string): string[] {
     const chunk = normalizeChunkText(text.slice(start, end));
 
     if (chunk) {
-      chunks.push(chunk);
+      chunks.push({ text: chunk, startOffset: start, endOffset: end });
     }
 
     if (end >= text.length) {
@@ -141,12 +141,14 @@ function splitTextIntoChunks(
   }
 
   return splitTextWithOverlap(normalized)
-    .map((chunkText, index) => ({
+    .map((piece, index) => ({
       chunkId: `${prefix}:${index}`,
       chunkIndex: index,
       pageIndex,
       blockId,
-      text: normalizeChunkText(chunkText),
+      text: piece.text,
+      startOffset: piece.startOffset,
+      endOffset: piece.endOffset,
     }))
     .filter((chunk) => chunk.text);
 }
@@ -169,7 +171,25 @@ function buildBlockScopedChunk(
     pageIndex,
     blockId,
     text: normalized,
+    startOffset: 0,
+    endOffset: normalized.length,
   };
+}
+
+function headingLevel(block: PositionedMineruBlock): number | null {
+  if (block.type !== 'title') {
+    return null;
+  }
+
+  const content = block.content;
+  if (content && typeof content === 'object' && 'text_level' in content) {
+    const level = Number((content as { text_level?: unknown }).text_level);
+    if (Number.isFinite(level) && level > 0) {
+      return Math.floor(level);
+    }
+  }
+
+  return 1;
 }
 
 export function buildReaderRagDocumentKey(item: WorkspaceItem): string {
@@ -183,9 +203,22 @@ export function buildReaderRagDocumentKey(item: WorkspaceItem): string {
 export function buildMineruRagChunks(
   blocks: PositionedMineruBlock[],
 ): RagChunkInput[] {
+  const headingStack: Array<{ level: number; title: string }> = [];
+  let sectionId: string | null = null;
+
   return blocks
     .filter((block) => !isPageDecorationBlock(block))
     .flatMap((block) => {
+      const level = headingLevel(block);
+      if (level !== null) {
+        while (headingStack.length > 0 && headingStack[headingStack.length - 1].level >= level) {
+          headingStack.pop();
+        }
+        const title = normalizeChunkText(extractTextFromMineruBlock(block)) || block.blockId;
+        headingStack.push({ level, title });
+        sectionId = block.blockId;
+      }
+      const sectionPath = headingStack.length > 0 ? headingStack.map((entry) => entry.title) : null;
       const prefix = `mineru:${block.blockId}`;
       const pageIndex = Number.isFinite(block.pageIndex) ? block.pageIndex : null;
       const text = extractTextFromMineruBlock(block);
@@ -197,10 +230,11 @@ export function buildMineruRagChunks(
 
       if (normalized.length <= DEFAULT_CHUNK_SIZE) {
         const chunk = buildBlockScopedChunk(prefix, normalized, pageIndex, block.blockId);
-        return chunk ? [chunk] : [];
+        return chunk ? [{ ...chunk, sectionId, sectionPath }] : [];
       }
 
-      return splitTextIntoChunks(prefix, normalized, pageIndex, block.blockId);
+      return splitTextIntoChunks(prefix, normalized, pageIndex, block.blockId)
+        .map((chunk) => ({ ...chunk, sectionId, sectionPath }));
     })
     .map((chunk, index) => ({
       ...chunk,
@@ -230,7 +264,12 @@ export function buildPdfRagChunks(documentText: string): RagChunkInput[] {
     .filter((section) => section.text.trim());
 
   return sections
-    .flatMap((section, index) => splitTextIntoChunks(`pdf:${index}`, section.text, section.pageIndex))
+    .flatMap((section, index) => splitTextIntoChunks(`pdf:${index}`, section.text, section.pageIndex)
+      .map((chunk) => ({
+        ...chunk,
+        sectionId: section.pageIndex === null ? null : `page:${section.pageIndex}`,
+        sectionPath: section.pageIndex === null ? null : [`Page ${section.pageIndex + 1}`],
+      })))
     .map((chunk, index) => ({
       ...chunk,
       chunkIndex: index,

@@ -429,26 +429,42 @@ function rebuildAllDocumentVectors(db) {
   }
 }
 
-// 旧库一次性回填：为所有已有 chunk 的文档重建平均向量缓存。
+// 启动时只做有界的一批。其余由 createRagStore 在空闲时继续，避免一次扫完全库向量。
 function backfillDocumentVectors(db) {
-  const META_KEY = 'rag_document_vectors_v1';
-  const initialized = db
-    .prepare('SELECT value FROM rag_store_meta WHERE key = ?')
-    .get(META_KEY);
-
-  if (initialized?.value) {
-    return;
-  }
-
-  rebuildAllDocumentVectors(db);
-
-  db.prepare(`
-    INSERT INTO rag_store_meta (key, value) VALUES (?, ?)
-    ON CONFLICT (key) DO UPDATE SET value = excluded.value
-  `).run(META_KEY, String(Date.now()));
+  return runBoundedVectorBackfill(db);
 }
 
-function normalizeChunk(chunk, dimension) {
+function parseStoredSectionPath(value) {
+  if (typeof value !== 'string' || !value.trim()) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(value);
+    if (!Array.isArray(parsed)) {
+      return null;
+    }
+
+    return parsed.filter((part) => typeof part === 'string' && part.trim()).map((part) => part.trim());
+  } catch {
+    return null;
+  }
+}
+
+function normalizeOptionalOffset(value) {
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
+
+  const offset = Number(value);
+  if (!Number.isSafeInteger(offset) || offset < 0) {
+    return null;
+  }
+
+  return offset;
+}
+
+function normalizeChunk(chunk, dimension, defaults = {}) {
   const chunkId = cleanString(chunk?.chunkId) || `chunk-${normalizeNonNegativeInteger(chunk?.chunkIndex)}`;
   const chunkIndex = normalizeNonNegativeInteger(chunk?.chunkIndex);
   const pageIndex = chunk?.pageIndex === null || chunk?.pageIndex === undefined
@@ -456,6 +472,9 @@ function normalizeChunk(chunk, dimension) {
     : normalizeNonNegativeInteger(chunk.pageIndex);
   const blockId = cleanString(chunk?.blockId) || null;
   const text = typeof chunk?.text === 'string' ? chunk.text : String(chunk?.text ?? '');
+  const sectionPath = Array.isArray(chunk?.sectionPath)
+    ? chunk.sectionPath.filter((part) => typeof part === 'string' && part.trim()).map((part) => part.trim())
+    : parseStoredSectionPath(chunk?.sectionPath);
 
   validateEmbedding(chunk?.embedding, dimension);
 
@@ -466,6 +485,12 @@ function normalizeChunk(chunk, dimension) {
     blockId,
     text,
     embedding: chunk.embedding,
+    generationId: cleanString(chunk?.generationId) || cleanString(defaults.generationId) || '',
+    sectionId: cleanString(chunk?.sectionId) || null,
+    sectionPath: sectionPath && sectionPath.length > 0 ? JSON.stringify(sectionPath) : null,
+    startOffset: normalizeOptionalOffset(chunk?.startOffset),
+    endOffset: normalizeOptionalOffset(chunk?.endOffset),
+    textVersion: cleanString(chunk?.textVersion) || null,
   };
 }
 
@@ -523,6 +548,12 @@ function createSchema(db) {
       page_index INTEGER,
       block_id TEXT,
       text TEXT NOT NULL,
+      generation_id TEXT NOT NULL DEFAULT '',
+      section_id TEXT,
+      section_path TEXT,
+      start_offset INTEGER,
+      end_offset INTEGER,
+      text_version TEXT,
       UNIQUE (document_key, source_type, chunk_id)
     );
 
@@ -578,6 +609,91 @@ function createSchema(db) {
     CREATE INDEX IF NOT EXISTS idx_agent_run_events_run
       ON agent_run_events (run_id, id);
   `);
+  ensureChunkMappingColumns(db);
+}
+
+const VECTOR_BACKFILL_META_KEY = 'rag_document_vectors_v1';
+const VECTOR_BACKFILL_CURSOR_KEY = 'rag_document_vectors_v1_cursor';
+const VECTOR_BACKFILL_SYNC_LIMIT = 24;
+
+function readStoreMeta(db, key) {
+  return db.prepare('SELECT value FROM rag_store_meta WHERE key = ?').get(key)?.value ?? '';
+}
+
+function writeStoreMeta(db, key, value) {
+  db.prepare(`
+    INSERT INTO rag_store_meta (key, value) VALUES (?, ?)
+    ON CONFLICT (key) DO UPDATE SET value = excluded.value
+  `).run(key, value);
+}
+
+function ensureChunkMappingColumns(db) {
+  const names = new Set(
+    db.prepare('PRAGMA table_info(rag_chunks)').all().map((row) => row.name),
+  );
+  const columns = [
+    ['generation_id', "generation_id TEXT NOT NULL DEFAULT ''"],
+    ['section_id', 'section_id TEXT'],
+    ['section_path', 'section_path TEXT'],
+    ['start_offset', 'start_offset INTEGER'],
+    ['end_offset', 'end_offset INTEGER'],
+    ['text_version', 'text_version TEXT'],
+  ];
+
+  for (const [name, definition] of columns) {
+    if (!names.has(name)) {
+      db.exec(`ALTER TABLE rag_chunks ADD COLUMN ${definition}`);
+    }
+  }
+
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_rag_chunks_generation
+      ON rag_chunks (document_key, source_type, generation_id, chunk_index);
+  `);
+}
+
+// 按 document_key 分批重建平均向量。不先清空缓存，中断后从游标继续。
+function stepDocumentVectorBackfill(db, limit = 8) {
+  if (readStoreMeta(db, VECTOR_BACKFILL_META_KEY)) {
+    return { done: true, processed: 0 };
+  }
+
+  const batchSize = Math.max(1, Math.min(100, normalizeNonNegativeInteger(limit, 8) || 8));
+  const cursor = readStoreMeta(db, VECTOR_BACKFILL_CURSOR_KEY);
+  const keys = db.prepare(`
+    SELECT DISTINCT document_key AS documentKey
+    FROM rag_chunks
+    WHERE document_key > ?
+    ORDER BY document_key
+    LIMIT ?
+  `).all(cursor, batchSize);
+
+  for (const row of keys) {
+    rebuildDocumentVectors(db, row.documentKey);
+  }
+
+  if (keys.length < batchSize) {
+    writeStoreMeta(db, VECTOR_BACKFILL_META_KEY, String(Date.now()));
+    db.prepare('DELETE FROM rag_store_meta WHERE key = ?').run(VECTOR_BACKFILL_CURSOR_KEY);
+    return { done: true, processed: keys.length };
+  }
+
+  writeStoreMeta(db, VECTOR_BACKFILL_CURSOR_KEY, keys[keys.length - 1].documentKey);
+  return { done: false, processed: keys.length };
+}
+
+function runBoundedVectorBackfill(db, maxDocuments = VECTOR_BACKFILL_SYNC_LIMIT) {
+  let processed = 0;
+
+  while (processed < maxDocuments) {
+    const step = stepDocumentVectorBackfill(db, 8);
+    processed += step.processed;
+    if (step.done) {
+      return { done: true, processed };
+    }
+  }
+
+  return { done: false, processed };
 }
 
 const FTS_TABLE_NAME = 'rag_chunks_fts';
@@ -716,7 +832,7 @@ function cleanupOrphanFailedStatuses(db) {
   }
 }
 
-function openDatabase(databasePath) {
+function openDatabase(databasePath, options = {}) {
   fs.mkdirSync(path.dirname(databasePath), { recursive: true });
 
   const db = new DatabaseSync(databasePath, {
@@ -734,7 +850,9 @@ function openDatabase(databasePath) {
   db.exec('PRAGMA journal_mode = WAL;');
   createSchema(db);
   cleanupOrphanFailedStatuses(db);
-  backfillDocumentVectors(db);
+  if (options.deferVectorBackfill !== true) {
+    backfillDocumentVectors(db);
+  }
   return db;
 }
 
@@ -959,8 +1077,36 @@ function createRagStore(appPaths, options = {}) {
     throw new Error('ragDatabasePath is required');
   }
 
-  let db = openDatabase(appPaths.ragDatabasePath);
+  let db = openDatabase(appPaths.ragDatabasePath, {
+    deferVectorBackfill: options.deferVectorBackfill === true,
+  });
   let ftsAvailable = initializeFtsSchema(db, { disabled: options.disableFts === true });
+  let vectorBackfillClosed = false;
+
+  function scheduleVectorBackfill() {
+    const timer = setImmediate(() => {
+      if (vectorBackfillClosed || !db.isOpen) {
+        return;
+      }
+
+      try {
+        const step = stepDocumentVectorBackfill(db, 8);
+        if (!step.done) {
+          scheduleVectorBackfill();
+        }
+      } catch (error) {
+        console.warn('[paperquay] RAG document vector backfill paused.', toError(error));
+      }
+    });
+
+    if (typeof timer.unref === 'function') {
+      timer.unref();
+    }
+  }
+
+  if (!readStoreMeta(db, VECTOR_BACKFILL_META_KEY) && options.deferVectorBackfill !== true) {
+    scheduleVectorBackfill();
+  }
 
   function indexDocument(request) {
     const documentKey = normalizeDocumentKey(request?.documentKey);
@@ -1025,13 +1171,21 @@ function createRagStore(appPaths, options = {}) {
           chunk_index,
           page_index,
           block_id,
-          text
+          text,
+          generation_id,
+          section_id,
+          section_path,
+          start_offset,
+          end_offset,
+          text_version
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       const updateChunk = db.prepare(`
         UPDATE rag_chunks
-        SET chunk_index = ?, page_index = ?, block_id = ?, text = ?
+        SET chunk_index = ?, page_index = ?, block_id = ?, text = ?,
+            generation_id = ?, section_id = ?, section_path = ?,
+            start_offset = ?, end_offset = ?, text_version = ?
         WHERE id = ?
       `);
       const lastInsertedId = db.prepare('SELECT last_insert_rowid() AS id');
@@ -1041,14 +1195,28 @@ function createRagStore(appPaths, options = {}) {
       `);
 
       for (const rawChunk of chunks) {
-        const chunk = normalizeChunk(rawChunk, dimension);
+        const chunk = normalizeChunk(rawChunk, dimension, {
+          generationId: request?.generationId,
+        });
         const existingChunk = selectChunk.get(documentKey, sourceType, chunk.chunkId);
         let chunkRowId;
 
         if (existingChunk) {
           chunkRowId = Number(existingChunk.id);
           deleteVectorRowsByIds(db, [chunkRowId]);
-          updateChunk.run(chunk.chunkIndex, chunk.pageIndex, chunk.blockId, chunk.text, chunkRowId);
+          updateChunk.run(
+            chunk.chunkIndex,
+            chunk.pageIndex,
+            chunk.blockId,
+            chunk.text,
+            chunk.generationId,
+            chunk.sectionId,
+            chunk.sectionPath,
+            chunk.startOffset,
+            chunk.endOffset,
+            chunk.textVersion,
+            chunkRowId,
+          );
         } else {
           insertChunk.run(
             documentKey,
@@ -1058,6 +1226,12 @@ function createRagStore(appPaths, options = {}) {
             chunk.pageIndex,
             chunk.blockId,
             chunk.text,
+            chunk.generationId,
+            chunk.sectionId,
+            chunk.sectionPath,
+            chunk.startOffset,
+            chunk.endOffset,
+            chunk.textVersion,
           );
           chunkRowId = Number(lastInsertedId.get().id);
         }
@@ -1523,7 +1697,8 @@ function createRagStore(appPaths, options = {}) {
 
     const target = db
       .prepare(
-        `SELECT chunk_id, chunk_index, page_index, block_id, text
+        `SELECT chunk_id, chunk_index, page_index, block_id, text,
+                generation_id, section_id, section_path
          FROM rag_chunks
          WHERE document_key = ? AND source_type = ? AND chunk_id = ?`,
       )
@@ -1532,26 +1707,43 @@ function createRagStore(appPaths, options = {}) {
       return emptyResult('not-found');
     }
 
+    const generationId = target.generation_id ?? '';
+    const restrictSection = request?.boundary === 'document' || !target.section_id
+      ? null
+      : target.section_id;
+    const neighborSql = `
+      SELECT chunk_id, chunk_index, page_index, block_id, text
+      FROM rag_chunks
+      WHERE document_key = ? AND source_type = ? AND generation_id = ?
+        AND (? IS NULL OR section_id = ?)
+    `;
+
     const beforeRows = before > 0
       ? db
-          .prepare(
-            `SELECT chunk_id, chunk_index, page_index, block_id, text
-             FROM rag_chunks
-             WHERE document_key = ? AND source_type = ? AND chunk_index < ?
-             ORDER BY chunk_index DESC LIMIT ?`,
+          .prepare(`${neighborSql} AND chunk_index < ? ORDER BY chunk_index DESC LIMIT ?`)
+          .all(
+            documentKey,
+            sourceType,
+            generationId,
+            restrictSection,
+            restrictSection,
+            target.chunk_index,
+            before,
           )
-          .all(documentKey, sourceType, target.chunk_index, before)
           .reverse()
       : [];
     const afterRows = after > 0
       ? db
-          .prepare(
-            `SELECT chunk_id, chunk_index, page_index, block_id, text
-             FROM rag_chunks
-             WHERE document_key = ? AND source_type = ? AND chunk_index > ?
-             ORDER BY chunk_index ASC LIMIT ?`,
+          .prepare(`${neighborSql} AND chunk_index > ? ORDER BY chunk_index ASC LIMIT ?`)
+          .all(
+            documentKey,
+            sourceType,
+            generationId,
+            restrictSection,
+            restrictSection,
+            target.chunk_index,
+            after,
           )
-          .all(documentKey, sourceType, target.chunk_index, after)
       : [];
 
     const minFetchedIndex = beforeRows.length > 0 ? beforeRows[0].chunk_index : target.chunk_index;
@@ -1560,17 +1752,29 @@ function createRagStore(appPaths, options = {}) {
       db
         .prepare(
           `SELECT 1 FROM rag_chunks
-           WHERE document_key = ? AND source_type = ? AND chunk_index < ? LIMIT 1`,
+           WHERE document_key = ? AND source_type = ? AND generation_id = ?
+             AND (? IS NULL OR section_id = ?)
+             AND chunk_index < ? LIMIT 1`,
         )
-        .get(documentKey, sourceType, minFetchedIndex),
+        .get(documentKey, sourceType, generationId, restrictSection, restrictSection, minFetchedIndex),
     );
     const hasMoreAfter = Boolean(
       db
         .prepare(
           `SELECT 1 FROM rag_chunks
-           WHERE document_key = ? AND source_type = ? AND chunk_index > ? LIMIT 1`,
+           WHERE document_key = ? AND source_type = ? AND generation_id = ?
+             AND (? IS NULL OR section_id = ?)
+             AND chunk_index > ? LIMIT 1`,
         )
-        .get(documentKey, sourceType, maxFetchedIndex),
+        .get(documentKey, sourceType, generationId, restrictSection, restrictSection, maxFetchedIndex),
+    );
+    const stoppedAtSectionBoundary = Boolean(
+      restrictSection && db.prepare(
+        `SELECT 1 FROM rag_chunks
+         WHERE document_key = ? AND source_type = ? AND generation_id = ?
+           AND (section_id IS NULL OR section_id != ?)
+         LIMIT 1`,
+      ).get(documentKey, sourceType, generationId, restrictSection),
     );
 
     const toSlice = (row, position) => ({
@@ -1584,8 +1788,8 @@ function createRagStore(appPaths, options = {}) {
 
     return {
       status: 'ready',
-      // 当前 schema 尚无章节字段，显式降级为空（P3 再补 sectionPath）。
-      sectionPath: null,
+      sectionPath: parseStoredSectionPath(target.section_path),
+      generationId,
       slices: [
         ...beforeRows.map((row) => toSlice(row, 'before')),
         toSlice(target, 'hit'),
@@ -1593,8 +1797,8 @@ function createRagStore(appPaths, options = {}) {
       ],
       hasMoreBefore,
       hasMoreAfter,
-      truncated: false,
-      truncationReason: null,
+      truncated: stoppedAtSectionBoundary,
+      truncationReason: stoppedAtSectionBoundary ? 'boundary' : null,
     };
   }
 
@@ -1899,6 +2103,7 @@ function createRagStore(appPaths, options = {}) {
   }
 
   function close() {
+    vectorBackfillClosed = true;
     if (db.isOpen) {
       db.close();
     }
@@ -1914,6 +2119,15 @@ function createRagStore(appPaths, options = {}) {
     getAgentRunEvents,
     getChunkContext,
     getDocumentIndexStatus,
+    stepVectorBackfill(limit = 8) {
+      return stepDocumentVectorBackfill(db, limit);
+    },
+    vectorBackfillStatus() {
+      return {
+        done: Boolean(readStoreMeta(db, VECTOR_BACKFILL_META_KEY)),
+        cursor: readStoreMeta(db, VECTOR_BACKFILL_CURSOR_KEY),
+      };
+    },
     indexDocument,
     isFtsAvailable,
     listAgentRunUsageBySession,
@@ -1949,8 +2163,13 @@ function createRagStore(appPaths, options = {}) {
         await fsp.rename(replacementPath, appPaths.ragDatabasePath);
       } finally {
         await fsp.rm(replacementPath, { force: true }).catch(() => {});
-        db = openDatabase(appPaths.ragDatabasePath);
+        db = openDatabase(appPaths.ragDatabasePath, {
+          deferVectorBackfill: options.deferVectorBackfill === true,
+        });
         ftsAvailable = initializeFtsSchema(db, { disabled: options.disableFts === true });
+        if (!readStoreMeta(db, VECTOR_BACKFILL_META_KEY) && options.deferVectorBackfill !== true) {
+          scheduleVectorBackfill();
+        }
       }
     },
   };
