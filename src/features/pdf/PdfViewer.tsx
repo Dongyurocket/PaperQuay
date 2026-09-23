@@ -63,10 +63,12 @@ import { PdfThumbnailSidebar } from './PdfThumbnailSidebar';
 import { PdfOutlinePanel } from './PdfOutlinePanel';
 import {
   buildMineruOutline,
+  buildMineruOutlineFromIndex,
   normalizePdfOutline,
   type PdfJsOutlineNode,
   type ReaderOutlineItem,
 } from './pdfOutline.ts';
+import type { MineruOutlineIndexItem } from '../reader/mineruSegments.ts';
 import {
   arePageHostsEqual,
   ensurePageOverlayElement,
@@ -145,6 +147,7 @@ interface PdfViewerProps {
   translationProgressTotal?: number;
   hideToolbar?: boolean;
   blocks: PositionedMineruBlock[];
+  mineruOutlineIndex?: readonly MineruOutlineIndexItem[] | null;
   annotations: PaperAnnotation[];
   activeBlockId: string | null;
   hoveredBlockId: string | null;
@@ -310,6 +313,7 @@ function PdfViewer({
   translationProgressTotal = 0,
   hideToolbar = false,
   blocks,
+  mineruOutlineIndex,
   annotations,
   activeBlockId,
   hoveredBlockId,
@@ -504,10 +508,17 @@ function PdfViewer({
       }
 
       if (items.length === 0) {
-        const mineruItems = buildMineruOutline(blocksRef.current);
-        if (mineruItems.length > 0) {
-          items = mineruItems;
-          usedMineruFallback = true;
+        if (mineruOutlineIndex && mineruOutlineIndex.length > 0) {
+          items = buildMineruOutlineFromIndex(mineruOutlineIndex);
+          if (items.length > 0) {
+            usedMineruFallback = true;
+          }
+        } else {
+          const mineruItems = buildMineruOutline(blocksRef.current);
+          if (mineruItems.length > 0) {
+            items = mineruItems;
+            usedMineruFallback = true;
+          }
         }
       }
 
@@ -552,16 +563,25 @@ function PdfViewer({
     })();
   }, [sidebarTab, thumbnailsCollapsed, pageCount, outlineItems]);
 
-  // MinerU 块异步到达：PDF 无原生目录且初次构建时 MinerU 尚未就绪，则块到达后重建
+  // MinerU 章节索引或结构块异步到达：PDF 无原生目录时，章节索引到达立即构建目录，无需等待正文块全部渲染
   useEffect(() => {
-    if (outlineItems === null || outlineItems.length > 0 || blocks.length === 0) {
+    if (outlineItems === null || outlineItems.length > 0) {
       return;
     }
-    const mineruItems = buildMineruOutline(blocks);
-    if (mineruItems.length > 0) {
-      setOutlineItems(mineruItems);
+    if (mineruOutlineIndex && mineruOutlineIndex.length > 0) {
+      const items = buildMineruOutlineFromIndex(mineruOutlineIndex);
+      if (items.length > 0) {
+        setOutlineItems(items);
+        return;
+      }
     }
-  }, [blocks, outlineItems]);
+    if (blocks.length > 0) {
+      const mineruItems = buildMineruOutline(blocks);
+      if (mineruItems.length > 0) {
+        setOutlineItems(mineruItems);
+      }
+    }
+  }, [blocks, mineruOutlineIndex, outlineItems]);
 
   useEffect(() => {
     const currentPosition = scrollPositionRef.current;

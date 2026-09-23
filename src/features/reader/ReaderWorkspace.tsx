@@ -12,6 +12,7 @@ import {
   formatReaderDocumentSource,
   type ReaderWorkspaceDocument,
 } from './readerWorkspaceShared';
+import type { MineruOutlineIndexItem } from './mineruSegments.ts';
 import type { Note } from '../../types/notes';
 import type {
   DocumentChatAttachment,
@@ -76,6 +77,7 @@ interface ReaderWorkspaceProps {
   onPdfScrollPositionChange: (position: PdfScrollPosition) => void;
   onPdfReadingHeatmapChange: (heatmap: PdfReadingHeatmap) => void;
   blocks: PositionedMineruBlock[];
+  mineruOutlineIndex?: readonly MineruOutlineIndexItem[] | null;
   translations: TranslationMap;
   translationDisplayMode: TranslationDisplayMode;
   translationLanguageLabel: string;
@@ -171,6 +173,7 @@ function ReadingStage(props: ReaderWorkspaceProps & { immersiveReading: boolean 
   const l = useLocaleText();
   const {
     blocks,
+    mineruOutlineIndex,
     translations,
     translationDisplayMode,
     readingViewMode,
@@ -450,6 +453,7 @@ function ReadingStage(props: ReaderWorkspaceProps & { immersiveReading: boolean 
               translationProgressTotal={translationProgressTotal}
               hideToolbar={immersiveReading}
               blocks={blocks}
+              mineruOutlineIndex={mineruOutlineIndex}
               activeBlockId={activeBlockId}
               hoveredBlockId={hoveredBlockId}
               activeHighlight={activePdfHighlight}

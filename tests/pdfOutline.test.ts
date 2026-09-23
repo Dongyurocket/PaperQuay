@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   buildMineruOutline,
+  buildMineruOutlineFromIndex,
   collectOutlineIds,
   countOutlineItems,
   filterOutline,
@@ -83,6 +84,22 @@ test('buildMineruOutline nests known levels and flattens unknown levels', () => 
   assert.equal(items[2].depth, 1);
   assert.equal(items[0].pageIndex, 0);
   assert.equal(items[0].source, 'mineru-heading');
+});
+
+test('buildMineruOutlineFromIndex builds outline tree directly without full text rendering', () => {
+  const indexItems = [
+    { blockId: 'page-1-block-1', pageIndex: 0, level: 1, title: 'Introduction' },
+    { blockId: 'page-2-block-1', pageIndex: 1, level: 2, title: 'Previous Work' },
+    { blockId: 'page-3-block-1', pageIndex: 2, level: 1, title: 'Methodology' },
+  ];
+
+  const outline = buildMineruOutlineFromIndex(indexItems);
+  assert.equal(outline.length, 2);
+  assert.equal(outline[0].title, 'Introduction');
+  assert.equal(outline[0].children.length, 1);
+  assert.equal(outline[0].children[0].title, 'Previous Work');
+  assert.equal(outline[0].children[0].pageIndex, 1);
+  assert.equal(outline[1].title, 'Methodology');
 });
 
 test('flattenOutline respects collapsed ids', () => {

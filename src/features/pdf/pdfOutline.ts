@@ -1,5 +1,6 @@
 import type { PositionedMineruBlock } from '../../types/reader.ts';
 import { extractTextFromMineruBlock } from '../../services/mineru.ts';
+import type { MineruOutlineIndexItem } from '../reader/mineruSegments.ts';
 
 export type ReaderOutlineSource = 'pdf-outline' | 'mineru-heading';
 
@@ -101,21 +102,16 @@ function readMineruHeadingLevel(block: PositionedMineruBlock): number | null {
 }
 
 /**
- * 从 MinerU 标题块构建目录。text_level 已知时按层级嵌套，未知层级平铺；
- * 空标题块跳过。blockId 按页/块序号生成，仅对当前解析版本有效。
+ * 直接从轻量章节索引（标题块元数据）构建目录。
+ * 目录不依赖正文全文渲染或全部结构块就绪，只要章节索引到达即可立即生成。
  */
-export function buildMineruOutline(blocks: PositionedMineruBlock[]): ReaderOutlineItem[] {
+export function buildMineruOutlineFromIndex(indexItems: readonly MineruOutlineIndexItem[]): ReaderOutlineItem[] {
   const roots: ReaderOutlineItem[] = [];
-  // stack[i] 存放 depth=i+1 的最近节点
   const stack: ReaderOutlineItem[] = [];
   let counter = 0;
 
-  for (const block of blocks) {
-    if (block.type !== 'title') {
-      continue;
-    }
-
-    const title = normalizeTitle(extractTextFromMineruBlock(block));
+  for (const item of indexItems) {
+    const title = normalizeTitle(item.title);
     if (!title) {
       continue;
     }
@@ -125,20 +121,23 @@ export function buildMineruOutline(blocks: PositionedMineruBlock[]): ReaderOutli
     }
 
     counter += 1;
-    const level = readMineruHeadingLevel(block);
-    const item: ReaderOutlineItem = {
-      id: `mineru-heading-${block.blockId}`,
+    const level = typeof item.level === 'number' && Number.isFinite(item.level) && item.level > 0
+      ? Math.min(Math.round(item.level), MAX_OUTLINE_DEPTH)
+      : null;
+
+    const outlineItem: ReaderOutlineItem = {
+      id: `mineru-heading-${item.blockId}`,
       title,
       depth: level ?? 1,
       source: 'mineru-heading',
       children: [],
-      pageIndex: block.pageIndex,
-      blockId: block.blockId,
+      pageIndex: item.pageIndex,
+      blockId: item.blockId,
     };
 
     if (level === null) {
       // 未知层级平铺到根
-      roots.push(item);
+      roots.push(outlineItem);
       stack.length = 0;
       continue;
     }
@@ -148,11 +147,39 @@ export function buildMineruOutline(blocks: PositionedMineruBlock[]): ReaderOutli
     }
 
     const parent = stack.length > 0 ? stack[stack.length - 1] : null;
-    (parent ? parent.children : roots).push(item);
-    stack.push(item);
+    (parent ? parent.children : roots).push(outlineItem);
+    stack.push(outlineItem);
   }
 
   return roots;
+}
+
+/**
+ * 从 MinerU 标题块构建目录。text_level 已知时按层级嵌套，未知层级平铺；
+ * 空标题块跳过。blockId 按页/块序号生成，仅对当前解析版本有效。
+ */
+export function buildMineruOutline(blocks: PositionedMineruBlock[]): ReaderOutlineItem[] {
+  const indexItems: MineruOutlineIndexItem[] = [];
+  for (const block of blocks) {
+    if (block.type !== 'title') {
+      continue;
+    }
+
+    const title = extractTextFromMineruBlock(block);
+    if (!title.trim()) {
+      continue;
+    }
+
+    const level = readMineruHeadingLevel(block);
+    indexItems.push({
+      blockId: block.blockId,
+      pageIndex: block.pageIndex,
+      level,
+      title,
+    });
+  }
+
+  return buildMineruOutlineFromIndex(indexItems);
 }
 
 export function countOutlineItems(items: ReaderOutlineItem[]): number {

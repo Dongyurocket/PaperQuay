@@ -34,6 +34,7 @@ import {
   resolveMineruBlockContentSource,
 } from '../../services/mineru';
 import { parseMineruPagesOffThread } from './mineruParseWorker';
+import { extractMineruOutlineIndex, type MineruOutlineIndexItem } from './mineruSegments.ts';
 import { askDocumentOpenAICompatibleStream } from '../../services/qa';
 import {
   getMissingParseCredentialMessage,
@@ -399,6 +400,7 @@ function DocumentReaderTab({
   const [mineruPath, setMineruPath] = useState('');
   const [mineruPages, setMineruPages] = useState<MineruPage[]>([]);
   const [flatBlocks, setFlatBlocks] = useState<PositionedMineruBlock[]>([]);
+  const [mineruOutlineIndex, setMineruOutlineIndex] = useState<MineruOutlineIndexItem[] | null>(null);
   const [activeBlockId, setActiveBlockId] = useState<string | null>(null);
   const [hoveredBlockId, setHoveredBlockId] = useState<string | null>(null);
   const [activePdfHighlight, setActivePdfHighlight] = useState<PdfHighlightTarget | null>(null);
@@ -923,12 +925,15 @@ function DocumentReaderTab({
         pdfPath?: string;
         pdfSource?: PdfSource;
         statusMessage?: string;
+        outlineIndex?: MineruOutlineIndexItem[];
       },
     ) => {
       const blocks = flattenMineruPages(pages);
+      const outlineIndex = options?.outlineIndex ?? extractMineruOutlineIndex(pages);
 
       setMineruPages(pages);
       setFlatBlocks(blocks);
+      setMineruOutlineIndex(outlineIndex);
       setMineruPath(nextMineruPath);
       setActiveBlockId(null);
       setHoveredBlockId(null);
@@ -994,7 +999,20 @@ function DocumentReaderTab({
           if (disposed || getDocumentParseTask(currentDocument.workspaceId)?.taskId !== task.taskId
             || parseViewRef.current.mineruPath !== view.mineruPath
             || !shouldShowParseTask(task, parseViewRef.current.libraryOperation)) return;
-          applyMineruPages(await parseMineruPagesOffThread(text), jsonPath, { item: parseViewRef.current.currentDocument,
+          const pages = await parseMineruPagesOffThread(text, {
+            sourcePath: jsonPath,
+            onOutlineIndex: (outline) => {
+              if (!disposed) setMineruOutlineIndex(outline);
+            },
+            onSegment: (_, { allPagesSoFar, segmentIndex }) => {
+              if (!disposed && segmentIndex === 0 && allPagesSoFar.length > 0) {
+                setMineruPages(allPagesSoFar);
+                setFlatBlocks(flattenMineruPages(allPagesSoFar));
+                setMineruPath(jsonPath);
+              }
+            },
+          });
+          applyMineruPages(pages, jsonPath, { item: parseViewRef.current.currentDocument,
             statusMessage: toPaperParseTaskState(task, parseViewRef.current.locale).message });
         }).catch((error) => {
           if (!disposed && getDocumentParseTask(task.documentKey)?.taskId === task.taskId
@@ -1319,7 +1337,19 @@ function DocumentReaderTab({
                   continue;
                 }
 
-                const pages = await parseMineruPagesOffThread(jsonText);
+                const pages = await parseMineruPagesOffThread(jsonText, {
+                  sourcePath: siblingJsonPath,
+                  onOutlineIndex: (outline) => {
+                    if (isCurrentOpen()) setMineruOutlineIndex(outline);
+                  },
+                  onSegment: (_, { allPagesSoFar, segmentIndex }) => {
+                    if (isCurrentOpen() && segmentIndex === 0 && allPagesSoFar.length > 0) {
+                      setMineruPages(allPagesSoFar);
+                      setFlatBlocks(flattenMineruPages(allPagesSoFar));
+                      setMineruPath(siblingJsonPath);
+                    }
+                  },
+                });
 
                 if (!isCurrentOpen()) {
                   return;
@@ -1555,7 +1585,17 @@ function DocumentReaderTab({
       }
 
       const jsonText = await readLocalTextFile(path);
-      const pages = await parseMineruPagesOffThread(jsonText);
+      const pages = await parseMineruPagesOffThread(jsonText, {
+        sourcePath: path,
+        onOutlineIndex: (outline) => setMineruOutlineIndex(outline),
+        onSegment: (_, { allPagesSoFar, segmentIndex }) => {
+          if (segmentIndex === 0 && allPagesSoFar.length > 0) {
+            setMineruPages(allPagesSoFar);
+            setFlatBlocks(flattenMineruPages(allPagesSoFar));
+            setMineruPath(path);
+          }
+        },
+      });
 
       applyMineruPages(pages, path, {
         item: currentDocument,
@@ -1762,7 +1802,16 @@ function DocumentReaderTab({
         );
       }
 
-      const pages = await parseMineruPagesOffThread(jsonText);
+      const pages = await parseMineruPagesOffThread(jsonText, {
+        sourcePath: (result.contentJsonPath || result.middleJsonPath) ?? undefined,
+        onOutlineIndex: (outline) => setMineruOutlineIndex(outline),
+        onSegment: (_, { allPagesSoFar, segmentIndex }) => {
+          if (segmentIndex === 0 && allPagesSoFar.length > 0) {
+            setMineruPages(allPagesSoFar);
+            setFlatBlocks(flattenMineruPages(allPagesSoFar));
+          }
+        },
+      });
       let nextMineruPath =
         result.contentJsonPath || result.middleJsonPath || `cloud:${result.fileName}:${result.batchId}`;
       let nextStatusMessage = lRef.current(
@@ -4050,6 +4099,7 @@ function DocumentReaderTab({
         onPdfScrollPositionChange={handlePdfScrollPositionChange}
         onPdfReadingHeatmapChange={handlePdfReadingHeatmapChange}
         blocks={flatBlocks}
+        mineruOutlineIndex={mineruOutlineIndex}
         translations={blockTranslations}
         translationDisplayMode={settings.translationDisplayMode}
         translationLanguageLabel={translationTargetLanguageLabel}
