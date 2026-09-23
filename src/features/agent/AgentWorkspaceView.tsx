@@ -79,6 +79,7 @@ interface AgentWorkspaceViewProps {
   messages: AgentChatMessage[];
   onApplyPlan: () => void;
   onApplyMemoryPlan: (memoryPlan: AgentMemoryWritePlan) => void;
+  onRejectMemoryPlan: (memoryPlan: AgentMemoryWritePlan) => void;
   onAgentPresetChange: (presetId: string) => void;
   onAgentReasoningEffortChange: (reasoningEffort: ModelReasoningEffort) => void;
   onCancelAgentRun: () => void;
@@ -306,6 +307,7 @@ export default function AgentWorkspaceView({
   messages,
   onApplyPlan,
   onApplyMemoryPlan,
+  onRejectMemoryPlan,
   onAgentPresetChange,
   onAgentReasoningEffortChange,
   onCancelAgentRun,
@@ -577,6 +579,7 @@ export default function AgentWorkspaceView({
                       message={message}
                       onApplyPlan={onApplyPlan}
                       onApplyMemoryPlan={onApplyMemoryPlan}
+                      onRejectMemoryPlan={onRejectMemoryPlan}
                       onCancelPlan={onCancelPlan}
                   onCopyToolParameters={onCopyToolParameters}
                   onContinueWithSelectedPapers={onInlinePaperSelectionContinue}

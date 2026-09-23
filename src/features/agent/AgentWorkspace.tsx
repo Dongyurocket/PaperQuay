@@ -521,11 +521,74 @@ function AgentWorkspace() {
   const restoreDraftStateFromMessages = (sessionMessages: AgentChatMessage[]) => {
     const latestPlanMessage = [...sessionMessages]
       .reverse()
-      .find((message) => message.role === 'assistant' && message.plan);
+      .find((message) => message.role === 'assistant' && message.plan && !message.planStatus);
     const nextPlan = latestPlanMessage?.plan ?? null;
 
     setPlan(nextPlan);
     setApprovedItemIds(new Set(nextPlan?.items.map((item) => item.id) ?? []));
+  };
+
+  /** 将包含指定计划/记忆计划的消息回写终态，防止切换会话后审批卡复活并重复执行。 */
+  const markPlanTerminalStatus = (
+    sessionId: string,
+    planId: string,
+    status: 'applied' | 'cancelled',
+  ) => {
+    const applyStatus = (message: AgentChatMessage): AgentChatMessage =>
+      message.plan?.id === planId && !message.planStatus
+        ? { ...message, planStatus: status }
+        : message;
+
+    if (activeSessionIdRef.current === sessionId) {
+      setMessages((current) => current.map(applyStatus));
+    }
+
+    setHistorySessions((current) => {
+      const target = current.find((session) => session.id === sessionId);
+      const targetMessage = target?.messages.find((entry) => entry.plan?.id === planId);
+
+      if (!target || !targetMessage) {
+        return current;
+      }
+
+      return patchAgentHistorySessionMessage(current, {
+        sessionId,
+        messageId: targetMessage.id,
+        updater: applyStatus,
+        locale,
+      });
+    });
+  };
+
+  const markMemoryPlanTerminalStatus = (
+    sessionId: string,
+    memoryPlanId: string,
+    status: 'applied' | 'cancelled',
+  ) => {
+    const applyStatus = (message: AgentChatMessage): AgentChatMessage =>
+      message.memoryPlan?.id === memoryPlanId && !message.memoryPlanStatus
+        ? { ...message, memoryPlanStatus: status }
+        : message;
+
+    if (activeSessionIdRef.current === sessionId) {
+      setMessages((current) => current.map(applyStatus));
+    }
+
+    setHistorySessions((current) => {
+      const target = current.find((session) => session.id === sessionId);
+      const targetMessage = target?.messages.find((entry) => entry.memoryPlan?.id === memoryPlanId);
+
+      if (!target || !targetMessage) {
+        return current;
+      }
+
+      return patchAgentHistorySessionMessage(current, {
+        sessionId,
+        messageId: targetMessage.id,
+        updater: applyStatus,
+        locale,
+      });
+    });
   };
 
   const setAgentSessionRunning = (sessionId: string, running: boolean) => {
@@ -948,7 +1011,7 @@ function AgentWorkspace() {
         ...message,
         content: streamedAgentAnswer.trim() ? streamedAgentAnswer : message.content,
         thinking: streamedAgentThinking.trim() ? streamedAgentThinking : message.thinking,
-        meta: 'streaming / Running',
+        meta: l('流式回复中', 'Streaming'),
         error: undefined,
       }));
     };
@@ -1365,7 +1428,8 @@ function AgentWorkspace() {
         window.clearTimeout(streamCommitTimer);
       }
 
-      commitStreamedAgentMessage();
+      // 不在此处提交流式缓冲：try 的各个结果分支与 catch 均已写入最终内容，
+      // 再提交会把跨轮累积的流式文本覆盖到最终答案上。
       if (runId) {
         await runEventQueue;
         try {
@@ -1445,6 +1509,8 @@ function AgentWorkspace() {
     try {
       const result = await applyLibraryAgentPlan(planToApply, approvedIdsSnapshot);
 
+      // 执行已发生（即使部分失败），回写终态防止切换会话后计划复活重复写入。
+      markPlanTerminalStatus(sessionId, planToApply.id, 'applied');
       await refreshPapers();
       if (isTargetSessionActive()) {
         setPlan(null);
@@ -1483,10 +1549,13 @@ function AgentWorkspace() {
   };
 
   const applyMemoryPlan = async (memoryPlan: AgentMemoryWritePlan) => {
+    const sessionId = activeSessionId;
+
     try {
       await writeAgentMemory(memoryPlan.file, memoryPlan.content);
+      markMemoryPlanTerminalStatus(sessionId, memoryPlan.id, 'applied');
       appendAssistantMessageToSession(
-        activeSessionId,
+        sessionId,
         l('已写入本地 Agent 记忆。', 'Local Agent memory was updated.'),
         memoryPlan.summary,
       );
@@ -1498,7 +1567,15 @@ function AgentWorkspace() {
     }
   };
 
+  const rejectMemoryPlan = (memoryPlan: AgentMemoryWritePlan) => {
+    markMemoryPlanTerminalStatus(activeSessionId, memoryPlan.id, 'cancelled');
+    setStatusMessage(l('已拒绝本次 Agent 记忆写入。', 'The Agent memory update was rejected.'));
+  };
+
   const cancelPlan = () => {
+    if (plan) {
+      markPlanTerminalStatus(activeSessionId, plan.id, 'cancelled');
+    }
     setPlan(null);
     setApprovedItemIds(new Set());
     setStatusMessage(l('已取消当前计划。', 'Canceled the current plan.'));
@@ -1960,6 +2037,7 @@ function AgentWorkspace() {
       onApplyMemoryPlan={(memoryPlan) => {
         void applyMemoryPlan(memoryPlan);
       }}
+      onRejectMemoryPlan={rejectMemoryPlan}
       onCancelAgentRun={handleCancelAgentRun}
       onCancelPlan={cancelPlan}
       onClearSelection={clearSelection}
