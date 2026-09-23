@@ -81,7 +81,11 @@ export interface AgentChatMessage {
   ragNotice?: string | null;
   toolCall?: AgentToolCallView;
   plan?: LibraryAgentPlan;
+  /** 审批计划生命周期终态；undefined 表示仍可审批。 */
+  planStatus?: 'applied' | 'cancelled';
   memoryPlan?: AgentMemoryWritePlan;
+  /** 记忆写入审批终态；undefined 表示仍可审批。 */
+  memoryPlanStatus?: 'applied' | 'cancelled';
   capability?: AgentCapabilityView;
   choices?: LibraryAgentUserChoice[];
   paperSelectionRequest?: LibraryAgentPaperSelectionRequest;

@@ -771,6 +771,8 @@ async function runAgentChatTurn(request, event) {
     tools: tools?.length ? tools : undefined,
     toolChoice: tools?.length ? toolChoice : undefined,
     reasoningSummary: 'auto',
+    // 非流式请求默认 5 分钟超时，防止 provider 挂起后只能手动取消；流式由取消机制负责。
+    ...(request?.stream === false ? { timeoutMs: 300_000 } : {}),
   };
   const controller = new AbortController();
   const previousController = activeAgentTurnControllers.get(requestId);
@@ -834,6 +836,37 @@ async function runAgentChatTurn(request, event) {
   } finally {
     if (activeAgentTurnControllers.get(requestId) === controller) {
       activeAgentTurnControllers.delete(requestId);
+    }
+  }
+}
+
+function normalizeLegacyAgentRequestId(requestId) {
+  return typeof requestId === 'string' ? requestId.trim().slice(0, 180) : '';
+}
+
+/** 为 legacy Agent 命令注册与 agent_chat_turn_cancel 共用的可取消 controller。 */
+async function withLegacyAgentTurnController(requestId, requestExtras, execute) {
+  const normalizedRequestId = normalizeLegacyAgentRequestId(requestId);
+
+  if (!normalizedRequestId) {
+    return execute();
+  }
+
+  const controller = new AbortController();
+  activeAgentTurnControllers.get(normalizedRequestId)?.abort();
+  activeAgentTurnControllers.set(normalizedRequestId, controller);
+  requestExtras.signal = controller.signal;
+
+  try {
+    return await execute();
+  } catch (error) {
+    if (controller.signal.aborted && error instanceof Error) {
+      error.name = 'AbortError';
+    }
+    throw error;
+  } finally {
+    if (activeAgentTurnControllers.get(normalizedRequestId) === controller) {
+      activeAgentTurnControllers.delete(normalizedRequestId);
     }
   }
 }
@@ -1738,46 +1771,54 @@ function createAiCommands(context) {
       return true;
     },
 
-    async decide_library_agent_paper_context_openai_compatible({ options }) {
+    async decide_library_agent_paper_context_openai_compatible({ options, requestId }) {
       const { messages, requestExtras } = buildPaperSkillDecisionRequest(options);
-      const data = await openAiChatWithAgentFallback(options, messages, requestExtras, true);
+      requestExtras.timeoutMs = 120_000;
+      return withLegacyAgentTurnController(requestId, requestExtras, async () => {
+        const data = await openAiChatWithAgentFallback(options, messages, requestExtras, true);
 
-      return parsePaperSkillDecisionOutput(data, options);
+        return parsePaperSkillDecisionOutput(data, options);
+      });
     },
 
-    async generate_library_agent_plan_openai_compatible({ options }) {
+    async generate_library_agent_plan_openai_compatible({ options, requestId }) {
       const { allowPaperContextTool, messages, requestExtras } = buildLibraryAgentModelRequest(options);
-      const data = await openAiChatWithAgentFallback(options, messages, requestExtras, allowPaperContextTool);
+      requestExtras.timeoutMs = 300_000;
+      return withLegacyAgentTurnController(requestId, requestExtras, async () => {
+        const data = await openAiChatWithAgentFallback(options, messages, requestExtras, allowPaperContextTool);
 
-      return parseLibraryAgentModelOutput(data, options);
+        return parseLibraryAgentModelOutput(data, options);
+      });
     },
 
     async generate_library_agent_plan_openai_compatible_stream({ requestId, options }, event) {
       const sender = event.sender;
       const { allowPaperContextTool, messages, requestExtras } = buildLibraryAgentModelRequest(options);
 
-      try {
-        const streamResult = await openAiChatAgentStreamWithFallback(
-          options,
-          messages,
-          requestExtras,
-          allowPaperContextTool,
-        );
-        const response = streamResult?.response || streamResult;
-        const effectiveOptions = streamResult?.effectiveOptions || options;
-        const data = await readAgentStreamResponse({ requestId, options: effectiveOptions, response, sender });
-        const result = parseLibraryAgentModelOutput(data, effectiveOptions);
+      return withLegacyAgentTurnController(requestId, requestExtras, async () => {
+        try {
+          const streamResult = await openAiChatAgentStreamWithFallback(
+            options,
+            messages,
+            requestExtras,
+            allowPaperContextTool,
+          );
+          const response = streamResult?.response || streamResult;
+          const effectiveOptions = streamResult?.effectiveOptions || options;
+          const data = await readAgentStreamResponse({ requestId, options: effectiveOptions, response, sender });
+          const result = parseLibraryAgentModelOutput(data, effectiveOptions);
 
-        sender.send('paperquay:event', AGENT_STREAM_EVENT, { requestId, kind: 'done' });
-        return result;
-      } catch (error) {
-        const message = error instanceof Error && error.message
-          ? error.message
-          : String(error ?? 'Agent stream failed');
+          sender.send('paperquay:event', AGENT_STREAM_EVENT, { requestId, kind: 'done' });
+          return result;
+        } catch (error) {
+          const message = error instanceof Error && error.message
+            ? error.message
+            : String(error ?? 'Agent stream failed');
 
-        sender.send('paperquay:event', AGENT_STREAM_EVENT, { requestId, kind: 'error', error: message });
-        throw error;
-      }
+          sender.send('paperquay:event', AGENT_STREAM_EVENT, { requestId, kind: 'error', error: message });
+          throw error;
+        }
+      });
     },
   };
 

@@ -35,10 +35,12 @@ test('Agent memory store writes fixed L2/L3 files and appends redacted L1 traces
       },
     });
 
+    // appendTrace 只回 stat 信息（避免全量读回），内容校验改走 readMemory。
     assert.equal(trace.date, '2026-08-27');
-    assert.match(trace.content, /"apiKey":"\[redacted\]"/);
-    assert.match(trace.content, /"dataUrl":"\[redacted\]"/);
-    assert.match(trace.content, /rag_search/);
+    const traceContent = store.readMemory({ file: 'trace', date: '2026-08-27' }).content;
+    assert.match(traceContent, /"apiKey":"\[redacted\]"/);
+    assert.match(traceContent, /"dataUrl":"\[redacted\]"/);
+    assert.match(traceContent, /rag_search/);
     assert.equal(store.listMemory({ date: '2026-08-27' }).length, 3);
 
     const cleared = store.clearMemory({ file: 'topics' });

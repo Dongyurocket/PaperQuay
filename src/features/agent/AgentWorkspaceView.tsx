@@ -44,6 +44,7 @@ import { formatFileSize } from '../../utils/files';
 interface AgentWorkspaceViewProps {
   activeSessionId: string;
   activeSessionRunning: boolean;
+  activeSessionCancelling: boolean;
   agentAttachments: DocumentChatAttachment[];
   agentModelPresets: QaModelPreset[];
   agentRagEnabled: boolean;
@@ -79,6 +80,7 @@ interface AgentWorkspaceViewProps {
   messages: AgentChatMessage[];
   onApplyPlan: () => void;
   onApplyMemoryPlan: (memoryPlan: AgentMemoryWritePlan) => void;
+  onRejectMemoryPlan: (memoryPlan: AgentMemoryWritePlan) => void;
   onAgentPresetChange: (presetId: string) => void;
   onAgentReasoningEffortChange: (reasoningEffort: ModelReasoningEffort) => void;
   onCancelAgentRun: () => void;
@@ -215,7 +217,7 @@ function AgentReasoningPicker({
   const menu = open ? (
     <div
       ref={menuRef}
-      className="pq-card fixed z-[9999] overflow-hidden p-1 shadow-[0_18px_48px_rgba(15,23,42,0.18)]"
+      className="pq-card fixed z-[9999] max-h-[50vh] overflow-y-auto p-1 shadow-[0_18px_48px_rgba(15,23,42,0.18)]"
       style={menuStyle}
     >
       {agentReasoningOptions.map((option) => {
@@ -271,6 +273,7 @@ function AgentReasoningPicker({
 export default function AgentWorkspaceView({
   activeSessionId,
   activeSessionRunning,
+  activeSessionCancelling,
   agentAttachments,
   agentModelPresets,
   agentRagEnabled,
@@ -306,6 +309,7 @@ export default function AgentWorkspaceView({
   messages,
   onApplyPlan,
   onApplyMemoryPlan,
+  onRejectMemoryPlan,
   onAgentPresetChange,
   onAgentReasoningEffortChange,
   onCancelAgentRun,
@@ -404,7 +408,7 @@ export default function AgentWorkspaceView({
                   data-wheel-scroll-target
                   className="mt-1 flex min-h-0 flex-1 flex-col items-center gap-2 overflow-y-auto overscroll-y-contain"
                 >
-                  {sortedHistorySessions.slice(0, 12).map((session) => (
+                  {sortedHistorySessions.map((session) => (
                     <button
                       key={session.id}
                       type="button"
@@ -577,6 +581,7 @@ export default function AgentWorkspaceView({
                       message={message}
                       onApplyPlan={onApplyPlan}
                       onApplyMemoryPlan={onApplyMemoryPlan}
+                      onRejectMemoryPlan={onRejectMemoryPlan}
                       onCancelPlan={onCancelPlan}
                   onCopyToolParameters={onCopyToolParameters}
                   onContinueWithSelectedPapers={onInlinePaperSelectionContinue}
@@ -974,18 +979,26 @@ export default function AgentWorkspaceView({
 
                     <button
                       type={activeSessionRunning ? 'button' : 'submit'}
-                      onClick={activeSessionRunning ? onCancelAgentRun : undefined}
-                      disabled={activeSessionRunning ? false : !canSubmitPrompt}
+                      onClick={activeSessionRunning && !activeSessionCancelling ? onCancelAgentRun : undefined}
+                      disabled={activeSessionRunning ? activeSessionCancelling : !canSubmitPrompt}
                       className={activeSessionRunning
-                        ? 'pq-button h-11 shrink-0 border-rose-200 px-5 text-sm text-rose-600 dark:border-rose-300/20 dark:text-rose-300'
+                        ? 'pq-button h-11 shrink-0 border-rose-200 px-5 text-sm text-rose-600 disabled:opacity-60 dark:border-rose-300/20 dark:text-rose-300'
                         : 'pq-button-primary h-11 shrink-0 px-5 text-sm disabled:opacity-50'}
                     >
                       {activeSessionRunning ? (
-                        <X className="h-4 w-4" strokeWidth={2} />
+                        activeSessionCancelling ? (
+                          <Loader2 className="h-4 w-4 animate-spin" strokeWidth={2} />
+                        ) : (
+                          <X className="h-4 w-4" strokeWidth={2} />
+                        )
                       ) : (
                         <Send className="h-4 w-4" strokeWidth={2} />
                       )}
-                      {activeSessionRunning ? l('取消', 'Cancel') : l('发送', 'Send')}
+                      {activeSessionRunning
+                        ? activeSessionCancelling
+                          ? l('正在取消', 'Cancelling')
+                          : l('取消', 'Cancel')
+                        : l('发送', 'Send')}
                     </button>
                   </div>
                 </form>

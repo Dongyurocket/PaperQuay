@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  AGENT_VISUAL_CONTEXT_MESSAGE,
   compactMessagesAtUserBoundary,
   emptyAgentSessionArtifacts,
   estimateMessagesTokens,
@@ -21,6 +22,43 @@ test('context budget estimates English and CJK text conservatively', () => {
   assert.equal(estimateTokens('abcdefgh'), 2);
   assert.equal(estimateTokens('中文字符'), 3);
   assert.equal(estimateMessagesTokens([message('user', 'abcd'), message('assistant', '中文字符')]), 4);
+});
+
+test('context budget counts tool-call arguments and attachment payloads', () => {
+  const withToolCalls = estimateMessagesTokens([{
+    role: 'assistant',
+    content: '',
+    toolCalls: [{ id: 'c1', name: 'search_library', arguments: { query: 'a'.repeat(400) } }],
+  }]);
+  const withAttachment = estimateMessagesTokens([{
+    role: 'user',
+    content: AGENT_VISUAL_CONTEXT_MESSAGE,
+    attachments: [{
+      id: 'a1',
+      kind: 'image',
+      name: 'figure.png',
+      mimeType: 'image/png',
+      size: 1024,
+      dataUrl: `data:image/png;base64,${'A'.repeat(4000)}`,
+    }],
+  }]);
+
+  assert.ok(withToolCalls > estimateTokens(''));
+  assert.ok(withToolCalls >= 100);
+  assert.ok(withAttachment >= 1000);
+});
+
+test('compaction boundary skips synthetic visual-context user messages', () => {
+  const messages = [
+    message('system', 'root instructions'),
+    message('user', 'real question'),
+    message('assistant', 'tool call'),
+    message('tool', 'tool result'),
+    { role: 'user' as const, content: AGENT_VISUAL_CONTEXT_MESSAGE },
+  ];
+
+  // 合成视觉消息不是真实用户指令，边界必须落在真实 user 消息上。
+  assert.equal(findLatestUserTurnBoundary(messages), 1);
 });
 
 test('context compaction only starts before the current user turn', () => {

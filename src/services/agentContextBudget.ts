@@ -3,6 +3,9 @@ import type { AgentLoopMessage } from './agentLoop';
 export const DEFAULT_AGENT_CONTEXT_WINDOW = 128_000;
 export const DEFAULT_AGENT_CONTEXT_RESERVE = 16_384;
 
+/** 工具视觉附件注入会话时使用的合成 user 消息文本；压缩边界识别时必须跳过它。 */
+export const AGENT_VISUAL_CONTEXT_MESSAGE = 'Visual content returned by the preceding PaperQuay tool calls.';
+
 export interface AgentSessionArtifacts {
   readPaperIds: string[];
   citedPages: string[];
@@ -40,17 +43,36 @@ export function estimateTokens(text: string): number {
   return Math.max(latinEstimate, cjkEstimate);
 }
 
-export function estimateMessagesTokens(messages: Array<Pick<AgentLoopMessage, 'content'>>): number {
-  return messages.reduce((total, message) => total + estimateTokens(message.content), 0);
+export function estimateMessagesTokens(
+  messages: Array<Pick<AgentLoopMessage, 'content'> & Partial<Pick<AgentLoopMessage, 'toolCalls' | 'attachments'>>>,
+): number {
+  return messages.reduce((total, message) => {
+    let messageTokens = estimateTokens(message.content);
+
+    // 工具调用参数与附件 base64 同样占用上下文，必须计入估算，否则压缩触发会偏晚。
+    for (const call of message.toolCalls ?? []) {
+      messageTokens += estimateTokens(`${call.name} ${JSON.stringify(call.arguments ?? {})}`);
+    }
+
+    for (const attachment of message.attachments ?? []) {
+      const dataUrlLength = attachment.dataUrl?.length ?? 0;
+      messageTokens += Math.ceil(dataUrlLength / 4) + estimateTokens(attachment.name ?? '');
+    }
+
+    return total + messageTokens;
+  }, 0);
 }
 
 /**
  * The newest user message starts the active turn. Only messages before it may
  * be compacted, so tool results from the active turn are never split apart.
+ * 合成视觉上下文消息不是真实用户指令，不能作为轮次边界。
  */
 export function findLatestUserTurnBoundary(messages: AgentLoopMessage[]): number {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
-    if (messages[index]?.role === 'user') {
+    const message = messages[index];
+
+    if (message?.role === 'user' && message.content !== AGENT_VISUAL_CONTEXT_MESSAGE) {
       return index;
     }
   }

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Bot,
   Camera,
@@ -345,14 +346,17 @@ function AgentFigureReferences({
           </button>
         ))}
       </div>
-      {preview && urls[preview.id] ? (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/80 p-6" onClick={() => setPreview(null)}>
-          <div className="max-h-full max-w-5xl overflow-auto" onClick={(event) => event.stopPropagation()}>
-            <img src={urls[preview.id]} alt={preview.caption} className="max-h-[80vh] max-w-full object-contain" />
-            <div className="bg-white p-3 text-sm text-slate-700 dark:bg-chrome-900 dark:text-chrome-200">{preview.caption}</div>
-          </div>
-        </div>
-      ) : null}
+      {preview && urls[preview.id] && typeof document !== 'undefined'
+        ? createPortal(
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/80 p-6" onClick={() => setPreview(null)}>
+            <div className="max-h-full max-w-5xl overflow-auto" onClick={(event) => event.stopPropagation()}>
+              <img src={urls[preview.id]} alt={preview.caption} className="max-h-[80vh] max-w-full object-contain" />
+              <div className="bg-white p-3 text-sm text-slate-700 dark:bg-chrome-900 dark:text-chrome-200">{preview.caption}</div>
+            </div>
+          </div>,
+          document.body,
+        )
+        : null}
     </>
   );
 }
@@ -409,7 +413,7 @@ export function UserMessageCard({ message }: { message: AgentChatMessage }) {
   return (
     <article className="flex items-start justify-end gap-3">
       <div className="max-w-[72%] rounded-[24px] border border-teal-300 bg-teal-600 px-4 py-3 text-sm leading-7 text-white shadow-[0_18px_40px_rgba(20,184,166,0.18)] dark:border-teal-300/30 dark:bg-teal-300 dark:text-slate-950">
-        <div className="whitespace-pre-wrap">{message.content}</div>
+        <div className="whitespace-pre-wrap break-words">{message.content}</div>
         {message.attachments && message.attachments.length > 0 ? (
           <div className="mt-3 flex flex-wrap gap-2">
             {message.attachments.map((attachment) => {
@@ -464,6 +468,7 @@ export function AssistantMessageCard({
   message,
   onApplyPlan,
   onApplyMemoryPlan,
+  onRejectMemoryPlan,
   onCancelPlan,
   onCopyToolParameters,
   onContinueWithSelectedPapers,
@@ -495,6 +500,7 @@ export function AssistantMessageCard({
   message: AgentChatMessage;
   onApplyPlan: () => void;
   onApplyMemoryPlan: (memoryPlan: AgentMemoryWritePlan) => void;
+  onRejectMemoryPlan: (memoryPlan: AgentMemoryWritePlan) => void;
   onCancelPlan: () => void;
   onCopyToolParameters: (toolCall: AgentToolCallView) => void;
   onContinueWithSelectedPapers: (instruction: string, paperIds: string[]) => void;
@@ -558,8 +564,15 @@ export function AssistantMessageCard({
             {message.capability ? <CapabilityProgress capability={message.capability} l={l} /> : null}
             {memoryPlan ? (
               <div className="mt-4 rounded-[20px] border border-sky-200 bg-sky-50/70 p-4 dark:border-sky-300/25 dark:bg-sky-300/10">
-                <div className="text-sm font-bold text-slate-950 dark:text-white">
-                  {l('Agent 记忆更新', 'Agent Memory Update')}
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-sm font-bold text-slate-950 dark:text-white">
+                    {l('Agent 记忆更新', 'Agent Memory Update')}
+                  </div>
+                  {message.memoryPlanStatus ? (
+                    <span className="rounded-full border border-sky-200 bg-white px-2.5 py-0.5 text-[11px] font-semibold text-sky-700 dark:border-sky-300/30 dark:bg-sky-300/10 dark:text-sky-200">
+                      {message.memoryPlanStatus === 'applied' ? l('已写入', 'Applied') : l('已拒绝', 'Rejected')}
+                    </span>
+                  ) : null}
                 </div>
                 <div className="mt-1 text-xs leading-5 text-slate-600 dark:text-chrome-300">
                   {memoryPlan.summary}
@@ -571,12 +584,27 @@ export function AssistantMessageCard({
                   <button
                     type="button"
                     onClick={() => onApplyMemoryPlan(memoryPlan)}
-                    disabled={activeSessionRunning}
+                    disabled={activeSessionRunning || Boolean(message.memoryPlanStatus)}
                     className={agentPlanPrimaryActionClass}
                   >
                     <Check className="h-4 w-4" />
-                    {l('确认写入', 'Apply Update')}
+                    {message.memoryPlanStatus === 'applied'
+                      ? l('已写入', 'Applied')
+                      : message.memoryPlanStatus === 'cancelled'
+                        ? l('已拒绝', 'Rejected')
+                        : l('确认写入', 'Apply Update')}
                   </button>
+                  {!message.memoryPlanStatus ? (
+                    <button
+                      type="button"
+                      onClick={() => onRejectMemoryPlan(memoryPlan)}
+                      disabled={activeSessionRunning}
+                      className={agentPlanSecondaryActionClass}
+                    >
+                      <X className="h-4 w-4" />
+                      {l('拒绝', 'Reject')}
+                    </button>
+                  ) : null}
                 </div>
               </div>
             ) : null}
@@ -677,12 +705,22 @@ export function AssistantMessageCard({
                   {l('原值与新值分开展示，确认前不会写入数据库。', 'Original and new values are shown separately. Nothing is written before confirmation.')}
                 </div>
               </div>
-              <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-bold text-slate-500 dark:border-white/10 dark:bg-chrome-900 dark:text-chrome-400">
-                {messagePlan.items.length} changes
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-bold text-slate-500 dark:border-white/10 dark:bg-chrome-900 dark:text-chrome-400">
+                  {messagePlan.items.length} changes
+                </span>
+                {message.planStatus ? (
+                  <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-bold text-slate-500 dark:border-white/10 dark:bg-chrome-900 dark:text-chrome-400">
+                    {message.planStatus === 'applied' ? l('已执行', 'Applied') : l('已取消', 'Cancelled')}
+                  </span>
+                ) : null}
+              </div>
             </div>
-            <div className="grid gap-3 xl:grid-cols-2">
-              {messagePlan.items.slice(0, 4).map((item) => (
+            <div
+              data-wheel-scroll-target
+              className="grid max-h-[32rem] gap-3 overflow-y-auto overscroll-y-contain pr-1 xl:grid-cols-2"
+            >
+              {messagePlan.items.map((item) => (
                 <PlanDiffCard
                   key={item.id}
                   item={item}

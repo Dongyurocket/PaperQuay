@@ -23,6 +23,7 @@ import {
   type AgentMemoryWritePlan,
 } from '../../services/agentMemory';
 import type { AgentLoopEvent, AgentLoopMessage } from '../../services/agentLoop';
+import { isComparativeSurveyInstruction } from '../../services/agentCapabilityTrigger';
 import type { ComparativeSurveyArtifacts, ComparativeSurveyEvent } from '../../services/agentCapability';
 import { listLibraryCategories, listLibraryPapers } from '../../services/library';
 import type { LiteratureCategory, LiteraturePaper } from '../../types/library';
@@ -103,7 +104,16 @@ function createCapabilityView() {
 }
 
 function recoverySnapshotMessages(messages: AgentLoopMessage[]) {
-  return messages.slice(-32).map((message) => ({
+  // 始终保留系统提示；窗口不从 tool 消息开始，避免产生没有前置 assistant toolCalls 的孤儿消息。
+  const root = messages[0]?.role === 'system' ? messages[0] : null;
+  const rest = root ? messages.slice(1) : messages;
+  let windowed = rest.slice(-32);
+
+  while (windowed.length > 0 && windowed[0]?.role === 'tool') {
+    windowed = windowed.slice(1);
+  }
+
+  return [...(root ? [root] : []), ...windowed].map((message) => ({
     role: message.role,
     content: message.content.slice(0, 8000),
     toolCallId: message.toolCallId,
@@ -181,6 +191,7 @@ function AgentWorkspace() {
   const [loading, setLoading] = useState(true);
   const [applyingPlan, setApplyingPlan] = useState(false);
   const [runningSessionIds, setRunningSessionIds] = useState<Set<string>>(() => new Set());
+  const [cancellingSessionIds, setCancellingSessionIds] = useState<Set<string>>(() => new Set());
   const runningSessionIdsRef = useRef(runningSessionIds);
   const activeSessionIdRef = useRef(activeSessionId);
   const [statusMessage, setStatusMessage] = useState('');
@@ -438,8 +449,20 @@ function AgentWorkspace() {
   ]);
 
   useEffect(() => {
-    saveAgentHistorySessions(historySessions);
-  }, [historySessions]);
+    // 有运行中的会话时（流式期间）防抖写盘，运行结束后立即落盘。
+    if (runningSessionIds.size === 0) {
+      saveAgentHistorySessions(historySessions);
+      return undefined;
+    }
+
+    const timer = window.setTimeout(() => {
+      saveAgentHistorySessions(historySessions);
+    }, 800);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [historySessions, runningSessionIds]);
 
   useEffect(() => {
     const sessionIds = historySessions.map((session) => session.id);
@@ -521,15 +544,81 @@ function AgentWorkspace() {
   const restoreDraftStateFromMessages = (sessionMessages: AgentChatMessage[]) => {
     const latestPlanMessage = [...sessionMessages]
       .reverse()
-      .find((message) => message.role === 'assistant' && message.plan);
+      .find((message) => message.role === 'assistant' && message.plan && !message.planStatus);
     const nextPlan = latestPlanMessage?.plan ?? null;
 
     setPlan(nextPlan);
     setApprovedItemIds(new Set(nextPlan?.items.map((item) => item.id) ?? []));
   };
 
+  /** 将包含指定计划/记忆计划的消息回写终态，防止切换会话后审批卡复活并重复执行。 */
+  const markPlanTerminalStatus = (
+    sessionId: string,
+    planId: string,
+    status: 'applied' | 'cancelled',
+  ) => {
+    const applyStatus = (message: AgentChatMessage): AgentChatMessage =>
+      message.plan?.id === planId && !message.planStatus
+        ? { ...message, planStatus: status }
+        : message;
+
+    if (activeSessionIdRef.current === sessionId) {
+      setMessages((current) => current.map(applyStatus));
+    }
+
+    setHistorySessions((current) => {
+      const target = current.find((session) => session.id === sessionId);
+      const targetMessage = target?.messages.find((entry) => entry.plan?.id === planId);
+
+      if (!target || !targetMessage) {
+        return current;
+      }
+
+      return patchAgentHistorySessionMessage(current, {
+        sessionId,
+        messageId: targetMessage.id,
+        updater: applyStatus,
+        locale,
+      });
+    });
+  };
+
+  const markMemoryPlanTerminalStatus = (
+    sessionId: string,
+    memoryPlanId: string,
+    status: 'applied' | 'cancelled',
+  ) => {
+    const applyStatus = (message: AgentChatMessage): AgentChatMessage =>
+      message.memoryPlan?.id === memoryPlanId && !message.memoryPlanStatus
+        ? { ...message, memoryPlanStatus: status }
+        : message;
+
+    if (activeSessionIdRef.current === sessionId) {
+      setMessages((current) => current.map(applyStatus));
+    }
+
+    setHistorySessions((current) => {
+      const target = current.find((session) => session.id === sessionId);
+      const targetMessage = target?.messages.find((entry) => entry.memoryPlan?.id === memoryPlanId);
+
+      if (!target || !targetMessage) {
+        return current;
+      }
+
+      return patchAgentHistorySessionMessage(current, {
+        sessionId,
+        messageId: targetMessage.id,
+        updater: applyStatus,
+        locale,
+      });
+    });
+  };
+
   const setAgentSessionRunning = (sessionId: string, running: boolean) => {
-    setRunningSessionIds((current) => updateAgentRunningSessions(current, sessionId, running));
+    // 同步更新 ref，保证运行中守卫在同一事件循环内连续调用时也能生效。
+    const next = updateAgentRunningSessions(runningSessionIdsRef.current, sessionId, running);
+    runningSessionIdsRef.current = next;
+    setRunningSessionIds(next);
   };
 
   const togglePaper = (paperId: string) => {
@@ -796,7 +885,8 @@ function AgentWorkspace() {
     const startedAt = performance.now();
     const assistantMessageId = newMessageId();
     const paperCount = selectedPapersSnapshot.length;
-    const capabilityRequested = /对比调研|比较调研|对比综述|比较综述|comparative survey|comparative review|comparison report/i.test(instruction) && paperCount >= 2;
+    // 触发判定与服务层共用同一函数，进度卡展示与实际执行路径不再分叉。
+    const capabilityRequested = isComparativeSurveyInstruction(instruction, modelPapersSnapshot.length);
     const historyMessages = buildConversationHistory();
     const attachmentsSnapshot = [...agentAttachments];
     const userMessage: AgentChatMessage = {
@@ -839,7 +929,8 @@ function AgentWorkspace() {
     let runTurns = 0;
     const runTokens = { promptTokens: 0, completionTokens: 0 };
     const appendRunEvent = (event: AgentLoopEvent) => {
-      if (!runId || event.kind === 'thinking_delta') {
+      // delta 事件没有重放/恢复价值，不落库，避免每个 token 产生一次 IPC + SQLite 写入。
+      if (!runId || event.kind === 'thinking_delta' || event.kind === 'answer_delta') {
         return;
       }
 
@@ -851,8 +942,6 @@ function AgentWorkspace() {
             return { kind: 'tool_call', turn: event.turn, payload: { turn: event.turn, callId: event.callId, name: event.name, args: event.args } };
           case 'tool_result':
             return { kind: 'tool_result', turn: event.turn, payload: { turn: event.turn, callId: event.callId, name: event.name, ok: event.ok, preview: event.preview } };
-          case 'answer_delta':
-            return { kind: 'answer_delta', payload: { characters: event.text.length } };
           case 'context_compacted':
             return {
               kind: 'context_compacted',
@@ -948,7 +1037,7 @@ function AgentWorkspace() {
         ...message,
         content: streamedAgentAnswer.trim() ? streamedAgentAnswer : message.content,
         thinking: streamedAgentThinking.trim() ? streamedAgentThinking : message.thinking,
-        meta: 'streaming / Running',
+        meta: l('流式回复中', 'Streaming'),
         error: undefined,
       }));
     };
@@ -1365,7 +1454,8 @@ function AgentWorkspace() {
         window.clearTimeout(streamCommitTimer);
       }
 
-      commitStreamedAgentMessage();
+      // 不在此处提交流式缓冲：try 的各个结果分支与 catch 均已写入最终内容，
+      // 再提交会把跨轮累积的流式文本覆盖到最终答案上。
       if (runId) {
         await runEventQueue;
         try {
@@ -1378,8 +1468,20 @@ function AgentWorkspace() {
           // The primary answer has already been delivered; avoid surfacing telemetry-only failures.
         }
       }
-      setAgentSessionRunning(sessionId, false);
-      abortControllersRef.current.delete(sessionId);
+      // 仅当 controller 仍是本 run 的实例时才收敛运行状态，
+      // 避免旧 run 的 finally 误清新 run 的 controller 与 running 标志。
+      if (abortControllersRef.current.get(sessionId) === abortController) {
+        abortControllersRef.current.delete(sessionId);
+        setAgentSessionRunning(sessionId, false);
+        setCancellingSessionIds((current) => {
+          if (!current.has(sessionId)) {
+            return current;
+          }
+          const next = new Set(current);
+          next.delete(sessionId);
+          return next;
+        });
+      }
     }
   };
 
@@ -1392,16 +1494,9 @@ function AgentWorkspace() {
     }
 
     controller.abort();
+    setCancellingSessionIds((current) => new Set(current).add(activeSessionId));
+    // 取消的收敛完全交给 run 自身的 finally，不用定时器强制清态，避免双 run 竞态。
     setStatusMessage(l('正在取消当前运行...', 'Cancelling the current run...'));
-
-    const sid = activeSessionId;
-    window.setTimeout(() => {
-      if (abortControllersRef.current.has(sid)) {
-        abortControllersRef.current.delete(sid);
-        setAgentSessionRunning(sid, false);
-        setStatusMessage(l('已取消当前运行。', 'Current run cancelled.'));
-      }
-    }, 500);
   };
 
   const submitPrompt = (value: string) => {
@@ -1445,6 +1540,8 @@ function AgentWorkspace() {
     try {
       const result = await applyLibraryAgentPlan(planToApply, approvedIdsSnapshot);
 
+      // 执行已发生（即使部分失败），回写终态防止切换会话后计划复活重复写入。
+      markPlanTerminalStatus(sessionId, planToApply.id, 'applied');
       await refreshPapers();
       if (isTargetSessionActive()) {
         setPlan(null);
@@ -1483,10 +1580,13 @@ function AgentWorkspace() {
   };
 
   const applyMemoryPlan = async (memoryPlan: AgentMemoryWritePlan) => {
+    const sessionId = activeSessionId;
+
     try {
       await writeAgentMemory(memoryPlan.file, memoryPlan.content);
+      markMemoryPlanTerminalStatus(sessionId, memoryPlan.id, 'applied');
       appendAssistantMessageToSession(
-        activeSessionId,
+        sessionId,
         l('已写入本地 Agent 记忆。', 'Local Agent memory was updated.'),
         memoryPlan.summary,
       );
@@ -1498,7 +1598,15 @@ function AgentWorkspace() {
     }
   };
 
+  const rejectMemoryPlan = (memoryPlan: AgentMemoryWritePlan) => {
+    markMemoryPlanTerminalStatus(activeSessionId, memoryPlan.id, 'cancelled');
+    setStatusMessage(l('已拒绝本次 Agent 记忆写入。', 'The Agent memory update was rejected.'));
+  };
+
   const cancelPlan = () => {
+    if (plan) {
+      markPlanTerminalStatus(activeSessionId, plan.id, 'cancelled');
+    }
     setPlan(null);
     setApprovedItemIds(new Set());
     setStatusMessage(l('已取消当前计划。', 'Canceled the current plan.'));
@@ -1781,13 +1889,24 @@ function AgentWorkspace() {
 
     void (async () => {
       try {
-        const [interruptedRun] = await listInterruptedAgentRuns(session.id);
+        // 本进程内仍有活跃 controller 的会话，其 running 行属于正在执行的 run，不视为中断。
+        if (abortControllersRef.current.has(session.id)) {
+          return;
+        }
+
+        const interruptedRuns = await listInterruptedAgentRuns(session.id);
+        const [interruptedRun, ...staleRuns] = interruptedRuns;
 
         if (!interruptedRun || activeSessionIdRef.current !== session.id) {
           return;
         }
 
-        const events = await getAgentRunEvents(interruptedRun.runId);
+        // 同会话其余遗留 running 行一并清理，避免每次打开会话重复提示。
+        for (const staleRun of staleRuns) {
+          await finishAgentRun({ runId: staleRun.runId, status: 'aborted' }).catch(() => {});
+        }
+
+        const events = await getAgentRunEvents(interruptedRun.runId, 0, { order: 'desc', limit: 200 });
         const checkpoint = latestAgentRecoveryCheckpoint(events);
         const capabilityCheckpoint = latestComparativeSurveyCheckpoint(events);
 
@@ -1798,6 +1917,11 @@ function AgentWorkspace() {
           ));
 
           await finishAgentRun({ runId: interruptedRun.runId, status: 'aborted' }).catch(() => {});
+
+          // confirm + await 期间用户可能已切换到其他会话，写输入框前必须复查。
+          if (activeSessionIdRef.current !== session.id) {
+            return;
+          }
 
           if (resumeCapability) {
             pendingCapabilityResumeRef.current.set(session.id, {
@@ -1874,6 +1998,23 @@ function AgentWorkspace() {
   };
 
   const handleDeleteHistorySession = (sessionId: string) => {
+    // 删除前先中止该会话仍在运行的 run，避免孤儿 run 继续消耗 token 且无法取消。
+    const controller = abortControllersRef.current.get(sessionId);
+
+    if (controller) {
+      controller.abort();
+      abortControllersRef.current.delete(sessionId);
+      setAgentSessionRunning(sessionId, false);
+      setCancellingSessionIds((current) => {
+        if (!current.has(sessionId)) {
+          return current;
+        }
+        const next = new Set(current);
+        next.delete(sessionId);
+        return next;
+      });
+    }
+
     setHistorySessions((current) => current.filter((session) => session.id !== sessionId));
 
     if (sessionId === activeSessionId) {
@@ -1895,6 +2036,15 @@ function AgentWorkspace() {
   const handleClearAgentHistory = () => {
     const nextSessionId = newAgentSessionId();
     const nextMessages = [createLocalizedWelcomeMessage()];
+
+    // 清空历史会删除所有会话，先中止所有仍在运行的 run。
+    for (const controller of abortControllersRef.current.values()) {
+      controller.abort();
+    }
+    abortControllersRef.current.clear();
+    runningSessionIdsRef.current = new Set();
+    setRunningSessionIds(new Set());
+    setCancellingSessionIds(new Set());
 
     setActiveSessionId(nextSessionId);
     setMessages(nextMessages);
@@ -1921,6 +2071,7 @@ function AgentWorkspace() {
     <AgentWorkspaceView
       activeSessionId={activeSessionId}
       activeSessionRunning={activeSessionRunning}
+      activeSessionCancelling={cancellingSessionIds.has(activeSessionId)}
       agentAttachments={agentAttachments}
       agentModelPresets={agentModelPresets}
       agentRagEnabled={agentRagEnabled}
@@ -1960,6 +2111,7 @@ function AgentWorkspace() {
       onApplyMemoryPlan={(memoryPlan) => {
         void applyMemoryPlan(memoryPlan);
       }}
+      onRejectMemoryPlan={rejectMemoryPlan}
       onCancelAgentRun={handleCancelAgentRun}
       onCancelPlan={cancelPlan}
       onClearSelection={clearSelection}

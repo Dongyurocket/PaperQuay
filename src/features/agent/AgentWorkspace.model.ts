@@ -234,18 +234,22 @@ function stripAgentMessageForHistory(message: AgentChatMessage): AgentChatMessag
 }
 
 export function saveAgentHistorySessions(sessions: AgentHistorySession[]) {
-  const normalized = sessions
-    .filter((session) => hasAgentConversationHistory(session.messages))
-    .slice()
-    .sort((left, right) => right.updatedAt - left.updatedAt)
-    .slice(0, MAX_AGENT_HISTORY_SESSIONS)
-    .map((session) => ({
-      ...session,
-      messages: session.messages.map(stripAgentMessageForHistory),
-      attachments: session.attachments?.map(stripAgentAttachmentForHistory),
-    }));
+  try {
+    const normalized = sessions
+      .filter((session) => hasAgentConversationHistory(session.messages))
+      .slice()
+      .sort((left, right) => right.updatedAt - left.updatedAt)
+      .slice(0, MAX_AGENT_HISTORY_SESSIONS)
+      .map((session) => ({
+        ...session,
+        messages: session.messages.map(stripAgentMessageForHistory),
+        attachments: session.attachments?.map(stripAgentAttachmentForHistory),
+      }));
 
-  window.localStorage.setItem(AGENT_HISTORY_STORAGE_KEY, JSON.stringify(normalized));
+    window.localStorage.setItem(AGENT_HISTORY_STORAGE_KEY, JSON.stringify(normalized));
+  } catch {
+    // localStorage 配额或序列化失败不应打断 Agent 对话；历史记录本就是易失缓存。
+  }
 }
 
 export function paperAuthors(paper: LiteraturePaper, locale: UiLanguage = 'zh-CN'): string {
