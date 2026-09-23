@@ -25,24 +25,55 @@ test('recovery chooses the newest complete checkpoint and preserves user/assista
       messages: [
         { role: 'system', content: 'root' },
         { role: 'user', content: 'current request' },
-        { role: 'assistant', content: 'complete answer' },
+        {
+          role: 'assistant',
+          content: '',
+          toolCalls: [{ id: 'call-1', name: 'search_library', arguments: { query: 'x' } }],
+        },
         { role: 'tool', content: 'tool record', toolCallId: 'call-1' },
+        { role: 'assistant', content: 'complete answer' },
       ],
     }),
     event(4, 'tool_call', { name: 'unfinished next call' }),
   ]);
 
+  // 工具调用轮的空 content assistant 消息必须保留，否则 tool 消息成为孤儿。
   assert.deepEqual(checkpoint?.map((message) => message.content), [
     'root',
     'current request',
-    'complete answer',
+    ' ',
     'tool record',
+    'complete answer',
   ]);
   assert.equal(checkpoint?.[3]?.toolCallId, 'call-1');
+  assert.equal(checkpoint?.[2]?.toolCalls?.[0]?.id, 'call-1');
 
   const chat = recoveryCheckpointToChatMessages(checkpoint ?? []);
-  assert.deepEqual(chat.map((message) => message.role), ['user', 'assistant']);
-  assert.deepEqual(chat.map((message) => message.content), ['current request', 'complete answer']);
+  assert.deepEqual(chat.map((message) => message.role), ['user', 'assistant', 'assistant']);
+  assert.deepEqual(chat.map((message) => message.content), ['current request', ' ', 'complete answer']);
+});
+
+test('recovery drops orphan tool messages and unanswered tool-call assistant messages', () => {
+  const checkpoint = latestAgentRecoveryCheckpoint([
+    event(1, 'checkpoint', {
+      messages: [
+        { role: 'system', content: 'root' },
+        { role: 'user', content: 'request' },
+        // 没有前置 assistant toolCalls 的 tool 消息：孤儿，必须丢弃。
+        { role: 'tool', content: 'orphan tool result', toolCallId: 'missing-call' },
+        // toolCalls 没有对应 tool 应答的 assistant 消息：provider 会拒绝，必须丢弃。
+        {
+          role: 'assistant',
+          content: '',
+          toolCalls: [{ id: 'unanswered', name: 'search_library', arguments: {} }],
+        },
+        { role: 'assistant', content: 'final answer' },
+      ],
+    }),
+  ]);
+
+  assert.deepEqual(checkpoint?.map((message) => message.role), ['system', 'user', 'assistant']);
+  assert.deepEqual(checkpoint?.map((message) => message.content), ['root', 'request', 'final answer']);
 });
 
 test('recovery ignores malformed checkpoint payloads', () => {

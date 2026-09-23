@@ -1,6 +1,7 @@
 # Agent 模块审查：问题清单与修复方案
 
 - 日期：2026-09-23
+- 状态：**已实施**（2026-09-23，分支 `fix/agent-module-review-2026-09-23`，变更记录见 `docs/changes/2026-09-23-agent-module-review-fixes.md`）。唯一未实施项：wheel delegate 触控板惯性（M5，疑似问题，需运行态验证后另行处理）。
 - 范围：`src/services/agent*.ts`、`src/features/agent/*`、`src/services/libraryAgent.ts`（ReAct 与 legacy 路径、调研阶段）、`electron/backend/ragStore.cjs` / `aiCommands.cjs` / `agentMemoryStore.cjs` 的 agent 相关段落
 - 方法：三个独立只读审查（UI 层 / 架构 / Bug 排查）并行执行，Top 级结论经第二次代码复核（含行号核对与调用链交叉验证）。时序类结论为静态推演，未做运行时复现。
 

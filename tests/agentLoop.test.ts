@@ -195,6 +195,81 @@ test('agent loop keeps memory writes behind an independent approval plan', async
   assert.match(result.memoryPlan.content, /Evidence/);
 });
 
+test('agent loop rejects mixed paper and memory writes before executing either', async () => {
+  let paperExecutions = 0;
+  let memoryExecutions = 0;
+  const paperWrite: AgentToolDefinition = {
+    name: 'rename',
+    description: 'Create a rename plan.',
+    kind: 'write',
+    parameters: { type: 'object', additionalProperties: true },
+    async execute() {
+      paperExecutions += 1;
+      return { content: 'plan created' };
+    },
+  };
+  const memoryWrite: AgentToolDefinition = {
+    name: 'write_memory',
+    description: 'Create a memory update.',
+    kind: 'write',
+    parameters: { type: 'object', additionalProperties: true },
+    async execute() {
+      memoryExecutions += 1;
+      return { content: 'memory plan created' };
+    },
+  };
+  const calls: AgentChatTurnRequest[] = [];
+
+  const result = await runAgentLoop(loopOptions(
+    [paperWrite, memoryWrite],
+    async (request) => {
+      calls.push(request);
+      return calls.length === 1
+        ? {
+          content: '',
+          toolCalls: [
+            { id: 'w-1', name: 'rename', arguments: {} },
+            { id: 'w-2', name: 'write_memory', arguments: {} },
+          ],
+        }
+        : { content: 'Split into separate reviewable actions.' };
+    },
+  ));
+
+  assert.equal(result.kind, 'answer');
+  assert.equal(paperExecutions, 0);
+  assert.equal(memoryExecutions, 0);
+  assert.match(calls[1]?.messages.at(-2)?.content ?? '', /separate turns/);
+  assert.match(calls[1]?.messages.at(-1)?.content ?? '', /separate turns/);
+});
+
+test('agent loop feeds write tool failures back to the model instead of aborting the run', async () => {
+  const failingWrite: AgentToolDefinition = {
+    name: 'rename',
+    description: 'Create a rename plan.',
+    kind: 'write',
+    parameters: { type: 'object', additionalProperties: true },
+    async execute() {
+      throw new Error('plan schema invalid');
+    },
+  };
+  const calls: AgentChatTurnRequest[] = [];
+
+  const result = await runAgentLoop(loopOptions(
+    [failingWrite],
+    async (request) => {
+      calls.push(request);
+      return calls.length === 1
+        ? { content: '', toolCalls: [{ id: 'w-1', name: 'rename', arguments: {} }] }
+        : { content: 'Understood, no changes are needed.' };
+    },
+  ));
+
+  assert.equal(result.kind, 'answer');
+  assert.match(calls[1]?.messages.at(-1)?.content ?? '', /plan schema invalid/);
+  assert.match(calls[1]?.messages.at(-1)?.content ?? '', /"isError":true/);
+});
+
 test('agent loop forces a final tool-free turn at maxTurns', async () => {
   const calls: AgentChatTurnRequest[] = [];
   const result = await runAgentLoop(loopOptions(
