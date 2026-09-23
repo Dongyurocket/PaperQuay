@@ -1151,10 +1151,52 @@ function parseJsonObject(text) {
   }
 }
 
+// MinerU 从 PDF 数学符号/公式里可能解析出**落单的 UTF-16 代理字符**（例如 "\udc45"）。
+// JSON.stringify 会把它原样转义成 "\udc45"，OpenAI 兼容网关（如 SiliconFlow）会判定
+// 参数非法并整批返回 400 {"code":20015}，导致该文档的 RAG 索引永远建不完
+// （且报错信息看不出是文本问题）。这里只修复落单的代理码位——成对代理是正常字符
+// （emoji、扩展汉字），必须原样保留。
+function toWellFormedText(value) {
+  if (typeof value !== 'string' || !/[\uD800-\uDFFF]/.test(value)) {
+    return value;
+  }
+
+  if (typeof value.toWellFormed === 'function') {
+    return value.toWellFormed();
+  }
+
+  let output = '';
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        output += value[index] + value[index + 1];
+        index += 1;
+        continue;
+      }
+      output += '\uFFFD';
+      continue;
+    }
+
+    if (code >= 0xdc00 && code <= 0xdfff) {
+      output += '\uFFFD';
+      continue;
+    }
+
+    output += value[index];
+  }
+
+  return output;
+}
+
 async function embedTexts(texts, embedding) {
   const body = {
     model: embedding.model,
-    input: texts,
+    input: Array.isArray(texts)
+      ? texts.map((text) => toWellFormedText(text))
+      : toWellFormedText(texts),
   };
 
   if (embedding.dimensions) {

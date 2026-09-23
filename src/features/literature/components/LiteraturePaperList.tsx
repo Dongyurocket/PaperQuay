@@ -701,7 +701,7 @@ export default function LiteraturePaperList({
                               ? l('MinerU 已解析', 'MinerU Parsed')
                               : l('MinerU 未解析', 'MinerU Not Parsed')}
                         </span>
-                        {ragIndexAvailable && mineruParsed ? (
+                        {ragIndexAvailable ? (
                           <span
                             title={
                               ragIndexingDocumentKey === paper.id
