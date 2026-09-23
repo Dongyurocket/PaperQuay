@@ -448,8 +448,20 @@ function AgentWorkspace() {
   ]);
 
   useEffect(() => {
-    saveAgentHistorySessions(historySessions);
-  }, [historySessions]);
+    // 有运行中的会话时（流式期间）防抖写盘，运行结束后立即落盘。
+    if (runningSessionIds.size === 0) {
+      saveAgentHistorySessions(historySessions);
+      return undefined;
+    }
+
+    const timer = window.setTimeout(() => {
+      saveAgentHistorySessions(historySessions);
+    }, 800);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [historySessions, runningSessionIds]);
 
   useEffect(() => {
     const sessionIds = historySessions.map((session) => session.id);

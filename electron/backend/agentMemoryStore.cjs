@@ -139,7 +139,8 @@ function createAgentMemoryStore(appPaths) {
     }
 
     fs.appendFileSync(filePath, line, 'utf8');
-    return readMemory({ file: 'trace', date });
+    // 调用方不使用返回值；只回 stat 信息，避免每次追加都全量读回 trace 文件（O(n²) 读放大）。
+    return { file: 'trace', date, ...fileInfo(filePath) };
   }
 
   function listMemory(request = {}) {
