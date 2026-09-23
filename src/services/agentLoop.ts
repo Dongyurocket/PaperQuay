@@ -1,6 +1,7 @@
 import type { DocumentChatAttachment } from '../types/reader';
 import type { AgentMemoryWritePlan } from './agentMemory';
 import {
+  AGENT_VISUAL_CONTEXT_MESSAGE,
   compactMessagesAtUserBoundary,
   emptyAgentSessionArtifacts,
   fallbackCompactionSummary,
@@ -144,6 +145,22 @@ export interface AgentLoopOptions {
   contextCompaction?: AgentContextCompactionOptions;
 }
 
+const MEMORY_WRITE_TOOL_NAME = 'write_memory';
+
+function isLikelyContextSizeErrorMessage(message: string): boolean {
+  const normalized = message.toLocaleLowerCase();
+
+  return [
+    'context length',
+    'maximum context',
+    'too many tokens',
+    'token limit',
+    'request too large',
+    'payload too large',
+    '413',
+  ].some((signal) => normalized.includes(signal));
+}
+
 function abortError(): Error {
   const error = new Error('Agent run aborted');
   error.name = 'AbortError';
@@ -240,7 +257,7 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<LibraryAg
   });
   const compaction = options.contextCompaction;
   const artifacts = compaction?.artifacts ?? emptyAgentSessionArtifacts();
-  const compactContextAtTurnBoundary = async () => {
+  const compactContextAtTurnBoundary = async (force = false) => {
     if (!compaction) {
       return;
     }
@@ -251,7 +268,7 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<LibraryAg
       reserve: compaction.reserve,
     });
 
-    if (!plan.required) {
+    if (!plan.required && !(force && plan.messagesToCompact.length > 0)) {
       return;
     }
 
@@ -303,27 +320,50 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<LibraryAg
     let response: AgentChatTurnResponse;
 
     try {
-      response = await options.chatTurn({
-        messages: messages.map((message) => ({
-          ...message,
-          toolCalls: message.toolCalls?.map((call) => ({ ...call, arguments: { ...call.arguments } })),
-          attachments: message.attachments?.map((attachment) => ({ ...attachment })),
-        })),
-        tools: turnTools.length > 0 ? modelTools(turnTools) : undefined,
-        toolChoice: turnTools.length > 0 ? 'auto' : 'none',
-        stream: true,
-        signal: options.signal,
-        onAnswerDelta: (text) => {
-          if (!text) return;
-          emittedAnswerDelta = true;
-          emit({ kind: 'answer_delta', text });
-        },
-        onThinkingDelta: (text) => {
-          if (!text) return;
-          emittedThinkingDelta = true;
-          emit({ kind: 'thinking_delta', text });
-        },
-      });
+      let contextRetryUsed = false;
+
+      // 估算漏算（附件/工具参数）或压缩后仍超限时，强制压缩后重试一次。
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        try {
+          response = await options.chatTurn({
+            messages: messages.map((message) => ({
+              ...message,
+              toolCalls: message.toolCalls?.map((call) => ({ ...call, arguments: { ...call.arguments } })),
+              attachments: message.attachments?.map((attachment) => ({ ...attachment })),
+            })),
+            tools: turnTools.length > 0 ? modelTools(turnTools) : undefined,
+            toolChoice: turnTools.length > 0 ? 'auto' : 'none',
+            stream: true,
+            signal: options.signal,
+            onAnswerDelta: (text) => {
+              if (!text) return;
+              emittedAnswerDelta = true;
+              emit({ kind: 'answer_delta', text });
+            },
+            onThinkingDelta: (text) => {
+              if (!text) return;
+              emittedThinkingDelta = true;
+              emit({ kind: 'thinking_delta', text });
+            },
+          });
+          break;
+        } catch (turnError) {
+          const turnMessage = resultErrorMessage(turnError);
+
+          if (
+            !contextRetryUsed &&
+            !options.signal?.aborted &&
+            isLikelyContextSizeErrorMessage(turnMessage)
+          ) {
+            contextRetryUsed = true;
+            await compactContextAtTurnBoundary(true);
+            continue;
+          }
+
+          throw turnError;
+        }
+      }
     } catch (error) {
       const message = resultErrorMessage(error);
       emit({ kind: 'error', turn, message });
@@ -373,8 +413,47 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<LibraryAg
       }
 
       if (writeCalls.length > 0) {
+        const memoryWriteCalls = writeCalls.filter((call) => call.name === MEMORY_WRITE_TOOL_NAME);
+        const paperWriteCalls = writeCalls.filter((call) => call.name !== MEMORY_WRITE_TOOL_NAME);
+
+        // 先落 assistant 消息，保证后续 tool 结果消息有合法前置。
+        messages.push({
+          role: 'assistant',
+          content: response.content || '',
+          toolCalls: toolCalls.map((call) => ({
+            id: call.id,
+            name: call.name,
+            arguments: normalizeToolArguments(call.arguments),
+          })),
+        });
+
+        // 执行前预检混合写：论文写入与记忆写入必须拆成独立可审批动作，错误喂回模型分拆。
+        if (memoryWriteCalls.length > 0 && paperWriteCalls.length > 0) {
+          const message = 'PaperQuay requires paper writes and memory writes in separate turns. Propose only one kind of write plan this turn.';
+
+          for (const call of writeCalls) {
+            emit({ kind: 'tool_call', turn, callId: call.id, name: call.name, args: normalizeToolArguments(call.arguments) });
+            emit({ kind: 'tool_result', turn, callId: call.id, name: call.name, ok: false, preview: message });
+            messages.push({
+              role: 'tool',
+              toolCallId: call.id,
+              content: JSON.stringify({ name: call.name, isError: true, result: message }),
+            });
+          }
+
+          emit({
+            kind: 'turn_end',
+            turn,
+            finishReason: 'mixed_write_calls_rejected',
+            ...usage,
+          });
+          checkpoint(turn);
+          continue;
+        }
+
         const plans: LibraryAgentPlan[] = [];
         const memoryPlans: AgentMemoryWritePlan[] = [];
+        let writeToolFailed = false;
 
         for (const call of writeCalls) {
           throwIfAborted(options.signal);
@@ -392,11 +471,27 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<LibraryAg
             if (result.memoryPlan) memoryPlans.push(result.memoryPlan);
           } catch (error) {
             throwIfAborted(options.signal);
+            // 与读工具对齐：写工具失败作为 tool 结果喂回模型，由下一轮修正或解释，而不是硬终止 run。
             const message = resultErrorMessage(error);
             emit({ kind: 'tool_result', turn, callId: call.id, name: call.name, ok: false, preview: message.slice(0, 500) });
-            emit({ kind: 'error', turn, message });
-            throw error;
+            messages.push({
+              role: 'tool',
+              toolCallId: call.id,
+              content: JSON.stringify({ name: call.name, isError: true, result: message }),
+            });
+            writeToolFailed = true;
           }
+        }
+
+        if (writeToolFailed) {
+          emit({
+            kind: 'turn_end',
+            turn,
+            finishReason: 'write_tool_error',
+            ...usage,
+          });
+          checkpoint(turn);
+          continue;
         }
 
         emit({
@@ -406,10 +501,6 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<LibraryAg
           ...usage,
         });
         const plan = mergePlans(plans);
-
-        if (plan && memoryPlans.length > 0) {
-          throw new Error('The Agent requested mixed paper and memory writes in one turn. Split them into separate reviewable actions.');
-        }
 
         if (memoryPlans.length > 0) {
           checkpoint(turn);
@@ -518,7 +609,7 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<LibraryAg
       if (acceptedVisualAttachments.length) {
         messages.push({
           role: 'user',
-          content: 'Visual content returned by the preceding PaperQuay tool calls.',
+          content: AGENT_VISUAL_CONTEXT_MESSAGE,
           attachments: acceptedVisualAttachments,
         });
       }

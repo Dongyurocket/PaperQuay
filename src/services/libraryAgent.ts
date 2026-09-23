@@ -2843,6 +2843,35 @@ export async function runConversationalLibraryAgent({
           const notes: string[] = [];
           let promptTokens = 0;
           let completionTokens = 0;
+          // 按模型上下文窗口分配每篇论文的正文配额，避免大范围调研把 prompt 撑爆。
+          // token 到字符按保守的 1:2 换算，并预留系统提示与报告阶段的开销。
+          const contextCharBudget = Math.max(8192, ((preset.contextWindow ?? 128_000) - 32_768) * 2);
+          const perPaperContextChars = Math.max(
+            2000,
+            Math.min(16_000, Math.floor(contextCharBudget / Math.max(1, papers.length))),
+          );
+          // 并发抽取全量 PDF 文本会造成内存峰值，分批处理。
+          const CONTEXT_LOAD_CONCURRENCY = 4;
+          const loadContextsInBatches = async (subquestion: string) => {
+            const results: Awaited<ReturnType<typeof loadPaperContext>>[] = [];
+
+            for (let start = 0; start < papers.length; start += CONTEXT_LOAD_CONCURRENCY) {
+              if (signal?.aborted) {
+                const error = new Error('Comparative survey cancelled');
+                error.name = 'AbortError';
+                throw error;
+              }
+              const batch = papers.slice(start, start + CONTEXT_LOAD_CONCURRENCY);
+              results.push(...await Promise.all(batch.map((paper) => loadPaperContext(
+                paper,
+                'pdf-text',
+                subquestion,
+                { ragEnabled },
+              ))));
+            }
+
+            return results;
+          };
 
           for (let index = 0; index < subquestions.length; index += 1) {
             if (signal?.aborted) {
@@ -2852,12 +2881,7 @@ export async function runConversationalLibraryAgent({
             }
             const subquestion = subquestions[index] ?? normalizedInstruction;
             onProgress(index, subquestions.length, subquestion);
-            const contexts = await Promise.all(papers.map((paper) => loadPaperContext(
-              paper,
-              'pdf-text',
-              subquestion,
-              { ragEnabled },
-            )));
+            const contexts = await loadContextsInBatches(subquestion);
             for (const context of contexts) {
               addUniqueAgentCitations(citationAccumulator, context.citations);
               if (context.ragError?.trim() && !ragErrors.includes(context.ragError.trim())) {
@@ -2871,7 +2895,7 @@ export async function runConversationalLibraryAgent({
                 papers: papers.map((paper, paperIndex) => ({
                   id: paper.id,
                   title: paper.title,
-                  context: contexts[paperIndex]?.text.slice(0, 16_000) ?? '',
+                  context: contexts[paperIndex]?.text.slice(0, perPaperContextChars) ?? '',
                 })),
               }),
             );
@@ -3219,10 +3243,7 @@ export async function runConversationalLibraryAgent({
       };
       const plan = convertGeneratedAgentPlan(tool, papers, generatedPlan);
 
-      if (plan.items.length === 0) {
-        throw new Error('The write tool did not contain any valid paper changes for review.');
-      }
-
+      // 空计划不代表失败：模型合理判断“无需变更”时返回空 items，交给 UI 审批卡展示。
       return plan;
     },
   });
@@ -3321,6 +3342,7 @@ export async function runConversationalLibraryAgent({
           ],
           toolChoice: 'none',
           stream: false,
+          signal,
         });
 
         if (!summary.content.trim()) {

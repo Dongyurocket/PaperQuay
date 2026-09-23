@@ -23,6 +23,7 @@ import {
   type AgentMemoryWritePlan,
 } from '../../services/agentMemory';
 import type { AgentLoopEvent, AgentLoopMessage } from '../../services/agentLoop';
+import { isComparativeSurveyInstruction } from '../../services/agentCapabilityTrigger';
 import type { ComparativeSurveyArtifacts, ComparativeSurveyEvent } from '../../services/agentCapability';
 import { listLibraryCategories, listLibraryPapers } from '../../services/library';
 import type { LiteratureCategory, LiteraturePaper } from '../../types/library';
@@ -881,7 +882,8 @@ function AgentWorkspace() {
     const startedAt = performance.now();
     const assistantMessageId = newMessageId();
     const paperCount = selectedPapersSnapshot.length;
-    const capabilityRequested = /对比调研|比较调研|对比综述|比较综述|comparative survey|comparative review|comparison report/i.test(instruction) && paperCount >= 2;
+    // 触发判定与服务层共用同一函数，进度卡展示与实际执行路径不再分叉。
+    const capabilityRequested = isComparativeSurveyInstruction(instruction, modelPapersSnapshot.length);
     const historyMessages = buildConversationHistory();
     const attachmentsSnapshot = [...agentAttachments];
     const userMessage: AgentChatMessage = {

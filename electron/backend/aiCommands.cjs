@@ -771,6 +771,8 @@ async function runAgentChatTurn(request, event) {
     tools: tools?.length ? tools : undefined,
     toolChoice: tools?.length ? toolChoice : undefined,
     reasoningSummary: 'auto',
+    // 非流式请求默认 5 分钟超时，防止 provider 挂起后只能手动取消；流式由取消机制负责。
+    ...(request?.stream === false ? { timeoutMs: 300_000 } : {}),
   };
   const controller = new AbortController();
   const previousController = activeAgentTurnControllers.get(requestId);
@@ -1771,6 +1773,7 @@ function createAiCommands(context) {
 
     async decide_library_agent_paper_context_openai_compatible({ options, requestId }) {
       const { messages, requestExtras } = buildPaperSkillDecisionRequest(options);
+      requestExtras.timeoutMs = 120_000;
       return withLegacyAgentTurnController(requestId, requestExtras, async () => {
         const data = await openAiChatWithAgentFallback(options, messages, requestExtras, true);
 
@@ -1780,6 +1783,7 @@ function createAiCommands(context) {
 
     async generate_library_agent_plan_openai_compatible({ options, requestId }) {
       const { allowPaperContextTool, messages, requestExtras } = buildLibraryAgentModelRequest(options);
+      requestExtras.timeoutMs = 300_000;
       return withLegacyAgentTurnController(requestId, requestExtras, async () => {
         const data = await openAiChatWithAgentFallback(options, messages, requestExtras, allowPaperContextTool);
 
