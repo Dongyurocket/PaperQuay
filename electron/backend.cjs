@@ -11,6 +11,7 @@ const { createNoteStore } = require('./backend/noteStore.cjs');
 const { createPaddleOcrCommands } = require('./backend/paddleOcrCommands.cjs');
 const { createReviewCommands } = require('./backend/reviewCommands.cjs');
 const { createUpdateCommands } = require('./backend/updateCommands.cjs');
+const { perfMark, perfMeasure } = require('./perfTrace.cjs');
 
 function toErrorMessage(error) {
   return error instanceof Error ? error.message : String(error);
@@ -65,15 +66,21 @@ function createRagStoreSafely(appPaths) {
 }
 
 function createBackend({ app }) {
+  perfMark('backend:init-start');
   const appPaths = createAppPaths(app);
   const store = createLibraryStore(appPaths);
+  perfMeasure('backend:init library-store', 'backend:init-start');
   const noteStore = createNoteStore(appPaths);
+  perfMeasure('backend:init note-store', 'backend:init-start');
   const agentMemoryStore = createAgentMemoryStore(appPaths);
+  perfMeasure('backend:init agent-memory-store', 'backend:init-start');
   const ragStore = createRagStoreSafely(appPaths);
+  perfMeasure('backend:init rag-store', 'backend:init-start');
   const legacyRagIndexes = store.loadLegacyRagIndexes();
 
   if (ragStore.available && Object.keys(legacyRagIndexes).length > 0) {
     const migration = ragStore.migrateFromLibraryRagIndexes(legacyRagIndexes);
+    perfMeasure('backend:init legacy-rag-migration', 'backend:init-start');
 
     if (migration.failedCount === 0) {
       store.clearLegacyRagIndexesSync();

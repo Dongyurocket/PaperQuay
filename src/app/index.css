@@ -440,6 +440,14 @@ textarea,
   box-shadow: none;
 }
 
+/* 文库列表行窗口化：浏览器跳过视口外行的布局与绘制，DOM 结构保持完整，
+   选择/键盘导航/scrollIntoView 不受影响。contain-intrinsic-size 的 auto 值
+   会在行首次渲染后记住实际尺寸，滚动位置保持稳定。 */
+.pq-paper-row {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 132px;
+}
+
 .pq-tab-surface {
   border: 1px solid var(--pq-border);
   border-radius: var(--pq-radius-sm);

@@ -41,6 +41,7 @@ import {
   type PageSize,
 } from '../../utils/bbox';
 import { cn } from '../../utils/cn';
+import { perfMark, perfMeasure } from '../../utils/perfTrace';
 import { useLocaleText } from '../../i18n/uiLanguage';
 import { buildPathInDirectory, getParentDirectory, normalizePathForCompare } from '../../utils/path';
 import { getFileNameFromPath } from '../../utils/text';
@@ -276,6 +277,7 @@ function PdfViewer({
   const lastHandledHighlightSignalRef = useRef(highlightScrollSignal);
   const hoveredBlockIdRef = useRef<string | null>(hoveredBlockId);
   const currentPageRef = useRef(1);
+  const firstPageRenderLoggedRef = useRef(false);
   const scrollPositionRef = useRef<PdfScrollPosition | null>(scrollPosition);
   const sourceSignatureRef = useRef('');
   const restoringScrollRef = useRef(false);
@@ -1762,6 +1764,8 @@ function PdfViewer({
     let cancelled = false;
     setLoading(true);
     setDocumentError('');
+    firstPageRenderLoggedRef.current = false;
+    perfMark('pdf:document-load-start');
 
     let eventBus: any = null;
     let linkService: any = null;
@@ -1847,6 +1851,12 @@ function PdfViewer({
         };
 
         handlePageRendered = () => {
+          // 基线指标：首个 pagerendered 才是首屏可用的准确信号（loading=false 早于实际绘制）。
+          if (!firstPageRenderLoggedRef.current) {
+            firstPageRenderLoggedRef.current = true;
+            perfMeasure('pdf:first-pagerendered', 'pdf:document-load-start');
+          }
+
           if (syncPageHosts()) {
             retrySavedScrollRestore();
           }

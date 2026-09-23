@@ -1,6 +1,7 @@
 const path = require('node:path');
 const { app, BrowserWindow, ipcMain, shell } = require('electron');
 const { createBackend } = require('./backend.cjs');
+const { perfMark, perfMeasure } = require('./perfTrace.cjs');
 const {
   registerLocalPdfProtocol,
   registerLocalPdfProtocolScheme,
@@ -55,6 +56,8 @@ function createWindow() {
   });
 
   mainWindow.once('ready-to-show', () => {
+    perfMark('window:ready-to-show');
+    perfMeasure('startup:window-visible', 'app:ready');
     mainWindow.show();
   });
 
@@ -140,13 +143,19 @@ ipcMain.handle('paperquay:window-control', (event, action) => {
 });
 
 app.whenReady().then(() => {
+  perfMark('app:ready');
+
   if (process.platform === 'win32') {
     app.setAppUserModelId('dev.paperquay.app');
   }
 
   getBackend();
+  perfMark('backend:ready');
+  perfMeasure('startup:backend-init', 'app:ready');
   registerLocalPdfProtocol();
   createWindow();
+  perfMark('window:created');
+  perfMeasure('startup:window-created', 'app:ready');
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

@@ -113,6 +113,7 @@ import {
   savePaperHistory,
 } from '../../utils/paperHistory';
 import { getFileNameFromPath } from '../../utils/text';
+import { perfMark, perfMeasure } from '../../utils/perfTrace';
 import { getPdfSourceSignature } from '../pdf/pdfDocumentSource';
 import {
   buildAttachmentFromPath,
@@ -1111,7 +1112,7 @@ function DocumentReaderTab({
         item,
         mineruCacheDir: settings.mineruCacheDir,
         readText: readLocalTextFileIfExists,
-        loadPdf: loadPdfBinary,
+        pathExists: localPathExists,
       });
     },
     [settings.mineruCacheDir],
@@ -1214,6 +1215,7 @@ function DocumentReaderTab({
     ): Promise<boolean> => {
       const requestId = openDocumentRequestIdRef.current + 1;
       openDocumentRequestIdRef.current = requestId;
+      perfMark('reader:open-start');
       setLoading(true);
       setError('');
 
@@ -1246,6 +1248,9 @@ function DocumentReaderTab({
             await downloadRemoteFileToPath(source.url, downloadPath, source.headers);
             resolvedPdfPath = downloadPath;
             nextResolvedItem = { ...item, localPdfPath: downloadPath };
+            // 下载是打开前的阻塞步骤：成功后统一切换到本地文件作为阅读来源，
+            // 避免 PDF 查看器与文本提取再次请求远程 URL（重复下载）。
+            resolvedSource = { kind: 'local-path', path: downloadPath };
             nextStatus = lRef.current(
               `${openingStatus}，并已保存到本地下载目录`,
               `${openingStatus}, and saved to the local download directory`,
@@ -1270,6 +1275,7 @@ function DocumentReaderTab({
         setCurrentDocument(nextResolvedItem);
         setWorkspaceStage(nextStage);
         onDocumentResolved(nextResolvedItem);
+        perfMeasure('reader:open-source-resolved', 'reader:open-start');
 
         requestDeferredReaderStartupWork(() => {
           void (async () => {

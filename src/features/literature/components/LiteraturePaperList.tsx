@@ -570,7 +570,7 @@ export default function LiteraturePaperList({
                 status?.overviewGenerated ?? Boolean(paper.aiSummary?.trim());
 
               return (
-                <div key={paper.id} className="relative">
+                <div key={paper.id} className="pq-paper-row relative">
                   {showBeforeIndicator ? (
                     <div className="pointer-events-none absolute -top-1 left-3 right-3 z-10 h-0.5 rounded-full bg-[#2f7f85]" />
                   ) : null}

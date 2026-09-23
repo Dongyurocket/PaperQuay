@@ -1,4 +1,4 @@
-import type { MineruPage, PaperSummary, PdfSource, WorkspaceItem } from '../../types/reader.ts';
+import type { MineruPage, PaperSummary, WorkspaceItem } from '../../types/reader.ts';
 import {
   buildMineruCachePathCandidates,
   buildMineruSummaryCachePathCandidates,
@@ -8,7 +8,9 @@ import { isMineruCacheManifest } from './documentReaderManifest.ts';
 type Localize = (zh: string, en: string) => string;
 
 type ReadLocalTextFileIfExists = (path: string) => Promise<string | null>;
-type LoadPdfBinary = (source: PdfSource) => Promise<Uint8Array | null>;
+// 缓存 manifest 的 PDF 路径校验只需要存在性检查；此前用整份 PDF 读取做隐式校验，
+// 大文献每次打开都会全量读盘且字节未被复用。
+type LocalPathExists = (path: string) => Promise<boolean>;
 type ParseMineruPages = (payload: string | unknown) => MineruPage[];
 type ParseMineruMarkdownPages = (markdownText: string) => MineruPage[];
 type SummaryCacheEnvelope = {
@@ -184,12 +186,12 @@ export async function resolveSavedPdfPath({
   item,
   mineruCacheDir,
   readText,
-  loadPdf,
+  pathExists,
 }: {
   item: WorkspaceItem;
   mineruCacheDir: string;
   readText: ReadLocalTextFileIfExists;
-  loadPdf: LoadPdfBinary;
+  pathExists: LocalPathExists;
 }): Promise<string | null> {
   if (!mineruCacheDir.trim()) {
     return null;
@@ -208,11 +210,9 @@ export async function resolveSavedPdfPath({
         continue;
       }
 
-      try {
-        await loadPdf({ kind: 'local-path', path: parsed.pdfPath } satisfies PdfSource);
+      // 仅检查文件存在性；真正的格式问题交给后续 PDF 加载错误路径处理。
+      if (await pathExists(parsed.pdfPath)) {
         return parsed.pdfPath;
-      } catch {
-        continue;
       }
     } catch {
       continue;

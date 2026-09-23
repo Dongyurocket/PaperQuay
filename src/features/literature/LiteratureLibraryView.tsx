@@ -505,41 +505,37 @@ export default function LiteratureLibraryView({
         return;
       }
 
-      const entries: Array<[string, LiteraturePaperListStatus]> = [];
-
       if (uncheckedPapers.length > 0) {
         // 提前标记，避免并发重入时重复检查同一批文献。
         for (const paper of uncheckedPapers) {
           checkedMineruPaperIdsRef.current.add(paper.id);
         }
 
-        try {
-          // 汇总全部候选路径，单次 IPC 批量检查，避免每篇文献多次 IPC 往返。
-          const candidatesByPaper = uncheckedPapers.map((paper) => ({
-            paper,
-            candidates: mineruOutputPathCandidatesForPaper(
-              paper,
-              mineruCacheDir,
-              autoLoadSiblingJson,
-              libraryStorageDir,
-            ),
-          }));
-          const uniquePaths = Array.from(
-            new Set(candidatesByPaper.flatMap((item) => item.candidates)),
-          );
-          const existence = await localPathsExist(uniquePaths);
+        // 大库分批检查：每批一次批量 IPC，批次间让出主线程；
+        // 调用方将当前可见文献排在前面，保证可见项状态优先就绪，
+        // 其余条目在后台分批补齐（limit-concurrency backfill）。
+        const MINERU_STATUS_BATCH_SIZE = 400;
+        let processedCount = 0;
 
+        const rollbackUncheckedMarks = (papersToRollback: LiteraturePaper[]) => {
+          for (const paper of papersToRollback) {
+            checkedMineruPaperIdsRef.current.delete(paper.id);
+          }
+        };
+
+        for (let start = 0; start < uncheckedPapers.length; start += MINERU_STATUS_BATCH_SIZE) {
           if (shouldCancel()) {
-            // 取消时回滚标记，让下一次运行重新检查；同时清除已写入的 checking 状态，
-            // 避免没有后续运行时界面永久停在“检测中”。
-            for (const paper of uncheckedPapers) {
-              checkedMineruPaperIdsRef.current.delete(paper.id);
-            }
+            // 取消时回滚未处理批次的标记，让下一次运行重新检查；同时清除已写入的
+            // checking 状态，避免没有后续运行时界面永久停在“检测中”。
+            rollbackUncheckedMarks(uncheckedPapers.slice(processedCount));
+            const remainingPaperIds = new Set(
+              uncheckedPapers.slice(processedCount).map((paper) => paper.id),
+            );
             setPaperStatuses((current) =>
               Object.fromEntries(
                 Object.entries(current).map(([paperId, status]) => [
                   paperId,
-                  uncheckedPaperIds.has(paperId) && status.checkingMineru
+                  remainingPaperIds.has(paperId) && status.checkingMineru
                     ? { ...status, checkingMineru: false }
                     : status,
                 ]),
@@ -548,44 +544,83 @@ export default function LiteratureLibraryView({
             return;
           }
 
-          const existsByPath = new Map(uniquePaths.map((candidate, index) => [candidate, existence[index] === true]));
+          // 汇总本批候选路径，单次 IPC 批量检查，避免每篇文献多次 IPC 往返。
+          const batch = uncheckedPapers.slice(start, start + MINERU_STATUS_BATCH_SIZE);
 
-          for (const { paper, candidates } of candidatesByPaper) {
-            entries.push([
-              paper.id,
-              {
-                mineruParsed: candidates.some((candidate) => existsByPath.get(candidate) === true),
-                overviewGenerated: Boolean(paper.aiSummary?.trim()),
-                checkingMineru: false,
-              },
-            ]);
-          }
-        } catch {
-          // 检查失败时回滚标记并清除 checking 状态，允许后续重试。
-          for (const paper of uncheckedPapers) {
-            checkedMineruPaperIdsRef.current.delete(paper.id);
+          try {
+            const candidatesByPaper = batch.map((paper) => ({
+              paper,
+              candidates: mineruOutputPathCandidatesForPaper(
+                paper,
+                mineruCacheDir,
+                autoLoadSiblingJson,
+                libraryStorageDir,
+              ),
+            }));
+            const uniquePaths = Array.from(
+              new Set(candidatesByPaper.flatMap((item) => item.candidates)),
+            );
+            const existence = await localPathsExist(uniquePaths);
+
+            if (shouldCancel()) {
+              rollbackUncheckedMarks(uncheckedPapers.slice(processedCount));
+              const remainingPaperIds = new Set(
+                uncheckedPapers.slice(processedCount).map((paper) => paper.id),
+              );
+              setPaperStatuses((current) =>
+                Object.fromEntries(
+                  Object.entries(current).map(([paperId, status]) => [
+                    paperId,
+                    remainingPaperIds.has(paperId) && status.checkingMineru
+                      ? { ...status, checkingMineru: false }
+                      : status,
+                  ]),
+                ),
+              );
+              return;
+            }
+
+            const existsByPath = new Map(uniquePaths.map((candidate, index) => [candidate, existence[index] === true]));
+            const batchEntries: Array<[string, LiteraturePaperListStatus]> = [];
+
+            for (const { paper, candidates } of candidatesByPaper) {
+              batchEntries.push([
+                paper.id,
+                {
+                  mineruParsed: candidates.some((candidate) => existsByPath.get(candidate) === true),
+                  overviewGenerated: Boolean(paper.aiSummary?.trim()),
+                  checkingMineru: false,
+                },
+              ]);
+            }
+
+            setPaperStatuses((current) => ({
+              ...current,
+              ...Object.fromEntries(batchEntries),
+            }));
+            processedCount = start + batch.length;
+          } catch {
+            // 本批检查失败时回滚标记并清除 checking 状态，允许后续重试；其余批次继续。
+            rollbackUncheckedMarks(batch);
+            const failedBatchIds = new Set(batch.map((paper) => paper.id));
+
+            setPaperStatuses((current) =>
+              Object.fromEntries(
+                Object.entries(current).map(([paperId, status]) => [
+                  paperId,
+                  failedBatchIds.has(paperId) ? { ...status, checkingMineru: false } : status,
+                ]),
+              ),
+            );
+            processedCount = start + batch.length;
           }
 
-          if (shouldCancel()) {
-            return;
+          // 批次间让出事件循环，避免大库状态检查挤占交互。
+          if (start + MINERU_STATUS_BATCH_SIZE < uncheckedPapers.length) {
+            await new Promise((resolve) => setTimeout(resolve, 0));
           }
-
-          setPaperStatuses((current) =>
-            Object.fromEntries(
-              Object.entries(current).map(([paperId, status]) => [
-                paperId,
-                uncheckedPaperIds.has(paperId) ? { ...status, checkingMineru: false } : status,
-              ]),
-            ),
-          );
-          return;
         }
       }
-
-      setPaperStatuses((current) => ({
-        ...current,
-        ...Object.fromEntries(entries),
-      }));
     },
     [autoLoadSiblingJson, demoLibrary, libraryStorageDir, mineruCacheDir],
   );
@@ -597,7 +632,7 @@ export default function LiteratureLibraryView({
 
         setPapers(nextPapers);
         setSelectedPaperId((current) => resolveSelectedPaperId(current, nextPapers));
-        return;
+        return nextPapers;
       }
 
       const nextPapers = await listLibraryPapers({
@@ -610,6 +645,7 @@ export default function LiteratureLibraryView({
 
       setPapers(nextPapers);
       setSelectedPaperId((current) => resolveSelectedPaperId(current, nextPapers));
+      return nextPapers;
     },
     [demoLibrary, paperSort.sortBy, paperSort.sortDirection, resolveDemoPapers, searchQuery, selectedCategoryId],
   );
@@ -626,7 +662,7 @@ export default function LiteratureLibraryView({
       return;
     }
 
-    const [nextCategories, , allPapers] = await Promise.all([
+    const [nextCategories, visiblePapers, allPapers] = await Promise.all([
       listLibraryCategories(),
       refreshPapers(),
       listLibraryPapers({
@@ -639,7 +675,14 @@ export default function LiteratureLibraryView({
     allPapersSnapshotRef.current = allPapers;
     onAllPapersChange?.(allPapers);
     setCategories(nextCategories);
-    void refreshMineruStatusesForPapers(allPapers);
+
+    // 解析状态可见项优先：当前列表页排在前面先检查，其余条目后台分批补齐。
+    const visiblePaperIds = new Set(visiblePapers.map((paper) => paper.id));
+    const prioritizedPapers = [
+      ...visiblePapers,
+      ...allPapers.filter((paper) => !visiblePaperIds.has(paper.id)),
+    ];
+    void refreshMineruStatusesForPapers(prioritizedPapers);
   }, [demoLibrary, onAllPapersChange, refreshMineruStatusesForPapers, refreshPapers, resolveDemoPapers]);
 
   const hydrateImportDraftsFromLocalPdf = useCallback(

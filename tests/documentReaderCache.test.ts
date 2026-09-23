@@ -161,8 +161,8 @@ test('loadSavedMineruPages can fall back to cached MinerU Markdown blocks', asyn
   assert.equal(reads.includes('D:/cache/full.md'), false);
 });
 
-test('resolveSavedPdfPath returns the first manifest path that still loads as a PDF', async () => {
-  const loadAttempts: string[] = [];
+test('resolveSavedPdfPath returns the first manifest path that still exists', async () => {
+  const existenceChecks: string[] = [];
   const resolved = await resolveSavedPdfPath({
     item: item(),
     mineruCacheDir: 'D:/cache',
@@ -175,20 +175,17 @@ test('resolveSavedPdfPath returns the first manifest path that still loads as a 
         savedAt: new Date(0).toISOString(),
         sourceKind: 'manual-json',
       }),
-    loadPdf: async (source: PdfSource) => {
-      if (source?.kind === 'local-path') {
-        loadAttempts.push(source.path);
-      }
-
-      return new Uint8Array([1]);
+    pathExists: async (path: string) => {
+      existenceChecks.push(path);
+      return true;
     },
   });
 
   assert.equal(resolved, 'D:/papers/cached.pdf');
-  assert.deepEqual(loadAttempts, ['D:/papers/cached.pdf']);
+  assert.deepEqual(existenceChecks, ['D:/papers/cached.pdf']);
 });
 
-test('resolveSavedPdfPath ignores invalid manifests and unreadable PDFs', async () => {
+test('resolveSavedPdfPath ignores invalid manifests and missing PDFs', async () => {
   const resolved = await resolveSavedPdfPath({
     item: item(),
     mineruCacheDir: 'D:/cache',
@@ -201,9 +198,7 @@ test('resolveSavedPdfPath ignores invalid manifests and unreadable PDFs', async 
         savedAt: new Date(0).toISOString(),
         sourceKind: 'manual-json',
       }),
-    loadPdf: async () => {
-      throw new Error('missing file');
-    },
+    pathExists: async () => false,
   });
 
   assert.equal(resolved, null);
