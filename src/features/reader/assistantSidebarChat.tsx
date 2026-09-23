@@ -696,6 +696,7 @@ export interface ChatWorkspacePanelProps {
   onAttachAssistant?: () => void;
   onCollapseSidebar?: () => void;
   onCitationClick?: (citation: DocumentChatCitation) => void;
+  onCitationContext?: (citation: DocumentChatCitation) => void;
   onSaveAssistantMessageAsNote?: (message: DocumentChatMessage) => void;
 }
 
@@ -736,6 +737,7 @@ export function ChatWorkspacePanel({
   onAttachAssistant,
   onCollapseSidebar,
   onCitationClick,
+  onCitationContext,
   onSaveAssistantMessageAsNote,
 }: ChatWorkspacePanelProps) {
   const l = useReaderChatLocaleText();
@@ -1230,34 +1232,45 @@ export function ChatWorkspacePanel({
                         ) : null}
 
                         {/*
-                          Only surface citation chips in HTML-preview mode, where inline
-                          citation links cannot be injected into the sandboxed iframe.
-                          In markdown mode, citations appear as clickable inline [n] links
-                          when the model actually references them; if the answer cites
-                          nothing, no chips are shown.
+                          Citation chips: in HTML-preview mode they are the only citation UI
+                          (inline links cannot be injected into the sandboxed iframe); in
+                          markdown mode they complement inline [n] links and carry the
+                          「查看上下文」 entry for every retrieval hit.
                         */}
-                        {message.citations &&
-                        message.citations.length > 0 &&
-                        renderHtmlPreview ? (
+                        {assistantMessage && message.citations && message.citations.length > 0 ? (
                           <div className="mt-3 flex flex-wrap gap-2">
                             {message.citations.map((citation) => (
-                              <button
+                              <span
                                 key={citation.id}
-                                type="button"
-                                onClick={() => onCitationClick?.(citation)}
-                                className="inline-flex items-center gap-2 rounded-full border border-[var(--pq-accent-border)] bg-[var(--pq-accent-soft)] px-3 py-1 text-[11px] text-[var(--pq-accent)] transition hover:border-[var(--pq-accent-border-strong)] hover:bg-[var(--pq-accent-bg-hover)]"
-                                title={
-                                  citation.previewText
-                                    ? `${
-                                        citation.pageIndex !== null && citation.pageIndex !== undefined
-                                          ? l(`Page ${citation.pageIndex + 1}`, `Page ${citation.pageIndex + 1}`)
-                                          : citation.sourceType
-                                      }\n${citation.previewText}`
-                                    : undefined
-                                }
+                                className="inline-flex items-center overflow-hidden rounded-full border border-[var(--pq-accent-border)] bg-[var(--pq-accent-soft)] text-[11px] text-[var(--pq-accent)]"
                               >
-                                <span>[{citation.label}]</span>
-                              </button>
+                                <button
+                                  type="button"
+                                  onClick={() => onCitationClick?.(citation)}
+                                  className="px-3 py-1 transition hover:bg-[var(--pq-accent-bg-hover)]"
+                                  title={
+                                    citation.previewText
+                                      ? `${
+                                          citation.pageIndex !== null && citation.pageIndex !== undefined
+                                            ? l(`Page ${citation.pageIndex + 1}`, `Page ${citation.pageIndex + 1}`)
+                                            : citation.sourceType
+                                        }\n${citation.previewText}`
+                                      : undefined
+                                  }
+                                >
+                                  <span>[{citation.label}]</span>
+                                </button>
+                                {citation.chunkId && onCitationContext ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => onCitationContext(citation)}
+                                    className="border-l border-[var(--pq-accent-border)] px-2 py-1 transition hover:bg-[var(--pq-accent-bg-hover)]"
+                                    title={l('查看该切片的前后文', 'Show the context around this chunk')}
+                                  >
+                                    {l('上下文', 'Context')}
+                                  </button>
+                                ) : null}
+                              </span>
                             ))}
                           </div>
                         ) : null}

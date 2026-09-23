@@ -7,7 +7,7 @@ import {
   useState,
 } from 'react';
 import { createPortal } from 'react-dom';
-import { FilePlus2 } from 'lucide-react';
+import { FilePlus2, Images, ListTree } from 'lucide-react';
 import {
   AnnotationEditorType,
   AnnotationMode,
@@ -60,6 +60,13 @@ import {
   usePdfReadingHeatmap,
 } from './pdfReadingHeatmap';
 import { PdfThumbnailSidebar } from './PdfThumbnailSidebar';
+import { PdfOutlinePanel } from './PdfOutlinePanel';
+import {
+  buildMineruOutline,
+  normalizePdfOutline,
+  type PdfJsOutlineNode,
+  type ReaderOutlineItem,
+} from './pdfOutline.ts';
 import {
   arePageHostsEqual,
   ensurePageOverlayElement,
@@ -105,6 +112,8 @@ GlobalWorkerOptions.workerSrc = new URL(
 ).toString();
 
 const PDF_THUMBNAILS_COLLAPSED_STORAGE_KEY = 'paperquay-pdf-thumbnails-collapsed-v2';
+const PDF_SIDEBAR_TAB_STORAGE_KEY = 'paperquay-pdf-sidebar-tab-v1';
+const PDF_OUTLINE_COLLAPSED_STORAGE_PREFIX = 'paperquay-pdf-outline-collapsed-v1:';
 const PDF_READING_HEATMAP_BAR_VISIBLE_STORAGE_KEY =
   'paperquay-pdf-reading-heatmap-bar-visible-v1';
 const USER_SCROLL_RESTORE_GUARD_MS = 700;
@@ -148,6 +157,8 @@ interface PdfViewerProps {
   softPageShadow: boolean;
   onBlockHover: (block: PositionedMineruBlock | null) => void;
   onBlockSelect: (block: PositionedMineruBlock, context?: PdfBlockSelectContext) => void;
+  /** 目录点击 MinerU 标题块时的跳转（父级复用结构块点击的激活+双侧同步逻辑） */
+  onOutlineNavigateBlock?: (block: PositionedMineruBlock) => void;
   onAddBlockToNote?: (block: PositionedMineruBlock, selection: TextSelectionPayload) => void;
   blockClickOpensQuickActions?: boolean;
   onAnnotationSelect?: (annotationId: string) => void;
@@ -212,6 +223,78 @@ function setBooleanStateIfChanged(
   setter((current) => (current === value ? current : value));
 }
 
+type PdfSidebarTab = 'thumbnails' | 'outline';
+
+function loadStoredSidebarTab(): PdfSidebarTab {
+  try {
+    return window.localStorage.getItem(PDF_SIDEBAR_TAB_STORAGE_KEY) === 'outline'
+      ? 'outline'
+      : 'thumbnails';
+  } catch {
+    return 'thumbnails';
+  }
+}
+
+function loadOutlineCollapsedIds(signature: string): Set<string> {
+  try {
+    const raw = window.localStorage.getItem(`${PDF_OUTLINE_COLLAPSED_STORAGE_PREFIX}${signature}`);
+    if (!raw) {
+      return new Set();
+    }
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return new Set();
+    }
+    return new Set(parsed.filter((value): value is string => typeof value === 'string'));
+  } catch {
+    return new Set();
+  }
+}
+
+function persistOutlineCollapsedIds(signature: string, ids: ReadonlySet<string>) {
+  if (!signature) {
+    return;
+  }
+  try {
+    window.localStorage.setItem(
+      `${PDF_OUTLINE_COLLAPSED_STORAGE_PREFIX}${signature}`,
+      JSON.stringify([...ids]),
+    );
+  } catch {
+    // 存储失败仅影响展开状态记忆
+  }
+}
+
+/** 解析 PDF 原生目录 destination 的 0-based 页码；失败返回 null（仅影响当前位置高亮） */
+async function resolveOutlineDestinationPageIndex(
+  pdfDocument: { getDestination?: (id: string) => Promise<unknown>; getPageIndex?: (ref: unknown) => Promise<number> },
+  destination: unknown,
+): Promise<number | null> {
+  if (destination == null) {
+    return null;
+  }
+  try {
+    let explicit: unknown = destination;
+    if (typeof destination === 'string') {
+      explicit = await pdfDocument.getDestination?.(destination);
+    }
+    if (!Array.isArray(explicit) || explicit.length === 0) {
+      return null;
+    }
+    const ref: unknown = explicit[0];
+    if (typeof ref === 'number' && Number.isFinite(ref)) {
+      return ref;
+    }
+    if (ref && typeof ref === 'object' && pdfDocument.getPageIndex) {
+      const pageIndex = await pdfDocument.getPageIndex(ref);
+      return Number.isFinite(pageIndex) ? pageIndex : null;
+    }
+  } catch {
+    // 命名目标缺失等情况静默降级
+  }
+  return null;
+}
+
 function PdfViewer({
   source,
   pdfData,
@@ -239,6 +322,7 @@ function PdfViewer({
   softPageShadow,
   onBlockHover,
   onBlockSelect,
+  onOutlineNavigateBlock,
   onAddBlockToNote,
   blockClickOpensQuickActions = false,
   onAnnotationSelect,
@@ -274,6 +358,11 @@ function PdfViewer({
   const selectionCommitTimerRef = useRef<number | null>(null);
   const selectionCommitAttemptRef = useRef(0);
   const pendingBlockSelectTimerRef = useRef<number | null>(null);
+  const linkServiceRef = useRef<any>(null);
+  const blocksRef = useRef<PositionedMineruBlock[]>(blocks);
+  const onOutlineNavigateBlockRef = useRef(onOutlineNavigateBlock);
+  const outlineRequestTokenRef = useRef(0);
+  const outlineBackStackRef = useRef<number[]>([]);
   const lastHandledHighlightSignalRef = useRef(highlightScrollSignal);
   const hoveredBlockIdRef = useRef<string | null>(hoveredBlockId);
   const currentPageRef = useRef(1);
@@ -304,6 +393,13 @@ function PdfViewer({
   const [thumbnailsCollapsed, setThumbnailsCollapsed] = useState(() =>
     loadStoredBoolean(PDF_THUMBNAILS_COLLAPSED_STORAGE_KEY, true),
   );
+  const [sidebarTab, setSidebarTab] = useState<PdfSidebarTab>(() => loadStoredSidebarTab());
+  const [outlineItems, setOutlineItems] = useState<ReaderOutlineItem[] | null>(null);
+  const [outlineLoading, setOutlineLoading] = useState(false);
+  const [outlineError, setOutlineError] = useState('');
+  const [outlineCollapsedIds, setOutlineCollapsedIds] = useState<Set<string>>(() => new Set());
+  // 仅作 canGoBack 的重渲染信号；真实栈在 outlineBackStackRef
+  const [outlineBackCount, setOutlineBackCount] = useState(0);
   const [readingHeatmapBarVisible, setReadingHeatmapBarVisible] = useState(() =>
     loadStoredBoolean(PDF_READING_HEATMAP_BAR_VISIBLE_STORAGE_KEY, true),
   );
@@ -350,7 +446,122 @@ function PdfViewer({
     externalScrollRestoreKeyRef.current = '';
     pendingScrollRestoreKeyRef.current = '';
     lastUserScrollAtRef.current = 0;
+    setOutlineCollapsedIds(loadOutlineCollapsedIds(sourceSignature));
   }, [sourceSignature]);
+
+  useEffect(() => {
+    blocksRef.current = blocks;
+  }, [blocks]);
+
+  useEffect(() => {
+    onOutlineNavigateBlockRef.current = onOutlineNavigateBlock;
+  }, [onOutlineNavigateBlock]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(PDF_SIDEBAR_TAB_STORAGE_KEY, sidebarTab);
+    } catch {
+      // 存储失败仅影响侧栏页签记忆
+    }
+  }, [sidebarTab]);
+
+  // 文档切换：清空目录数据/返回栈，等下次展开目录页签时按新文档重建
+  useEffect(() => {
+    outlineRequestTokenRef.current += 1;
+    outlineBackStackRef.current = [];
+    setOutlineBackCount(0);
+    setOutlineItems(null);
+    setOutlineLoading(false);
+    setOutlineError('');
+  }, [documentInit]);
+
+  // 目录懒加载：首次展开「目录」页签才读取 outline，失败回退 MinerU 标题块
+  useEffect(() => {
+    if (sidebarTab !== 'outline' || thumbnailsCollapsed || pageCount <= 0) {
+      return;
+    }
+    if (outlineItems !== null) {
+      return;
+    }
+    const pdfDocument = pdfDocumentRef.current;
+    if (!pdfDocument) {
+      return;
+    }
+
+    const token = ++outlineRequestTokenRef.current;
+    setOutlineLoading(true);
+    setOutlineError('');
+
+    void (async () => {
+      let items: ReaderOutlineItem[] = [];
+      let usedMineruFallback = false;
+
+      try {
+        const rawOutline = (await pdfDocument.getOutline?.()) ?? null;
+        items = normalizePdfOutline((rawOutline ?? []) as PdfJsOutlineNode[]);
+      } catch {
+        items = [];
+      }
+
+      if (items.length === 0) {
+        const mineruItems = buildMineruOutline(blocksRef.current);
+        if (mineruItems.length > 0) {
+          items = mineruItems;
+          usedMineruFallback = true;
+        }
+      }
+
+      if (token !== outlineRequestTokenRef.current) {
+        return;
+      }
+      setOutlineItems(items);
+      setOutlineLoading(false);
+
+      // 懒解析原生目录页码供「当前位置」高亮；分批让出主线程，失败仅影响高亮
+      if (usedMineruFallback || items.length === 0) {
+        return;
+      }
+      const flat: ReaderOutlineItem[] = [];
+      const collect = (list: ReaderOutlineItem[]) => {
+        for (const item of list) {
+          flat.push(item);
+          collect(item.children);
+        }
+      };
+      collect(items);
+      let processed = 0;
+      for (const item of flat) {
+        if (token !== outlineRequestTokenRef.current) {
+          return;
+        }
+        if (item.destination != null && typeof item.pageIndex !== 'number') {
+          const resolved = await resolveOutlineDestinationPageIndex(pdfDocument, item.destination);
+          if (resolved !== null) {
+            item.pageIndex = resolved;
+          }
+        }
+        processed += 1;
+        if (processed % 25 === 0) {
+          await new Promise((resolve) => window.setTimeout(resolve, 0));
+        }
+      }
+      if (token !== outlineRequestTokenRef.current) {
+        return;
+      }
+      setOutlineItems((current) => (current ? [...current] : current));
+    })();
+  }, [sidebarTab, thumbnailsCollapsed, pageCount, outlineItems]);
+
+  // MinerU 块异步到达：PDF 无原生目录且初次构建时 MinerU 尚未就绪，则块到达后重建
+  useEffect(() => {
+    if (outlineItems === null || outlineItems.length > 0 || blocks.length === 0) {
+      return;
+    }
+    const mineruItems = buildMineruOutline(blocks);
+    if (mineruItems.length > 0) {
+      setOutlineItems(mineruItems);
+    }
+  }, [blocks, outlineItems]);
 
   useEffect(() => {
     const currentPosition = scrollPositionRef.current;
@@ -948,6 +1159,74 @@ function PdfViewer({
     },
     [pageHosts, smoothScroll, syncPageHosts],
   );
+
+  const handleOutlineNavigate = useCallback(
+    (item: ReaderOutlineItem) => {
+      // 记录返回位置（1-based 页），上限 50 条
+      const snapshot = Math.max(1, currentPageRef.current);
+      const stack = outlineBackStackRef.current;
+      if (stack[stack.length - 1] !== snapshot) {
+        stack.push(snapshot);
+        if (stack.length > 50) {
+          stack.shift();
+        }
+        setOutlineBackCount(stack.length);
+      }
+
+      if (item.source === 'mineru-heading') {
+        const block = item.blockId
+          ? blocksRef.current.find((entry) => entry.blockId === item.blockId)
+          : undefined;
+        if (block && onOutlineNavigateBlockRef.current) {
+          onOutlineNavigateBlockRef.current(block);
+          return;
+        }
+        if (typeof item.pageIndex === 'number' && item.pageIndex >= 0) {
+          scrollToPage(item.pageIndex);
+        }
+        return;
+      }
+
+      const linkService = linkServiceRef.current;
+      if (linkService && item.destination != null) {
+        try {
+          void Promise.resolve(linkService.goToDestination(item.destination)).catch(() => {
+            setOutlineError(lRef.current('无法跳转到该目录位置', 'Unable to navigate to this outline entry'));
+          });
+        } catch {
+          setOutlineError(lRef.current('无法跳转到该目录位置', 'Unable to navigate to this outline entry'));
+        }
+        return;
+      }
+      if (typeof item.pageIndex === 'number' && item.pageIndex >= 0) {
+        scrollToPage(item.pageIndex);
+      }
+    },
+    [scrollToPage],
+  );
+
+  const handleOutlineGoBack = useCallback(() => {
+    const stack = outlineBackStackRef.current;
+    const page = stack.pop();
+    if (typeof page !== 'number') {
+      return;
+    }
+    setOutlineBackCount(stack.length);
+    scrollToPage(Math.max(0, page - 1), 'auto');
+  }, [scrollToPage]);
+
+  const handleOutlineToggleCollapsed = useCallback((id: string) => {
+    setOutlineCollapsedIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      persistOutlineCollapsedIds(sourceSignatureRef.current, next);
+      return next;
+    });
+  }, []);
 
   const lastPageSyncTokenRef = useRef(0);
 
@@ -1787,6 +2066,7 @@ function PdfViewer({
         eventBus = new EventBus();
         eventBusRef.current = eventBus;
         linkService = new PDFLinkService({ eventBus });
+        linkServiceRef.current = linkService;
         viewer.textContent = '';
 
         const pdfViewer = new PdfJsViewer({
@@ -1912,6 +2192,7 @@ function PdfViewer({
       annotationEditorReadyRef.current = false;
       annotationEditorUiManagerRef.current = null;
       eventBusRef.current = null;
+      linkServiceRef.current = null;
       setBooleanStateIfChanged(setHasSelectedEditor, false);
 
       if (eventBus && handleAnnotationEditorUiManager) {
@@ -2763,6 +3044,63 @@ function PdfViewer({
           onToggleCollapsed={() => setThumbnailsCollapsed((current) => !current)}
           onScrollToPage={scrollToPage}
           onWheelCapture={handleThumbnailWheelCapture}
+          stripExtra={
+            <>
+              <button
+                type="button"
+                onClick={() => {
+                  setSidebarTab('thumbnails');
+                  setThumbnailsCollapsed(false);
+                }}
+                title={l('页面缩略图', 'Page thumbnails')}
+                aria-label={l('页面缩略图', 'Page thumbnails')}
+                aria-pressed={sidebarTab === 'thumbnails'}
+                className={cn(
+                  'inline-flex h-8 w-8 items-center justify-center rounded-xl border transition',
+                  sidebarTab === 'thumbnails' && !thumbnailsCollapsed
+                    ? 'border-indigo-200 bg-indigo-50 text-indigo-600 dark:border-indigo-400/30 dark:bg-indigo-500/10 dark:text-indigo-300'
+                    : 'border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:bg-slate-50 dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:text-[var(--pq-text-muted)] dark:hover:border-white/15 dark:hover:bg-[var(--pq-surface-2)]',
+                )}
+              >
+                <Images className="h-4 w-4" strokeWidth={1.8} />
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setSidebarTab('outline');
+                  setThumbnailsCollapsed(false);
+                }}
+                title={l('文档目录', 'Document outline')}
+                aria-label={l('文档目录', 'Document outline')}
+                aria-pressed={sidebarTab === 'outline'}
+                className={cn(
+                  'inline-flex h-8 w-8 items-center justify-center rounded-xl border transition',
+                  sidebarTab === 'outline' && !thumbnailsCollapsed
+                    ? 'border-indigo-200 bg-indigo-50 text-indigo-600 dark:border-indigo-400/30 dark:bg-indigo-500/10 dark:text-indigo-300'
+                    : 'border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:bg-slate-50 dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:text-[var(--pq-text-muted)] dark:hover:border-white/15 dark:hover:bg-[var(--pq-surface-2)]',
+                )}
+              >
+                <ListTree className="h-4 w-4" strokeWidth={1.8} />
+              </button>
+            </>
+          }
+          contentOverride={
+            sidebarTab === 'outline' ? (
+              <PdfOutlinePanel
+                items={outlineItems ?? []}
+                loading={outlineLoading}
+                currentPage={currentPage}
+                collapsedIds={outlineCollapsedIds}
+                onToggleCollapsed={handleOutlineToggleCollapsed}
+                onNavigate={handleOutlineNavigate}
+                canGoBack={outlineBackCount > 0}
+                onGoBack={handleOutlineGoBack}
+                errorMessage={outlineError || undefined}
+                l={l}
+              />
+            ) : undefined
+          }
+          contentTitle={l('文档目录', 'Document Outline')}
           l={l}
         />
 

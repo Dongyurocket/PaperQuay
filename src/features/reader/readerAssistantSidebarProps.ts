@@ -55,6 +55,7 @@ export interface BuildReaderAssistantSidebarInput {
   onCaptureScreenshot: AssistantSidebarCoreProps['onCaptureScreenshot'];
   onRemoveAttachment: AssistantSidebarCoreProps['onRemoveAttachment'];
   onCitationClick: AssistantSidebarCoreProps['onCitationClick'];
+  onCitationContext?: AssistantSidebarCoreProps['onCitationContext'];
   onCreateStandaloneNote: AssistantSidebarCoreProps['onCreateStandaloneNote'];
   onSelectNote: AssistantSidebarCoreProps['onSelectNote'];
   onUpdateNote: AssistantSidebarCoreProps['onUpdateNote'];
@@ -128,6 +129,7 @@ export function buildReaderAssistantSidebarProps(
     onCaptureScreenshot: input.onCaptureScreenshot,
     onRemoveAttachment: input.onRemoveAttachment,
     onCitationClick: input.onCitationClick,
+    onCitationContext: input.onCitationContext,
     onCreateStandaloneNote: input.onCreateStandaloneNote,
     onSelectNote: input.onSelectNote,
     onUpdateNote: input.onUpdateNote,

@@ -17,8 +17,8 @@ import type {
   WorkspaceItem,
 } from '../../types/reader';
 import type { LiteraturePaper, LiteraturePaperTaskState } from '../../types/library';
-import { resolvePaperPdfAttachment, resolvePaperTranslatedPdfAttachment } from '../../utils/libraryPaper';
-import { getFileNameFromPath } from '../../utils/text';
+import { resolvePaperPdfAttachment, resolvePaperTranslatedPdfAttachment } from '../../utils/libraryPaper.ts';
+import { getFileNameFromPath } from '../../utils/text.ts';
 
 export const SETTINGS_STORAGE_KEY = 'paper-reader-settings-v3';
 export const SECRETS_STORAGE_KEY = 'paper-reader-secrets-v1';
@@ -1029,4 +1029,4 @@ export function formatPaperSummaryForLibrary(summary: PaperSummary): string {
   return sections.join('\n\n').trim();
 }
 
-export { parseMineruTokens } from '../../services/mineru';
+export { parseMineruTokens } from '../../services/mineru.ts';

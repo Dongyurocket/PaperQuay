@@ -745,3 +745,162 @@ test('RAG store supports global multi-document retrieval and documentKeys filter
     rmSync(dataDir, { recursive: true, force: true });
   }
 });
+
+test('RAG store returns neighbor chunk context within the same document and source', () => {
+  const { dataDir, store } = createStore();
+
+  try {
+    const chunks = [0, 2, 5, 9].map((chunkIndex, order) => ({
+      chunkId: `c-${chunkIndex}`,
+      chunkIndex,
+      pageIndex: order,
+      blockId: `block-${chunkIndex}`,
+      text: `chunk text ${chunkIndex}`,
+      embedding: [0.1 * (order + 1), 0.1, 0.1, 0.1],
+    }));
+
+    store.indexDocument({
+      documentKey: 'doc-ctx',
+      title: 'Context Document',
+      sourceType: 'pdf-text',
+      sourceSignature: 'sig-ctx',
+      embeddingModelKey: 'embedding-test',
+      totalChunkCount: chunks.length,
+      chunks,
+    });
+
+    // chunkIndex 有间隔：邻接由排序而非编号算术决定。
+    const middle = store.getChunkContext({
+      documentKey: 'doc-ctx',
+      sourceType: 'pdf-text',
+      chunkId: 'c-5',
+      before: 1,
+      after: 1,
+    });
+
+    assert.equal(middle.status, 'ready');
+    assert.equal(middle.sectionPath, null);
+    assert.deepEqual(
+      middle.slices.map((slice) => `${slice.position}:${slice.chunkId}`),
+      ['before:c-2', 'hit:c-5', 'after:c-9'],
+    );
+    assert.equal(middle.hasMoreBefore, true);
+    assert.equal(middle.hasMoreAfter, false);
+    assert.equal(middle.slices[1].pageIndex, 2);
+    assert.equal(middle.slices[1].blockId, 'block-5');
+
+    const first = store.getChunkContext({
+      documentKey: 'doc-ctx',
+      sourceType: 'pdf-text',
+      chunkId: 'c-0',
+      before: 1,
+      after: 1,
+    });
+
+    assert.equal(first.status, 'ready');
+    assert.deepEqual(
+      first.slices.map((slice) => slice.position),
+      ['hit', 'after'],
+    );
+    assert.equal(first.hasMoreBefore, false);
+    assert.equal(first.hasMoreAfter, true);
+
+    const wide = store.getChunkContext({
+      documentKey: 'doc-ctx',
+      sourceType: 'pdf-text',
+      chunkId: 'c-5',
+      before: 5,
+      after: 5,
+    });
+
+    assert.equal(wide.slices.length, 4);
+    assert.equal(wide.hasMoreBefore, false);
+  } finally {
+    store.close();
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('RAG chunk context reports not-ready, not-found and stays source-isolated', () => {
+  const { dataDir, store } = createStore();
+
+  try {
+    const notReady = store.getChunkContext({
+      documentKey: 'doc-missing',
+      sourceType: 'pdf-text',
+      chunkId: 'c-0',
+    });
+    assert.equal(notReady.status, 'not-ready');
+    assert.equal(notReady.slices.length, 0);
+
+    store.indexDocument({
+      documentKey: 'doc-ctx-2',
+      title: 'Context Document 2',
+      sourceType: 'pdf-text',
+      sourceSignature: 'sig-ctx-2',
+      embeddingModelKey: 'embedding-test',
+      totalChunkCount: 2,
+      chunks: [0, 1].map((chunkIndex) => ({
+        chunkId: `c2-${chunkIndex}`,
+        chunkIndex,
+        pageIndex: chunkIndex,
+        blockId: null,
+        text: `pdf chunk ${chunkIndex}`,
+        embedding: [0.1, 0.2, 0.3, 0.4],
+      })),
+    });
+
+    // mineru-markdown 来源未建索引：不跨来源拼接（方案 §5.7）。
+    const wrongSource = store.getChunkContext({
+      documentKey: 'doc-ctx-2',
+      sourceType: 'mineru-markdown',
+      chunkId: 'c2-0',
+    });
+    assert.equal(wrongSource.status, 'not-ready');
+
+    const notFound = store.getChunkContext({
+      documentKey: 'doc-ctx-2',
+      sourceType: 'pdf-text',
+      chunkId: 'does-not-exist',
+    });
+    assert.equal(notFound.status, 'not-found');
+
+    store.indexDocument({
+      documentKey: 'doc-ctx-3',
+      title: 'Context Document 3',
+      sourceType: 'pdf-text',
+      sourceSignature: 'sig-ctx-3',
+      embeddingModelKey: 'embedding-test',
+      totalChunkCount: 1,
+      chunks: [{
+        chunkId: 'c2-0',
+        chunkIndex: 0,
+        pageIndex: 0,
+        blockId: null,
+        text: 'other document chunk',
+        embedding: [0.1, 0.2, 0.3, 0.4],
+      }],
+    });
+
+    // 不同文献同 chunkId：各自文档内取邻接，不串档。
+    const docTwo = store.getChunkContext({
+      documentKey: 'doc-ctx-2',
+      sourceType: 'pdf-text',
+      chunkId: 'c2-0',
+    });
+    assert.equal(docTwo.status, 'ready');
+    assert.equal(docTwo.slices.length, 2);
+    assert.ok(docTwo.slices.every((slice) => slice.text.startsWith('pdf chunk')));
+
+    const docThree = store.getChunkContext({
+      documentKey: 'doc-ctx-3',
+      sourceType: 'pdf-text',
+      chunkId: 'c2-0',
+    });
+    assert.equal(docThree.slices.length, 1);
+    assert.equal(docThree.slices[0].text, 'other document chunk');
+  } finally {
+    store.close();
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});

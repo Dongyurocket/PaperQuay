@@ -448,6 +448,12 @@ textarea,
   contain-intrinsic-size: auto 132px;
 }
 
+/* 目录行窗口化：目录条目上限 2000 条，浏览器跳过视口外行的布局与绘制。 */
+.pq-outline-row {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 30px;
+}
+
 .pq-tab-surface {
   border: 1px solid var(--pq-border);
   border-radius: var(--pq-radius-sm);

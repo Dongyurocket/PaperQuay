@@ -39,6 +39,7 @@ function createUnavailableRagStore(error) {
     getDocumentIndexStatus: fail,
     listIndexStatuses: fail,
     retrieveDocumentChunks: fail,
+    getChunkContext: fail,
     createAgentRun: fail,
     appendAgentRunEvent: fail,
     finishAgentRun: fail,

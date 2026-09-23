@@ -1,6 +1,7 @@
 import { invoke } from '../platform/electron/core';
 
 import type {
+  RagChunkContextResponse,
   RagChunkInput,
   RagDocumentIndexStatus,
   RagFinalizeDocumentIndexRequest,
@@ -179,6 +180,24 @@ export async function ragRetrieveDocumentChunks(
     return await invoke<RagRetrievalResult[]>('rag_retrieve_document_chunks', { request });
   } catch (error) {
     throw new Error(toErrorMessage(error, '本地 RAG 检索失败'));
+  }
+}
+
+export interface RagChunkContextRequest {
+  documentKey: string;
+  sourceType: Exclude<RagSourceMode, 'off' | 'hybrid'>;
+  chunkId: string;
+  before?: number;
+  after?: number;
+}
+
+export async function ragGetChunkContext(
+  request: RagChunkContextRequest,
+): Promise<RagChunkContextResponse> {
+  try {
+    return await invoke<RagChunkContextResponse>('rag_get_chunk_context', { request });
+  } catch (error) {
+    throw new Error(toErrorMessage(error, '读取本地 RAG 切片上下文失败'));
   }
 }
 

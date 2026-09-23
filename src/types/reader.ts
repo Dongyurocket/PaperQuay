@@ -251,6 +251,33 @@ export interface RagRetrievalResult {
   text: string;
   score: number;
   rrfScore?: number;
+  /** 直接检索命中（hit）或上下文补充（context）；缺省视为 hit（旧数据兼容）。 */
+  retrievalRole?: "hit" | "context";
+  /** retrievalRole=context 时记录其补充的目标 chunkId。 */
+  expandedFrom?: string;
+}
+
+/** 「查看上下文」前后邻接切片查询（基于同文档+同来源 chunkIndex 排序）。 */
+export interface RagChunkContextSlice {
+  chunkId: string;
+  chunkIndex: number;
+  pageIndex: number | null;
+  blockId: string | null;
+  text: string;
+  position: "before" | "hit" | "after";
+}
+
+export type RagChunkContextStatus = "ready" | "not-ready" | "not-found";
+
+export interface RagChunkContextResponse {
+  status: RagChunkContextStatus;
+  /** 当前索引 schema 尚无章节字段，显式降级为 null。 */
+  sectionPath: string[] | null;
+  slices: RagChunkContextSlice[];
+  hasMoreBefore: boolean;
+  hasMoreAfter: boolean;
+  truncated: boolean;
+  truncationReason: string | null;
 }
 
 export interface RagReportDocumentIndexFailureRequest {
@@ -396,6 +423,8 @@ export interface DocumentChatCitation {
   sourceType: Exclude<RagSourceMode, "off" | "hybrid">;
   pageIndex: number | null;
   blockId?: string | null;
+  /** 锚点切片 ID，供「查看上下文」邻接查询使用。 */
+  chunkId?: string | null;
   previewText?: string;
 }
 

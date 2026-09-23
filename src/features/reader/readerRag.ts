@@ -6,9 +6,9 @@ import type {
   RagSourceMode,
   ReaderSettings,
   WorkspaceItem,
-} from '../../types/reader';
-import { extractTextFromMineruBlock } from '../../services/mineru';
-import { textSignature } from './readerShared';
+} from '../../types/reader.ts';
+import { extractTextFromMineruBlock } from '../../services/mineru.ts';
+import { textSignature } from './readerShared.ts';
 
 export interface ReaderRagPreparedSource {
   sourceType: Exclude<RagSourceMode, 'off' | 'hybrid'>;
@@ -35,6 +35,18 @@ const MAX_HEADING_NEIGHBOR_BLOCKS = 3;
 const MAX_HEADING_SECTION_CHARS = 2_400;
 const MAX_HEADING_LENGTH = 140;
 const MIN_SOFT_BREAK_RATIO = 0.58;
+/** 上下文预算起始值（方案 §5.5，均为待调优参数）：单目标窗口 1500 tokens，一次问答 6000 tokens。 */
+const CONTEXT_TARGET_TOKEN_BUDGET = 1_500;
+const CONTEXT_QUESTION_TOKEN_BUDGET = 6_000;
+
+/**
+ * 无 tokenizer 时的保守 token 估算（方案 §5.5-5）：
+ * CJK/假名/谚文字符约 1 token，其余约每 3 字符 1 token。
+ */
+function estimateTokens(text: string): number {
+  const wideCount = (text.match(/[㐀-鿿豈-﫿぀-ヿ가-힯]/g) ?? []).length;
+  return Math.ceil(wideCount + (text.length - wideCount) / 3);
+}
 
 // Page decorations (page numbers, headers/footers, page footnotes) are not real
 // content. They must not become RAG chunks or citation anchors, otherwise a
@@ -426,6 +438,8 @@ function buildExpandedHeadingSection(
         blockId: chunk.blockId,
         text: chunk.text,
         score: seed.score,
+        retrievalRole: 'context',
+        expandedFrom: seed.chunkId,
       });
       collectedChars += chunk.text.length;
     });
@@ -441,6 +455,91 @@ function buildExpandedHeadingSection(
   }
 
   return additions;
+}
+
+/**
+ * 普通正文命中的前后邻接扩展（方案 §5.5）：默认前后各 1 片，按 chunkIndex 顺序取；
+ * 受传入 token 预算约束，超预算的邻接片跳过。补充项标 retrievalRole=context +
+ * expandedFrom，不冒充独立命中。
+ */
+function buildNeighborContext(input: {
+  seed: RagRetrievalResult;
+  orderedChunks: RagChunkInput[];
+  positionByChunkId: Map<string, number>;
+  usedChunkIds: Set<string>;
+  tokenBudget: number;
+}): { additions: RagRetrievalResult[]; before: RagRetrievalResult[]; usedTokens: number } {
+  const position = input.positionByChunkId.get(input.seed.chunkId);
+
+  if (typeof position !== 'number') {
+    return { additions: [], before: [], usedTokens: 0 };
+  }
+
+  const picks: Array<{ chunk: RagChunkInput; side: 'before' | 'after' }> = [];
+  const beforeChunk = input.orderedChunks[position - 1];
+  const afterChunk = input.orderedChunks[position + 1];
+
+  if (beforeChunk) {
+    picks.push({ chunk: beforeChunk, side: 'before' });
+  }
+
+  if (afterChunk) {
+    picks.push({ chunk: afterChunk, side: 'after' });
+  }
+
+  const additions: RagRetrievalResult[] = [];
+  const before: RagRetrievalResult[] = [];
+  let usedTokens = 0;
+
+  for (const pick of picks) {
+    if (input.usedChunkIds.has(pick.chunk.chunkId)) {
+      continue;
+    }
+
+    const tokens = estimateTokens(pick.chunk.text);
+
+    if (usedTokens + tokens > input.tokenBudget) {
+      continue;
+    }
+
+    usedTokens += tokens;
+    input.usedChunkIds.add(pick.chunk.chunkId);
+
+    const addition: RagRetrievalResult = {
+      chunkId: pick.chunk.chunkId,
+      sourceType: input.seed.sourceType,
+      pageIndex: pick.chunk.pageIndex,
+      blockId: pick.chunk.blockId,
+      text: pick.chunk.text,
+      // 上下文补充不参与排名；保留种子分仅为排序稳定，retrievalRole 是区分依据。
+      score: input.seed.score,
+      retrievalRole: 'context',
+      expandedFrom: input.seed.chunkId,
+    };
+
+    additions.push(addition);
+
+    if (pick.side === 'before') {
+      before.push(addition);
+    }
+  }
+
+  return { additions, before, usedTokens };
+}
+
+function buildOrderedChunksBySource(
+  preparedSources: ReaderRagPreparedSource[],
+): Map<string, RagChunkInput[]> {
+  const bySource = new Map<string, RagChunkInput[]>();
+
+  preparedSources.forEach((source) => {
+    bySource.set(
+      source.sourceType,
+      [...source.chunks].sort((left, right) => left.chunkIndex - right.chunkIndex),
+    );
+  });
+
+  return bySource;
 }
 
 function buildContextSection(
@@ -483,8 +582,11 @@ function selectCitationAnchor(
     return null;
   }
 
+  // 引用锚点必须保留真实目标位置：上下文补充段（retrievalRole=context）不作锚点。
+  const directHits = results.filter((result) => result.retrievalRole !== 'context');
+
   // Prefer a body result: not a heading and not a page decoration.
-  const bodyResult = results.find(
+  const bodyResult = directHits.find(
     (result) =>
       !isHeadingResult(result, blockById) && !isPageDecorationResult(result, blockById),
   );
@@ -494,9 +596,9 @@ function selectCitationAnchor(
   }
 
   // Otherwise allow a heading, but never anchor on a page decoration.
-  const nonDecoration = results.find((result) => !isPageDecorationResult(result, blockById));
+  const nonDecoration = directHits.find((result) => !isPageDecorationResult(result, blockById));
 
-  return nonDecoration ?? results[0] ?? null;
+  return nonDecoration ?? directHits[0] ?? results[0] ?? null;
 }
 
 function buildCitation(
@@ -514,6 +616,7 @@ function buildCitation(
     sourceType: anchor.sourceType,
     pageIndex: anchor.pageIndex,
     blockId: anchor.blockId,
+    chunkId: anchor.chunkId,
     previewText: results
       .map((result) => normalizeChunkText(result.text))
       .filter(Boolean)
@@ -550,34 +653,83 @@ export function buildRagContextText(input: {
   const blockById = new Map(orderedBlocks.map((block) => [block.blockId, block]));
   const blockOrder = new Map(orderedBlocks.map((block, index) => [block.blockId, index]));
   const chunksBySourceAndBlock = buildChunkLookup(input.preparedSources);
+  const orderedChunksBySource = buildOrderedChunksBySource(input.preparedSources);
+  const positionMapsBySource = new Map<string, Map<string, number>>();
+  const getPositionMap = (sourceType: string): Map<string, number> => {
+    const cached = positionMapsBySource.get(sourceType);
+
+    if (cached) {
+      return cached;
+    }
+
+    const map = new Map<string, number>();
+    (orderedChunksBySource.get(sourceType) ?? []).forEach((chunk, index) => {
+      map.set(chunk.chunkId, index);
+    });
+    positionMapsBySource.set(sourceType, map);
+    return map;
+  };
   const usedChunkIds = new Set<string>();
   const sections: string[] = [];
   const citations: DocumentChatCitation[] = [];
+  /** 上下文补充段（标题扩展 + 前后邻接），标记 retrievalRole=context 后随结果返回，便于各入口查看其位置。 */
+  const contextSupplements: RagRetrievalResult[] = [];
+  let questionContextTokenBudget = CONTEXT_QUESTION_TOKEN_BUDGET;
 
   seeds.forEach((seed) => {
     if (usedChunkIds.has(seed.chunkId)) {
       return;
     }
 
-    const sectionResults = [seed];
     usedChunkIds.add(seed.chunkId);
+    const beforeAdditions: RagRetrievalResult[] = [];
+    const afterAdditions: RagRetrievalResult[] = [];
 
-    buildExpandedHeadingSection(
-      seed,
-      orderedBlocks,
-      blockById,
-      blockOrder,
-      chunksBySourceAndBlock,
-      usedChunkIds,
-    ).forEach((result) => {
-      if (usedChunkIds.has(result.chunkId)) {
-        return;
-      }
+    if (isHeadingResult(seed, blockById)) {
+      buildExpandedHeadingSection(
+        seed,
+        orderedBlocks,
+        blockById,
+        blockOrder,
+        chunksBySourceAndBlock,
+        usedChunkIds,
+      ).forEach((result) => {
+        if (usedChunkIds.has(result.chunkId)) {
+          return;
+        }
 
-      sectionResults.push(result);
-      usedChunkIds.add(result.chunkId);
-    });
+        afterAdditions.push(result);
+        contextSupplements.push(result);
+        usedChunkIds.add(result.chunkId);
+      });
+    } else if (questionContextTokenBudget > 0) {
+      // 普通正文命中：前后邻接扩展，单目标窗口与整次问答双层预算约束（方案 §5.5）。
+      const targetBudget = Math.min(
+        Math.max(0, CONTEXT_TARGET_TOKEN_BUDGET - estimateTokens(seed.text)),
+        questionContextTokenBudget,
+      );
+      const neighbor = buildNeighborContext({
+        seed,
+        orderedChunks: orderedChunksBySource.get(seed.sourceType) ?? [],
+        positionByChunkId: getPositionMap(seed.sourceType),
+        usedChunkIds,
+        tokenBudget: targetBudget,
+      });
 
+      questionContextTokenBudget -= neighbor.usedTokens;
+      neighbor.additions.forEach((result) => {
+        contextSupplements.push(result);
+
+        if (neighbor.before.includes(result)) {
+          beforeAdditions.push(result);
+          return;
+        }
+
+        afterAdditions.push(result);
+      });
+    }
+
+    const sectionResults = [...beforeAdditions, seed, ...afterAdditions];
     const sectionIndex = sections.length;
     const anchor = selectCitationAnchor(sectionResults, blockById);
     if (!anchor) {
@@ -596,6 +748,6 @@ export function buildRagContextText(input: {
     documentText: sections.join('\n\n').trim(),
     sectionCount: sections.length,
     citations,
-    retrievals: results,
+    retrievals: [...results, ...contextSupplements],
   };
 }

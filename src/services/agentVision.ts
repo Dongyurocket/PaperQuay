@@ -93,6 +93,8 @@ export function matchRagVisionCandidates(input: {
   const scoreByBlockId = new Map<string, number>();
 
   for (const retrieval of input.retrievals) {
+    // 上下文补充段（retrievalRole=context）只是命中的前后文，不代表该图被检索命中，不参与图片候选匹配。
+    if (retrieval.retrievalRole === 'context') continue;
     const blockId = retrieval.blockId?.trim();
     if (!blockId) continue;
     const current = scoreByBlockId.get(blockId);

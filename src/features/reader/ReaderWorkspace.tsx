@@ -143,6 +143,7 @@ interface ReaderWorkspaceProps {
   onCaptureScreenshot: () => void;
   onRemoveAttachment: (attachmentId: string) => void;
   onCitationClick: (citation: DocumentChatCitation) => void;
+  onCitationContext?: (citation: DocumentChatCitation) => void;
   onSaveAssistantMessageAsNote: (message: DocumentChatMessage) => void;
   qaLoading: boolean;
   qaError: string;
@@ -461,6 +462,7 @@ function ReadingStage(props: ReaderWorkspaceProps & { immersiveReading: boolean 
               selectedAnnotationId={activeNoteAnnotationId ?? selectedAnnotationId}
               onBlockHover={onPdfBlockHover}
               onBlockSelect={onPdfBlockSelect}
+              onOutlineNavigateBlock={onBlockClick}
               onAddBlockToNote={onAddBlockToNote}
               blockClickOpensQuickActions={readingViewMode === 'pdf-only'}
               onAnnotationSelect={onSelectAnnotation}
@@ -621,6 +623,7 @@ function ReaderWorkspace(props: ReaderWorkspaceProps) {
     onCaptureScreenshot: props.onCaptureScreenshot,
     onRemoveAttachment: props.onRemoveAttachment,
     onCitationClick: props.onCitationClick,
+    onCitationContext: props.onCitationContext,
     onSaveAssistantMessageAsNote: props.onSaveAssistantMessageAsNote,
   };
 

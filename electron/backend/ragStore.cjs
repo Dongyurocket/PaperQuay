@@ -8,6 +8,7 @@ const { cleanString, toError } = require('./utils.cjs');
 const RAG_SOURCE_TYPES = new Set(['mineru-markdown', 'pdf-text']);
 const MAX_VECTOR_DIMENSION = 32768;
 const MAX_RAG_RETRIEVAL_TOP_K = 100;
+const MAX_CONTEXT_NEIGHBORS = 8;
 const MAX_AGENT_LOG_STRING_LENGTH = 4096;
 const MAX_AGENT_LOG_DEPTH = 6;
 const MAX_AGENT_LOG_ITEMS = 64;
@@ -1499,6 +1500,104 @@ function createRagStore(appPaths, options = {}) {
     return rrfFuse(vectorRows, ftsRows).slice(0, topK);
   }
 
+  function getChunkContext(request) {
+    const documentKey = normalizeDocumentKey(request?.documentKey);
+    const sourceType = normalizeSourceType(request?.sourceType);
+    const chunkId = normalizeRequiredString(request?.chunkId, 'chunkId');
+    const before = Math.min(MAX_CONTEXT_NEIGHBORS, normalizeNonNegativeInteger(request?.before, 1));
+    const after = Math.min(MAX_CONTEXT_NEIGHBORS, normalizeNonNegativeInteger(request?.after, 1));
+    const emptyResult = (status) => ({
+      status,
+      sectionPath: null,
+      slices: [],
+      hasMoreBefore: false,
+      hasMoreAfter: false,
+      truncated: false,
+      truncationReason: null,
+    });
+
+    const statusRow = getStatus(db, documentKey, sourceType);
+    if (!statusRow || statusRow.status !== 'ready') {
+      return emptyResult('not-ready');
+    }
+
+    const target = db
+      .prepare(
+        `SELECT chunk_id, chunk_index, page_index, block_id, text
+         FROM rag_chunks
+         WHERE document_key = ? AND source_type = ? AND chunk_id = ?`,
+      )
+      .get(documentKey, sourceType, chunkId);
+    if (!target) {
+      return emptyResult('not-found');
+    }
+
+    const beforeRows = before > 0
+      ? db
+          .prepare(
+            `SELECT chunk_id, chunk_index, page_index, block_id, text
+             FROM rag_chunks
+             WHERE document_key = ? AND source_type = ? AND chunk_index < ?
+             ORDER BY chunk_index DESC LIMIT ?`,
+          )
+          .all(documentKey, sourceType, target.chunk_index, before)
+          .reverse()
+      : [];
+    const afterRows = after > 0
+      ? db
+          .prepare(
+            `SELECT chunk_id, chunk_index, page_index, block_id, text
+             FROM rag_chunks
+             WHERE document_key = ? AND source_type = ? AND chunk_index > ?
+             ORDER BY chunk_index ASC LIMIT ?`,
+          )
+          .all(documentKey, sourceType, target.chunk_index, after)
+      : [];
+
+    const minFetchedIndex = beforeRows.length > 0 ? beforeRows[0].chunk_index : target.chunk_index;
+    const maxFetchedIndex = afterRows.length > 0 ? afterRows[afterRows.length - 1].chunk_index : target.chunk_index;
+    const hasMoreBefore = Boolean(
+      db
+        .prepare(
+          `SELECT 1 FROM rag_chunks
+           WHERE document_key = ? AND source_type = ? AND chunk_index < ? LIMIT 1`,
+        )
+        .get(documentKey, sourceType, minFetchedIndex),
+    );
+    const hasMoreAfter = Boolean(
+      db
+        .prepare(
+          `SELECT 1 FROM rag_chunks
+           WHERE document_key = ? AND source_type = ? AND chunk_index > ? LIMIT 1`,
+        )
+        .get(documentKey, sourceType, maxFetchedIndex),
+    );
+
+    const toSlice = (row, position) => ({
+      chunkId: row.chunk_id,
+      chunkIndex: row.chunk_index,
+      pageIndex: row.page_index ?? null,
+      blockId: row.block_id ?? null,
+      text: row.text,
+      position,
+    });
+
+    return {
+      status: 'ready',
+      // 当前 schema 尚无章节字段，显式降级为空（P3 再补 sectionPath）。
+      sectionPath: null,
+      slices: [
+        ...beforeRows.map((row) => toSlice(row, 'before')),
+        toSlice(target, 'hit'),
+        ...afterRows.map((row) => toSlice(row, 'after')),
+      ],
+      hasMoreBefore,
+      hasMoreAfter,
+      truncated: false,
+      truncationReason: null,
+    };
+  }
+
   function createAgentRun(request) {
     const runId = normalizeAgentRunId(request?.runId);
     const sessionId = normalizeAgentRunId(request?.sessionId, 'agent sessionId');
@@ -1813,6 +1912,7 @@ function createRagStore(appPaths, options = {}) {
     finishAgentRun,
     getAgentRun,
     getAgentRunEvents,
+    getChunkContext,
     getDocumentIndexStatus,
     indexDocument,
     isFtsAvailable,

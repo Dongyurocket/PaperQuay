@@ -1,4 +1,4 @@
-﻿import {
+import {
   ExternalLink,
   FileText,
   Info,
@@ -88,6 +88,7 @@ export interface AssistantSidebarCoreProps {
   onCaptureScreenshot: () => void;
   onRemoveAttachment: (attachmentId: string) => void;
   onCitationClick: (citation: DocumentChatCitation) => void;
+  onCitationContext?: (citation: DocumentChatCitation) => void;
   onCreateStandaloneNote: () => void;
   onSelectNote: (note: Note) => void;
   onUpdateNote: (noteId: string, patch: UpdateNoteRequest, options?: { sourceId?: string }) => Note | void | Promise<Note | void>;
@@ -169,6 +170,7 @@ function AssistantSidebar({
   onCaptureScreenshot,
   onRemoveAttachment,
   onCitationClick,
+  onCitationContext,
   onCreateStandaloneNote,
   onSelectNote,
   onUpdateNote,
@@ -266,6 +268,7 @@ function AssistantSidebar({
                 onCaptureScreenshot={onCaptureScreenshot}
                 onRemoveAttachment={onRemoveAttachment}
                 onCitationClick={onCitationClick}
+                onCitationContext={onCitationContext}
                 onSaveAssistantMessageAsNote={onSaveAssistantMessageAsNote}
                 onCollapseSidebar={() => onActivePanelChange(null)}
               />

@@ -6,6 +6,7 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  type ReactNode,
   type WheelEventHandler,
 } from 'react';
 import { PanelLeftClose, PanelLeftOpen } from 'lucide-react';
@@ -23,6 +24,11 @@ interface PdfThumbnailSidebarProps {
   onToggleCollapsed: () => void;
   onScrollToPage: (pageIndex: number) => void;
   onWheelCapture: WheelEventHandler<HTMLElement>;
+  /** 折叠按钮下方的额外按钮（如「目录/缩略图」切换） */
+  stripExtra?: ReactNode;
+  /** 非空时替换缩略图列表内容区（目录面板等），并改用 contentTitle 作标题 */
+  contentOverride?: ReactNode;
+  contentTitle?: string;
   l: LocaleText;
 }
 
@@ -45,6 +51,9 @@ export const PdfThumbnailSidebar = memo(forwardRef<HTMLElement, PdfThumbnailSide
     onToggleCollapsed,
     onScrollToPage,
     onWheelCapture,
+    stripExtra,
+    contentOverride,
+    contentTitle,
     l,
   },
   ref,
@@ -125,7 +134,10 @@ export const PdfThumbnailSidebar = memo(forwardRef<HTMLElement, PdfThumbnailSide
         'flex min-h-0 shrink-0 transition-[width,background-color,box-shadow] duration-300 ease-out',
         collapsed
           ? 'pointer-events-none absolute inset-y-0 left-0 z-30 w-10 border-r-0 bg-transparent'
-          : 'relative w-[184px] border-r border-slate-200/80 bg-white/72 shadow-[8px_0_24px_rgba(15,23,42,0.04)] backdrop-blur-xl dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:shadow-none',
+          : cn(
+              'relative border-r border-slate-200/80 bg-white/72 shadow-[8px_0_24px_rgba(15,23,42,0.04)] backdrop-blur-xl dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:shadow-none',
+              contentOverride ? 'w-[248px]' : 'w-[184px]',
+            ),
       )}
     >
       <div className="flex min-h-0 w-full">
@@ -153,19 +165,21 @@ export const PdfThumbnailSidebar = memo(forwardRef<HTMLElement, PdfThumbnailSide
               <PanelLeftClose className="h-4 w-4" strokeWidth={1.8} />
             )}
           </button>
+          {stripExtra}
         </div>
 
         <div
           className={cn(
             'min-h-0 overflow-hidden transition-[width,opacity] duration-300 ease-out',
-            collapsed ? 'w-0 opacity-0' : 'w-36 opacity-100',
+            collapsed ? 'w-0 opacity-0' : cn('opacity-100', contentOverride ? 'w-52' : 'w-36'),
           )}
         >
           {!collapsed ? (
             <div className="flex h-full min-h-0 flex-col">
               <div className="border-b border-slate-200/70 px-2.5 py-3 text-xs font-medium text-slate-500 dark:border-[var(--pq-border)] dark:text-[var(--pq-text-faint)]">
-                {l('Page Thumbnails', 'Page Thumbnails')}
+                {contentOverride ? (contentTitle ?? l('Outline', 'Outline')) : l('Page Thumbnails', 'Page Thumbnails')}
               </div>
+              {contentOverride ?? (
               <div
                 ref={listRef}
                 data-wheel-scroll-target
@@ -225,6 +239,7 @@ export const PdfThumbnailSidebar = memo(forwardRef<HTMLElement, PdfThumbnailSide
                   </div>
                 </div>
               </div>
+              )}
             </div>
           ) : null}
         </div>

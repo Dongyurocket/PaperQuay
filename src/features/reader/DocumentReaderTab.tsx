@@ -91,6 +91,7 @@ import type {
   PdfSource,
   PositionedMineruBlock,
   QaModelPreset,
+  RagChunkContextSlice,
   ReaderViewMode,
   ReaderSettings,
   SelectedExcerpt,
@@ -201,6 +202,7 @@ import {
   resolveMineruMarkdownCandidatePaths,
 } from './documentReaderSummarySource';
 import { buildReaderAssistantSidebarProps } from './readerAssistantSidebarProps';
+import { RagChunkContextPreview } from './RagChunkContextPreview';
 import { formatReaderDocumentSource } from './readerWorkspaceShared';
 
 type StateSetter<T> = (value: T | ((current: T) => T)) => void;
@@ -3039,6 +3041,57 @@ function DocumentReaderTab({
     [activateBlock, annotations, flatBlocks, handleJumpToNote, handleJumpToNoteAnchor, notes],
   );
 
+  const [ragContextCitation, setRagContextCitation] = useState<DocumentChatCitation | null>(null);
+
+  // 切换文档时丢弃上一文档的上下文预览，避免用错误的 documentKey 串档查询。
+  useEffect(() => {
+    setRagContextCitation(null);
+  }, [currentDocument.workspaceId]);
+
+  const handlePreviewQaCitationContext = useCallback(
+    (citation: DocumentChatCitation) => {
+      setWorkspaceStage('reading');
+      setAssistantActivePanel('chat');
+      setRagContextCitation(citation);
+    },
+    [setAssistantActivePanel],
+  );
+
+  const handleLocateRagContextSlice = useCallback(
+    (slice: RagChunkContextSlice) => {
+      const samePageBlocks =
+        slice.pageIndex !== null
+          ? flatBlocks.filter((block) => block.pageIndex === slice.pageIndex)
+          : [];
+      const targetBlock =
+        (slice.blockId ? flatBlocks.find((block) => block.blockId === slice.blockId) : null) ??
+        samePageBlocks.find((block) => block.type !== 'title') ??
+        samePageBlocks[0] ??
+        null;
+
+      if (!targetBlock) {
+        setStatusMessage(
+          lRef.current(
+            '未找到上下文切片对应的结构块',
+            'Could not find the block for the context chunk',
+          ),
+        );
+        return;
+      }
+
+      setRagContextCitation(null);
+      setWorkspaceStage('reading');
+      activateBlock(
+        targetBlock,
+        lRef.current(
+          `已定位到上下文切片 · ${targetBlock.blockId}`,
+          `Focused context chunk · ${targetBlock.blockId}`,
+        ),
+      );
+    },
+    [activateBlock, flatBlocks],
+  );
+
   const handleSelectQaCitation = useCallback(
     (citation: DocumentChatCitation) => {
       const samePageBlocks =
@@ -3680,6 +3733,7 @@ function DocumentReaderTab({
         },
         onRemoveAttachment: handleRemoveAttachment,
         onCitationClick: handleSelectQaCitation,
+        onCitationContext: handlePreviewQaCitationContext,
         onCreateStandaloneNote: handleCreateStandaloneNote,
         onSelectNote: handleSelectNote,
         onUpdateNote: (noteId, patch, options) => {
@@ -3732,6 +3786,7 @@ function DocumentReaderTab({
       handleSelectNote,
       handleSelectQaAttachments,
       handleSelectQaCitation,
+      handlePreviewQaCitationContext,
       handleSelectQaSession,
       handleSubmitQa,
       handleTranslateSelectedExcerpt,
@@ -4063,6 +4118,7 @@ function DocumentReaderTab({
         onCaptureScreenshot={() => void handleCaptureSystemScreenshotNative()}
         onRemoveAttachment={handleRemoveAttachment}
         onCitationClick={handleSelectQaCitation}
+        onCitationContext={handlePreviewQaCitationContext}
         onSaveAssistantMessageAsNote={handleSaveAssistantMessageAsNote}
         qaLoading={selectedQaSessionLoading}
         qaRunningSessionIds={qaRunningSessionIds}
@@ -4083,6 +4139,14 @@ function DocumentReaderTab({
         onAttachAssistant={handleAttachAssistant}
         showLibraryToggle={false}
       />
+      {ragContextCitation ? (
+        <RagChunkContextPreview
+          documentKey={currentDocument.workspaceId}
+          citation={ragContextCitation}
+          onClose={() => setRagContextCitation(null)}
+          onLocate={handleLocateRagContextSlice}
+        />
+      ) : null}
     </div>
   );
 }

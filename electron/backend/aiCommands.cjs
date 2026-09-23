@@ -1633,6 +1633,10 @@ function createAiCommands(context) {
       return ragStore.retrieveDocumentChunks(request);
     },
 
+    async rag_get_chunk_context({ request }) {
+      return ragStore.getChunkContext(request);
+    },
+
     async agent_run_start({ request }) {
       return ragStore.createAgentRun(request);
     },
