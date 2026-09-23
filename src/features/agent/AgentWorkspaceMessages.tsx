@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Bot,
   Camera,
@@ -345,14 +346,17 @@ function AgentFigureReferences({
           </button>
         ))}
       </div>
-      {preview && urls[preview.id] ? (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/80 p-6" onClick={() => setPreview(null)}>
-          <div className="max-h-full max-w-5xl overflow-auto" onClick={(event) => event.stopPropagation()}>
-            <img src={urls[preview.id]} alt={preview.caption} className="max-h-[80vh] max-w-full object-contain" />
-            <div className="bg-white p-3 text-sm text-slate-700 dark:bg-chrome-900 dark:text-chrome-200">{preview.caption}</div>
-          </div>
-        </div>
-      ) : null}
+      {preview && urls[preview.id] && typeof document !== 'undefined'
+        ? createPortal(
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/80 p-6" onClick={() => setPreview(null)}>
+            <div className="max-h-full max-w-5xl overflow-auto" onClick={(event) => event.stopPropagation()}>
+              <img src={urls[preview.id]} alt={preview.caption} className="max-h-[80vh] max-w-full object-contain" />
+              <div className="bg-white p-3 text-sm text-slate-700 dark:bg-chrome-900 dark:text-chrome-200">{preview.caption}</div>
+            </div>
+          </div>,
+          document.body,
+        )
+        : null}
     </>
   );
 }
@@ -409,7 +413,7 @@ export function UserMessageCard({ message }: { message: AgentChatMessage }) {
   return (
     <article className="flex items-start justify-end gap-3">
       <div className="max-w-[72%] rounded-[24px] border border-teal-300 bg-teal-600 px-4 py-3 text-sm leading-7 text-white shadow-[0_18px_40px_rgba(20,184,166,0.18)] dark:border-teal-300/30 dark:bg-teal-300 dark:text-slate-950">
-        <div className="whitespace-pre-wrap">{message.content}</div>
+        <div className="whitespace-pre-wrap break-words">{message.content}</div>
         {message.attachments && message.attachments.length > 0 ? (
           <div className="mt-3 flex flex-wrap gap-2">
             {message.attachments.map((attachment) => {

@@ -615,7 +615,10 @@ function AgentWorkspace() {
   };
 
   const setAgentSessionRunning = (sessionId: string, running: boolean) => {
-    setRunningSessionIds((current) => updateAgentRunningSessions(current, sessionId, running));
+    // 同步更新 ref，保证运行中守卫在同一事件循环内连续调用时也能生效。
+    const next = updateAgentRunningSessions(runningSessionIdsRef.current, sessionId, running);
+    runningSessionIdsRef.current = next;
+    setRunningSessionIds(next);
   };
 
   const togglePaper = (paperId: string) => {
@@ -1915,6 +1918,11 @@ function AgentWorkspace() {
 
           await finishAgentRun({ runId: interruptedRun.runId, status: 'aborted' }).catch(() => {});
 
+          // confirm + await 期间用户可能已切换到其他会话，写输入框前必须复查。
+          if (activeSessionIdRef.current !== session.id) {
+            return;
+          }
+
           if (resumeCapability) {
             pendingCapabilityResumeRef.current.set(session.id, {
               instruction: session.lastInstruction,
@@ -1990,6 +1998,23 @@ function AgentWorkspace() {
   };
 
   const handleDeleteHistorySession = (sessionId: string) => {
+    // 删除前先中止该会话仍在运行的 run，避免孤儿 run 继续消耗 token 且无法取消。
+    const controller = abortControllersRef.current.get(sessionId);
+
+    if (controller) {
+      controller.abort();
+      abortControllersRef.current.delete(sessionId);
+      setAgentSessionRunning(sessionId, false);
+      setCancellingSessionIds((current) => {
+        if (!current.has(sessionId)) {
+          return current;
+        }
+        const next = new Set(current);
+        next.delete(sessionId);
+        return next;
+      });
+    }
+
     setHistorySessions((current) => current.filter((session) => session.id !== sessionId));
 
     if (sessionId === activeSessionId) {
@@ -2011,6 +2036,15 @@ function AgentWorkspace() {
   const handleClearAgentHistory = () => {
     const nextSessionId = newAgentSessionId();
     const nextMessages = [createLocalizedWelcomeMessage()];
+
+    // 清空历史会删除所有会话，先中止所有仍在运行的 run。
+    for (const controller of abortControllersRef.current.values()) {
+      controller.abort();
+    }
+    abortControllersRef.current.clear();
+    runningSessionIdsRef.current = new Set();
+    setRunningSessionIds(new Set());
+    setCancellingSessionIds(new Set());
 
     setActiveSessionId(nextSessionId);
     setMessages(nextMessages);

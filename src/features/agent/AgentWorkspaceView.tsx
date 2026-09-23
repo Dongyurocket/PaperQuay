@@ -217,7 +217,7 @@ function AgentReasoningPicker({
   const menu = open ? (
     <div
       ref={menuRef}
-      className="pq-card fixed z-[9999] overflow-hidden p-1 shadow-[0_18px_48px_rgba(15,23,42,0.18)]"
+      className="pq-card fixed z-[9999] max-h-[50vh] overflow-y-auto p-1 shadow-[0_18px_48px_rgba(15,23,42,0.18)]"
       style={menuStyle}
     >
       {agentReasoningOptions.map((option) => {
@@ -408,7 +408,7 @@ export default function AgentWorkspaceView({
                   data-wheel-scroll-target
                   className="mt-1 flex min-h-0 flex-1 flex-col items-center gap-2 overflow-y-auto overscroll-y-contain"
                 >
-                  {sortedHistorySessions.slice(0, 12).map((session) => (
+                  {sortedHistorySessions.map((session) => (
                     <button
                       key={session.id}
                       type="button"
