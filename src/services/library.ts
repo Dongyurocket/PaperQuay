@@ -163,6 +163,30 @@ export async function listLibraryPaperIds(
   }
 }
 
+const PAPER_ID_PAGE_SIZE = 5000;
+
+/** 按当前筛选枚举全部文献 id。只取 id，不水合详情；单页上限与 SQL 查询上限一致。 */
+export async function listAllLibraryPaperIds(
+  request: ListPapersRequest = {},
+): Promise<string[]> {
+  const ids: string[] = [];
+  let offset = 0;
+
+  for (;;) {
+    const page = await listLibraryPaperIds({
+      ...request,
+      offset,
+      limit: PAPER_ID_PAGE_SIZE,
+    });
+    ids.push(...page);
+    if (page.length < PAPER_ID_PAGE_SIZE) {
+      return ids;
+    }
+
+    offset += page.length;
+  }
+}
+
 export async function reorderLibraryPapers(
   request: ReorderPapersRequest,
 ): Promise<void> {

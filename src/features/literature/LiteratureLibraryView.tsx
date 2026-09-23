@@ -27,6 +27,7 @@ import {
   getLibrarySettings,
   importPdfsToLibrary,
   initializeLiteratureLibrary,
+  listAllLibraryPaperIds,
   listLibraryCategories,
   queryLibraryPapers,
   moveLibraryCategory,
@@ -74,6 +75,14 @@ import LiteraturePaperList, {
   type LiteraturePaperRagStatus,
 } from './components/LiteraturePaperList';
 import { flattenCategories, paperPdfPath, paperTranslatedPdfAttachment } from './literatureUi';
+import {
+  capturePaperSelection,
+  EMPTY_PAPER_SELECTION,
+  replacePaperSelection,
+  selectionCheckState,
+  togglePaperSelection,
+  type PaperSelection,
+} from './paperSelection';
 import { readPdfPageCount } from './pdfPageCount';
 import {
   loadPaperTitleDisplayMode,
@@ -254,7 +263,7 @@ type CategoryNameDialogState =
 type LibraryConfirmDialogState =
   | { kind: 'delete-category'; category: LiteratureCategory }
   | { kind: 'delete-paper'; paper: LiteraturePaper; deleteFiles: boolean }
-  | { kind: 'delete-papers'; papers: LiteraturePaper[]; deleteFiles: boolean }
+  | { kind: 'delete-papers'; paperIds: string[]; deleteFiles: boolean }
   | { kind: 'remove-translated-pdf'; paper: LiteraturePaper; attachmentId: string; fileName: string };
 
 type LiteraturePaperSortBy = NonNullable<ListPapersRequest['sortBy']>;
@@ -355,7 +364,9 @@ export default function LiteratureLibraryView({
   }, [onPaperStatusesChange, paperStatuses]);
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
   const [selectedPaperId, setSelectedPaperId] = useState<string | null>(null);
-  const [multiSelectedPaperIds, setMultiSelectedPaperIds] = useState<string[]>([]);
+  const [paperSelection, setPaperSelection] = useState<PaperSelection>(EMPTY_PAPER_SELECTION);
+  const paperSelectionRef = useRef(paperSelection);
+  const selectionFilterRef = useRef<{ categoryId: string | null; search: string } | null>(null);
   const [selectionAnchorId, setSelectionAnchorId] = useState<string | null>(null);
   const [batchWorking, setBatchWorking] = useState(false);
   const [bibExportMenuOpen, setBibExportMenuOpen] = useState(false);
@@ -424,29 +435,37 @@ export default function LiteratureLibraryView({
     [papers, selectedPaperId],
   );
 
-  // 多选集合：与 selectedPaperId（详情面板主选中）独立，仅在批量操作时生效。
+  // 多选与详情面板的 selectedPaperId 分开。全选保存 id 快照，已加载行只是其中可见的一部分。
+  paperSelectionRef.current = paperSelection;
+  const multiSelectedPaperIds = paperSelection.ids;
+  const selectedCount = multiSelectedPaperIds.length;
+  const selectAllState = selectionCheckState(paperSelection, papersTotal);
   const multiSelectedPaperIdSet = useMemo(() => new Set(multiSelectedPaperIds), [multiSelectedPaperIds]);
   const multiSelectedPapers = useMemo(
     () => papers.filter((paper) => multiSelectedPaperIdSet.has(paper.id)),
     [papers, multiSelectedPaperIdSet],
   );
-  const multiSelectActive = multiSelectedPaperIds.length > 0;
 
-  // 文献列表刷新/过滤后，清理已不在当前列表中的多选 id。
   useEffect(() => {
-    setMultiSelectedPaperIds((current) => {
-      if (current.length === 0) {
-        return current;
-      }
+    const nextFilter = { categoryId: selectedCategoryId, search: searchQuery };
+    const previousFilter = selectionFilterRef.current;
+    selectionFilterRef.current = nextFilter;
+    if (
+      !previousFilter
+      || (previousFilter.categoryId === nextFilter.categoryId && previousFilter.search === nextFilter.search)
+      || paperSelectionRef.current.ids.length === 0
+    ) {
+      return;
+    }
 
-      const validIds = new Set(papers.map((paper) => paper.id));
-      const next = current.filter((id) => validIds.has(id));
-      return next.length === current.length ? current : next;
-    });
-  }, [papers]);
+    setPaperSelection(EMPTY_PAPER_SELECTION);
+    setStatusMessage(
+      l('筛选条件已变化，选择已清空。', 'The filter changed, so the selection was cleared.'),
+    );
+  }, [l, searchQuery, selectedCategoryId]);
 
   const clearMultiSelection = useCallback(() => {
-    setMultiSelectedPaperIds([]);
+    setPaperSelection(EMPTY_PAPER_SELECTION);
   }, []);
 
   const handleSelectPaperWithModifiers = useCallback(
@@ -461,35 +480,75 @@ export default function LiteratureLibraryView({
         if (anchorIndex >= 0 && targetIndex >= 0) {
           const [start, end] = anchorIndex < targetIndex ? [anchorIndex, targetIndex] : [targetIndex, anchorIndex];
           const rangeIds = orderedIds.slice(start, end + 1);
+          const currentIds = paperSelectionRef.current.ids;
 
-          setMultiSelectedPaperIds((current) =>
+          setPaperSelection(replacePaperSelection(
             modifiers.ctrlKey || modifiers.metaKey
-              ? [...new Set([...current, ...rangeIds])]
+              ? [...currentIds, ...rangeIds]
               : rangeIds,
-          );
+          ));
           setSelectedPaperId(paperId);
           return;
         }
       }
 
       if (modifiers.ctrlKey || modifiers.metaKey) {
-        setMultiSelectedPaperIds((current) =>
-          current.includes(paperId)
-            ? current.filter((id) => id !== paperId)
-            : [...current, paperId],
-        );
+        setPaperSelection((current) => togglePaperSelection(current, paperId));
         setSelectionAnchorId(paperId);
         setSelectedPaperId(paperId);
         return;
       }
 
-      // 普通点击：单选并清空多选。
-      setMultiSelectedPaperIds([]);
+      // 普通点击：单选并退出多选。
+      setPaperSelection(EMPTY_PAPER_SELECTION);
       setSelectionAnchorId(paperId);
       setSelectedPaperId(paperId);
     },
     [papers, selectedPaperId, selectionAnchorId],
   );
+
+  const resolveSelectedPapers = useCallback(async (ids: string[]) => {
+    const wanted = new Set(ids);
+    const found = new Map<string, LiteraturePaper>();
+
+    for (const paper of papersRef.current) {
+      if (wanted.has(paper.id)) {
+        found.set(paper.id, paper);
+      }
+    }
+
+    if (!demoLibrary && found.size < wanted.size) {
+      let offset = 0;
+      const pageSize = 500;
+
+      while (found.size < wanted.size) {
+        const result = await queryLibraryPapers({
+          categoryId: selectedCategoryId,
+          search: searchQuery,
+          sortBy: paperSort.sortBy,
+          sortDirection: paperSort.sortDirection,
+          limit: pageSize,
+          offset,
+        });
+
+        for (const paper of result.papers) {
+          if (wanted.has(paper.id)) {
+            found.set(paper.id, paper);
+          }
+        }
+
+        offset += result.papers.length;
+        if (result.papers.length === 0 || offset >= result.total) {
+          break;
+        }
+      }
+    }
+
+    return ids.flatMap((id) => {
+      const paper = found.get(id);
+      return paper ? [paper] : [];
+    });
+  }, [demoLibrary, paperSort.sortBy, paperSort.sortDirection, searchQuery, selectedCategoryId]);
 
   const resolveDemoPapers = useCallback(
     (nextCategoryId = selectedCategoryId) => {
@@ -501,6 +560,43 @@ export default function LiteratureLibraryView({
     },
     [demoLibrary, searchQuery, selectedCategoryId],
   );
+
+  const handleToggleSelectAll = useCallback(async () => {
+    if (selectionCheckState(paperSelectionRef.current, papersTotal) === 'all') {
+      setPaperSelection(EMPTY_PAPER_SELECTION);
+      return;
+    }
+
+    setBatchWorking(true);
+    setError('');
+
+    try {
+      const ids = demoLibrary
+        ? resolveDemoPapers().map((paper) => paper.id)
+        : await listAllLibraryPaperIds({
+          categoryId: selectedCategoryId,
+          search: searchQuery,
+        });
+
+      setPaperSelection(capturePaperSelection(ids));
+      setStatusMessage(
+        ids.length === 0
+          ? l('当前筛选没有文献。', 'No papers match the current filter.')
+          : l(
+            `已全选当前筛选的 ${ids.length} 篇。之后导入的文献不会自动加入。`,
+            `Selected all ${ids.length} papers in the current filter. Papers imported later are not added.`,
+          ),
+      );
+    } catch (nextError) {
+      const message = nextError instanceof Error
+        ? nextError.message
+        : l('全选当前筛选失败', 'Failed to select the current filter');
+      setError(message);
+      setStatusMessage(message);
+    } finally {
+      setBatchWorking(false);
+    }
+  }, [demoLibrary, l, papersTotal, resolveDemoPapers, searchQuery, selectedCategoryId]);
 
   const showDemoLockedMessage = useCallback(() => {
     setStatusMessage(
@@ -739,6 +835,7 @@ export default function LiteratureLibraryView({
       setSettings(demoLibrary.settings);
       setCategories(demoLibrary.categories);
       setPapers(nextPapers);
+      setPapersTotal(nextPapers.length);
       setSelectedPaperId((current) => resolveSelectedPaperId(current, nextPapers));
       setStatusMessage(demoLibrary.statusMessage);
       return;
@@ -2149,27 +2246,28 @@ export default function LiteratureLibraryView({
       return;
     }
 
-    if (multiSelectedPapers.length === 0) {
+    const paperIds = paperSelectionRef.current.ids;
+    if (paperIds.length === 0) {
       return;
     }
 
     setConfirmDialog({
       kind: 'delete-papers',
-      papers: multiSelectedPapers,
+      paperIds,
       deleteFiles: selectedCategory?.systemKey === 'all',
     });
   };
 
-  const deletePapersAfterConfirm = async (papersToDelete: LiteraturePaper[], deleteFiles: boolean) => {
+  const deletePapersAfterConfirm = async (paperIds: string[], deleteFiles: boolean) => {
     setBatchWorking(true);
     setDialogBusy(true);
     setError('');
     let failedCount = 0;
 
     try {
-      for (const paper of papersToDelete) {
+      for (const paperId of paperIds) {
         try {
-          await deleteLibraryPaper({ paperId: paper.id, deleteFiles });
+          await deleteLibraryPaper({ paperId, deleteFiles });
         } catch {
           failedCount += 1;
         }
@@ -2180,12 +2278,12 @@ export default function LiteratureLibraryView({
       setStatusMessage(
         failedCount > 0
           ? l(
-            `已删除 ${papersToDelete.length - failedCount} 篇文献，${failedCount} 篇失败。`,
-            `Deleted ${papersToDelete.length - failedCount} papers; ${failedCount} failed.`,
+            `已删除 ${paperIds.length - failedCount} 篇文献，${failedCount} 篇失败。`,
+            `Deleted ${paperIds.length - failedCount} papers; ${failedCount} failed.`,
           )
           : l(
-            `已删除 ${papersToDelete.length} 篇文献${deleteFiles ? '及其 PDF 文件' : '记录'}。`,
-            `Deleted ${papersToDelete.length} paper${papersToDelete.length > 1 ? 's' : ''}${deleteFiles ? ' and their PDF files' : ' records'}.`,
+            `已删除 ${paperIds.length} 篇文献${deleteFiles ? '及其 PDF 文件' : '记录'}。`,
+            `Deleted ${paperIds.length} paper${paperIds.length > 1 ? 's' : ''}${deleteFiles ? ' and their PDF files' : ' records'}.`,
           ),
       );
       setConfirmDialog(null);
@@ -2201,7 +2299,8 @@ export default function LiteratureLibraryView({
       return;
     }
 
-    if (multiSelectedPapers.length === 0) {
+    const paperIds = paperSelectionRef.current.ids;
+    if (paperIds.length === 0) {
       return;
     }
 
@@ -2210,13 +2309,9 @@ export default function LiteratureLibraryView({
     let failedCount = 0;
 
     try {
-      for (const paper of multiSelectedPapers) {
-        if (paper.isFavorite === favorite) {
-          continue;
-        }
-
+      for (const paperId of paperIds) {
         try {
-          await updateLibraryPaper({ paperId: paper.id, isFavorite: favorite });
+          await updateLibraryPaper({ paperId, isFavorite: favorite });
         } catch {
           failedCount += 1;
         }
@@ -2226,12 +2321,12 @@ export default function LiteratureLibraryView({
       setStatusMessage(
         failedCount > 0
           ? l(
-            `已更新 ${multiSelectedPapers.length - failedCount} 篇收藏状态，${failedCount} 篇失败。`,
-            `Updated ${multiSelectedPapers.length - failedCount} papers; ${failedCount} failed.`,
+            `已更新 ${paperIds.length - failedCount} 篇收藏状态，${failedCount} 篇失败。`,
+            `Updated ${paperIds.length - failedCount} papers; ${failedCount} failed.`,
           )
           : favorite
-            ? l(`已收藏 ${multiSelectedPapers.length} 篇文献。`, `Favorited ${multiSelectedPapers.length} papers.`)
-            : l(`已取消收藏 ${multiSelectedPapers.length} 篇文献。`, `Unfavorited ${multiSelectedPapers.length} papers.`),
+            ? l(`已收藏 ${paperIds.length} 篇文献。`, `Favorited ${paperIds.length} papers.`)
+            : l(`已取消收藏 ${paperIds.length} 篇文献。`, `Unfavorited ${paperIds.length} papers.`),
       );
     } finally {
       setBatchWorking(false);
@@ -2246,7 +2341,8 @@ export default function LiteratureLibraryView({
 
     const targetCategory = flatCategories.find((category) => category.id === categoryId);
 
-    if (!targetCategory || targetCategory.isSystem || multiSelectedPapers.length === 0) {
+    const paperIds = paperSelectionRef.current.ids;
+    if (!targetCategory || targetCategory.isSystem || paperIds.length === 0) {
       return;
     }
 
@@ -2255,9 +2351,9 @@ export default function LiteratureLibraryView({
     let failedCount = 0;
 
     try {
-      for (const paper of multiSelectedPapers) {
+      for (const paperId of paperIds) {
         try {
-          await assignPaperToLibraryCategory({ paperId: paper.id, categoryId });
+          await assignPaperToLibraryCategory({ paperId, categoryId });
         } catch {
           failedCount += 1;
         }
@@ -2269,12 +2365,12 @@ export default function LiteratureLibraryView({
       setStatusMessage(
         failedCount > 0
           ? l(
-            `已移动 ${multiSelectedPapers.length - failedCount} 篇到「${targetCategory.name}」，${failedCount} 篇失败。`,
-            `Moved ${multiSelectedPapers.length - failedCount} papers to "${targetCategory.name}"; ${failedCount} failed.`,
+            `已移动 ${paperIds.length - failedCount} 篇到「${targetCategory.name}」，${failedCount} 篇失败。`,
+            `Moved ${paperIds.length - failedCount} papers to "${targetCategory.name}"; ${failedCount} failed.`,
           )
           : l(
-            `已移动 ${multiSelectedPapers.length} 篇文献到「${targetCategory.name}」。`,
-            `Moved ${multiSelectedPapers.length} papers to "${targetCategory.name}".`,
+            `已移动 ${paperIds.length} 篇文献到「${targetCategory.name}」。`,
+            `Moved ${paperIds.length} papers to "${targetCategory.name}".`,
           ),
       );
     } finally {
@@ -2694,17 +2790,27 @@ export default function LiteratureLibraryView({
       </div>
 
       <div data-tour="paper-list" className="flex h-full min-h-0 flex-col overflow-hidden">
-        {multiSelectedPaperIds.length > 0 ? (
+        {selectedCount > 0 ? (
           <div className="flex flex-wrap items-center gap-2 border-b border-[var(--pq-border)] bg-[var(--pq-accent-soft)] px-4 py-2">
             <span className="text-xs font-semibold text-[var(--pq-accent)]">
-              {l(`已选 ${multiSelectedPaperIds.length} 篇`, `${multiSelectedPaperIds.length} selected`)}
+              {l(`已选 ${selectedCount} 篇`, `${selectedCount} selected`)}
             </span>
             <div className="mx-1 h-4 w-px bg-[var(--pq-border)]" />
             {onBatchTranslatePaperTitles ? (
               <button
                 type="button"
                 disabled={batchWorking || batchTitleTranslationRunning || demoMode}
-                onClick={() => onBatchTranslatePaperTitles(multiSelectedPapers)}
+                onClick={() => {
+                  void resolveSelectedPapers(paperSelectionRef.current.ids)
+                    .then((resolved) => onBatchTranslatePaperTitles(resolved))
+                    .catch((nextError) => {
+                      const message = nextError instanceof Error
+                        ? nextError.message
+                        : l('读取选中文献失败', 'Failed to load the selected papers');
+                      setError(message);
+                      setStatusMessage(message);
+                    });
+                }}
                 className="pq-button px-2.5 py-1 text-xs disabled:opacity-50"
               >
                 {l('翻译标题', 'Translate Titles')}
@@ -2727,7 +2833,15 @@ export default function LiteratureLibraryView({
                       className="rounded-lg px-3 py-1.5 text-left text-xs hover:bg-[var(--pq-accent-soft)]"
                       onClick={() => {
                         setBibExportMenuOpen(false);
-                        onBatchExportBib(multiSelectedPapers, 'merged');
+                        void resolveSelectedPapers(paperSelectionRef.current.ids)
+                          .then((resolved) => onBatchExportBib(resolved, 'merged'))
+                          .catch((nextError) => {
+                            const message = nextError instanceof Error
+                              ? nextError.message
+                              : l('读取选中文献失败', 'Failed to load the selected papers');
+                            setError(message);
+                            setStatusMessage(message);
+                          });
                       }}
                     >
                       {l('合并为单个 .bib', 'Merge into one .bib')}
@@ -2737,7 +2851,15 @@ export default function LiteratureLibraryView({
                       className="rounded-lg px-3 py-1.5 text-left text-xs hover:bg-[var(--pq-accent-soft)]"
                       onClick={() => {
                         setBibExportMenuOpen(false);
-                        onBatchExportBib(multiSelectedPapers, 'separate');
+                        void resolveSelectedPapers(paperSelectionRef.current.ids)
+                          .then((resolved) => onBatchExportBib(resolved, 'separate'))
+                          .catch((nextError) => {
+                            const message = nextError instanceof Error
+                              ? nextError.message
+                              : l('读取选中文献失败', 'Failed to load the selected papers');
+                            setError(message);
+                            setStatusMessage(message);
+                          });
                       }}
                     >
                       {l('每篇一个 .bib 文件', 'One .bib per paper')}
@@ -2807,6 +2929,8 @@ export default function LiteratureLibraryView({
             storageDir={libraryStorageDir}
             selectedPaper={selectedPaper}
             multiSelectedPaperIds={multiSelectedPaperIds}
+            selectAllState={selectAllState}
+            onToggleSelectAll={() => void handleToggleSelectAll()}
             searchQuery={searchQuery}
             sortBy={paperSort.sortBy}
             sortDirection={paperSort.sortDirection}
@@ -2861,14 +2985,14 @@ export default function LiteratureLibraryView({
       </div>
 
       <div data-tour="ai-summary" className="h-full min-h-0 overflow-hidden">
-        {multiSelectedPaperIds.length >= 2 ? (
+        {selectedCount >= 2 ? (
           <div className="flex h-full min-h-0 flex-col overflow-y-auto p-4">
             <div className="rounded-[22px] border border-[var(--pq-border)] bg-white/70 p-4 dark:bg-white/5">
               <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--pq-text-faint)]">
                 {l('批量操作', 'Batch Operations')}
               </div>
               <div className="mt-2 text-base font-semibold">
-                {l(`已选择 ${multiSelectedPaperIds.length} 篇文献`, `${multiSelectedPaperIds.length} papers selected`)}
+                {l(`已选择 ${selectedCount} 篇文献`, `${selectedCount} papers selected`)}
               </div>
               <p className="mt-2 text-sm leading-6 text-[var(--pq-text-muted)]">
                 {l(
@@ -2882,9 +3006,9 @@ export default function LiteratureLibraryView({
                     · {paper.title}
                   </li>
                 ))}
-                {multiSelectedPapers.length > 12 ? (
+                {selectedCount > multiSelectedPapers.slice(0, 12).length ? (
                   <li className="text-[var(--pq-text-faint)]">
-                    {l(`… 等 ${multiSelectedPapers.length} 篇`, `… and ${multiSelectedPapers.length} papers`)}
+                    {l(`… 等 ${selectedCount} 篇`, `… and ${selectedCount} papers`)}
                   </li>
                 ) : null}
               </ul>
@@ -3206,9 +3330,9 @@ export default function LiteratureLibraryView({
               )
             : confirmDialog?.kind === 'delete-papers'
               ? confirmDialog.deleteFiles
-                ? l(`从所有文献中删除选中的 ${confirmDialog.papers.length} 篇文献？这也会删除磁盘上的 PDF 文件。`, `Delete the selected ${confirmDialog.papers.length} papers from All Papers? This will also delete PDF files from disk.`,
+                ? l(`从所有文献中删除选中的 ${confirmDialog.paperIds.length} 篇文献？这也会删除磁盘上的 PDF 文件。`, `Delete the selected ${confirmDialog.paperIds.length} papers from All Papers? This will also delete PDF files from disk.`,
                   )
-                : l(`删除选中的 ${confirmDialog.papers.length} 篇文献记录？磁盘上的 PDF 文件不会被删除。`, `Delete the records of the selected ${confirmDialog.papers.length} papers? PDF files on disk will not be deleted.`,
+                : l(`删除选中的 ${confirmDialog.paperIds.length} 篇文献记录？磁盘上的 PDF 文件不会被删除。`, `Delete the records of the selected ${confirmDialog.paperIds.length} papers? PDF files on disk will not be deleted.`,
                   )
             : confirmDialog?.kind === 'delete-paper'
               ? confirmDialog.deleteFiles
@@ -3246,7 +3370,7 @@ export default function LiteratureLibraryView({
           }
 
           if (confirmDialog.kind === 'delete-papers') {
-            void deletePapersAfterConfirm(confirmDialog.papers, confirmDialog.deleteFiles);
+            void deletePapersAfterConfirm(confirmDialog.paperIds, confirmDialog.deleteFiles);
             return;
           }
 

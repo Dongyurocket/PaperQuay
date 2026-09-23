@@ -13,6 +13,7 @@ import {
 import {
   BookOpenText,
   Check,
+  Minus,
   FilePlus2,
   GripVertical,
   RefreshCw,
@@ -38,6 +39,7 @@ import {
   type PaperTitleDisplayMode,
 } from '../titleDisplay';
 import LiteratureReadingHeatmapPreview from './LiteratureReadingHeatmapPreview';
+import type { SelectionCheckState } from '../paperSelection';
 
 export interface LiteraturePaperListStatus {
   mineruParsed: boolean;
@@ -63,8 +65,10 @@ interface LiteraturePaperListProps {
   showReadingHeatmap?: boolean;
   storageDir?: string;
   selectedPaper: LiteraturePaper | null;
-  /** 多选集合（P1）：为空数组时与普通单选模式行为一致。 */
+  /** 多选集合。全选时包含尚未加载的匹配 id，所以后加载的行也会显示为已选。 */
   multiSelectedPaperIds?: string[];
+  selectAllState?: SelectionCheckState;
+  onToggleSelectAll?: () => void;
   searchQuery: string;
   sortBy: LiteraturePaperListSortBy;
   sortDirection: LiteraturePaperListSortDirection;
@@ -113,6 +117,8 @@ export default function LiteraturePaperList({
   storageDir = '',
   selectedPaper,
   multiSelectedPaperIds = [],
+  selectAllState = 'none',
+  onToggleSelectAll,
   searchQuery,
   sortBy,
   sortDirection,
@@ -473,6 +479,32 @@ export default function LiteraturePaperList({
     >
       <header className="pq-toolbar px-4 py-3">
         <div className="flex flex-wrap items-center gap-2.5">
+          <button
+            type="button"
+            role="checkbox"
+            aria-checked={selectAllState === 'all' ? true : selectAllState === 'partial' ? 'mixed' : false}
+            disabled={working || resolvedTotal === 0 || !onToggleSelectAll}
+            onClick={onToggleSelectAll}
+            title={l(
+              `全选当前筛选结果（${resolvedTotal} 篇）`,
+              `Select all papers in the current filter (${resolvedTotal})`,
+            )}
+            className="pq-button inline-flex h-9 items-center gap-2 px-2.5 text-sm disabled:opacity-50"
+          >
+            <span
+              className={clsx(
+                'flex h-4 w-4 items-center justify-center rounded border',
+                selectAllState === 'none'
+                  ? 'border-[var(--pq-border)] bg-white/70 text-transparent'
+                  : 'border-[var(--pq-accent-border-strong)] bg-[var(--pq-accent)] text-white',
+              )}
+            >
+              {selectAllState === 'partial'
+                ? <Minus className="h-3 w-3" strokeWidth={2.6} />
+                : <Check className="h-3 w-3" strokeWidth={2.6} />}
+            </span>
+            {l(`全选（${resolvedTotal}）`, `All (${resolvedTotal})`)}
+          </button>
           <div className="relative min-w-[260px] flex-1">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" strokeWidth={1.8} />
             <input
