@@ -1,33 +1,49 @@
 # PaperQuay v{{VERSION}}
 
+## What's New
+
+- **PDF Outline Sidebar & Chapter Navigation**: Added native document outline sidebar to the PDF reader with tree collapse/expand, keyword filtering, and auto-highlighting of the current reading chapter. When a PDF lacks embedded outlines, an outline hierarchy is derived on the fly from lightweight MinerU headings.
+- **RAG Chunk Context & Evidence Drawer**: Enhanced RAG citation cards with a "View Chunk Context" action, allowing readers to preview adjacent neighboring chunks, source sections, and full context in a slide-out drawer without losing reading focus.
+- **Select All Filtered Papers in Library**: Supported one-click selection of all papers matching active filters across pages, with a stable frozen snapshot for batch tagging, category management, or export.
+
+## Performance & Architecture Improvements
+
+- **Progressive Streaming for Long Documents**: MinerU parsing worker now splits documents into metadata, chapter index, and 25-page content segments. Outlines become clickable as soon as the index arrives, and first-batch body pages render immediately without blocking on full-text processing.
+- **Byte-Budget LRU Memory Management**: Introduced `ByteBudgetLruCache` to manage PDF.js document instances, MinerU structural blocks, and image crops by estimated byte sizes. Safely destroys idle objects while protecting in-use references from eviction.
+- **SQL-Level Library Pagination & Incremental Persistence**: Replaced full in-memory sorting with database-level multi-condition filtering and pagination, significantly reducing initial loading latency for large libraries (10,000+ items). Single-item updates persist directly without rewriting other records.
+- **Isolated RAG Worker**: Offloaded heavy RAG chunking and vector retrieval to an independent background worker thread, ensuring high UI responsiveness and native abort cancellation.
+
 ## Fixes
 
-- **Note citations could open the paper but never jump to the cited position**: the anchor `blockId` / `pageIndex` were dropped when the note was persisted, because the anchor whitelist in the note store only kept `pdfLocation`-style fields while AI-polish anchors carry just the block id and page index. Clicking the page button on an excerpt card (e.g. `P20`) or a location chip in the reference list therefore had no position to jump to, and the reader only showed "this citation has no bound PDF position". Anchor positions are now persisted, and existing notes need no migration: the position is recovered at click time from the explicit fields, then from the anchor id (`note-polish:<paperId>:mineru:page-20-block-3:0`), then from the page label.
-- **Jump requests no longer hang on papers without structure blocks**: when a paper had no MinerU block data, a note-anchor jump waited forever instead of doing anything. Jumps now degrade gracefully — exact block, then a body block on the same page, then a whole-page highlight — and only report "no bound PDF position" when there is genuinely no location at all.
+- **Surrogate Character Sanitization in Embeddings**: Stripped unpaired UTF-16 surrogate characters in text chunks, resolving `400 Invalid UTF-8` failures with OpenAI and compatible embedding endpoints.
+- **Library RAG Status Badge Alignment**: Decoupled RAG status indicators from transient MinerU parser states, accurately displaying knowledge base readiness.
 
 ## Downloads
 
 Select the installer matching your system and architecture from Assets: Windows `.exe` or `.msi`, macOS `.dmg`, or Linux `.AppImage` / `.deb` / `.tar.gz`.
 
-## Notes
-
-- Existing notes keep working with no data migration: positions are derived on the fly when you click.
-- The fix applies to the note excerpt cards, the reference-list location chips, and the reader-side jump detail, which now share one position resolver.
-
 ---
 
 # PaperQuay v{{VERSION}} 中文说明
 
+## 新增功能
+
+- **PDF 目录侧栏与章节快速导航**：PDF 阅读器新增原生目录侧栏，支持树状折叠、关键词筛选及当前阅读页章节自动高亮；文档缺少原生 PDF 目录时，自动基于轻量 MinerU 章节索引即时生成层级目录树。
+- **RAG 原生切片上下文与证据抽屉**：RAG 检索证据卡片新增「查看切片上下文」，在抽屉中直观浏览同文档同来源的前后邻居切片、原文章节路径与完整正文；底层 RAG 存储与服务直接支持按切片 ID 扩展前后上下文窗口。
+- **文库跨页全选当前筛选结果**：文献列表支持一键全选当前筛选条件下的全部文献（即使跨越多页），冻结操作快照并支持批量移动分类、批量打标签或导出。
+
+## 性能与架构优化
+
+- **超长解析文档分段与渐进可用**：Worker 中 MinerU JSON 解析重构为「元数据、章节索引、正文分段」分离；章节索引到达后目录立即可用，首批分段（前 25 页）到达即刻渲染正文，极大缩短超长大文件阅读等待时间。
+- **全局内存预算按字节计量与对象生命周期管理**：新增 `ByteBudgetLruCache`，对 PDF.js 文档对象、MinerU 解析结构块、切片图像与缩略图按预估字节统一管控；支持引用借用保护，超额淘汰时安全销毁闲置对象并释放底册内存。
+- **文库 SQL 级分页与增量更新**：文库查询从全量内存过滤迁移为底层 SQL 级多条件筛选、排序与分页，大幅降低万级文献下的内存占用与首屏加载延迟；单篇文献元数据保存改为单行精准更新，消除大事务重写风险。
+- **RAG 独立 Worker 执行隔离**：RAG 切片提取、向量检索与耗时计算移入后台独立 Worker 执行，保障 Electron 主进程及 UI 交互流畅响应，并原生接入取消信号支持。
+
 ## 修复
 
-- **笔记引用只能打开文献、无法跳转到引用位置**：锚点的 `blockId` / `pageIndex` 在笔记保存时被丢弃——锚点字段白名单只保留了 `pdfLocation` 一类字段，而 AI 润色生成的锚点只带块 id 与页下标。因此点击摘录卡片上的页码按钮（如 `P20`）或参考文献列表里的位置芯片时，跳转没有位置可用，阅读器只提示「该引用没有绑定 PDF 位置」。现锚点位置正常落库，且旧笔记无需迁移：位置按「显式字段 → 锚点 id（`note-polish:<paperId>:mineru:page-20-block-3:0`）→ 页码标签」逐级实时还原。
-- **没有结构块的文献不再挂起跳转**：此前文献缺少 MinerU 结构块时，笔记跳转请求会一直等待而永不执行。现按「精确块 → 同页正文块 → 整页高亮」逐级降级，只有确实没有任何位置信息时才提示「没有绑定 PDF 位置」。
+- **嵌入向量孤立代理字符（Surrogates）被拒**：清理文本分块中的孤立代理字符（UTF-16 Unpaired Surrogates），防止 OpenAI / 兼容端点报错 `400 Invalid UTF-8` 导致索引中断。
+- **文库 RAG 状态角标误报**：解绑文献列表中 RAG 状态徽标与 MinerU 检测状态的错误联动，真实反映知识库切片就绪情况。
 
 ## 下载
 
 请在 Assets 中选择对应系统和架构的安装包：Windows `.exe` 或 `.msi`、macOS `.dmg`、Linux `.AppImage` / `.deb` / `.tar.gz`。
-
-## 使用提示
-
-- 旧笔记无需迁移：点击时即时推导位置，无需改动既有笔记数据。
-- 本次修复覆盖笔记摘录卡片、参考文献位置芯片与阅读器跳转参数三处入口，它们现在共用同一套位置解析。
