@@ -238,7 +238,16 @@ function trustCertificate(cerPath) {
   if (!isFile(cerPath)) return { ok: false, reason: '找不到证书文件（.cer）' };
   if (process.platform !== 'win32') return { ok: false, reason: '仅 Windows 支持导入受信任根证书' };
   try {
-    runPowerShell(`Import-Certificate -FilePath ${quotePowerShell(cerPath)} -CertStoreLocation 'Cert:\\CurrentUser\\Root' | Out-Null`);
+    // $ErrorActionPreference='Stop' + 导入后回查：用户在系统安全提示里点「否」时，
+    // Import-Certificate 只产生语句级错误，PowerShell 仍以 0 退出，不能只看退出码。
+    runPowerShell(
+      [
+        "$ErrorActionPreference = 'Stop'",
+        `Import-Certificate -FilePath ${quotePowerShell(cerPath)} -CertStoreLocation 'Cert:\\CurrentUser\\Root' | Out-Null`,
+        `$cer = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2 ${quotePowerShell(cerPath)}`,
+        `if (-not (Test-Path ('Cert:\\CurrentUser\\Root\\' + $cer.Thumbprint))) { Write-Error '证书未出现在受信任根存储区（可能取消了系统安全提示）'; exit 1 }`,
+      ].join('; '),
+    );
     return { ok: true };
   } catch (error) {
     return { ok: false, reason: `导入受信任根证书失败：${toErrorMessage(error)}` };

@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.3.0-2563eb?style=flat-square" alt="Version v0.3.0">
+  <img src="https://img.shields.io/badge/version-v0.3.1-2563eb?style=flat-square" alt="Version v0.3.1">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-4b5563?style=flat-square" alt="Windows macOS Linux">
   <img src="https://img.shields.io/badge/built%20with-Electron-47848f?style=flat-square" alt="Electron">
   <img src="https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-0f766e?style=flat-square" alt="React TypeScript">
@@ -55,6 +55,10 @@
 ---
 
 ## Latest Update
+
+### v0.3.1 - Word add-in certificate trust fix
+
+- **Fixed certificate trust silently failing while reporting success**: the installer and the in-app "Trust local certificate" button only checked the PowerShell exit code, so declining the Windows security prompt still logged "imported" and Word kept showing certificate errors. The import now verifies the certificate store and reports the real cause. If Word still complains after trusting, click "Restart bridge" in settings (the page source reads the certificate only at startup).
 
 ### v0.3.0 - Word add-in (Office bridge)
 

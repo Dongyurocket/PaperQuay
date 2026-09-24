@@ -180,6 +180,7 @@ CORS：只有请求带 `Origin` 时才校验白名单，响应带 `Vary: Origin`
 | 加载项连不上（Failed to fetch） | 桥没启动（设置里点「启动桥」）；或端口被防火墙拦；确认 `GET http://127.0.0.1:<port>/health` 能返回 JSON。 |
 | 403 `FORBIDDEN_ORIGIN` | 加载项来源不在白名单。把实际来源（如 `https://localhost:3007`）加进「额外的加载项来源白名单」。 |
 | Word 提示证书不受信任 | exe 安装器勾选「信任证书」重跑一次，或点 PaperQuay 设置页「信任本地证书」；开发者路径用 `npm run office-addin:serve -- --trust`。 |
+| 证书已信任但 Word 仍报证书错误 | 源站只在启动时读取证书：若安装器在 PaperQuay 运行期间换过证书，正在运行的应用仍持旧证书。在设置页点「重启桥」（或重启 PaperQuay）让源站换用安装器目录里的证书。 |
 | Word 里看不到加载项 | 侧载注册表项不在（重跑 exe 安装器或 `office-addin:install`），或清单来源地址与源站端口不一致（用 exe 安装器 `--https-port` 重写清单；开发者路径确认侧载的是 `manifest.local.xml`）。可用 `--diagnose` 逐项排查。 |
 | 想确认安装状态 | 运行 `PaperQuay-OfficeAddin-Setup-<版本>.exe --diagnose`：只读检查清单、注册表、证书信任、页面源站与桥的可达性。 |
 | 刷新没反应 | 文档处于修订模式或受保护；先关闭修订再刷新。 |

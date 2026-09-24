@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.3.0-2563eb?style=flat-square" alt="Version v0.3.0">
+  <img src="https://img.shields.io/badge/version-v0.3.1-2563eb?style=flat-square" alt="Version v0.3.1">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-4b5563?style=flat-square" alt="Windows macOS Linux">
   <img src="https://img.shields.io/badge/built%20with-Electron-47848f?style=flat-square" alt="Electron">
   <img src="https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-0f766e?style=flat-square" alt="React TypeScript">
@@ -56,6 +56,10 @@
 ---
 
 ## 近期更新
+
+### v0.3.1 - Word 加载项证书信任修复
+
+- **修复证书信任「假成功」**：安装器与设置页「信任本地证书」此前只看 PowerShell 退出码，在系统安全提示里点「否」时仍误报「已导入」，Word 持续报证书错误；现在导入后回查证书存储区，失败会给出明确原因。若信任后 Word 仍报错，在设置页点「重启桥」（源站只在启动时读证书）。
 
 ### v0.3.0 - Word 加载项（Office 桥）
 

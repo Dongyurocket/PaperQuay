@@ -4,6 +4,12 @@
 
 各平台安装包见 [GitHub Releases](https://github.com/Dongyurocket/PaperQuay/releases)。
 
+## [0.3.1] - 2026-09-25
+
+### 修复
+
+- **Word 加载项证书信任可能「假成功」**：安装器与设置页「信任本地证书」调用的 `Import-Certificate` 未设 `$ErrorActionPreference='Stop'`，用户在系统安全提示里点「否」（或提示未弹出被系统拒绝）时 PowerShell 仍以退出码 0 结束，界面误报「已导入」而证书实际未进受信任根，Word 依旧报证书错误。现在导入命令正确传播失败，并在导入后回查证书存储区，以证书真的就位为准；失败时给出「可能取消了系统安全提示」的明确原因。
+
 ## [0.3.0] - 2026-09-25
 
 ### 新增

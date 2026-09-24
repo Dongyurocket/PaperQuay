@@ -34,7 +34,7 @@ namespace PaperQuay.OfficeAddin
     internal static class SetupConstants
     {
         public const string AppTitle = "PaperQuay Word 加载项安装器";
-        public const string InstallerVersion = "0.3.0";
+        public const string InstallerVersion = "0.3.1";
         public const string DefaultHttpsOrigin = "https://localhost:3000";
         public const int DefaultHttpsPort = 3000;
         public const int DefaultHttpPort = 3007;
@@ -370,10 +370,20 @@ namespace PaperQuay.OfficeAddin
         public static bool Trust(string cerPath, out string error)
         {
             error = string.Empty;
+            // 必须让导入失败反映为退出码：不加 $ErrorActionPreference='Stop' 时，用户在系统安全提示里点「否」
+            // 只会产生语句级错误，PowerShell 仍以 0 退出，会造成「提示已导入但实际没导入」。
             ProcessResult result = PowerShellRunner.Run(
-                "Import-Certificate -FilePath " + PowerShellRunner.Quote(cerPath) + " -CertStoreLocation 'Cert:\\CurrentUser\\Root' | Out-Null");
-            if (result.Ok) return true;
-            error = result.Message;
+                "$ErrorActionPreference = 'Stop'; "
+                + "Import-Certificate -FilePath " + PowerShellRunner.Quote(cerPath) + " -CertStoreLocation 'Cert:\\CurrentUser\\Root' | Out-Null");
+            if (!result.Ok)
+            {
+                error = result.Message;
+                return false;
+            }
+            // 退出码仍不完全可信：导入后回查存储区，以证书真的在受信任根里为准。
+            string thumbprint = ThumbprintOfCer(cerPath);
+            if (!string.IsNullOrEmpty(thumbprint) && IsTrusted(thumbprint)) return true;
+            error = "导入命令执行后证书仍未出现在「受信任的根证书颁发机构」（可能取消了系统安全提示）。";
             return false;
         }
 

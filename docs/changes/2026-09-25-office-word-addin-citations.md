@@ -40,3 +40,8 @@
 - 桥默认随应用启动（`officeAddin.enabled` 默认 `true`）：它只监听回环地址且要求 token，默认只读；如需彻底关闭可在设置里关掉。
 - 引用域标签用短 id `pq:c|<citeId>` 而不是把明细塞进 tag，绕开 `ContentControl.tag` 的 64 字符限制，明细放文档设置。
 - `cleanPart` 增加有限数字兜底：`papers.year` 等列在库里是 TEXT，但导入链路可能给数字，原来会被静默丢弃。
+
+## 后续修复（0.3.1，2026-09-25）
+
+- **证书信任假成功**：安装器 `CertificateTools.Trust` 与 `officeAddinHost.cjs` 的 `trustCertificate` 此前只凭 PowerShell 退出码判断 `Import-Certificate` 是否成功；用户在系统安全提示里点「否」（或提示被系统拒绝）时退出码仍为 0，界面误报「已导入」而证书未进受信任根，Word 持续报证书错误。两处都改为 `$ErrorActionPreference='Stop'` + 导入后回查 `Cert:\CurrentUser\Root` 以实际就位为准。实机验证：0.3.0 安装器复现假成功（Root 无证书但日志称已导入），修复后同一命令正确报错；手动导入并回查通过后 `297D7F62` 就位。
+- 排障补充：源站只在启动时读证书，安装器在应用运行期间换证书后需「重启桥」或重启 PaperQuay（已写入 OFFICE_ADDIN 文档）。
