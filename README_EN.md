@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.1.48-2563eb?style=flat-square" alt="Version v0.1.48">
+  <img src="https://img.shields.io/badge/version-v0.2.1-2563eb?style=flat-square" alt="Version v0.2.1">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-4b5563?style=flat-square" alt="Windows macOS Linux">
   <img src="https://img.shields.io/badge/built%20with-Electron-47848f?style=flat-square" alt="Electron">
   <img src="https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-0f766e?style=flat-square" alt="React TypeScript">
@@ -54,6 +54,18 @@
 ---
 
 ## Latest Update
+
+### v0.2.1 - Table inline-math fix and a Chinese user manual
+
+- **Fixed: inline math inside Markdown tables degraded to literal `$`**: when a table cell contained bare LaTeX (e.g. `仅 T_i`), the inline-math wrapper's candidate run crossed the `|` cell delimiter and swallowed the neighbouring cell, so the inserted `$` landed in two different cells; remark-math never pairs across cells and the whole row rendered as literal `$`. Table rows are now wrapped cell by cell, while expressions containing `|` outside tables (`A = |x| < 1`, `P(A | B) = 0.5`) behave exactly as before.
+- **New Chinese user manual ([docs/USER_MANUAL.zh-CN.md](./docs/USER_MANUAL.zh-CN.md))**: covers installation and first run, library and reader, note authoring and maintenance, the Agent workspace, knowledge graph, review drafting, local RAG, MCP integration, backups and privacy, settings reference and troubleshooting, plus keyboard-shortcut and FAQ appendices.
+
+### v0.2.0 - Notes System Overhaul
+
+- **Agents and MCP can read and write notes**: the built-in Agent gains note read tools and a `write_notes` tool behind a dedicated approval card (creates/updates/deletes land only after diff review); the Knowledge MCP server exposes `create_note` / `update_note` / `delete_note` / `list_note_tags` plus folder management, reusing the same write guardrails.
+- **Structured note workspace**: folder tree moved into the database (survives reinstalls, syncs over WebDAV), 8 page types and 11 templates, notes graph and health report (orphans / broken links / untagged / stale 30+ days), and Obsidian-compatible Markdown vault two-way sync where anchor IDs survive the round trip.
+- **Academic citations and excerpt cards**: inline `paperReference` nodes render as sequential `[n]` with a GB/T 7714 reference list in vault exports; "AI Distill to Card" runs a two-step CoT that cleans OCR noise before paraphrasing, keeps source anchors jumpable back to the exact PDF location, and appends multiple page segments onto one multi-anchor card.
+- **Cleanup**: the legacy one-shot Agent path (~800 lines) and the `agentLegacyMode` toggle were removed; the multi-turn ReAct loop is now the only path.
 
 ### v0.1.51 - Fixed jump-to-position for note citations
 

@@ -6,9 +6,33 @@
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-09-25
+
 ### 修复
 
 - **Markdown 表格内行内公式退化为字面 `$`**：表格单元格里写裸 LaTeX（如 `仅 T_i`）时，行内公式补全的候选串会跨过 `|` 单元格分隔符把相邻格内容一起吞下，补出的 `$` 因此分别落在两格里（`仅 $T_i | τ$ 预调度`）；remark-math 不会跨单元格配对，整行公式只剩字面 `$`，KaTeX 一个节点也不产出。`wrapInlineLatexSegments` 现在对表格行按单元格分别处理，`$` 不再跨格；非表格中含 `|` 的表达式（`A = |x| < 1`、`P(A | B) = 0.5`）行为不变。新增 `tests/markdownTableMath.test.ts` 7 例回归。
+
+### 文档
+
+- **新增中文用户手册 `docs/USER_MANUAL.zh-CN.md`**：面向使用者的完整手册，覆盖安装与首次启动、文献库、阅读器、笔记使用与维护（页面类型与模板、摘录卡、学术化引用、图谱与体检、vault 双向同步）、Agent 工作区、知识图谱、综述写作、本地 RAG、MCP 与外部 Agent 接入、数据备份与隐私、设置参考、更新与排障，附快捷键与常见问题两个附录。
+- **README 与 MCP 接入指南同步笔记能力**：README 快速导航加入用户手册入口，笔记工作区 / 编辑器 / 摘录维护特性表补齐 v0.2.0 引入的页面类型模板、分类入库持久化、内联引用自动编号与 GB/T 7714-2015 / APA 7 / IEEE 样式、笔记写入工具与 Obsidian 兼容 vault 同步；`docs/MCP_AGENT_INTEGRATION.md` 补入 `list_note_tags` / `list_note_folders` 与「笔记维护工具（带运行护栏）」小节，说明写入语义约定与批量删除前的清单确认要求。
+
+## [0.2.0] - 2026-09-24
+
+### 笔记系统重构
+
+- **内置 Agent 可直接读写笔记**：新增笔记只读工具与 `write_notes` 写工具，配独立审批卡——增删改经 diff 审批后才落库；论文、笔记、记忆写操作强制分轮进行。
+- **MCP 笔记工具（供 Codex / DSH 等外部 Agent）**：Knowledge MCP 新增 `create_note` / `update_note` / `delete_note` / `list_note_tags` 及文件夹管理工具，复用写护栏（`PAPERQUAY_MCP_WRITE`、应用运行保护）；附 `skills/paperquay-notes/SKILL.md` Agent Skill 包，一键接入。
+- **文件夹入库**：文件夹树从 `localStorage` 迁入 `note_folders` SQLite 表——重装不丢、可随 WebDAV 同步、MCP 可见。
+- **Markdown vault 双向同步（兼容 Obsidian）**：指定目录后笔记导出为带 YAML frontmatter（`id` / `type` / `paperId` / `folder` / `tags` / `sources` / `anchors`）的 `.md`；在 Obsidian / VS Code 中编辑可回写，锚点 ID 往返不丢。Tiptap JSON 仍是唯一事实源。
+- **学术化引用**：`paperReference` 内联节点以顺序编码 `[n]` 呈现（同一文献同号，编号实时派生不落盘），vault 导出自动附 GB/T 7714 参考文献列表。
+- **提炼式摘录卡**：划词后点「AI 提炼为摘录卡」，两步 CoT 先清洗 OCR / 排版再忠实改写（不逐字）；来源锚点保真可跳回 PDF 原位；「追加到当前摘录卡」支持跨页多段累加，一卡多锚点。
+- **笔记图谱 + 体检**：新图谱视图按文件夹 / 论文分组、展示 `[[双链]]` 边；体检 badge 汇总孤立笔记、断链、无标题 / 无标签、30 天未更新，点击高亮定位。
+- **笔记宪章与模板**：`docs/notes-charter.md` 定义三条红线（Tiptap JSON 唯一事实源；锚点 ID 不可丢；提炼可自由、证据须保真）与 8 种页面类型；编辑器内置 11 个模板（含摘录卡）。
+
+### 清理
+
+- **移除旧版一次性 Agent 路径**：`runLegacyConversationalLibraryAgent` 及其计划生成链（约 800 行）、孤儿 IPC 命令、`agentLegacyMode` 设置键与 UI 开关全部删除；多轮 ReAct 循环成为唯一路径，保留并重命名了论文上下文路由器与取消机制。
 
 ## [0.1.55] - 2026-09-24
 

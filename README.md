@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.1.48-2563eb?style=flat-square" alt="Version v0.1.48">
+  <img src="https://img.shields.io/badge/version-v0.2.1-2563eb?style=flat-square" alt="Version v0.2.1">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-4b5563?style=flat-square" alt="Windows macOS Linux">
   <img src="https://img.shields.io/badge/built%20with-Electron-47848f?style=flat-square" alt="Electron">
   <img src="https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-0f766e?style=flat-square" alt="React TypeScript">
@@ -55,6 +55,18 @@
 ---
 
 ## 近期更新
+
+### v0.2.1 - 表格行内公式修复与中文用户手册
+
+- **修复 Markdown 表格内行内公式整表退化**：表格单元格里写裸 LaTeX（如 `仅 T_i`）时，行内公式补全的候选串会跨过 `|` 把相邻格内容一起吞下，补出的 `$` 分落两格，remark-math 不跨单元格配对，整行公式只剩字面 `$`。现在表格行按单元格分别补全，非表格中含 `|` 的表达式（`A = |x| < 1`、`P(A | B) = 0.5`）行为不变。
+- **新增中文用户手册 [docs/USER_MANUAL.zh-CN.md](./docs/USER_MANUAL.zh-CN.md)**：从安装与首次启动、文献库与阅读器、笔记使用与维护、Agent 工作区、知识图谱、综述写作、本地 RAG，到 MCP 接入、数据备份与隐私、设置参考与排障，附快捷键与常见问题附录。
+
+### v0.2.0 - 笔记系统重构
+
+- **Agent 与 MCP 均可读写笔记**：内置 Agent 新增笔记工具与独立审批卡（增删改经 diff 审批后落库）；Knowledge MCP 对外暴露 `create_note` / `update_note` / `delete_note` / `list_note_tags` 与文件夹管理，复用同一道写护栏。
+- **结构化笔记工作区**：文件夹树入库（重装不丢、可随 WebDAV 同步）、8 种页面类型与 11 个模板、笔记图谱与体检（孤立 / 断链 / 无标签 / 30 天未更新）、Markdown vault 双向同步（兼容 Obsidian，锚点 ID 往返不丢）。
+- **学术化引用与摘录卡**：`paperReference` 内联节点按顺序渲染为 `[n]`，vault 导出附 GB/T 7714 参考文献；划词后「AI 提炼为摘录卡」两步 CoT 清洗 OCR 噪声再忠实改写，来源锚点可跳回 PDF 原位，支持跨页多段累加一卡多锚点。
+- **清理**：移除旧版一次性 Agent 路径（约 800 行）与 `agentLegacyMode` 开关，多轮 ReAct 循环成为唯一路径。
 
 ### v0.1.51 - 笔记引用跳转定位修复
 
