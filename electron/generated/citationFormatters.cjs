@@ -109,7 +109,7 @@ function joinParts(parts, separator = ", ") {
 }
 
 // src/shared/citation/styles.ts
-var CITATION_STYLE_IDS = ["gbt7714", "gbt7714-author-date", "apa7", "ieee"];
+var CITATION_STYLE_IDS = ["gbt7714", "gbt7714-87", "gbt7714-author-date", "apa7", "ieee"];
 var DEFAULT_CITATION_STYLE = "gbt7714";
 var CITATION_STYLES = [
   {
@@ -118,6 +118,13 @@ var CITATION_STYLES = [
     labelEn: "GB/T 7714-2015 (numeric)",
     kind: "numeric",
     description: "\u4E2D\u6587\u5199\u4F5C\u9ED8\u8BA4\uFF1A\u6B63\u6587 [1]\uFF0C\u6587\u732E\u8868\u6309\u5F15\u7528\u987A\u5E8F\u7F16\u53F7\uFF1B\u540C\u4E00\u6587\u732E\u59CB\u7EC8\u540C\u53F7\u3002"
+  },
+  {
+    id: "gbt7714-87",
+    label: "GB 7714-87 \u987A\u5E8F\u7F16\u7801\u5236\uFF08CAJ-CD\uFF09",
+    labelEn: "GB 7714-87 (numeric, CAJ-CD)",
+    kind: "numeric",
+    description: "1987 \u7248\u56FD\u6807\u4E0E CAJ-CD B/T-1998 \u89C4\u8303\uFF1A\u897F\u6587\u4F5C\u8005\u59D3\u5168\u5927\u5199\u3001\u540D\u7F29\u5199\u4E0D\u52A0\u7F29\u5199\u70B9\uFF1B\u8BBA\u6587\u96C6\u6790\u51FA\u7528 [A]\u2026[C]\uFF1B\u51FA\u7248\u4FE1\u606F\u7528\u5168\u89D2\u6807\u70B9\u3002"
   },
   {
     id: "gbt7714-author-date",
@@ -400,6 +407,90 @@ function gbtDocumentMark(paper) {
       return paper?.publication ? "J" : "EB/OL";
   }
 }
+function gbt87DocumentMark(paper) {
+  switch (paper?.itemType) {
+    case "journalArticle":
+      return "J";
+    case "conferencePaper":
+      return "A";
+    case "book":
+    case "bookSection":
+      return "M";
+    case "thesis":
+      return "D";
+    case "report":
+      return "R";
+    case "patent":
+      return "P";
+    case "preprint":
+    case "webpage":
+      return "EB/OL";
+    default:
+      return paper?.publication ? "J" : "EB/OL";
+  }
+}
+function gbt87AuthorName(parts) {
+  if (!parts.structured || parts.cjk) return parts.name;
+  const family = parts.family.toUpperCase();
+  const initials = initialsCompact(parts.given);
+  return initials ? `${family} ${initials}` : family;
+}
+function formatAuthorsGbt87(parts) {
+  if (parts.length === 0) return "";
+  const shown = parts.slice(0, 3).map(gbt87AuthorName);
+  const suffix = parts.length > 3 ? parts[0].cjk ? "\uFF0C\u7B49" : "\uFF0Cet al" : "";
+  return `${shown.join("\uFF0C")}${suffix}`;
+}
+function formatGbt87Entry(paper, fallbackLabel) {
+  const title = cleanPart(paper?.title) || cleanPart(fallbackLabel);
+  const mark = gbt87DocumentMark(paper);
+  const authors = formatAuthorsGbt87(paperAuthorParts(paper));
+  const year = cleanPart(paper?.year);
+  const publication = cleanPart(paper?.publication);
+  const volume = cleanPart(paper?.volume);
+  const issue = cleanPart(paper?.issue);
+  const pages = cleanPart(paper?.pages);
+  const publisher = cleanPart(paper?.publisher);
+  const publisherPlace = cleanPart(paper?.publisherPlace);
+  const institution = cleanPart(paper?.institution);
+  const url = cleanPart(paper?.url);
+  const volumeIssue = issue ? `${volume}\uFF08${issue}\uFF09` : volume;
+  const placeAndPublisher = joinParts([publisherPlace, publisher], "\uFF1A");
+  let entry = authors ? `${trimTrailingPeriod(authors)}.${title}` : title;
+  if (mark === "A") {
+    entry += "[A]";
+    if (publication) entry += `.${publication}[C]`;
+    const tail = joinParts([placeAndPublisher, year], "\uFF0C");
+    if (tail) entry += `.${tail}`;
+    if (pages) entry += `\uFF1A${pages}`;
+  } else if (mark === "M" || mark === "R") {
+    entry += `[${mark}]`;
+    const tail = joinParts([placeAndPublisher, year], "\uFF0C");
+    if (tail) entry += `.${tail}`;
+    if (pages) entry += `\uFF1A${pages}`;
+  } else if (mark === "D") {
+    entry += "[D]";
+    const holder = institution || publisher;
+    const tail = joinParts([joinParts([publisherPlace, holder], "\uFF1A"), year], "\uFF0C");
+    if (tail) entry += `.${tail}`;
+    if (pages) entry += `\uFF1A${pages}`;
+  } else if (mark === "P") {
+    entry += "[P]";
+    if (year) entry += `.${year}`;
+  } else if (mark === "EB/OL") {
+    entry += "[EB/OL]";
+    const source = placeAndPublisher || publication;
+    const tail = joinParts([source, year], "\uFF0C");
+    if (tail) entry += `.${tail}`;
+    if (url) entry += `.${url}`;
+  } else {
+    entry += "[J]";
+    const tail = joinParts([publication, year, volumeIssue], "\uFF0C");
+    if (tail) entry += `.${tail}`;
+    if (pages) entry += `\uFF1A${pages}`;
+  }
+  return `${trimTrailingPeriod(entry)}.`;
+}
 function formatGbtEntry(paper, fallbackLabel, options = {}) {
   const title = cleanPart(paper?.title) || cleanPart(fallbackLabel);
   const mark = gbtDocumentMark(paper);
@@ -495,6 +586,8 @@ function formatBibliographyEntry(paper, fallbackLabel, style) {
       return formatApa7(paper, fallbackLabel);
     case "ieee":
       return formatIeee(paper, fallbackLabel);
+    case "gbt7714-87":
+      return formatGbt87Entry(paper, fallbackLabel);
     case "gbt7714-author-date":
       return formatGbtEntry(paper, fallbackLabel, { authorDate: true });
     default:

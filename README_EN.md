@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.3.3-2563eb?style=flat-square" alt="Version v0.3.3">
+  <img src="https://img.shields.io/badge/version-v0.3.4-2563eb?style=flat-square" alt="Version v0.3.4">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-4b5563?style=flat-square" alt="Windows macOS Linux">
   <img src="https://img.shields.io/badge/built%20with-Electron-47848f?style=flat-square" alt="Electron">
   <img src="https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-0f766e?style=flat-square" alt="React TypeScript">
@@ -55,6 +55,10 @@
 ---
 
 ## Latest Update
+
+### v0.3.4 - New GB 7714-87 (CAJ-CD) citation style
+
+- The Word add-in gains "GB 7714-87 numeric (CAJ-CD)": Western author surnames in ALL CAPS with dot-less initials (VASWANI A), first-3-authors plus 等/et al truncation, two-part `[A]…[C]` proceedings entries, and full-width punctuation in publication info. Compatible with the superscript option.
 
 ### v0.3.3 - Word add-in usability fixes
 

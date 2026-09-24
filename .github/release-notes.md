@@ -1,11 +1,8 @@
 # PaperQuay v{{VERSION}}
 
-## Fixes
+## New
 
-- **Bibliography inserts at the cursor**: it used to always append at the end of the document. Now it is inserted where your cursor is (starting a new paragraph when the cursor sits inside a non-empty one); an existing bibliography refreshes in place regardless of cursor position.
-- **Optional bibliography heading**: a new "include heading" toggle (saved per document) lets the bibliography be just the entry list — handy when your template already has its own "References" heading.
-- **Superscript numeric citations**: a new "render in-text citations as superscript" toggle (numeric styles only, saved per document) applies on insert and across the whole document on refresh.
-- **No visible control frames**: citations and the bibliography no longer show Word's content-control bounding box. They look exactly like ordinary text while remaining refreshable fields (you can still unlink them before submission).
+- **New citation style: GB 7714-87 numeric (CAJ-CD)** — implements GB 7714-87 together with CAJ-CD B/T-1998 for journals that still require the older national standard: Western author surnames in ALL CAPS with dot-less given-name initials (`VASWANI A`); up to 3 authors listed in full, 4+ truncated to the first 3 plus `，等` / `，et al`; proceedings articles use the two-part `[A]…[C]` form; publication info uses full-width punctuation (`刊名，年，卷（期）：页码`). Available in the Word add-in style dropdown (and anywhere the shared citation module is used), and compatible with the superscript option. Fields the library model does not have (patent numbers, update/cited dates) are omitted gracefully.
 
 ## Downloads
 
@@ -15,12 +12,9 @@ Select the installer matching your system and architecture from Assets: Windows 
 
 # PaperQuay v{{VERSION}} 中文说明
 
-## 修复
+## 新增
 
-- **参考文献表插到光标处**：此前固定追加到文档末尾。现在插入在光标所在位置（光标落在非空段落中时自动另起新段）；已存在表时光标位置无关，原位刷新。
-- **可只要条目列表**：新增「含标题行」开关（随文档保存），关闭后只插入条目，方便模板自带「参考文献」标题的文档。
-- **上标引用**：新增「正文引用以上标形式插入」开关（仅顺序编码制，随文档保存），插入与刷新全文时统一应用。
-- **控件不再带框**：引用与文献表不再显示 Word 内容控件的外框，视觉上与普通文字完全一致，同时保留域身份——仍可刷新重排，交付前也仍可「取消链接」变回纯文本。
+- **新增引用样式「GB 7714-87 顺序编码制（CAJ-CD）」**：按 GB 7714-87《文后参考文献著录规则》与 CAJ-CD B/T-1998 规范输出，适用于仍要求旧版国标的期刊——西文作者姓全大写、名缩写不加缩写点（`VASWANI A`）；3 名以内全列，4 名以上列前 3 名加「，等」/「，et al」；论文集析出用 `[A]…[C]` 两段式；出版信息用全角标点（`刊名，年，卷（期）：页码`）。在 Word 加载项的样式下拉中直接选用，与「上标引用」选项兼容。模型没有的字段（专利号、更新/引用日期）会自动省略。
 
 ## 下载
 

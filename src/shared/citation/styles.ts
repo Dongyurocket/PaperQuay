@@ -1,6 +1,6 @@
 /** 引用样式注册表（笔记侧、Electron 桥、Word 加载项共用同一份 id 与语义）。 */
 
-export const CITATION_STYLE_IDS = ['gbt7714', 'gbt7714-author-date', 'apa7', 'ieee'] as const;
+export const CITATION_STYLE_IDS = ['gbt7714', 'gbt7714-87', 'gbt7714-author-date', 'apa7', 'ieee'] as const;
 
 export type CitationStyleId = (typeof CITATION_STYLE_IDS)[number];
 
@@ -24,6 +24,14 @@ export const CITATION_STYLES: readonly CitationStyleDescriptor[] = [
     labelEn: 'GB/T 7714-2015 (numeric)',
     kind: 'numeric',
     description: '中文写作默认：正文 [1]，文献表按引用顺序编号；同一文献始终同号。',
+  },
+  {
+    id: 'gbt7714-87',
+    label: 'GB 7714-87 顺序编码制（CAJ-CD）',
+    labelEn: 'GB 7714-87 (numeric, CAJ-CD)',
+    kind: 'numeric',
+    description:
+      '1987 版国标与 CAJ-CD B/T-1998 规范：西文作者姓全大写、名缩写不加缩写点；论文集析出用 [A]…[C]；出版信息用全角标点。',
   },
   {
     id: 'gbt7714-author-date',

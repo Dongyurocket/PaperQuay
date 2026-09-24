@@ -83,13 +83,15 @@ function resolver(papers: CitationPaperLike[]) {
 }
 
 test('引用样式注册表：id 集合、默认值与未知值回退', () => {
-  assert.deepEqual([...CITATION_STYLE_IDS], ['gbt7714', 'gbt7714-author-date', 'apa7', 'ieee']);
+  assert.deepEqual([...CITATION_STYLE_IDS], ['gbt7714', 'gbt7714-87', 'gbt7714-author-date', 'apa7', 'ieee']);
   assert.equal(DEFAULT_CITATION_STYLE, 'gbt7714');
   assert.equal(citationStyleKind('gbt7714'), 'numeric');
+  assert.equal(citationStyleKind('gbt7714-87'), 'numeric');
   assert.equal(citationStyleKind('ieee'), 'numeric');
   assert.equal(citationStyleKind('apa7'), 'author-date');
   assert.equal(citationStyleKind('gbt7714-author-date'), 'author-date');
   assert.equal(normalizeCitationStyle('apa7'), 'apa7');
+  assert.equal(normalizeCitationStyle('gbt7714-87'), 'gbt7714-87');
   assert.equal(normalizeCitationStyle('unknown'), 'gbt7714');
   assert.equal(normalizeCitationStyle(undefined), 'gbt7714');
   assert.equal(getCitationStyle('ieee').kind, 'numeric');
@@ -152,6 +154,80 @@ test('GB/T 7714 条目形态：期刊、会议、专著出版地、结构化西�
   const structured = formatBibliographyEntry(structuredPaper, '', 'gbt7714');
   assert.match(structured, /^LeCun Y\. Deep Learning\[J\]\. Nature, 2015, 521\.$/);
   assert.doesNotMatch(structured, /Yann LeCun/);
+});
+
+test('GB 7714-87（CAJ-CD）：全角标点、西文姓全大写、论文集 [A]…[C]、3 名截断', () => {
+  // 期刊：作者.题名[J].刊名，年，卷（期）：页码.（4 名作者截断为前 3 + 等）
+  assert.equal(
+    formatBibliographyEntry(journalPaper, '', 'gbt7714-87'),
+    '张三，李四，王五，等.深度学习综述[J].计算机学报，2021，44（3）：1-25.',
+  );
+  // 结构化西文作者：姓全大写 + 名缩写不加缩写点
+  assert.equal(
+    formatBibliographyEntry(structuredPaper, '', 'gbt7714-87'),
+    'LECUN Y.Deep Learning[J].Nature，2015，521.',
+  );
+  // 论文集析出：题名[A].论文集名[C].年.（87 规范的论文集格式不含卷期）
+  assert.equal(
+    formatBibliographyEntry(conferencePaper, '', 'gbt7714-87'),
+    'Ashish Vaswani.Attention Is All You Need[A].NeurIPS[C].2017.',
+  );
+  // 专著：书名[M].出版地：出版者，年.
+  assert.equal(
+    formatBibliographyEntry(bookPaper, '', 'gbt7714-87'),
+    '李航.统计学习方法[M].北京：清华大学出版社，2019.',
+  );
+  // 学位论文：题名[D].保存地点：保存单位，年.
+  assert.equal(
+    formatBibliographyEntry(
+      {
+        id: 'p-thesis',
+        title: '基于深度学习的机器翻译研究',
+        itemType: 'thesis',
+        institution: '清华大学',
+        publisherPlace: '北京',
+        year: '2020',
+        authors: [{ name: '王芳' }],
+      },
+      '',
+      'gbt7714-87',
+    ),
+    '王芳.基于深度学习的机器翻译研究[D].北京：清华大学，2020.',
+  );
+  // 电子文献：题名[EB/OL].年.路径.
+  assert.equal(
+    formatBibliographyEntry(
+      {
+        id: 'p-web',
+        title: '某在线资源',
+        itemType: 'webpage',
+        url: 'https://example.com/x',
+        year: '2021',
+        authors: [{ name: '张三' }],
+      },
+      '',
+      'gbt7714-87',
+    ),
+    '张三.某在线资源[EB/OL].2021.https://example.com/x.',
+  );
+  // 西文 4 名结构化作者：前 3 名 + ，et al
+  const westernFour: CitationPaperLike = {
+    id: 'p-west4',
+    title: 'Some Paper',
+    itemType: 'journalArticle',
+    publication: 'Nature',
+    year: '2020',
+    authors: [
+      { name: 'Yann LeCun', givenName: 'Yann', familyName: 'LeCun' },
+      { name: 'Yoshua Bengio', givenName: 'Yoshua', familyName: 'Bengio' },
+      { name: 'Geoffrey Hinton', givenName: 'Geoffrey', familyName: 'Hinton' },
+      { name: 'Ashish Vaswani', givenName: 'Ashish', familyName: 'Vaswani' },
+    ],
+  };
+  assert.equal(
+    formatBibliographyEntry(westernFour, '', 'gbt7714-87'),
+    'LECUN Y，BENGIO Y，HINTON G，et al.Some Paper[J].Nature，2020.',
+  );
 });
 
 test('数字年份/卷期不再被丢弃（导入链路可能给数字）', () => {

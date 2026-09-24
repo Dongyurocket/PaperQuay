@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.3.3-2563eb?style=flat-square" alt="Version v0.3.3">
+  <img src="https://img.shields.io/badge/version-v0.3.4-2563eb?style=flat-square" alt="Version v0.3.4">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-4b5563?style=flat-square" alt="Windows macOS Linux">
   <img src="https://img.shields.io/badge/built%20with-Electron-47848f?style=flat-square" alt="Electron">
   <img src="https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-0f766e?style=flat-square" alt="React TypeScript">
@@ -56,6 +56,10 @@
 ---
 
 ## 近期更新
+
+### v0.3.4 - 新增 GB 7714-87（CAJ-CD）引用样式
+
+- Word 加载项新增「GB 7714-87 顺序编码制（CAJ-CD）」：西文作者姓全大写、名缩写不加缩写点（VASWANI A）；3 名以内全列、4 名以上前 3 名加「，等」/「，et al」；论文集析出用 [A]…[C] 两段式；出版信息全角标点。与上标选项兼容。
 
 ### v0.3.3 - Word 加载项可用性修复
 

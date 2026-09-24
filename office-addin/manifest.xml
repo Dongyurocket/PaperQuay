@@ -14,7 +14,7 @@
   xsi:type="TaskPaneApp">
 
   <Id>d4f7a2c1-6b0e-4d9a-9f24-73c8e5b1a640</Id>
-  <Version>0.3.3.0</Version>
+  <Version>0.3.4.0</Version>
   <ProviderName>PaperQuay</ProviderName>
   <DefaultLocale>zh-CN</DefaultLocale>
   <DisplayName DefaultValue="PaperQuay 引用" />

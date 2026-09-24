@@ -194,7 +194,7 @@ test('office bridge: /health 允许匿名探活并返回能力与样式清单', 
       writeBack: boolean;
     };
     assert.equal(capabilities.defaultStyle, 'gbt7714');
-    assert.deepEqual(capabilities.styles, ['gbt7714', 'gbt7714-author-date', 'apa7', 'ieee']);
+    assert.deepEqual(capabilities.styles, ['gbt7714', 'gbt7714-87', 'gbt7714-author-date', 'apa7', 'ieee']);
     assert.equal(capabilities.writeBack, true);
   } finally {
     await bridge.stop();
@@ -343,10 +343,12 @@ test('office bridge: /categories 与 /styles 返回加载项需要的清单', as
     assert.equal(styles.status, 200);
     assert.equal(styles.body.defaultStyle, 'gbt7714');
     const list = styles.body.styles as Array<{ id: string; label: string; kind: string }>;
-    assert.equal(list.length, 4);
+    assert.equal(list.length, 5);
     assert.equal(list[0].id, 'gbt7714');
     assert.equal(list[0].kind, 'numeric');
     assert.match(list[0].label, /GB\/T 7714/);
+    assert.equal(list[1].id, 'gbt7714-87');
+    assert.equal(list[1].kind, 'numeric');
   } finally {
     await bridge.stop();
   }
