@@ -1,19 +1,14 @@
 # PaperQuay v{{VERSION}}
 
-## Notes System Overhaul
+## Fixes
 
-- **Agents can now read and write notes**: the built-in Agent gains note read tools (`list_notes`, `read_note`, …) plus a `write_notes` tool with a dedicated approval card — note creates/updates/deletes are reviewed (with diffs) before anything touches the database. Paper, note, and memory writes are enforced in separate turns.
-- **MCP note tools for external agents (Codex / DSH / Claude Code)**: the Knowledge MCP server now exposes `create_note`, `update_note`, `delete_note`, `list_note_tags`, and folder management (`list/create/rename/delete_note_folder`), reusing the existing write guardrails (`PAPERQUAY_MCP_WRITE`, app-running protection). Ships with an Agent Skill package at `skills/paperquay-notes/SKILL.md` for one-shot onboarding.
-- **Note folders live in the database**: the folder tree moved from `localStorage` to a new `note_folders` SQLite table — folders survive reinstalls, sync over WebDAV, and are visible to MCP.
-- **Markdown vault two-way sync (Obsidian-compatible)**: point PaperQuay at a folder and notes sync to `.md` files with YAML frontmatter (`id`, `type`, `paperId`, `folder`, `tags`, `sources`, `anchors`). Edit in Obsidian/VS Code and changes flow back; anchor IDs survive the round trip. Tiptap JSON remains the single source of truth.
-- **Academic citations in notes**: inline `paperReference` nodes render as sequential `[n]` citations (same paper = same number, derived live from the document — never stored in the node), and vault exports append a GB/T 7714 reference list.
-- **Distilled excerpt cards**: select text in the reader and click "AI Distill to Card" — a two-step CoT prompt cleans OCR/layout noise, then paraphrases into a faithful summary (never verbatim). Source anchors stay immutable and jump back to the exact PDF location; "Append to Current Card" accumulates multiple segments across pages onto one card with multiple anchors.
-- **Notes graph + health report**: a new graph view groups notes by folder/paper with `[[wiki-link]]` edges; health badges surface orphan notes, broken links, untitled/untagged notes, and notes stale for 30+ days — click a badge to highlight them.
-- **Notes charter & templates**: `docs/notes-charter.md` defines the red lines (Tiptap JSON is the source of truth; anchor IDs must survive; distillation is free, evidence must stay faithful) and 8 page types; the editor ships 11 templates including excerpt cards.
+- **Inline math inside Markdown tables no longer degrades to literal `$`**: when a table cell contained bare LaTeX (for example `仅 T_i`), the inline-math wrapper's candidate run crossed the `|` cell delimiter and swallowed the neighbouring cell, so the inserted `$` delimiters landed in two different cells. remark-math never pairs across cells, so the entire row rendered as literal `$` and KaTeX produced no nodes at all. Table rows are now wrapped cell by cell; expressions containing `|` outside tables (`A = |x| < 1`, `P(A | B) = 0.5`) behave exactly as before. Seven regression cases were added in `tests/markdownTableMath.test.ts`.
 
-## Cleanup
+## Documentation
 
-- **Legacy one-shot Agent path removed**: `runLegacyConversationalLibraryAgent` and its entire plan-generation chain (~800 lines), the orphaned IPC commands, the `agentLegacyMode` setting key and its UI toggle are gone. The multi-turn ReAct loop is now the only path; the paper-context router and cancellation plumbing were kept and renamed.
+- **New Chinese user manual**: `docs/USER_MANUAL.zh-CN.md` is a complete end-user manual covering installation and first run, the library and reader, note authoring and maintenance (page types and templates, excerpt cards, academic citations, graph and health report, vault two-way sync), the Agent workspace, knowledge graph, review drafting, local RAG, MCP and external-agent integration, backups and privacy, a settings reference, and updating/troubleshooting — with keyboard-shortcut and FAQ appendices.
+- **README and MCP integration guide now document the notes feature set**: the README's quick navigation links the user manual, and the notes workspace/editor tables cover the v0.2.0 capabilities (page-type templates, database-backed folders, live sequential citations with GB/T 7714-2015 / APA 7 / IEEE styles, note write tools, Obsidian-compatible vault sync). `docs/MCP_AGENT_INTEGRATION.md` documents `list_note_tags` / `list_note_folders` plus a new "note maintenance tools (with guardrails)" section describing write semantics and the require-a-manifest rule for bulk deletes.
+- **CHANGELOG and README caught up on 0.2.0**: the 0.2.0 notes-system overhaul had no CHANGELOG entry and no README highlight; both are now recorded, and the stale `v0.1.48` version badges were updated.
 
 ## Downloads
 
@@ -23,20 +18,15 @@ Select the installer matching your system and architecture from Assets: Windows 
 
 # PaperQuay v{{VERSION}} 中文说明
 
-## 笔记系统重构
+## 修复
 
-- **内置 Agent 可直接读写笔记**：新增笔记只读工具与 `write_notes` 写工具，配独立审批卡——增删改经 diff 审批后才落库；论文、笔记、记忆写操作强制分轮进行。
-- **MCP 笔记工具（供 Codex / DSH 等外部 Agent）**：Knowledge MCP 新增 `create_note` / `update_note` / `delete_note` / `list_note_tags` 及文件夹管理工具，复用写护栏（`PAPERQUAY_MCP_WRITE`、应用运行保护）；附 `skills/paperquay-notes/SKILL.md` Agent Skill 包，一键接入。
-- **文件夹入库**：文件夹树从 `localStorage` 迁入 `note_folders` SQLite 表——重装不丢、可随 WebDAV 同步、MCP 可见。
-- **Markdown vault 双向同步（兼容 Obsidian）**：指定目录后笔记导出为带 YAML frontmatter（`id`/`type`/`paperId`/`folder`/`tags`/`sources`/`anchors`）的 `.md`；在 Obsidian/VS Code 中编辑可回写，锚点 ID 往返不丢。Tiptap JSON 仍是唯一事实源。
-- **学术化引用**：`paperReference` 内联节点以顺序编码 `[n]` 呈现（同一文献同号，编号实时派生不落盘），vault 导出自动附 GB/T 7714 参考文献列表。
-- **提炼式摘录卡**：划词后点「AI 提炼为摘录卡」，两步 CoT 先清洗 OCR/排版再忠实改写（不逐字）；来源锚点保真可跳回 PDF 原位；「追加到当前摘录卡」支持跨页多段累加，一卡多锚点。
-- **笔记图谱 + 体检**：新图谱视图按文件夹/论文分组、展示 `[[双链]]` 边；体检 badge 汇总孤立笔记、断链、无标题/无标签、30 天未更新，点击高亮定位。
-- **笔记宪章与模板**：`docs/notes-charter.md` 定义三条红线（Tiptap JSON 唯一事实源；锚点 ID 不可丢；提炼可自由、证据须保真）与 8 种页面类型；编辑器内置 11 个模板（含摘录卡）。
+- **Markdown 表格内的行内公式不再退化为字面 `$`**：表格单元格里写裸 LaTeX（例如 `仅 T_i`）时，行内公式补全的候选串会跨过 `|` 单元格分隔符把相邻格内容一起吞下，补出的 `$` 因此分别落在两格里；remark-math 不会跨单元格配对，整行公式只剩字面 `$`，KaTeX 一个节点也不产出。现在表格行按单元格分别补全，`$` 不再跨格；非表格中含 `|` 的表达式（`A = |x| < 1`、`P(A | B) = 0.5`）行为完全不变。新增 `tests/markdownTableMath.test.ts` 七例回归。
 
-## 清理
+## 文档
 
-- **移除旧版一次性 Agent 路径**：`runLegacyConversationalLibraryAgent` 及其计划生成链（约 800 行）、孤儿 IPC 命令、`agentLegacyMode` 设置键与 UI 开关全部删除；多轮 ReAct 循环成为唯一路径，保留并重命名了论文上下文路由器与取消机制。
+- **新增中文用户手册**：`docs/USER_MANUAL.zh-CN.md` 是面向使用者的完整手册，覆盖安装与首次启动、文献库与阅读器、笔记的使用与维护（页面类型与模板、摘录卡、学术化引用、图谱与体检、vault 双向同步）、Agent 工作区、知识图谱、综述写作、本地 RAG、MCP 与外部 Agent 接入、数据备份与隐私、设置参考、更新与排障，并附快捷键与常见问题两个附录。
+- **README 与 MCP 接入指南同步笔记能力**：README 快速导航加入用户手册入口，笔记工作区与编辑器特性表补齐 v0.2.0 的能力（页面类型模板、分类入库持久化、实时顺序编号的内联引用与 GB/T 7714-2015 / APA 7 / IEEE 样式、笔记写入工具、Obsidian 兼容 vault 同步）；`docs/MCP_AGENT_INTEGRATION.md` 补入 `list_note_tags` / `list_note_folders` 与新增的「笔记维护工具（带运行护栏）」小节，说明写入语义约定与批量删除前先出清单确认的要求。
+- **CHANGELOG 与 README 补齐 0.2.0**：0.2.0 的笔记系统重构此前既没有 CHANGELOG 条目也没有 README 更新说明，现已补记，并更新了停留在 v0.1.48 的版本徽章。
 
 ## 下载
 
