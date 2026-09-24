@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.3.1-2563eb?style=flat-square" alt="Version v0.3.1">
+  <img src="https://img.shields.io/badge/version-v0.3.2-2563eb?style=flat-square" alt="Version v0.3.2">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-4b5563?style=flat-square" alt="Windows macOS Linux">
   <img src="https://img.shields.io/badge/built%20with-Electron-47848f?style=flat-square" alt="Electron">
   <img src="https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-0f766e?style=flat-square" alt="React TypeScript">
@@ -55,6 +55,10 @@
 ---
 
 ## Latest Update
+
+### v0.3.2 - Word add-in settings entry fix
+
+- **The "Word add-in (Office bridge)" section is now actually visible in settings**: in 0.3.0/0.3.1 it was mounted inside a legacy library-settings dialog that no longer renders anywhere. It now lives at Settings → Library & Zotero → bottom, where you can copy the connection info, start/stop/restart the bridge, and manage the certificate and page source.
 
 ### v0.3.1 - Word add-in certificate trust fix
 

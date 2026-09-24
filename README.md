@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.3.1-2563eb?style=flat-square" alt="Version v0.3.1">
+  <img src="https://img.shields.io/badge/version-v0.3.2-2563eb?style=flat-square" alt="Version v0.3.2">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-4b5563?style=flat-square" alt="Windows macOS Linux">
   <img src="https://img.shields.io/badge/built%20with-Electron-47848f?style=flat-square" alt="Electron">
   <img src="https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-0f766e?style=flat-square" alt="React TypeScript">
@@ -56,6 +56,10 @@
 ---
 
 ## 近期更新
+
+### v0.3.2 - Word 加载项设置入口修复
+
+- **设置里新增「Word 加载项（Office 桥）」分区**：0.3.0/0.3.1 中该分区被误挂在已废弃的旧版文库设置对话框里，界面中实际不可达；现在它位于 设置 → 文库与 Zotero → 底部，可复制连接信息、启停/重启桥、管理证书与页面源站。
 
 ### v0.3.1 - Word 加载项证书信任修复
 

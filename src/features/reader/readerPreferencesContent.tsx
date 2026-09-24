@@ -19,6 +19,7 @@ import clsx from 'clsx';
 import { openExternalUrl } from '../../services/desktop';
 import { testRagEmbeddingEndpoint } from '../../services/rag';
 import { resolveSummaryOutputLanguage } from '../../services/summarySource';
+import OfficeAddinSection from '../literature/components/OfficeAddinSection';
 import type { LibraryImportMode, LibrarySettings } from '../../types/library';
 import type { ReaderSettings } from '../../types/reader';
 import {
@@ -662,6 +663,11 @@ export function ReaderPreferencesContent({
               </button>
             </div>
           </SettingsField>
+
+          <OfficeAddinSection
+            settings={activeLibrarySettings.officeAddin}
+            onChange={(officeAddin) => onNativeLibrarySettingsChange({ officeAddin })}
+          />
         </>
       ) : null}
 

@@ -34,7 +34,7 @@ namespace PaperQuay.OfficeAddin
     internal static class SetupConstants
     {
         public const string AppTitle = "PaperQuay Word 加载项安装器";
-        public const string InstallerVersion = "0.3.1";
+        public const string InstallerVersion = "0.3.2";
         public const string DefaultHttpsOrigin = "https://localhost:3000";
         public const int DefaultHttpsPort = 3000;
         public const int DefaultHttpPort = 3007;

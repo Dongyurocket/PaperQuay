@@ -2,9 +2,9 @@
 
 ## Fixes
 
-- **Word add-in: certificate trust could silently fail while reporting success**: the installer's trust step and the in-app "Trust local certificate" button called `Import-Certificate` without `$ErrorActionPreference='Stop'`. If you clicked "No" on the Windows security prompt (or the prompt was auto-denied), PowerShell still exited 0, so the UI claimed the certificate was trusted when it never reached the root store — Word kept showing certificate errors. The import now propagates failures correctly and re-checks the certificate store after importing; on failure it tells you the system prompt was likely cancelled.
+- **The "Word add-in (Office bridge)" section was unreachable in settings**: it had been mounted inside a legacy library-settings dialog that no longer renders anywhere, so in 0.3.0/0.3.1 there was no way to copy the connection info or manage the bridge from the UI. The section now lives in the real settings window (Settings → Library & Zotero → bottom), the orphaned dialog was removed, and the add-in's connection hint points to the right place.
 
-If Word still reports certificate errors after trusting: the add-in page source reads the certificate only at startup — click "Restart bridge" in settings (or restart PaperQuay) after the installer replaces the certificate.
+After updating, open PaperQuay → Settings → Library & Zotero → "Word add-in (Office bridge)" to copy the connection info (`port:token`) for Word.
 
 ## Downloads
 
@@ -16,9 +16,9 @@ Select the installer matching your system and architecture from Assets: Windows 
 
 ## 修复
 
-- **Word 加载项证书信任可能「假成功」**：安装器与设置页「信任本地证书」调用的 `Import-Certificate` 未设 `$ErrorActionPreference='Stop'`。在系统安全提示里点「否」（或提示被系统拒绝）时 PowerShell 仍以退出码 0 结束，界面误报「已导入」而证书实际未进受信任根，Word 依旧报证书错误。现在导入命令正确传播失败，并在导入后回查证书存储区，以证书真的就位为准；失败时给出「可能取消了系统安全提示」的明确原因。
+- **设置里找不到「Word 加载项（Office 桥）」分区**：该分区此前被挂进了一个已不再渲染的遗留文库设置对话框，导致 0.3.0/0.3.1 里无法从设置界面复制连接信息、管理桥。现在它位于真正的设置窗口（设置 → 文库与 Zotero → 底部），遗留对话框已删除，加载项里的连接指引也已更正。
 
-若信任后 Word 仍报证书错误：加载项页面源站只在启动时读取证书——安装器更换证书后，在设置页点「重启桥」（或重启 PaperQuay）即可换用新证书。
+更新后打开 PaperQuay → 设置 → 文库与 Zotero →「Word 加载项（Office 桥）」即可复制连接信息（`端口:令牌`）粘贴到 Word 加载项。
 
 ## 下载
 
