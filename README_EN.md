@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.3.2-2563eb?style=flat-square" alt="Version v0.3.2">
+  <img src="https://img.shields.io/badge/version-v0.3.3-2563eb?style=flat-square" alt="Version v0.3.3">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-4b5563?style=flat-square" alt="Windows macOS Linux">
   <img src="https://img.shields.io/badge/built%20with-Electron-47848f?style=flat-square" alt="Electron">
   <img src="https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-0f766e?style=flat-square" alt="React TypeScript">
@@ -55,6 +55,13 @@
 ---
 
 ## Latest Update
+
+### v0.3.3 - Word add-in usability fixes
+
+- **Bibliography inserts at the cursor** (previously always appended at the end of the document), starting a new paragraph when the cursor sits inside a non-empty one; an existing bibliography refreshes in place.
+- **Optional heading**: a new "include heading" toggle lets the bibliography be just the entry list, for templates that already ship their own heading.
+- **Superscript citations**: new toggle to render numeric in-text citations as superscript; the choice is saved per document and applied on refresh.
+- **No more control frames**: inserted citations and the bibliography no longer show Word's content-control bounding box (appearance set to Hidden) — they look like ordinary text while remaining refreshable fields.
 
 ### v0.3.2 - Word add-in settings entry fix
 

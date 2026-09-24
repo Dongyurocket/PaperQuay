@@ -41,6 +41,13 @@
 - 引用域标签用短 id `pq:c|<citeId>` 而不是把明细塞进 tag，绕开 `ContentControl.tag` 的 64 字符限制，明细放文档设置。
 - `cleanPart` 增加有限数字兜底：`papers.year` 等列在库里是 TEXT，但导入链路可能给数字，原来会被静默丢弃。
 
+## 后续修复（0.3.3，2026-09-25）
+
+- **参考文献表插入位置**：`insertBibliography` 此前用 `body.insertParagraph(..., End)` 固定追加到文末。现改为光标处插入——光标落在非空段落时 `insertParagraph('', After)` 另起新段再建控件，避免把表插进句子中间；已存在 `pq:bib` 控件时原位刷新（光标位置无关）。
+- **只要列表**：`applyBibliography` 此前总是写标题段。新增「含标题行」开关（文档设置 `pq:bibHeading`，默认开），关掉后只写条目段落，适配模板自带「参考文献」标题的文档。
+- **上标选项**：新增「正文引用以上标形式插入」（文档设置 `pq:superscript`，默认关）。插入与刷新两条路径统一经 `decorateCitationControl` 应用 `control.font.superscript`（仅 numeric 样式；切到著者-出版年时强制还原为正文大小）。
+- **控件外框**：引用与文献表控件在插入与刷新时统一设 `appearance = Hidden`（WordApi 1.1），不再显示内容控件边框，视觉上与普通文字一致；域身份、刷新、取消链接不受影响，旧文档在下次刷新时自动迁移。
+
 ## 后续修复（0.3.2，2026-09-25）
 
 - **设置分区挂错了对话框**：`OfficeAddinSection` 被挂进 `src/features/literature/components/LibrarySettingsDialog.tsx`——该组件自设置窗口重构后已无任何调用方（死代码），导致「复制连接信息」等整个 Office 桥分区在实际 UI 中不可达。修复：分区挂载到实际设置窗口 `readerPreferencesContent.tsx` 的「文库与 Zotero」页签底部，删除遗留对话框，加载项连接指引（taskpane.html）与文档路径同步更正。

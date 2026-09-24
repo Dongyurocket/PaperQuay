@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.3.2-2563eb?style=flat-square" alt="Version v0.3.2">
+  <img src="https://img.shields.io/badge/version-v0.3.3-2563eb?style=flat-square" alt="Version v0.3.3">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-4b5563?style=flat-square" alt="Windows macOS Linux">
   <img src="https://img.shields.io/badge/built%20with-Electron-47848f?style=flat-square" alt="Electron">
   <img src="https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-0f766e?style=flat-square" alt="React TypeScript">
@@ -56,6 +56,13 @@
 ---
 
 ## 近期更新
+
+### v0.3.3 - Word 加载项可用性修复
+
+- **参考文献表插到光标处**（此前固定追加到文末），光标在非空段落时自动另起新段；已存在表则原位刷新。
+- **可只要条目列表**：新增「含标题行」开关，关闭后不再插入「参考文献」标题段，方便套用模板自带标题的文档。
+- **上标引用**：新增「正文引用以上标形式插入」选项（仅顺序编码制），选择随文档保存，切换自动刷新全文。
+- **控件不再带框**：插件插入的引用与文献表视觉上与普通文字完全一致（控件外观设为 Hidden），保留域身份，仍可刷新与取消链接。
 
 ### v0.3.2 - Word 加载项设置入口修复
 

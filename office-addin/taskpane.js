@@ -15,6 +15,8 @@
   var CONNECTION_STORAGE_KEY = 'paperquay:office-addin:connection';
   var DOCUMENT_ID_KEY = 'pq:documentId';
   var BIBLIOGRAPHY_TITLE_KEY = 'pq:bibliographyTitle';
+  var SUPERSCRIPT_KEY = 'pq:superscript';
+  var BIB_HEADING_KEY = 'pq:bibHeading';
   var SEARCH_LIMIT = 30;
 
   var state = {
@@ -26,6 +28,8 @@
     results: [],
     selected: new Map(),
     bibliographyTitle: shared.DEFAULT_BIBLIOGRAPHY_TITLE,
+    superscript: false,
+    bibHeading: true,
   };
 
   function el(id) {
@@ -303,9 +307,17 @@
 
   /* -------------------------------------------------------- 文档写操作 */
 
+  /** 让控件融入正文：隐藏 Word 的内容控件外框；顺序编码制按需上标。 */
+  function decorateCitationControl(control, numericKind) {
+    control.appearance = Word.ContentControlAppearance.hidden;
+    control.font.superscript = Boolean(numericKind && state.superscript);
+  }
+
   function applyBibliography(control, render) {
     control.clear();
-    control.insertParagraph(render.bibliographyTitle || state.bibliographyTitle, Word.InsertLocation.end);
+    if (state.bibHeading) {
+      control.insertParagraph(render.bibliographyTitle || state.bibliographyTitle, Word.InsertLocation.end);
+    }
     render.entries.forEach(function (entry) {
       var prefix = render.kind === 'numeric' ? '[' + entry.seq + '] ' : '';
       control.insertParagraph(prefix + entry.text, Word.InsertLocation.end);
@@ -323,6 +335,7 @@
       controls.load('items/tag,items/title');
       return context.sync().then(function () {
         var bibliography = null;
+        var numeric = render.kind === 'numeric';
         controls.items.forEach(function (control) {
           var citeId = shared.parseCitationControlTag(control.tag);
           if (citeId) {
@@ -330,9 +343,13 @@
             if (typeof text === 'string' && text) {
               control.insertText(text, Word.InsertLocation.replace);
             }
+            decorateCitationControl(control, numeric);
             return;
           }
-          if (shared.isBibliographyControlTag(control.tag)) bibliography = control;
+          if (shared.isBibliographyControlTag(control.tag)) {
+            control.appearance = Word.ContentControlAppearance.hidden;
+            bibliography = control;
+          }
         });
         if (bibliography) applyBibliography(bibliography, render);
         return context.sync();
@@ -399,6 +416,7 @@
         control.tag = shared.encodeCitationControlTag(citeId);
         control.title = shared.CITATION_CONTROL_TITLE;
         control.insertText(inline, Word.InsertLocation.replace);
+        decorateCitationControl(control, render.kind === 'numeric');
         return context.sync();
       }).then(function () {
         writeStoredCitations(stored);
@@ -431,16 +449,31 @@
           controls.items.forEach(function (control) {
             if (shared.isBibliographyControlTag(control.tag)) bibliography = control;
           });
-          if (!bibliography) {
-            body.insertParagraph(render.bibliographyTitle || state.bibliographyTitle, Word.InsertLocation.end);
-            var target = body.insertParagraph('', Word.InsertLocation.end);
+          if (bibliography) {
+            // 已有表：原位刷新，与光标位置无关。
+            bibliography.appearance = Word.ContentControlAppearance.hidden;
+            applyBibliography(bibliography, render);
+            return context.sync();
+          }
+          // 新表插到光标处：光标落在非空段落里时另起新段，避免表被插进句子中间。
+          var selection = context.document.getSelection();
+          var paragraphs = selection.paragraphs;
+          paragraphs.load('items/text');
+          return context.sync().then(function () {
+            var host = paragraphs.items.length > 0 ? paragraphs.items[0] : null;
+            var target = host;
+            if (!host) {
+              target = body.insertParagraph('', Word.InsertLocation.end);
+            } else if ((host.text || '').trim().length > 0) {
+              target = host.insertParagraph('', Word.InsertLocation.after);
+            }
             var created = target.insertContentControl();
             created.tag = shared.BIBLIOGRAPHY_CONTROL_TAG;
             created.title = shared.BIBLIOGRAPHY_CONTROL_TITLE;
-            bibliography = created;
-          }
-          applyBibliography(bibliography, render);
-          return context.sync();
+            created.appearance = Word.ContentControlAppearance.hidden;
+            applyBibliography(created, render);
+            return context.sync();
+          });
         });
       }).then(function () {
         setSetting(SETTINGS.bibliographyControlId, shared.BIBLIOGRAPHY_CONTROL_TAG);
@@ -698,6 +731,29 @@
     el('bibliography-title-input').addEventListener('change', function () {
       state.bibliographyTitle = el('bibliography-title-input').value.trim() || shared.DEFAULT_BIBLIOGRAPHY_TITLE;
     });
+
+    el('superscript-input').addEventListener('change', function () {
+      state.superscript = el('superscript-input').checked;
+      setSetting(SUPERSCRIPT_KEY, state.superscript ? '1' : '0');
+      saveDocumentSettings().then(function () {
+        log(state.superscript ? '正文引用将以上标形式呈现，正在刷新…' : '正文引用已恢复为正文大小，正在刷新…');
+        return refreshCitations({ silent: true });
+      }).catch(function (error) {
+        log('切换上标失败：' + errorMessage(error));
+      });
+    });
+
+    el('bib-heading-input').addEventListener('change', function () {
+      state.bibHeading = el('bib-heading-input').checked;
+      setSetting(BIB_HEADING_KEY, state.bibHeading ? '1' : '0');
+      saveDocumentSettings().then(function () {
+        return refreshCitations({ silent: true });
+      }).then(function () {
+        log(state.bibHeading ? '参考文献表将包含标题行。' : '参考文献表已切换为只有条目列表。');
+      }).catch(function (error) {
+        log('切换标题行失败：' + errorMessage(error));
+      });
+    });
   }
 
   function searchPapers() {
@@ -719,6 +775,10 @@
       state.bibliographyTitle = storedTitle.trim();
       el('bibliography-title-input').value = state.bibliographyTitle;
     }
+    state.superscript = getSetting(SUPERSCRIPT_KEY) === '1';
+    el('superscript-input').checked = state.superscript;
+    state.bibHeading = getSetting(BIB_HEADING_KEY) !== '0';
+    el('bib-heading-input').checked = state.bibHeading;
     renderStyleOptions();
     renderCitationList(shared.extractCitationControlTagsFromOoxml(''), null);
   }

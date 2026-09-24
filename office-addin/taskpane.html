@@ -35,6 +35,10 @@
           <select id="style-select"></select>
           <button id="apply-style-button" type="button" class="button">应用样式</button>
         </div>
+        <label class="checkbox">
+          <input id="superscript-input" type="checkbox" />
+          正文引用以上标形式插入（仅顺序编码制，如 [1] 的右上角小标）
+        </label>
         <p class="hint" id="style-hint">默认 GB/T 7714-2015 顺序编码制（正文 [1]，文献表按引用顺序）。</p>
       </section>
 
@@ -71,8 +75,12 @@
         </div>
         <div class="row row--tight">
           <input id="bibliography-title-input" type="text" value="参考文献" />
-          <span class="hint">文献表标题</span>
+          <label class="checkbox">
+            <input id="bib-heading-input" type="checkbox" checked />
+            含标题行
+          </label>
         </div>
+        <p class="hint">参考文献表插入在光标处；光标落在段落中间时会自动另起新段。已存在表时光标位置无关，原位刷新。不勾「含标题行」则只插入条目列表。</p>
       </section>
 
       <section class="card">
