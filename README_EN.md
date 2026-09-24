@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.3.4-2563eb?style=flat-square" alt="Version v0.3.4">
+  <img src="https://img.shields.io/badge/version-v0.3.5-2563eb?style=flat-square" alt="Version v0.3.5">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-4b5563?style=flat-square" alt="Windows macOS Linux">
   <img src="https://img.shields.io/badge/built%20with-Electron-47848f?style=flat-square" alt="Electron">
   <img src="https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-0f766e?style=flat-square" alt="React TypeScript">
@@ -55,6 +55,11 @@
 ---
 
 ## Latest Update
+
+### v0.3.5 - Cross-references and GB 87 punctuation toggle
+
+- **In-text citations are now real Word cross-references**: in numeric styles, `[1]` becomes a native REF field pointing at a bookmark on the bibliography entry — Ctrl+click jumps to the entry, and Word's "Update Field" recalculates it. Can be turned off in the add-in; "Unlink" flattens fields to plain text.
+- **GB 7714-87 punctuation toggle**: full-width compact (default) or half-width with spaces, saved per document and re-rendered on change.
 
 ### v0.3.4 - New GB 7714-87 (CAJ-CD) citation style
 

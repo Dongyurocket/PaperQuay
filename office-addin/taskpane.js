@@ -17,6 +17,8 @@
   var BIBLIOGRAPHY_TITLE_KEY = 'pq:bibliographyTitle';
   var SUPERSCRIPT_KEY = 'pq:superscript';
   var BIB_HEADING_KEY = 'pq:bibHeading';
+  var PUNCTUATION_KEY = 'pq:punctuation';
+  var CROSSREF_KEY = 'pq:crossref';
   var SEARCH_LIMIT = 30;
 
   var state = {
@@ -30,6 +32,8 @@
     bibliographyTitle: shared.DEFAULT_BIBLIOGRAPHY_TITLE,
     superscript: false,
     bibHeading: true,
+    punctuation: 'full',
+    crossref: true,
   };
 
   function el(id) {
@@ -297,6 +301,7 @@
           style: state.style,
           groups: groups,
           bibliographyTitle: state.bibliographyTitle,
+          punctuation: state.punctuation,
         }),
       }).then(function (render) {
         render.scan = scan;
@@ -313,10 +318,34 @@
     control.font.superscript = Boolean(numericKind && state.superscript);
   }
 
+  /** 交叉引用是否启用：仅顺序编码制，且文档里已有文献表（书签才有落点）。 */
+  function crossrefActive(render) {
+    return Boolean(
+      state.crossref &&
+        render &&
+        render.kind === 'numeric' &&
+        render.scan &&
+        render.scan.hasBibliography,
+    );
+  }
+
   function applyBibliography(control, render) {
     control.clear();
+    control.appearance = Word.ContentControlAppearance.hidden;
+    var title = render.bibliographyTitle || state.bibliographyTitle;
+    // 顺序编码制 + 交叉引用：条目序号写成书签，正文 REF 域才有落点。
+    if (render.kind === 'numeric' && state.crossref) {
+      var parts = [];
+      if (state.bibHeading) parts.push(shared.buildBibliographyTitleParagraph(title));
+      var base = shared.bookmarkIdBase();
+      render.entries.forEach(function (entry, index) {
+        parts.push(shared.buildBibliographyEntryParagraph(entry.seq, entry.text, entry.paperId, base + index));
+      });
+      control.insertOoxml(parts.join(''), Word.InsertLocation.end);
+      return;
+    }
     if (state.bibHeading) {
-      control.insertParagraph(render.bibliographyTitle || state.bibliographyTitle, Word.InsertLocation.end);
+      control.insertParagraph(title, Word.InsertLocation.end);
     }
     render.entries.forEach(function (entry) {
       var prefix = render.kind === 'numeric' ? '[' + entry.seq + '] ' : '';
@@ -329,6 +358,12 @@
     (render.groups || []).forEach(function (group) {
       if (group && group.citeId) inlineByCiteId.set(group.citeId, group.inline);
     });
+    var seqByPaperId = new Map();
+    (render.entries || []).forEach(function (entry) {
+      if (entry && entry.paperId) seqByPaperId.set(entry.paperId, entry.seq);
+    });
+    var stored = readStoredCitations();
+    var useCrossref = crossrefActive(render);
     return Word.run(function (context) {
       var body = context.document.body;
       var controls = body.contentControls;
@@ -339,15 +374,23 @@
         controls.items.forEach(function (control) {
           var citeId = shared.parseCitationControlTag(control.tag);
           if (citeId) {
-            var text = inlineByCiteId.get(citeId);
-            if (typeof text === 'string' && text) {
-              control.insertText(text, Word.InsertLocation.replace);
+            // 交叉引用开启时把引用内容重建成 REF 域；建不了（缺明细/缺序号）退回纯文本。
+            var citation = shared.findStoredCitation(stored, citeId);
+            var ooxml = useCrossref && citation
+              ? shared.buildNumericCitationOoxml(citation.items, seqByPaperId)
+              : null;
+            if (ooxml) {
+              control.insertOoxml(ooxml, Word.InsertLocation.replace);
+            } else {
+              var text = inlineByCiteId.get(citeId);
+              if (typeof text === 'string' && text) {
+                control.insertText(text, Word.InsertLocation.replace);
+              }
             }
             decorateCitationControl(control, numeric);
             return;
           }
           if (shared.isBibliographyControlTag(control.tag)) {
-            control.appearance = Word.ContentControlAppearance.hidden;
             bibliography = control;
           }
         });
@@ -402,7 +445,7 @@
     var citeId = shared.createCitationId();
     return bridgeFetch('/citations/render', {
       method: 'POST',
-      body: JSON.stringify({ style: state.style, items: items }),
+      body: JSON.stringify({ style: state.style, items: items, punctuation: state.punctuation }),
     }).then(function (render) {
       var inline = render.inline;
       var stored = shared.upsertStoredCitation(readStoredCitations(), {
@@ -482,6 +525,9 @@
           renderCitationList(render.scan.ordered, render);
           log('已写入参考文献表：' + render.entries.length + ' 条。');
           return writeBackCited();
+        }).then(function () {
+          // 新建表后刷新一次：把正文引用升级为指向条目书签的交叉引用域。
+          return refreshCitations({ silent: true });
         });
       });
     });
@@ -490,11 +536,13 @@
   function unlinkCitations() {
     return Word.run(function (context) {
       var controls = context.document.body.contentControls;
-      controls.load('items/tag');
+      controls.load('items/tag,items/text');
       return context.sync().then(function () {
         var removed = 0;
         controls.items.forEach(function (control) {
           if (shared.parseCitationControlTag(control.tag) || shared.isBibliographyControlTag(control.tag)) {
+            // 先把可能存在的 REF 域摊平为当前显示文本，再拆掉控件——交出纯文本。
+            control.insertText(control.text, Word.InsertLocation.replace);
             control.delete(true);
             removed += 1;
           }
@@ -689,6 +737,7 @@
 
     el('style-select').addEventListener('change', function () {
       state.style = shared.normalizeCitationStyle(el('style-select').value);
+      updatePunctuationRow();
     });
 
     el('apply-style-button').addEventListener('click', function () {
@@ -754,6 +803,28 @@
         log('切换标题行失败：' + errorMessage(error));
       });
     });
+
+    el('punctuation-select').addEventListener('change', function () {
+      state.punctuation = shared.normalizeGbt87Punctuation(el('punctuation-select').value);
+      setSetting(PUNCTUATION_KEY, state.punctuation);
+      saveDocumentSettings().then(function () {
+        log(state.punctuation === 'half' ? 'GB 7714-87 标点已切换为半角（带空格），正在刷新…' : 'GB 7714-87 标点已切换为全角，正在刷新…');
+        return refreshCitations({ silent: true });
+      }).catch(function (error) {
+        log('切换标点风格失败：' + errorMessage(error));
+      });
+    });
+
+    el('crossref-input').addEventListener('change', function () {
+      state.crossref = el('crossref-input').checked;
+      setSetting(CROSSREF_KEY, state.crossref ? '1' : '0');
+      saveDocumentSettings().then(function () {
+        log(state.crossref ? '已开启交叉引用，正在刷新…' : '已关闭交叉引用（引用变为静态文本），正在刷新…');
+        return refreshCitations({ silent: true });
+      }).catch(function (error) {
+        log('切换交叉引用失败：' + errorMessage(error));
+      });
+    });
   }
 
   function searchPapers() {
@@ -768,6 +839,10 @@
     });
   }
 
+  function updatePunctuationRow() {
+    el('punctuation-row').hidden = state.style !== 'gbt7714-87';
+  }
+
   function initDocumentState() {
     state.style = styleFromDocument();
     var storedTitle = getSetting(BIBLIOGRAPHY_TITLE_KEY);
@@ -779,7 +854,12 @@
     el('superscript-input').checked = state.superscript;
     state.bibHeading = getSetting(BIB_HEADING_KEY) !== '0';
     el('bib-heading-input').checked = state.bibHeading;
+    state.punctuation = shared.normalizeGbt87Punctuation(getSetting(PUNCTUATION_KEY));
+    el('punctuation-select').value = state.punctuation;
+    state.crossref = getSetting(CROSSREF_KEY) !== '0';
+    el('crossref-input').checked = state.crossref;
     renderStyleOptions();
+    updatePunctuationRow();
     renderCitationList(shared.extractCitationControlTagsFromOoxml(''), null);
   }
 

@@ -11,8 +11,13 @@ import {
   CITATION_STYLE_IDS,
   DEFAULT_CITATION_STYLE,
   assignCitationNumbers,
+  buildBibliographyEntryParagraph,
+  buildNumericCitationOoxml,
+  citationBookmarkName,
   citationStyleKind,
+  collapseSeqRanges,
   encodeCitationControlTag,
+  escapeXmlText,
   extractBibliographyTagCount,
   extractCitationControlTagsFromOoxml,
   findStoredCitation,
@@ -228,6 +233,86 @@ test('GB 7714-87（CAJ-CD）：全角标点、西文姓全大写、论文集 [A]
     formatBibliographyEntry(westernFour, '', 'gbt7714-87'),
     'LECUN Y，BENGIO Y，HINTON G，et al.Some Paper[J].Nature，2020.',
   );
+});
+
+test('GB 7714-87 标点开关：half 输出半角标点带空格', () => {
+  assert.equal(
+    formatBibliographyEntry(journalPaper, '', 'gbt7714-87', { punctuation: 'half' }),
+    '张三, 李四, 王五, 等. 深度学习综述[J]. 计算机学报, 2021, 44(3): 1-25.',
+  );
+  assert.equal(
+    formatBibliographyEntry(structuredPaper, '', 'gbt7714-87', { punctuation: 'half' }),
+    'LECUN Y. Deep Learning[J]. Nature, 2015, 521.',
+  );
+  assert.equal(
+    formatBibliographyEntry(bookPaper, '', 'gbt7714-87', { punctuation: 'half' }),
+    '李航. 统计学习方法[M]. 北京: 清华大学出版社, 2019.',
+  );
+  assert.equal(
+    formatBibliographyEntry(conferencePaper, '', 'gbt7714-87', { punctuation: 'half' }),
+    'Ashish Vaswani. Attention Is All You Need[A]. NeurIPS[C]. 2017.',
+  );
+  // renderCitations 透传 punctuation；其他样式不受影响
+  const render = renderCitations(
+    { style: 'gbt7714-87', punctuation: 'half', items: [{ paperId: 'p-journal' }] },
+    resolver([journalPaper]),
+  );
+  assert.equal(render.entries[0]?.text, '张三, 李四, 王五, 等. 深度学习综述[J]. 计算机学报, 2021, 44(3): 1-25.');
+  const renderOther = renderCitations(
+    { style: 'gbt7714', punctuation: 'half', items: [{ paperId: 'p-journal' }] },
+    resolver([journalPaper]),
+  );
+  assert.equal(renderOther.entries[0]?.text, '张三, 李四, 王五, 等. 深度学习综述[J]. 计算机学报, 2021, 44(3): 1-25.');
+});
+
+test('交叉引用 OOXML：书签名、区间折叠、XML 转义', () => {
+  assert.equal(citationBookmarkName('p-abc_123'), 'r_p_abc_123');
+  assert.ok(citationBookmarkName('x').startsWith('r_'));
+  assert.deepEqual(collapseSeqRanges([3, 1, 2, 5]), [
+    [1, 3],
+    [5, 5],
+  ]);
+  assert.deepEqual(collapseSeqRanges([2, 2, 0, -1]), [[2, 2]]);
+  assert.equal(escapeXmlText('a<b>&"c"'), 'a&lt;b&gt;&amp;&quot;c&quot;');
+});
+
+test('交叉引用 OOXML：正文引用域与文献表书签段落', () => {
+  const seqByPaperId = new Map([
+    ['p-a', 1],
+    ['p-b', 2],
+    ['p-c', 3],
+    ['p-e', 5],
+  ]);
+  // 多篇连续折叠：[1-3] 只建首尾两个 REF 域，分别指向序号 1 和 3 的书签
+  const multi = buildNumericCitationOoxml(
+    [{ paperId: 'p-a' }, { paperId: 'p-b' }, { paperId: 'p-c' }],
+    seqByPaperId,
+  );
+  assert.ok(multi);
+  assert.ok(multi!.startsWith('<w:r><w:t xml:space="preserve">[</w:t></w:r>'));
+  assert.equal((multi!.match(/<w:fldSimple/g) || []).length, 2);
+  assert.match(multi!, /w:instr=" REF r_p_a \\h "/);
+  assert.match(multi!, /w:instr=" REF r_p_c \\h "/);
+  // 单篇带页码与前后缀：间距规则与 formatNumericInline 一致
+  const single = buildNumericCitationOoxml(
+    [{ paperId: 'p-e', locator: '25', prefix: '参见', suffix: '。' }],
+    seqByPaperId,
+  );
+  assert.ok(single);
+  assert.ok(single!.includes('>参见 </w:t>'));
+  assert.ok(single!.includes('REF r_p_e'));
+  assert.ok(single!.includes('>25</w:t>'));
+  assert.ok(single!.endsWith('<w:r><w:t xml:space="preserve">。</w:t></w:r>'));
+  // 缺序号的文献返回 null（调用方退化纯文本）
+  assert.equal(buildNumericCitationOoxml([{ paperId: 'missing' }], seqByPaperId), null);
+  // 文献表段落：序号包书签、文本转义
+  const paragraph = buildBibliographyEntryParagraph(1, '张三. 标题 <含>&特殊字符', 'p-a', 42);
+  assert.match(paragraph, /<w:bookmarkStart w:id="42" w:name="r_p_a"\/>/);
+  assert.match(paragraph, /<w:bookmarkEnd w:id="42"\/>/);
+  assert.match(paragraph, /&lt;含&gt;&amp;特殊字符/);
+  // author-date 无序号：不建书签
+  const plain = buildBibliographyEntryParagraph(null, '某某条目', 'p-a', 43);
+  assert.doesNotMatch(plain, /bookmarkStart/);
 });
 
 test('数字年份/卷期不再被丢弃（导入链路可能给数字）', () => {

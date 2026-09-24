@@ -41,6 +41,11 @@
 - 引用域标签用短 id `pq:c|<citeId>` 而不是把明细塞进 tag，绕开 `ContentControl.tag` 的 64 字符限制，明细放文档设置。
 - `cleanPart` 增加有限数字兜底：`papers.year` 等列在库里是 TEXT，但导入链路可能给数字，原来会被静默丢弃。
 
+## 后续修复（0.3.5，2026-09-25）
+
+- **交叉引用**：正文引用从纯文本升级为 Word 原生 `REF <书签> \h` 域。文献表侧：`buildBibliographyEntryParagraph` 把条目序号包进 `r_<paperId>` 书签（w:id 随机基数防冲突）；正文侧：`buildNumericCitationOoxml` 按 collapseSeqRanges（与 formatNumberRanges 同语义）把 `[1-3]` 拆成首尾两个 REF 域。仅在「顺序编码制 + 交叉引用开启 + 文档已有文献表」时启用，否则退回纯文本（插入引用后首刷自动升级；删掉表后刷新自动退化，自修复）。「取消链接」改为先 `insertText(当前文本)` 摊平域再删控件。新增 `pq:crossref` 文档设置（默认开）。
+- **GB 7714-87 标点开关**：`formatGbt87Entry`/`formatAuthorsGbt87` 增加 `punctuation: 'full' | 'half'`（full 全角紧凑，half 半角带空格，与 GB/T 7714 官方示例一致），`renderCitations` 透传、桥 `/citations/render` 增加 `punctuation` 入参，加载项「引用样式」卡在选中 GB 7714-87 时显示标点选择。新增 `pq:punctuation` 文档设置（默认全角）。注：GB 7714-87 与 CAJ-CD B/T-1998 均未强制标点宽窄，官方示例为半角，部分中文期刊模板为全角——两种都是合规实践。
+
 ## 后续修复（0.3.4，2026-09-25）
 
 - **新增「GB 7714-87 顺序编码制（CAJ-CD）」样式**（`gbt7714-87`）：注册进 `src/shared/citation/styles.ts`，桥 `/styles` 与加载项样式下拉自动带出。与 2015 版的差异点都在 `format.ts` 的 `formatGbt87Entry`：西文作者姓全大写 + 名缩写不加缩写点（沿用「只有结构化姓名才重组」的安全策略，纯 name 串保持原样）；作者全角逗号分隔、超 3 名加「，等」/「，et al」；论文集析出按 87 规范用 `[A].论文集名[C]` 两段式（不再用 2015 的 `[C]//`）；期刊/专著/学位论文的出版信息用全角标点。模型无专利号、更新/引用日期字段，[P]/[EB/OL] 按可得字段尽力输出。规范原文中「题名：[D]」的冒号是原文误植，按「题名[D]」实现。

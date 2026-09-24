@@ -380,6 +380,7 @@ function createOfficeBridge(options = {}) {
             groups: hasGroups ? body.groups : undefined,
             bibliographyTitle: body.bibliographyTitle ?? null,
             bibliographyOrder: body.bibliographyOrder ?? null,
+            punctuation: body.punctuation ?? null,
           },
           (paperId) => store.getPaper(paperId),
         ),

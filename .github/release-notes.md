@@ -2,7 +2,8 @@
 
 ## New
 
-- **New citation style: GB 7714-87 numeric (CAJ-CD)** — implements GB 7714-87 together with CAJ-CD B/T-1998 for journals that still require the older national standard: Western author surnames in ALL CAPS with dot-less given-name initials (`VASWANI A`); up to 3 authors listed in full, 4+ truncated to the first 3 plus `，等` / `，et al`; proceedings articles use the two-part `[A]…[C]` form; publication info uses full-width punctuation (`刊名，年，卷（期）：页码`). Available in the Word add-in style dropdown (and anywhere the shared citation module is used), and compatible with the superscript option. Fields the library model does not have (patent numbers, update/cited dates) are omitted gracefully.
+- **True Word cross-references for citations**: in numeric styles (GB/T 7714, GB 7714-87, IEEE), each bibliography entry's number is wrapped in a bookmark (`r_<paperId>`), and every in-text `[1]` is rebuilt as a native `REF <bookmark> \h` field. Ctrl+click an in-text citation to jump to its bibliography entry; Word's own "Update Field" (F9) recalculates the numbers too. The citation content controls still drive PaperQuay refresh — fields and controls coexist. Active only for numeric styles and only when a bibliography exists in the document; can be disabled per document ("与文献表建立交叉引用"). "Unlink" now flattens fields to their displayed text before removing the controls.
+- **GB 7714-87 punctuation toggle**: full-width compact (default, matching common Chinese journal templates) or half-width with spaces (matching the official GB/T 7714 examples). Saved per document; switching re-renders the whole document. The standard itself does not mandate either width — both are legitimate practice.
 
 ## Downloads
 
@@ -14,7 +15,8 @@ Select the installer matching your system and architecture from Assets: Windows 
 
 ## 新增
 
-- **新增引用样式「GB 7714-87 顺序编码制（CAJ-CD）」**：按 GB 7714-87《文后参考文献著录规则》与 CAJ-CD B/T-1998 规范输出，适用于仍要求旧版国标的期刊——西文作者姓全大写、名缩写不加缩写点（`VASWANI A`）；3 名以内全列，4 名以上列前 3 名加「，等」/「，et al」；论文集析出用 `[A]…[C]` 两段式；出版信息用全角标点（`刊名，年，卷（期）：页码`）。在 Word 加载项的样式下拉中直接选用，与「上标引用」选项兼容。模型没有的字段（专利号、更新/引用日期）会自动省略。
+- **正文引用与文献表的 Word 交叉引用**：顺序编码制（GB/T 7714、GB 7714-87、IEEE）下，文献表条目的序号写入书签（`r_<paperId>`），正文 `[1]` 重建为 Word 原生 `REF` 域——Ctrl+点击正文引用跳到文献表条目，Word 自带「更新域」（F9）也能重算编号。PaperQuay 的内容控件仍负责刷新，域与控件共存。仅顺序编码制且文档里已有文献表时生效；可随文档关闭。「取消链接」会先把域摊平为当前显示文本再移除控件，交出纯文本。
+- **GB 7714-87 标点风格开关**：全角紧凑（默认，与多数中文期刊模板一致）/ 半角带空格（与 GB/T 7714 官方示例一致），随文档保存，切换后自动刷新全文。标准本身未强制标点宽窄，两种都是合规实践。
 
 ## 下载
 

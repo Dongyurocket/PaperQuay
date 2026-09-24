@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.3.4-2563eb?style=flat-square" alt="Version v0.3.4">
+  <img src="https://img.shields.io/badge/version-v0.3.5-2563eb?style=flat-square" alt="Version v0.3.5">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-4b5563?style=flat-square" alt="Windows macOS Linux">
   <img src="https://img.shields.io/badge/built%20with-Electron-47848f?style=flat-square" alt="Electron">
   <img src="https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-0f766e?style=flat-square" alt="React TypeScript">
@@ -56,6 +56,11 @@
 ---
 
 ## 近期更新
+
+### v0.3.5 - 交叉引用与 GB 87 标点开关
+
+- **正文引用与文献表建立 Word 交叉引用**：顺序编码制下 `[1]` 是原生 REF 域（指向文献表条目序号的书签），Ctrl+点击跳转、F9 可随 Word 更新域重算；可在加载项里关闭。「取消链接」会把域摊平成纯文本。
+- **GB 7714-87 标点风格开关**：全角紧凑（默认）/ 半角带空格，随文档保存，切换自动刷新全文。
 
 ### v0.3.4 - 新增 GB 7714-87（CAJ-CD）引用样式
 

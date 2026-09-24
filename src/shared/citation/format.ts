@@ -164,22 +164,40 @@ export function gbt87AuthorName(parts: AuthorParts): string {
 }
 
 /** GB 7714-87（CAJ-CD B/T-1998 §6.6.5）：3 名以内全列，4 名以上列前 3 名加「，等」/「，et al」。 */
-export function formatAuthorsGbt87(parts: AuthorParts[]): string {
+export function formatAuthorsGbt87(parts: AuthorParts[], options: { punctuation?: Gbt87Punctuation } = {}): string {
   if (parts.length === 0) return '';
+  const comma = options.punctuation === 'half' ? ', ' : '，';
   const shown = parts.slice(0, 3).map(gbt87AuthorName);
-  const suffix = parts.length > 3 ? (parts[0].cjk ? '，等' : '，et al') : '';
-  return `${shown.join('，')}${suffix}`;
+  const suffix = parts.length > 3 ? (parts[0].cjk ? `${comma}等` : `${comma}et al`) : '';
+  return `${shown.join(comma)}${suffix}`;
+}
+
+/** GB 7714-87 标点风格：full = 全角紧凑（多数中文期刊模板）；half = 半角带空格（与 GB/T 7714 官方示例一致）。 */
+export type Gbt87Punctuation = 'full' | 'half';
+
+export function normalizeGbt87Punctuation(value: unknown): Gbt87Punctuation {
+  return value === 'half' ? 'half' : 'full';
 }
 
 /**
  * GB 7714-87 / CAJ-CD B/T-1998 条目：与 2015 版的差异在西文作者全大写、论文集
- * [A]…[C] 两段式、以及出版信息用全角标点（，：（））。模型没有专利号/公告日期字段，
- * [P] 按「申请者. 题名[P]. 年」尽力输出；[EB/OL] 同理省略更新/引用日期。
+ * [A]…[C] 两段式、以及出版信息默认用全角标点（可用 punctuation: 'half' 切半角）。
+ * 模型没有专利号/公告日期字段，[P] 按「申请者. 题名[P]. 年」尽力输出；[EB/OL] 同理省略更新/引用日期。
  */
-export function formatGbt87Entry(paper: CitationPaperLike | undefined, fallbackLabel: string): string {
+export function formatGbt87Entry(
+  paper: CitationPaperLike | undefined,
+  fallbackLabel: string,
+  options: { punctuation?: Gbt87Punctuation } = {},
+): string {
+  const half = options.punctuation === 'half';
+  const dot = half ? '. ' : '.';
+  const comma = half ? ', ' : '，';
+  const colon = half ? ': ' : '：';
+  const wrapIssue = (text: string) => (half ? `(${text})` : `（${text}）`);
+
   const title = cleanPart(paper?.title) || cleanPart(fallbackLabel);
   const mark = gbt87DocumentMark(paper);
-  const authors = formatAuthorsGbt87(paperAuthorParts(paper));
+  const authors = formatAuthorsGbt87(paperAuthorParts(paper), options);
   const year = cleanPart(paper?.year);
   const publication = cleanPart(paper?.publication);
   const volume = cleanPart(paper?.volume);
@@ -189,46 +207,46 @@ export function formatGbt87Entry(paper: CitationPaperLike | undefined, fallbackL
   const publisherPlace = cleanPart(paper?.publisherPlace);
   const institution = cleanPart(paper?.institution);
   const url = cleanPart(paper?.url);
-  const volumeIssue = issue ? `${volume}（${issue}）` : volume;
-  const placeAndPublisher = joinParts([publisherPlace, publisher], '：');
+  const volumeIssue = issue ? `${volume}${wrapIssue(issue)}` : volume;
+  const placeAndPublisher = joinParts([publisherPlace, publisher], colon);
 
-  let entry = authors ? `${trimTrailingPeriod(authors)}.${title}` : title;
+  let entry = authors ? `${trimTrailingPeriod(authors)}.${half ? ' ' : ''}${title}` : title;
 
   if (mark === 'A') {
     // 论文集析出：题名[A].论文集名[C].出版地：出版者，年：页码.
     entry += '[A]';
-    if (publication) entry += `.${publication}[C]`;
-    const tail = joinParts([placeAndPublisher, year], '，');
-    if (tail) entry += `.${tail}`;
-    if (pages) entry += `：${pages}`;
+    if (publication) entry += `${dot}${publication}[C]`;
+    const tail = joinParts([placeAndPublisher, year], comma);
+    if (tail) entry += `${dot}${tail}`;
+    if (pages) entry += `${colon}${pages}`;
   } else if (mark === 'M' || mark === 'R') {
     // 专著/报告：书名[M].出版地：出版者，年：页码.（版本字段不在模型内，略）
     entry += `[${mark}]`;
-    const tail = joinParts([placeAndPublisher, year], '，');
-    if (tail) entry += `.${tail}`;
-    if (pages) entry += `：${pages}`;
+    const tail = joinParts([placeAndPublisher, year], comma);
+    if (tail) entry += `${dot}${tail}`;
+    if (pages) entry += `${colon}${pages}`;
   } else if (mark === 'D') {
     // 学位论文：题名[D].保存地点：保存单位，年.
     entry += '[D]';
     const holder = institution || publisher;
-    const tail = joinParts([joinParts([publisherPlace, holder], '：'), year], '，');
-    if (tail) entry += `.${tail}`;
-    if (pages) entry += `：${pages}`;
+    const tail = joinParts([joinParts([publisherPlace, holder], colon), year], comma);
+    if (tail) entry += `${dot}${tail}`;
+    if (pages) entry += `${colon}${pages}`;
   } else if (mark === 'P') {
     entry += '[P]';
-    if (year) entry += `.${year}`;
+    if (year) entry += `${dot}${year}`;
   } else if (mark === 'EB/OL') {
     entry += '[EB/OL]';
     const source = placeAndPublisher || publication;
-    const tail = joinParts([source, year], '，');
-    if (tail) entry += `.${tail}`;
-    if (url) entry += `.${url}`;
+    const tail = joinParts([source, year], comma);
+    if (tail) entry += `${dot}${tail}`;
+    if (url) entry += `${dot}${url}`;
   } else {
     // 期刊：题名[J].刊名，年，卷（期）：页码.
     entry += '[J]';
-    const tail = joinParts([publication, year, volumeIssue], '，');
-    if (tail) entry += `.${tail}`;
-    if (pages) entry += `：${pages}`;
+    const tail = joinParts([publication, year, volumeIssue], comma);
+    if (tail) entry += `${dot}${tail}`;
+    if (pages) entry += `${colon}${pages}`;
   }
 
   return `${trimTrailingPeriod(entry)}.`;
@@ -342,6 +360,7 @@ export function formatBibliographyEntry(
   paper: CitationPaperLike | undefined,
   fallbackLabel: string,
   style: CitationStyleId,
+  options: { punctuation?: Gbt87Punctuation } = {},
 ): string {
   if (!paper && fallbackLabel) return `${trimTrailingPeriod(fallbackLabel)}.`;
   switch (style) {
@@ -350,7 +369,7 @@ export function formatBibliographyEntry(
     case 'ieee':
       return formatIeee(paper, fallbackLabel);
     case 'gbt7714-87':
-      return formatGbt87Entry(paper, fallbackLabel);
+      return formatGbt87Entry(paper, fallbackLabel, options);
     case 'gbt7714-author-date':
       return formatGbtEntry(paper, fallbackLabel, { authorDate: true });
     default:
@@ -464,6 +483,8 @@ export interface CitationRenderRequest {
   groups?: unknown;
   bibliographyTitle?: string | null;
   bibliographyOrder?: 'appearance' | 'alpha' | null;
+  /** GB 7714-87 专用：full = 全角紧凑（默认）；half = 半角带空格。其他样式忽略。 */
+  punctuation?: string | null;
 }
 
 export interface CitationRenderResult {
@@ -566,6 +587,7 @@ export function renderCitations(
       lookup(paperId),
       labelByPaperId.get(paperId) || paperId,
       style,
+      { punctuation: normalizeGbt87Punctuation(request?.punctuation) },
     );
     return {
       paperId,

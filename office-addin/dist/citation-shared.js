@@ -35,24 +35,35 @@ var PaperQuayCitation = (() => {
     apaAuthorName: () => apaAuthorName,
     assignCitationNumbers: () => assignCitationNumbers,
     authorDateLabel: () => authorDateLabel,
+    bookmarkIdBase: () => bookmarkIdBase,
+    buildBibliographyEntryParagraph: () => buildBibliographyEntryParagraph,
+    buildBibliographyTitleParagraph: () => buildBibliographyTitleParagraph,
+    buildNumericCitationOoxml: () => buildNumericCitationOoxml,
+    citationBookmarkName: () => citationBookmarkName,
     citationStyleKind: () => citationStyleKind,
     cleanPart: () => cleanPart,
+    collapseSeqRanges: () => collapseSeqRanges,
     createCitationId: () => createCitationId,
     deriveNameParts: () => deriveNameParts,
     encodeCitationControlTag: () => encodeCitationControlTag,
+    escapeXmlText: () => escapeXmlText,
     extractBibliographyTagCount: () => extractBibliographyTagCount,
     extractCitationControlTagsFromOoxml: () => extractCitationControlTagsFromOoxml,
     findStoredCitation: () => findStoredCitation,
     formatApa7: () => formatApa7,
     formatAuthorsApa: () => formatAuthorsApa,
     formatAuthorsGbt: () => formatAuthorsGbt,
+    formatAuthorsGbt87: () => formatAuthorsGbt87,
     formatAuthorsIeee: () => formatAuthorsIeee,
     formatBibliographyEntry: () => formatBibliographyEntry,
     formatBibliographyLines: () => formatBibliographyLines,
+    formatGbt87Entry: () => formatGbt87Entry,
     formatGbtEntry: () => formatGbtEntry,
     formatIeee: () => formatIeee,
     formatInlineApaCitation: () => formatInlineApaCitation,
     formatNumberRanges: () => formatNumberRanges,
+    gbt87AuthorName: () => gbt87AuthorName,
+    gbt87DocumentMark: () => gbt87DocumentMark,
     gbtAuthorName: () => gbtAuthorName,
     gbtDocumentMark: () => gbtDocumentMark,
     getCitationStyle: () => getCitationStyle,
@@ -70,6 +81,7 @@ var PaperQuayCitation = (() => {
     normalizeCitationItem: () => normalizeCitationItem,
     normalizeCitationItems: () => normalizeCitationItems,
     normalizeCitationStyle: () => normalizeCitationStyle,
+    normalizeGbt87Punctuation: () => normalizeGbt87Punctuation,
     normalizeRenderGroups: () => normalizeRenderGroups,
     normalizeStoredCitations: () => normalizeStoredCitations,
     paperAuthorParts: () => paperAuthorParts,
@@ -435,16 +447,25 @@ var PaperQuayCitation = (() => {
     const initials = initialsCompact(parts.given);
     return initials ? `${family} ${initials}` : family;
   }
-  function formatAuthorsGbt87(parts) {
+  function formatAuthorsGbt87(parts, options = {}) {
     if (parts.length === 0) return "";
+    const comma = options.punctuation === "half" ? ", " : "\uFF0C";
     const shown = parts.slice(0, 3).map(gbt87AuthorName);
-    const suffix = parts.length > 3 ? parts[0].cjk ? "\uFF0C\u7B49" : "\uFF0Cet al" : "";
-    return `${shown.join("\uFF0C")}${suffix}`;
+    const suffix = parts.length > 3 ? parts[0].cjk ? `${comma}\u7B49` : `${comma}et al` : "";
+    return `${shown.join(comma)}${suffix}`;
   }
-  function formatGbt87Entry(paper, fallbackLabel) {
+  function normalizeGbt87Punctuation(value) {
+    return value === "half" ? "half" : "full";
+  }
+  function formatGbt87Entry(paper, fallbackLabel, options = {}) {
+    const half = options.punctuation === "half";
+    const dot = half ? ". " : ".";
+    const comma = half ? ", " : "\uFF0C";
+    const colon = half ? ": " : "\uFF1A";
+    const wrapIssue = (text) => half ? `(${text})` : `\uFF08${text}\uFF09`;
     const title = cleanPart(paper?.title) || cleanPart(fallbackLabel);
     const mark = gbt87DocumentMark(paper);
-    const authors = formatAuthorsGbt87(paperAuthorParts(paper));
+    const authors = formatAuthorsGbt87(paperAuthorParts(paper), options);
     const year = cleanPart(paper?.year);
     const publication = cleanPart(paper?.publication);
     const volume = cleanPart(paper?.volume);
@@ -454,40 +475,40 @@ var PaperQuayCitation = (() => {
     const publisherPlace = cleanPart(paper?.publisherPlace);
     const institution = cleanPart(paper?.institution);
     const url = cleanPart(paper?.url);
-    const volumeIssue = issue ? `${volume}\uFF08${issue}\uFF09` : volume;
-    const placeAndPublisher = joinParts([publisherPlace, publisher], "\uFF1A");
-    let entry = authors ? `${trimTrailingPeriod(authors)}.${title}` : title;
+    const volumeIssue = issue ? `${volume}${wrapIssue(issue)}` : volume;
+    const placeAndPublisher = joinParts([publisherPlace, publisher], colon);
+    let entry = authors ? `${trimTrailingPeriod(authors)}.${half ? " " : ""}${title}` : title;
     if (mark === "A") {
       entry += "[A]";
-      if (publication) entry += `.${publication}[C]`;
-      const tail = joinParts([placeAndPublisher, year], "\uFF0C");
-      if (tail) entry += `.${tail}`;
-      if (pages) entry += `\uFF1A${pages}`;
+      if (publication) entry += `${dot}${publication}[C]`;
+      const tail = joinParts([placeAndPublisher, year], comma);
+      if (tail) entry += `${dot}${tail}`;
+      if (pages) entry += `${colon}${pages}`;
     } else if (mark === "M" || mark === "R") {
       entry += `[${mark}]`;
-      const tail = joinParts([placeAndPublisher, year], "\uFF0C");
-      if (tail) entry += `.${tail}`;
-      if (pages) entry += `\uFF1A${pages}`;
+      const tail = joinParts([placeAndPublisher, year], comma);
+      if (tail) entry += `${dot}${tail}`;
+      if (pages) entry += `${colon}${pages}`;
     } else if (mark === "D") {
       entry += "[D]";
       const holder = institution || publisher;
-      const tail = joinParts([joinParts([publisherPlace, holder], "\uFF1A"), year], "\uFF0C");
-      if (tail) entry += `.${tail}`;
-      if (pages) entry += `\uFF1A${pages}`;
+      const tail = joinParts([joinParts([publisherPlace, holder], colon), year], comma);
+      if (tail) entry += `${dot}${tail}`;
+      if (pages) entry += `${colon}${pages}`;
     } else if (mark === "P") {
       entry += "[P]";
-      if (year) entry += `.${year}`;
+      if (year) entry += `${dot}${year}`;
     } else if (mark === "EB/OL") {
       entry += "[EB/OL]";
       const source = placeAndPublisher || publication;
-      const tail = joinParts([source, year], "\uFF0C");
-      if (tail) entry += `.${tail}`;
-      if (url) entry += `.${url}`;
+      const tail = joinParts([source, year], comma);
+      if (tail) entry += `${dot}${tail}`;
+      if (url) entry += `${dot}${url}`;
     } else {
       entry += "[J]";
-      const tail = joinParts([publication, year, volumeIssue], "\uFF0C");
-      if (tail) entry += `.${tail}`;
-      if (pages) entry += `\uFF1A${pages}`;
+      const tail = joinParts([publication, year, volumeIssue], comma);
+      if (tail) entry += `${dot}${tail}`;
+      if (pages) entry += `${colon}${pages}`;
     }
     return `${trimTrailingPeriod(entry)}.`;
   }
@@ -579,7 +600,7 @@ var PaperQuayCitation = (() => {
     if (doi) entry += ` doi: ${doi}.`;
     return entry;
   }
-  function formatBibliographyEntry(paper, fallbackLabel, style) {
+  function formatBibliographyEntry(paper, fallbackLabel, style, options = {}) {
     if (!paper && fallbackLabel) return `${trimTrailingPeriod(fallbackLabel)}.`;
     switch (style) {
       case "apa7":
@@ -587,7 +608,7 @@ var PaperQuayCitation = (() => {
       case "ieee":
         return formatIeee(paper, fallbackLabel);
       case "gbt7714-87":
-        return formatGbt87Entry(paper, fallbackLabel);
+        return formatGbt87Entry(paper, fallbackLabel, options);
       case "gbt7714-author-date":
         return formatGbtEntry(paper, fallbackLabel, { authorDate: true });
       default:
@@ -716,7 +737,8 @@ var PaperQuayCitation = (() => {
       const text = formatBibliographyEntry(
         lookup(paperId),
         labelByPaperId.get(paperId) || paperId,
-        style
+        style,
+        { punctuation: normalizeGbt87Punctuation(request?.punctuation) }
       );
       return {
         paperId,
@@ -735,6 +757,88 @@ var PaperQuayCitation = (() => {
       bibliographyTitle: cleanPart(request?.bibliographyTitle) || "\u53C2\u8003\u6587\u732E",
       missingPaperIds: [...missing]
     };
+  }
+
+  // src/shared/citation/wordCrossRef.ts
+  function citationBookmarkName(paperId) {
+    const cleaned = cleanPart(paperId).replace(/[^A-Za-z0-9]/g, "_");
+    return `r_${cleaned}`.slice(0, 40);
+  }
+  function escapeXmlText(value) {
+    return String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
+  }
+  function collapseSeqRanges(seqs) {
+    const sorted = [...new Set(seqs.filter((value) => Number.isFinite(value) && value > 0))].sort(
+      (left, right) => left - right
+    );
+    if (sorted.length === 0) return [];
+    const ranges = [];
+    let start = sorted[0];
+    let previous = sorted[0];
+    for (const current of sorted.slice(1)) {
+      if (current === previous + 1) {
+        previous = current;
+        continue;
+      }
+      ranges.push([start, previous]);
+      start = current;
+      previous = current;
+    }
+    ranges.push([start, previous]);
+    return ranges;
+  }
+  function textRun(text) {
+    return `<w:r><w:t xml:space="preserve">${escapeXmlText(text)}</w:t></w:r>`;
+  }
+  function refField(bookmark, display) {
+    return `<w:fldSimple w:instr=" REF ${bookmark} \\h ">${textRun(String(display))}</w:fldSimple>`;
+  }
+  function buildNumericCitationOoxml(items, seqByPaperId) {
+    if (items.length === 0) return null;
+    const seqs = [];
+    const bookmarkBySeq = /* @__PURE__ */ new Map();
+    for (const item of items) {
+      const seq = seqByPaperId.get(item.paperId) ?? 0;
+      if (seq <= 0) return null;
+      seqs.push(seq);
+      bookmarkBySeq.set(seq, citationBookmarkName(item.paperId));
+    }
+    const ranges = collapseSeqRanges(seqs);
+    if (ranges.length === 0) return null;
+    const parts = [textRun("[")];
+    ranges.forEach(([start, end], index) => {
+      if (index > 0) parts.push(textRun(","));
+      parts.push(refField(bookmarkBySeq.get(start) ?? "", start));
+      if (end > start) {
+        parts.push(textRun("-"));
+        parts.push(refField(bookmarkBySeq.get(end) ?? "", end));
+      }
+    });
+    parts.push(textRun("]"));
+    if (items.length === 1) {
+      const locator = cleanPart(items[0].locator);
+      if (locator) parts.push(textRun(locator));
+    }
+    const prefix = typeof items[0]?.prefix === "string" ? items[0].prefix.trim() : "";
+    const lastItem = items[items.length - 1];
+    const suffix = typeof lastItem?.suffix === "string" ? lastItem.suffix.trim() : "";
+    if (prefix) parts.unshift(textRun(/[(（[]$/.test(prefix) ? prefix : `${prefix} `));
+    if (suffix) parts.push(textRun(/^[,.;:，。；：)\]）]/.test(suffix) ? suffix : ` ${suffix}`));
+    return parts.join("");
+  }
+  function buildBibliographyEntryParagraph(seq, text, paperId, bookmarkId) {
+    const body = escapeXmlText(cleanPart(text));
+    if (typeof seq !== "number" || seq <= 0) {
+      return `<w:p>${textRun(cleanPart(text))}</w:p>`;
+    }
+    const name = citationBookmarkName(paperId);
+    return `<w:p>` + textRun("[") + `<w:bookmarkStart w:id="${bookmarkId}" w:name="${name}"/>` + textRun(String(seq)) + `<w:bookmarkEnd w:id="${bookmarkId}"/>` + textRun("] ") + `<w:r><w:t xml:space="preserve">${body}</w:t></w:r></w:p>`;
+  }
+  function buildBibliographyTitleParagraph(title) {
+    return `<w:p>${textRun(cleanPart(title))}</w:p>`;
+  }
+  function bookmarkIdBase(random = Math.random) {
+    return 1e3 + Math.floor(random() * 1e5);
   }
   return __toCommonJS(index_exports);
 })();
