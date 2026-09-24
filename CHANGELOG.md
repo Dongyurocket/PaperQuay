@@ -6,6 +6,12 @@
 
 ## [Unreleased]
 
+## [0.1.55] - 2026-09-24
+
+### 修复
+
+- **公式红字（LaTeX 控制序列粘连）**：模型/OCR 生成的公式丢失反斜杠命令与后续字母之间的必需空格（如 `\pir^2`、`\Omegar`、`\sumT_{z,rotor_i}`、`\timesa_z`），未定义命令被 KaTeX 标红。新增 `normalizeGluedLatex` 清洗——按最长已知 LaTeX 控制词前缀拆分并补空格（双命令粘连如 `\alphabeta` 自动补回反斜杠），未知命令原样保留；新增 `remarkFixGluedLatex` 插件在 KaTeX 渲染前修复所有 math/inlineMath 节点，接入 Agent 回答、助手侧栏、MinerU 块渲染、重解析预览共四处渲染入口，同时接入 `normalizeRawLatexExpression` 覆盖公式直渲路径；Agent 系统提示补充 LaTeX 书写规则从源头约束。
+
 ## [0.1.54] - 2026-09-23
 
 ### 修复
