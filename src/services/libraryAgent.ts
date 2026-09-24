@@ -742,6 +742,7 @@ function buildReActAgentMessages({
       content: [
         'Use the PaperQuay tools as needed. Prefer evidence from paper context and preserve page citations.',
         'For write requests, call exactly one matching write tool with reviewable items. The user must approve before application.',
+        'When writing LaTeX math, every backslash command must be separated from a following letter by a space: write "\\pi r^2", "\\Omega r", "\\sigma C_{d_0}", "\\sum T_{z,i}", "\\times a_z", "\\int V_x\\,dt" — never "\\pir", "\\Omegar", "\\sigmaC_{d_0}", "\\sumT_{z,i}", "\\timesa_z" (glued commands are undefined and render in red). Wrap multi-character sub/superscripts in braces (x_{cg}, C_T^{2}) and use \\mathrm{} for word-like subscripts (P_{\\mathrm{induced}}).',
         memoryContext?.topics || memoryContext?.synthesis
           ? `[Local Agent memory]\nL2 topics:\n${memoryContext.topics.slice(0, 2000)}\n\nL3 synthesis:\n${memoryContext.synthesis.slice(0, 2000)}`
           : '',

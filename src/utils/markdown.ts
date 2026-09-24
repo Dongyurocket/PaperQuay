@@ -230,21 +230,23 @@ function looksLikeStandaloneFormulaLine(value: string) {
 }
 
 export function normalizeRawLatexExpression(value: string) {
-  return stripTrailingLatexLabel(value)
-    .replace(/\\r(?=\s*(?:\\leq|\\geq|\\in|[<>=+\-*/),;]|$))/g, 'r')
-    .replace(/\r\n?/g, '\n')
-    .replace(/\\([A-Za-z]+)\s+\{/g, '\\$1{')
-    .replace(/([_^])\s+\{/g, '$1{')
-    .replace(/\s+([,.;:])/g, '$1')
-    .replace(/\{\s+/g, '{')
-    .replace(/\s+\}/g, '}')
-    .replace(/\\\s*end\{array\}/g, '\\end{array}')
-    .replace(/\\\\end\{array\}/g, '\\end{array}')
-    .replace(/\\\s+(?=\\(?:sum|boldsymbol|forall))/g, ' \\\ ')
-    .replace(/\\\s+(?=\\tag)/g, ' ')
-    .replace(/\\\s+(?=[A-Za-z])/g, ' \\\\ ')
-    .replace(/[ \t]{2,}/g, ' ')
-    .trim();
+  return normalizeGluedLatex(
+    stripTrailingLatexLabel(value)
+      .replace(/\\r(?=\s*(?:\\leq|\\geq|\\in|[<>=+\-*/),;]|$))/g, 'r')
+      .replace(/\r\n?/g, '\n')
+      .replace(/\\([A-Za-z]+)\s+\{/g, '\\$1{')
+      .replace(/([_^])\s+\{/g, '$1{')
+      .replace(/\s+([,.;:])/g, '$1')
+      .replace(/\{\s+/g, '{')
+      .replace(/\s+\}/g, '}')
+      .replace(/\\\s*end\{array\}/g, '\\end{array}')
+      .replace(/\\\\end\{array\}/g, '\\end{array}')
+      .replace(/\\\s+(?=\\(?:sum|boldsymbol|forall))/g, ' \\\ ')
+      .replace(/\\\s+(?=\\tag)/g, ' ')
+      .replace(/\\\s+(?=[A-Za-z])/g, ' \\\\ ')
+      .replace(/[ \t]{2,}/g, ' ')
+      .trim(),
+  );
 }
 export function normalizeLatexExpression(value: string) {
   return normalizeTranslatedInlineLatex(normalizeRawLatexExpression(value));
@@ -649,6 +651,120 @@ export function separateCollidingDollarMath(text: string): string {
 
   // 解耦行内公式粘连：例如 $A$$B$ 或 $formula1$$formula2$，避免 remark-math 误当成块公式
   return text.replace(/([^$\s\n])\$\$(?=[^$\s\n])/g, '$1$ $');
+}
+
+// ---------------------------------------------------------------------------
+// 粘连 LaTeX 控制序列修复
+//
+// LLM / OCR 生成的公式经常丢失反斜杠命令与后续字母之间的必需空格，
+// 例如 `\pir^2`（应为 `\pi r^2`）、`\Omegar`、`\sumT_{z,rotor_i}`、`\timesa_z`。
+// 未定义的 `\pir` 会让 KaTeX 以红字渲染该命令。
+// 规则：完整词是已知命令 → 不动；否则取最长已知前缀拆分并补空格
+// （若拆出的后缀本身也是已知命令，则补回反斜杠，如 `\alphabeta` → `\alpha \beta`）；
+// 无已知前缀 → 原样保留（如 `\foo`，保持现状不引入新破坏）。
+// ---------------------------------------------------------------------------
+
+const LATEX_CONTROL_WORD_SET = new Set(
+  [
+    // 希腊字母（小写 / 大写 / var 变体）
+    'alpha beta gamma delta epsilon varepsilon zeta eta theta vartheta iota kappa lambda mu nu xi omicron pi varpi rho varrho sigma varsigma tau upsilon phi varphi chi psi omega',
+    'Gamma Delta Theta Lambda Xi Pi Sigma Upsilon Phi Psi Omega',
+    'varGamma varDelta varTheta varLambda varXi varPi varSigma varUpsilon varPhi varPsi varOmega',
+    // 函数与极限类算子
+    'sin cos tan sec csc cot arcsin arccos arctan sinh cosh tanh coth csch sech arg deg det dim exp gcd hom inf injlim ker lg lim liminf limsup ln log max min Pr projlim sup varinjlim varprojlim varliminf varlimsup mod bmod pmod',
+    // 大型运算符与积分
+    'sum prod coprod int iint iiint iiiint intop oint oiint oiiint bigcup bigcap bigoplus bigotimes bigodot biguplus bigvee bigwedge bigsqcup smallint',
+    // 分式 / 根式 / 二项式 / 中缀
+    'frac dfrac tfrac cfrac sqrt binom dbinom tbinom genfrac over atop choose brace brack overwithdelims atopwithdelims above abovewithdelims',
+    // 关系符号
+    'leq le geq ge neq ne lt gt equiv approx approxeq cong simeq sim backsim propto varpropto asymp doteq doteqdot circeq eqcirc triangleq bumpeq Bumpeq thickapprox thicksim therefore because',
+    'll lll llless gg ggg gggtr lesssim gtrsim lessapprox gtrapprox leqslant geqslant leqq geqq lessdot gtrdot lesseqgtr lesseqqgtr lessgtr gtrless gtreqless gtreqqless eqslantless eqslantgtr',
+    'prec succ preceq succeq preccurlyeq succcurlyeq precsim succsim precapprox succapprox precneqq succneqq precnapprox succnapprox precnsim succnsim nprec nsucc npreceq nsucceq',
+    'subset supset subseteq supseteq subseteqq supseteqq sqsubset sqsupset sqsubseteq sqsupseteq subsetneq supsetneq subsetneqq supsetneqq varsubsetneq varsupsetneq varsubsetneqq varsupsetneqq nsubseteq nsupseteq nsubseteqq nsupseteqq',
+    'in ni notin owns cup cap Cup Cap setminus smallsetminus uplus sqcup sqcap mid nmid shortmid parallel nparallel shortparallel perp vdash dashv Vdash Vvdash vDash nvdash nvDash nVdash nVDash models',
+    'ncong nsim nless ngtr nleq ngeq nleqslant ngeqslant lneq lneqq gneq gneqq lnsim gnsim lnapprox gnapprox between pitchfork bowtie smile frown smallsmile smallfrown',
+    // 箭头
+    'leftarrow rightarrow leftrightarrow Leftarrow Rightarrow Leftrightarrow longleftarrow longrightarrow longleftrightarrow Longleftarrow Longrightarrow Longleftrightarrow mapsto longmapsto hookleftarrow hookrightarrow to gets iff implies impliedby',
+    'uparrow downarrow updownarrow Uparrow Downarrow Updownarrow nearrow searrow swarrow nwarrow upuparrows downdownarrows restriction',
+    'dashleftarrow dashrightarrow twoheadleftarrow twoheadrightarrow leftarrowtail rightarrowtail looparrowleft looparrowright leftrightharpoons rightleftharpoons curvearrowleft curvearrowright circlearrowleft circlearrowright Lsh Rsh Lleftarrow Rrightarrow leftleftarrows rightrightarrows leftrightarrows rightleftarrows rightsquigarrow leadsto multimap',
+    'upharpoonleft upharpoonright downharpoonleft downharpoonright leftharpoonup leftharpoondown rightharpoonup rightharpoondown',
+    'xrightarrow xleftarrow xRightarrow xLeftarrow xLeftrightarrow xleftrightarrow xmapsto xhookleftarrow xhookrightarrow xtwoheadleftarrow xtwoheadrightarrow xlongequal xtofrom',
+    // 杂项符号
+    'infty partial nabla forall exists nexists neg lnot top bot emptyset varnothing complement aleph beth gimel daleth hbar hslash ell imath jmath Re Im wp prime backprime',
+    'angle measuredangle sphericalangle triangle triangledown square diamond Diamond lozenge circ bullet ast star bigstar times div pm mp cdot cdotp cdots ldots dots dotsb dotsc dotsi dotsm dotso vdots ddots',
+    'oplus ominus otimes odot oslash circledcirc circledast circleddash circledS circledR boxplus boxminus boxtimes boxdot vee wedge lor land wr lhd rhd unlhd unrhd triangleleft triangleright trianglelefteq trianglerighteq surd',
+    'flat natural sharp clubsuit diamondsuit heartsuit spadesuit clubs diamonds hearts spades checkmark maltese degree intercal barwedge doublebarwedge veebar curlyvee curlywedge sslash colon dotplus ltimes rtimes divideontimes doublecap doublecup centerdot',
+    'Game Finv mho eth Bbbk diagup diagdown blacktriangle blacktriangledown blacktriangleleft blacktriangleright blacksquare blacklozenge dag dagger ddag ddagger copyright pounds',
+    // 字体 / 文本 / 颜色
+    'mathrm mathbf mathit mathsf mathtt mathcal mathbb mathfrak mathscr mathnormal mathchoice mathbin mathop mathrel mathopen mathclose mathord mathpunct mathinner mathring mathstrut boldsymbol pmb Bbb boldmath unboldmath operatorname',
+    'text textbf textit textrm textsf texttt textmd textnormal textup emph color colorbox fcolorbox definecolor displaystyle scriptstyle scriptscriptstyle textstyle limits nolimits',
+    // 重音与上下装饰
+    'hat widehat check widecheck tilde widetilde acute grave breve bar vec dot ddot dddot ddddot overline underline underbar overbrace underbrace overgroup undergroup overlinesegment underlinesegment overrightarrow overleftarrow overleftrightarrow underrightarrow underleftarrow utilde overset underset stackrel not cancel bcancel xcancel sout boxed fbox',
+    // 分隔符伸缩
+    'left right middle big Big bigg Bigg bigl Bigl biggl Biggl bigm Bigm biggm Biggm bigr Bigr biggr Biggr lvert rvert lVert rVert vert Vert lceil rceil lfloor rfloor langle rangle ulcorner urcorner llcorner lrcorner lgroup rgroup lmoustache rmoustache lBrace rBrace llparenthesis rrparenthesis',
+    // 间距与幻影
+    'quad qquad enspace thinspace medspace thickspace negthinspace negmedspace negthickspace nobreakspace space hspace vspace hskip mskip mkern kern hphantom vphantom phantom smash strut rlap llap clap raisebox raise lower rule allowbreak',
+    // 环境与结构
+    'begin end hline hdashline cr newline nonumber notag tag label ref eqref substack subarray sideset array matrix pmatrix bmatrix Bmatrix vmatrix Vmatrix smallmatrix cases dcases aligned alignedat gathered split darray href url class cssId includegraphics',
+    // 字号
+    'tiny scriptsize footnotesize small normalsize large Large LARGE huge Huge',
+  ]
+    .join(' ')
+    .split(/\s+/)
+    .filter(Boolean),
+);
+
+function splitGluedLatexWord(word: string): string | null {
+  if (LATEX_CONTROL_WORD_SET.has(word)) {
+    return `\\${word}`;
+  }
+  for (let end = word.length - 1; end > 0; end--) {
+    const prefix = word.slice(0, end);
+    if (!LATEX_CONTROL_WORD_SET.has(prefix)) {
+      continue;
+    }
+    const rest = splitGluedLatexWord(word.slice(end));
+    if (rest) {
+      return `\\${prefix} ${rest}`;
+    }
+    return `\\${prefix} ${word.slice(end)}`;
+  }
+  return null;
+}
+
+export function normalizeGluedLatex(value: string): string {
+  if (!value || !value.includes('\\')) {
+    return value;
+  }
+  return value.replace(/\\([A-Za-z]+)/g, (match, word: string) => {
+    if (LATEX_CONTROL_WORD_SET.has(word)) {
+      return match;
+    }
+    return splitGluedLatexWord(word) ?? match;
+  });
+}
+
+// remark 插件：兜底清洗所有 remark-math 节点（math / inlineMath）中的粘连控制序列。
+// 已正确分隔的 $...$ 行内公式受 PROTECTED_MATH_PATTERN 保护、不会经过
+// normalizeRawLatexExpression，因此需要在渲染前对 AST 中的 math 节点统一修复。
+export function remarkFixGluedLatex() {
+  return (tree: any) => {
+    const visit = (node: any) => {
+      if (!node || typeof node !== 'object') {
+        return;
+      }
+      if ((node.type === 'math' || node.type === 'inlineMath') && typeof node.value === 'string') {
+        node.value = normalizeGluedLatex(node.value);
+      }
+      const children = node.children;
+      if (Array.isArray(children)) {
+        for (const child of children) {
+          visit(child);
+        }
+      }
+    };
+    visit(tree);
+  };
 }
 
 export function remarkSuperscriptPlugin() {

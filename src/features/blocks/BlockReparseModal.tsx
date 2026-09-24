@@ -8,7 +8,7 @@ import rehypeKatex from 'rehype-katex';
 import { useLocaleText } from '../../i18n/uiLanguage';
 import { getAvailableReparseModelPresets, reparseBlockWithAi } from '../../services/blockReparse';
 import type { PdfSource, PositionedMineruBlock, QaModelPreset } from '../../types/reader';
-import { normalizeMarkdownMath } from '../../utils/markdown';
+import { normalizeMarkdownMath, remarkFixGluedLatex } from '../../utils/markdown';
 import { isValidBBox } from '../../utils/bbox';
 import { getPdfBlockCropDataUrl } from '../pdf/pdfBlockCrop';
 
@@ -160,7 +160,7 @@ export function BlockReparseModal({
             </div>
             <div className="max-h-60 overflow-auto rounded-xl border border-emerald-200 p-3 dark:border-emerald-500/30">
               {viewTab === 'preview' ? <div className="prose prose-slate max-w-none text-xs dark:prose-invert [&_table]:w-full [&_th]:border [&_th]:p-1.5 [&_td]:border [&_td]:p-1.5">
-                <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[[rehypeKatex, { strict: 'ignore', throwOnError: false }]]}>{normalizedPreview}</ReactMarkdown>
+                <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath, remarkFixGluedLatex]} rehypePlugins={[[rehypeKatex, { strict: 'ignore', throwOnError: false }]]}>{normalizedPreview}</ReactMarkdown>
               </div> : <pre className="whitespace-pre-wrap font-mono text-[11px]">{reparsedResult}</pre>}
             </div>
           </div>}

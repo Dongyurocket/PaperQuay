@@ -6,7 +6,7 @@ import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import 'katex/dist/katex.min.css';
 import type { LibraryAgentRagCitation } from '../../services/libraryAgent';
-import { normalizeMarkdownMath, remarkSuperscriptPlugin } from '../../utils/markdown';
+import { normalizeMarkdownMath, remarkFixGluedLatex, remarkSuperscriptPlugin } from '../../utils/markdown';
 
 class AgentMarkdownBoundary extends Component<
   {
@@ -188,7 +188,7 @@ export default function AgentMarkdown({
           '[&_table]:my-4 [&_table]:block [&_table]:w-full [&_table]:border-collapse [&_table]:overflow-x-auto [&_table]:rounded-[var(--pq-radius-md)] [&_th]:border [&_th]:border-[var(--pq-border)] [&_th]:bg-[var(--pq-surface-2)] [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:font-semibold [&_td]:border [&_td]:border-[var(--pq-border)] [&_td]:px-3 [&_td]:py-2 [&_td]:break-words',
           '[&_.katex]:text-[var(--pq-text)] [&_.katex-display]:my-4 [&_.katex-display]:overflow-x-auto [&_.katex-display]:overflow-y-hidden [&_.katex-display]:py-2',
         ].join(' ')}
-        remarkPlugins={[remarkGfm, remarkMath, remarkSuperscriptPlugin]}
+        remarkPlugins={[remarkGfm, remarkMath, remarkFixGluedLatex, remarkSuperscriptPlugin]}
         rehypePlugins={[[rehypeKatex, { strict: 'ignore', throwOnError: true }]]}
         components={{
           sup: ({ children }) => (
