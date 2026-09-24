@@ -112,6 +112,10 @@ interface ReaderWorkspaceProps {
   onOpenPreferences: () => void;
   notes: Note[];
   onAddSelectionToNote: () => void;
+  onDistillSelectionToNote: () => void;
+  onDistillSelectionAppendToCard: () => void;
+  activeExcerptCardTitle: string | null;
+  selectionDistilling: boolean;
   annotations: PaperAnnotation[];
   selectedAnnotationId: string | null;
   onSelectAnnotation: (annotationId: string) => void;
@@ -254,6 +258,10 @@ function ReadingStage(props: ReaderWorkspaceProps & { immersiveReading: boolean 
     onRemoveAttachment,
     onCitationClick,
     onAddSelectionToNote,
+    onDistillSelectionToNote,
+    onDistillSelectionAppendToCard,
+    activeExcerptCardTitle,
+    selectionDistilling,
     onSaveAssistantMessageAsNote,
     onAppendSelectedExcerptToQa,
     onTranslateSelectedExcerpt,
@@ -552,6 +560,10 @@ function ReadingStage(props: ReaderWorkspaceProps & { immersiveReading: boolean 
         autoTranslateSelection={props.autoTranslateSelection}
         onAppendSelectedExcerptToQa={onAppendSelectedExcerptToQa}
         onAddSelectionToNote={onAddSelectionToNote}
+        onDistillSelectionToNote={onDistillSelectionToNote}
+        onDistillSelectionAppendToCard={onDistillSelectionAppendToCard}
+        activeExcerptCardTitle={activeExcerptCardTitle}
+        selectionDistilling={selectionDistilling}
         onTranslateSelectedExcerpt={onTranslateSelectedExcerpt}
         onClearSelectedExcerpt={onClearSelectedExcerpt}
       />

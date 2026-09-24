@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import type { LibraryAgentFigureReference, LibraryAgentPlan, LibraryAgentRagCitation } from '../../services/libraryAgent';
 import type { AgentMemoryWritePlan } from '../../services/agentMemory';
+import type { AgentNoteWritePlan } from '../../services/agentNotePlan';
 import type { AgentCapabilityView } from './AgentWorkspace.types';
 import type { LiteraturePaper } from '../../types/library';
 import type { UiLanguage } from '../../types/reader';
@@ -469,6 +470,8 @@ export function AssistantMessageCard({
   onApplyPlan,
   onApplyMemoryPlan,
   onRejectMemoryPlan,
+  onApplyNotePlan,
+  onRejectNotePlan,
   onCancelPlan,
   onCopyToolParameters,
   onContinueWithSelectedPapers,
@@ -501,6 +504,8 @@ export function AssistantMessageCard({
   onApplyPlan: () => void;
   onApplyMemoryPlan: (memoryPlan: AgentMemoryWritePlan) => void;
   onRejectMemoryPlan: (memoryPlan: AgentMemoryWritePlan) => void;
+  onApplyNotePlan: (notePlan: AgentNoteWritePlan) => void;
+  onRejectNotePlan: (notePlan: AgentNoteWritePlan) => void;
   onCancelPlan: () => void;
   onCopyToolParameters: (toolCall: AgentToolCallView) => void;
   onContinueWithSelectedPapers: (instruction: string, paperIds: string[]) => void;
@@ -515,6 +520,7 @@ export function AssistantMessageCard({
 }) {
   const messagePlan = message.plan;
   const memoryPlan = message.memoryPlan;
+  const notePlan = message.notePlan;
   const toolCall = message.toolCall;
 
   return (
@@ -598,6 +604,80 @@ export function AssistantMessageCard({
                     <button
                       type="button"
                       onClick={() => onRejectMemoryPlan(memoryPlan)}
+                      disabled={activeSessionRunning}
+                      className={agentPlanSecondaryActionClass}
+                    >
+                      <X className="h-4 w-4" />
+                      {l('拒绝', 'Reject')}
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+            {notePlan ? (
+              <div className="mt-4 rounded-[20px] border border-teal-200 bg-teal-50/70 p-4 dark:border-teal-300/25 dark:bg-teal-300/10">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-sm font-bold text-slate-950 dark:text-white">
+                    {l('笔记变更计划', 'Note Changes')}
+                  </div>
+                  {message.notePlanStatus ? (
+                    <span className="rounded-full border border-teal-200 bg-white px-2.5 py-0.5 text-[11px] font-semibold text-teal-700 dark:border-teal-300/30 dark:bg-teal-300/10 dark:text-teal-200">
+                      {message.notePlanStatus === 'applied' ? l('已写入', 'Applied') : l('已拒绝', 'Rejected')}
+                    </span>
+                  ) : null}
+                </div>
+                <div className="mt-1 text-xs leading-5 text-slate-600 dark:text-chrome-300">
+                  {notePlan.summary}
+                </div>
+                <div className="mt-3 grid gap-2">
+                  {notePlan.operations.map((operation, index) => (
+                    <div
+                      key={`${notePlan.id}:${index}`}
+                      className="rounded-xl border border-teal-200/80 bg-white/80 p-3 text-xs leading-5 dark:border-teal-300/20 dark:bg-chrome-950"
+                    >
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="rounded-full bg-teal-100 px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide text-teal-700 dark:bg-teal-300/15 dark:text-teal-200">
+                          {operation.kind === 'create'
+                            ? l('创建', 'Create')
+                            : operation.kind === 'update'
+                              ? l('更新', 'Update')
+                              : l('删除', 'Delete')}
+                        </span>
+                        <span className="font-semibold text-slate-800 dark:text-chrome-100">
+                          {operation.title || operation.noteId}
+                        </span>
+                      </div>
+                      {operation.reason ? (
+                        <div className="mt-1 text-slate-500 dark:text-chrome-400">{operation.reason}</div>
+                      ) : null}
+                      {operation.kind !== 'delete' && operation.content ? (
+                        <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap rounded-lg bg-slate-50 p-2 text-slate-700 dark:bg-chrome-900 dark:text-chrome-200">
+                          {operation.kind === 'update' && operation.before
+                            ? operation.content
+                            : operation.content}
+                        </pre>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => onApplyNotePlan(notePlan)}
+                    disabled={activeSessionRunning || Boolean(message.notePlanStatus)}
+                    className={agentPlanPrimaryActionClass}
+                  >
+                    <Check className="h-4 w-4" />
+                    {message.notePlanStatus === 'applied'
+                      ? l('已写入', 'Applied')
+                      : message.notePlanStatus === 'cancelled'
+                        ? l('已拒绝', 'Rejected')
+                        : l('确认写入', 'Apply Changes')}
+                  </button>
+                  {!message.notePlanStatus ? (
+                    <button
+                      type="button"
+                      onClick={() => onRejectNotePlan(notePlan)}
                       disabled={activeSessionRunning}
                       className={agentPlanSecondaryActionClass}
                     >

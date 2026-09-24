@@ -195,6 +195,87 @@ test('agent loop keeps memory writes behind an independent approval plan', async
   assert.match(result.memoryPlan.content, /Evidence/);
 });
 
+test('agent loop keeps note writes behind an independent approval plan', async () => {
+  const noteTool: AgentToolDefinition = {
+    name: 'write_notes',
+    description: 'Create a note write plan.',
+    kind: 'write',
+    parameters: { type: 'object', additionalProperties: true },
+    async execute() {
+      return {
+        content: 'Created note plan.',
+        notePlan: {
+          id: 'note-plan-1',
+          summary: 'Create a concept note.',
+          operations: [
+            { kind: 'create' as const, title: 'KV Cache', content: '## 定义\n键值缓存。', tags: ['llm'] },
+          ],
+          createdAt: 1,
+        },
+      };
+    },
+  };
+
+  const result = await runAgentLoop(loopOptions(
+    [noteTool],
+    async () => ({
+      content: '',
+      toolCalls: [{ id: 'note-1', name: 'write_notes', arguments: {} }],
+    }),
+  ));
+
+  assert.equal(result.kind, 'note-plan');
+  assert.equal(result.notePlan.summary, 'Create a concept note.');
+  assert.equal(result.notePlan.operations[0]?.kind, 'create');
+});
+
+test('agent loop rejects mixed note and memory writes before executing either', async () => {
+  let noteExecutions = 0;
+  let memoryExecutions = 0;
+  const noteWrite: AgentToolDefinition = {
+    name: 'write_notes',
+    description: 'Create a note write plan.',
+    kind: 'write',
+    parameters: { type: 'object', additionalProperties: true },
+    async execute() {
+      noteExecutions += 1;
+      return { content: 'note plan created' };
+    },
+  };
+  const memoryWrite: AgentToolDefinition = {
+    name: 'write_memory',
+    description: 'Create a memory update.',
+    kind: 'write',
+    parameters: { type: 'object', additionalProperties: true },
+    async execute() {
+      memoryExecutions += 1;
+      return { content: 'memory plan created' };
+    },
+  };
+  const calls: AgentChatTurnRequest[] = [];
+
+  const result = await runAgentLoop(loopOptions(
+    [noteWrite, memoryWrite],
+    async (request) => {
+      calls.push(request);
+      if (calls.length === 1) {
+        return {
+          content: '',
+          toolCalls: [
+            { id: 'w-1', name: 'write_notes', arguments: {} },
+            { id: 'w-2', name: 'write_memory', arguments: {} },
+          ],
+        };
+      }
+      return { content: '拆分完成', toolCalls: [] };
+    },
+  ));
+
+  assert.equal(noteExecutions, 0);
+  assert.equal(memoryExecutions, 0);
+  assert.equal(result.kind, 'answer');
+});
+
 test('agent loop rejects mixed paper and memory writes before executing either', async () => {
   let paperExecutions = 0;
   let memoryExecutions = 0;

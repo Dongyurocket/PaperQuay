@@ -8,6 +8,7 @@ import type {
   LibraryAgentUserChoice,
 } from '../../services/libraryAgent';
 import type { AgentMemoryWritePlan } from '../../services/agentMemory';
+import type { AgentNoteWritePlan } from '../../services/agentNotePlan';
 import type { ComparativeSurveyArtifacts } from '../../services/agentCapability';
 import type { DocumentChatAttachment } from '../../types/reader';
 
@@ -86,6 +87,9 @@ export interface AgentChatMessage {
   memoryPlan?: AgentMemoryWritePlan;
   /** 记忆写入审批终态；undefined 表示仍可审批。 */
   memoryPlanStatus?: 'applied' | 'cancelled';
+  notePlan?: AgentNoteWritePlan;
+  /** 笔记写入审批终态；undefined 表示仍可审批。 */
+  notePlanStatus?: 'applied' | 'cancelled';
   capability?: AgentCapabilityView;
   choices?: LibraryAgentUserChoice[];
   paperSelectionRequest?: LibraryAgentPaperSelectionRequest;

@@ -8,6 +8,8 @@ import {
   Folder,
   FolderOpen,
   FolderPlus,
+  FolderSync,
+  Network,
   NotebookText,
   PanelRightClose,
   PanelRightOpen,
@@ -29,9 +31,20 @@ import { listLibraryPapers } from '../../services/library';
 import { useNotesStore } from '../../stores/useNotesStore';
 import { useTabsStore, type NoteTab } from '../../stores/useTabsStore';
 import type { LiteraturePaper } from '../../types/library';
-import type { Note, NoteAnchor } from '../../types/notes';
+import type { Note, NoteAnchor, NoteFolder } from '../../types/notes';
+import {
+  createNoteFolder,
+  deleteNoteFolder,
+  listNoteFolders,
+  renameNoteFolder,
+  getNotesVaultSettings,
+  syncNotesVaultNow,
+  updateNotesVaultSettings,
+} from '../../services/notes';
+import { selectDirectory } from '../../services/desktop';
 import { cn } from '../../utils/cn';
 import { NoteEditor } from './NoteEditor';
+import { NotesGraphView } from './NotesGraphView';
 import type { PaperReferenceLocation } from './extensions/PaperReference';
 import {
   copyTextToClipboard,
@@ -44,64 +57,72 @@ import { resolveNoteAnchorLocation } from './noteAnchorLocation.ts';
 import { extractNoteReferences } from './noteReferences';
 
 const NOTE_FOLDERS_STORAGE_KEY = 'paperquay:note-folders:v1';
+const NOTE_FOLDERS_MIGRATION_KEY = 'paperquay:note-folders-migrated:v1';
 const UNCATEGORIZED_FOLDER_ID = '__uncategorized__';
 const NOTE_DRAG_MIME = 'application/x-paperquay-note-id';
 const NOTES_WORKSPACE_EDITOR_SOURCE_ID = 'paperquay:notes-workspace-editor';
-
-interface NoteFolder {
-  id: string;
-  name: string;
-  parentId: string | null;
-}
 
 type FolderEditDraft =
   | { kind: 'create'; parentId: string | null; value: string }
   | { kind: 'rename'; folderId: string; value: string };
 
-function createNoteFolderId() {
-  return `note-folder-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
-}
-
 function cleanFolderName(value: string) {
   return value.replace(/\s+/g, ' ').trim().slice(0, 48);
 }
 
-function normalizeNoteFolders(value: unknown): NoteFolder[] {
-  if (!Array.isArray(value)) return [];
+// 旧版本把文件夹树存在 localStorage；入库后做一次性迁移（保留原 id，笔记的
+// folderId 无需重映射），完成后写迁移标记，之后 localStorage 数据不再使用。
+async function migrateLegacyNoteFolders() {
+  if (typeof window === 'undefined') return;
+  if (window.localStorage.getItem(NOTE_FOLDERS_MIGRATION_KEY)) return;
 
-  const folders = value
-    .map((item): NoteFolder | null => {
-      if (!item || typeof item !== 'object') return null;
-      const draft = item as Partial<NoteFolder>;
-      const id = typeof draft.id === 'string' ? draft.id.trim() : '';
-      const name = typeof draft.name === 'string' ? cleanFolderName(draft.name) : '';
-
-      if (!id || !name) return null;
-
-      return {
-        id,
-        name,
-        parentId: typeof draft.parentId === 'string' && draft.parentId.trim() ? draft.parentId.trim() : null,
-      };
-    })
-    .filter((item): item is NoteFolder => Boolean(item));
-
-  const ids = new Set(folders.map((folder) => folder.id));
-  return folders.map((folder) => ({
-    ...folder,
-    parentId: folder.parentId && folder.parentId !== folder.id && ids.has(folder.parentId)
-      ? folder.parentId
-      : null,
-  }));
-}
-
-function loadNoteFolders() {
-  if (typeof window === 'undefined') return [];
+  let legacyFolders: Array<{ id: string; name: string; parentId: string | null }> = [];
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(NOTE_FOLDERS_STORAGE_KEY) || '[]');
+    if (Array.isArray(parsed)) {
+      legacyFolders = parsed
+        .map((item): { id: string; name: string; parentId: string | null } | null => {
+          if (!item || typeof item !== 'object') return null;
+          const draft = item as { id?: unknown; name?: unknown; parentId?: unknown };
+          const id = typeof draft.id === 'string' ? draft.id.trim() : '';
+          const name = typeof draft.name === 'string' ? cleanFolderName(draft.name) : '';
+          if (!id || !name) return null;
+          return {
+            id,
+            name,
+            parentId: typeof draft.parentId === 'string' && draft.parentId.trim()
+              ? draft.parentId.trim()
+              : null,
+          };
+        })
+        .filter((item): item is { id: string; name: string; parentId: string | null } => Boolean(item));
+    }
+  } catch {
+    legacyFolders = [];
+  }
 
   try {
-    return normalizeNoteFolders(JSON.parse(window.localStorage.getItem(NOTE_FOLDERS_STORAGE_KEY) || '[]'));
-  } catch {
-    return [];
+    const existing = await listNoteFolders();
+    if (existing.length === 0 && legacyFolders.length > 0) {
+      const knownIds = new Set(legacyFolders.map((folder) => folder.id));
+      // 父文件夹必须先于子文件夹创建，否则后端的 parent 校验会失败。
+      const pending = legacyFolders.map((folder) => ({
+        ...folder,
+        parentId: folder.parentId && knownIds.has(folder.parentId) ? folder.parentId : null,
+      }));
+      let guard = pending.length * 2;
+      while (pending.length > 0 && guard > 0) {
+        guard -= 1;
+        const index = pending.findIndex(
+          (folder) => !folder.parentId || !pending.some((item) => item.id === folder.parentId),
+        );
+        if (index < 0) break;
+        const [folder] = pending.splice(index, 1);
+        await createNoteFolder({ id: folder.id, name: folder.name, parentId: folder.parentId });
+      }
+    }
+  } finally {
+    window.localStorage.setItem(NOTE_FOLDERS_MIGRATION_KEY, String(Date.now()));
   }
 }
 
@@ -742,8 +763,11 @@ export function NotesWorkspace() {
   } = useNotesStore();
   const [papers, setPapers] = useState<LiteraturePaper[]>([]);
   const [rightPanelOpen, setRightPanelOpen] = useState(true);
+  const [mainView, setMainView] = useState<'editor' | 'graph'>('editor');
   const [contextMenu, setContextMenu] = useState<WorkspaceContextMenu | null>(null);
-  const [folders, setFolders] = useState<NoteFolder[]>(() => loadNoteFolders());
+  const [folders, setFolders] = useState<NoteFolder[]>([]);
+  const [vaultSyncing, setVaultSyncing] = useState(false);
+  const [vaultMessage, setVaultMessage] = useState<string | null>(null);
   const [activeFolderId, setActiveFolderId] = useState<string | null>(null);
   const [expandedFolderIds, setExpandedFolderIds] = useState<Set<string>>(() => new Set());
   const [draggingNoteId, setDraggingNoteId] = useState<string | null>(null);
@@ -789,10 +813,29 @@ export function NotesWorkspace() {
   const creatingRootFolder = folderEditDraft?.kind === 'create' && folderEditDraft.parentId === null;
   const uncategorizedExpanded = expandedFolderIds.has(UNCATEGORIZED_FOLDER_ID);
 
+  const refreshFolders = useCallback(async () => {
+    try {
+      setFolders(await listNoteFolders());
+    } catch {
+      setFolders([]);
+    }
+  }, []);
+
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    window.localStorage.setItem(NOTE_FOLDERS_STORAGE_KEY, JSON.stringify(folders));
-  }, [folders]);
+    let cancelled = false;
+    void (async () => {
+      await migrateLegacyNoteFolders();
+      if (cancelled) return;
+      try {
+        setFolders(await listNoteFolders());
+      } catch {
+        setFolders([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!activeFolderId || activeFolderId === UNCATEGORIZED_FOLDER_ID) return;
@@ -812,6 +855,33 @@ export function NotesWorkspace() {
     },
     [notes, openNoteTab, setActiveNoteId],
   );
+
+  const handleVaultSync = useCallback(async () => {
+    if (vaultSyncing) return;
+    setVaultSyncing(true);
+    setVaultMessage(null);
+    try {
+      let settings = await getNotesVaultSettings();
+      if (!settings.dir) {
+        const dir = await selectDirectory('选择笔记 vault 目录（可指向 Obsidian 库）');
+        if (!dir) {
+          setVaultMessage('未选择 vault 目录');
+          return;
+        }
+        settings = await updateNotesVaultSettings({ dir });
+      }
+      const stats = await syncNotesVaultNow();
+      setVaultMessage(
+        `同步完成：导入 ${stats.imported}（新建 ${stats.created}）、导出 ${stats.exported}、清理 ${stats.removed}`,
+      );
+      void loadNotes();
+      void refreshFolders();
+    } catch (error) {
+      setVaultMessage(error instanceof Error ? error.message : '同步失败');
+    } finally {
+      setVaultSyncing(false);
+    }
+  }, [loadNotes, refreshFolders, vaultSyncing]);
 
   const toggleFolder = useCallback((folderId: string) => {
     setExpandedFolderIds((current) => {
@@ -858,22 +928,29 @@ export function NotesWorkspace() {
       return;
     }
 
-    if (folderEditDraft.kind === 'create') {
-      const id = createNoteFolderId();
-      const parentId = folderEditDraft.parentId;
-      setFolders((current) => [...current, { id, name, parentId }]);
-      setActiveFolderId(id);
-      setTag(null);
-      if (parentId) {
-        setExpandedFolderIds((current) => new Set(current).add(parentId));
-      }
-    } else {
-      setFolders((current) =>
-        current.map((item) => (item.id === folderEditDraft.folderId ? { ...item, name } : item)),
-      );
-    }
-
+    const draft = folderEditDraft;
     setFolderEditDraft(null);
+
+    if (draft.kind === 'create') {
+      void createNoteFolder({ name, parentId: draft.parentId })
+        .then((folder) => {
+          setFolders((current) => [...current, folder]);
+          setActiveFolderId(folder.id);
+          setTag(null);
+          if (draft.parentId) {
+            setExpandedFolderIds((current) => new Set(current).add(draft.parentId as string));
+          }
+        })
+        .catch(() => undefined);
+    } else {
+      void renameNoteFolder(draft.folderId, name)
+        .then((folder) => {
+          setFolders((current) =>
+            current.map((item) => (item.id === folder.id ? folder : item)),
+          );
+        })
+        .catch(() => undefined);
+    }
   }, [folderEditDraft, setTag]);
 
   const deleteFolder = useCallback((folder: NoteFolder) => {
@@ -902,14 +979,14 @@ export function NotesWorkspace() {
       return current;
     });
 
-    const affectedNotes = notes.filter((note) => note.folderId && removedIds.has(note.folderId));
-    if (affectedNotes.length > 0) {
-      void Promise.all(affectedNotes.map((note) => updateWorkspaceNote(note.id, { folderId: null })))
-        .finally(() => {
-          if (previousActiveNoteId) setActiveNoteId(previousActiveNoteId);
-        });
-    }
-  }, [activeFolderId, activeNoteId, folders, notes, setActiveNoteId, updateWorkspaceNote]);
+    // 后端级联删除文件夹并把其中的笔记归入未分类；失败时回滚为重新拉取。
+    void deleteNoteFolder(folder.id)
+      .catch(() => refreshFolders())
+      .finally(() => {
+        if (previousActiveNoteId) setActiveNoteId(previousActiveNoteId);
+        void loadNotes();
+      });
+  }, [activeFolderId, activeNoteId, folders, loadNotes, notes, refreshFolders, setActiveNoteId]);
 
   useEffect(() => {
     if (!activeNoteTab) {
@@ -949,6 +1026,15 @@ export function NotesWorkspace() {
       if (!detail?.noteId) return;
       const fromThisWorkspaceEditor = detail.sourceId === NOTES_WORKSPACE_EDITOR_SOURCE_ID;
 
+      // 文件夹增删改通过复用 NOTE_CHANGED_EVENT 广播（noteId 形如 folder:<id>）。
+      if (detail.noteId.startsWith('folder:')) {
+        window.setTimeout(() => {
+          void refreshFolders();
+          void loadNotes();
+        }, 0);
+        return;
+      }
+
       if (detail.action === 'updated') {
         if (isNoteEventRecord(detail.note)) {
           updateNoteTabTitle(detail.note.id, detail.note.title || '未命名笔记');
@@ -968,7 +1054,7 @@ export function NotesWorkspace() {
 
     window.addEventListener(NOTE_CHANGED_EVENT, handleNoteChanged);
     return () => window.removeEventListener(NOTE_CHANGED_EVENT, handleNoteChanged);
-  }, [loadNotes, refreshTags, setNoteTabExternalUpdate, updateNoteTabTitle]);
+  }, [loadNotes, refreshFolders, refreshTags, setNoteTabExternalUpdate, updateNoteTabTitle]);
 
   const handleCreateNote = useCallback((targetFolderId: string | null = activeFolderId) => {
     const folderId =
@@ -1305,15 +1391,27 @@ export function NotesWorkspace() {
                 </div>
               </div>
             </div>
-            <button
-              type="button"
-              onClick={handleCreateNoteInCurrentFolder}
-              className="pq-icon-button h-8 w-8 rounded-lg bg-[var(--pq-accent-bg)] text-[var(--pq-accent)]"
-              title="New note"
-              aria-label="New note"
-            >
-              <Plus className="h-4 w-4" strokeWidth={1.8} />
-            </button>
+            <div className="flex shrink-0 items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => void handleVaultSync()}
+                disabled={vaultSyncing}
+                className="pq-icon-button flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--pq-bg-secondary)] text-[var(--pq-text-muted)] transition hover:text-[var(--pq-accent)] disabled:opacity-50"
+                title="同步 Markdown vault（Obsidian 兼容）"
+                aria-label="Sync notes vault"
+              >
+                <FolderSync className="h-4 w-4" strokeWidth={1.8} />
+              </button>
+              <button
+                type="button"
+                onClick={handleCreateNoteInCurrentFolder}
+                className="pq-icon-button flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--pq-accent-bg)] text-[var(--pq-accent)]"
+                title="New note"
+                aria-label="New note"
+              >
+                <Plus className="h-4 w-4" strokeWidth={1.8} />
+              </button>
+            </div>
           </div>
 
           <label className="pq-input mt-3 flex h-8 items-center gap-2 rounded-lg px-2.5">
@@ -1329,6 +1427,20 @@ export function NotesWorkspace() {
           {error ? (
             <div className="mt-3 rounded-[var(--pq-radius-sm)] border border-[var(--pq-error-bg)] bg-[var(--pq-error-bg)] px-2.5 py-1.5 text-xs text-[var(--pq-error)]">
               {error}
+            </div>
+          ) : null}
+
+          {vaultMessage ? (
+            <div className="mt-3 flex items-start gap-1.5 rounded-[var(--pq-radius-sm)] border border-[var(--pq-border-subtle)] bg-[var(--pq-bg-secondary)] px-2.5 py-1.5 text-xs text-[var(--pq-text-muted)]">
+              <span className="min-w-0 flex-1">{vaultMessage}</span>
+              <button
+                type="button"
+                onClick={() => setVaultMessage(null)}
+                className="shrink-0 text-[var(--pq-text-faint)] hover:text-[var(--pq-text)]"
+                aria-label="Dismiss"
+              >
+                <X className="h-3 w-3" strokeWidth={1.8} />
+              </button>
             </div>
           ) : null}
         </div>
@@ -1511,7 +1623,29 @@ export function NotesWorkspace() {
       </aside>
 
       <main className="relative flex h-full min-w-0 flex-col overflow-hidden bg-[var(--pq-bg-primary)] p-3">
-        {!rightPanelOpen ? (
+        <button
+          type="button"
+          onClick={() => setMainView((current) => (current === 'editor' ? 'graph' : 'editor'))}
+          className="pq-icon-button absolute left-3 top-3 z-20 flex h-8 items-center gap-1 rounded-lg border border-[var(--pq-border)] bg-[var(--pq-surface-1)] px-2 text-xs text-[var(--pq-text-muted)] shadow-[var(--pq-shadow-soft)] transition hover:text-[var(--pq-accent)]"
+          title={mainView === 'editor' ? '查看笔记图谱与体检' : '返回编辑器'}
+          aria-label="Toggle notes graph view"
+        >
+          <Network className="h-3.5 w-3.5" strokeWidth={1.8} />
+          {mainView === 'editor' ? '图谱' : '编辑'}
+        </button>
+        {mainView === 'graph' ? (
+          <div className="mt-9 min-h-0 flex-1">
+            <NotesGraphView
+              notes={notes}
+              folders={folders}
+              onOpenNote={(noteId) => {
+                openNote(noteId);
+                setMainView('editor');
+              }}
+            />
+          </div>
+        ) : null}
+        {!rightPanelOpen && mainView === 'editor' ? (
           <button
             type="button"
             onClick={() => setRightPanelOpen(true)}
@@ -1523,8 +1657,9 @@ export function NotesWorkspace() {
           </button>
         ) : null}
 
-        <NoteEditor
-          note={activeNote}
+        {mainView === 'editor' ? (
+          <NoteEditor
+            note={activeNote}
           saving={saving}
           notes={notes}
           tags={tags}
@@ -1543,8 +1678,9 @@ export function NotesWorkspace() {
           onOpenNote={openNote}
           onTagClick={setTag}
           onPaperClick={handleOpenPaper}
-          onJumpToNoteAnchor={handleJumpToNoteAnchor}
-        />
+            onJumpToNoteAnchor={handleJumpToNoteAnchor}
+          />
+        ) : null}
       </main>
 
       {rightPanelOpen ? (

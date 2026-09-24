@@ -83,6 +83,9 @@ function cloneForkMessage(message: AgentChatMessage): AgentChatMessage {
       ? { ...message.plan, items: message.plan.items.map((item) => ({ ...item, updateRequest: item.updateRequest ? { ...item.updateRequest } : undefined })) }
       : undefined,
     memoryPlan: message.memoryPlan ? { ...message.memoryPlan } : undefined,
+    notePlan: message.notePlan
+      ? { ...message.notePlan, operations: message.notePlan.operations.map((operation) => ({ ...operation, tags: operation.tags ? [...operation.tags] : undefined })) }
+      : undefined,
     choices: message.choices ? message.choices.map((choice) => ({ ...choice })) : undefined,
   };
 }

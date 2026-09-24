@@ -6,6 +6,7 @@ import {
   readAgentMemory,
   type AgentMemoryWritePlan,
 } from './agentMemory';
+import type { AgentNoteWritePlan } from './agentNotePlan';
 import {
   emptyAgentSessionArtifacts,
   type AgentSessionArtifacts,
@@ -17,7 +18,6 @@ import {
   type ComparativeSurveyResult,
 } from './agentCapability';
 import { isComparativeSurveyInstruction } from './agentCapabilityTrigger';
-import { selectLibraryAgentExecutionPath } from './agentExecutionMode';
 import {
   runAgentLoop,
   type AgentLoopEvent,
@@ -222,15 +222,6 @@ interface LibraryAgentGeneratedPlan {
   [key: string]: unknown;
 }
 
-interface LibraryAgentGeneratedResponse {
-  kind: 'answer' | 'plan' | 'context-request' | 'choice-request';
-  answer?: string | null;
-  thinking?: string | null;
-  plan?: LibraryAgentGeneratedPlan | null;
-  contextRequest?: LibraryAgentContextRequest | null;
-  userChoices?: LibraryAgentUserChoiceRequest | null;
-}
-
 interface LibraryAgentPaperContextDecision {
   kind: 'paper-skill-decision';
   action: 'load-context' | 'continue-without-context' | 'ask-user-to-select-papers';
@@ -312,6 +303,14 @@ export type LibraryAgentRunResult =
   | {
     kind: 'memory-plan';
     memoryPlan: AgentMemoryWritePlan;
+    citations?: LibraryAgentRagCitation[];
+    figures?: LibraryAgentFigureReference[];
+    visionNotice?: string | null;
+    ragNotice?: string | null;
+  }
+  | {
+    kind: 'note-plan';
+    notePlan: AgentNoteWritePlan;
     citations?: LibraryAgentRagCitation[];
     figures?: LibraryAgentFigureReference[];
     visionNotice?: string | null;
@@ -414,12 +413,6 @@ export interface LibraryAgentUserChoice {
   instruction: string;
 }
 
-interface LibraryAgentUserChoiceRequest {
-  summary: string;
-  reason: string;
-  options?: LibraryAgentUserChoice[];
-}
-
 export interface LibraryAgentConversationMessage {
   role: 'assistant' | 'user';
   content: string;
@@ -444,19 +437,11 @@ export {
   uniqueTags,
 } from './libraryAgentPlanHelpers';
 
-const AGENT_STREAM_EVENT = 'paperquay://agent-stream';
 const SETTINGS_STORAGE_KEY = 'paper-reader-settings-v3';
 const SECRETS_STORAGE_KEY = 'paper-reader-secrets-v1';
 const AUTO_CLASSIFY_PARENT_NAME = 'Agent 自动归类';
 const MAX_REACT_INITIAL_PAPERS = 80;
 const MAX_REACT_INITIAL_CONTEXT_CHARS = 48_000;
-
-interface LibraryAgentStreamEventPayload {
-  requestId: string;
-  kind: 'delta' | 'answer-delta' | 'thinking-delta' | 'done' | 'error';
-  text?: string | null;
-  error?: string | null;
-}
 
 export interface LibraryAgentStreamHandlers {
   onDelta?: (text: string, fullText: string) => void;
@@ -1420,30 +1405,6 @@ function isLikelyContextSizeError(error: unknown): boolean {
   ].some((signal) => normalized.includes(signal));
 }
 
-function choiceResultFromRequest(
-  request: LibraryAgentUserChoiceRequest,
-  citations?: LibraryAgentRagCitation[],
-): Extract<LibraryAgentRunResult, { kind: 'choice' }> {
-  const choices = (Array.isArray(request.options) ? request.options : [])
-    .map((option, index) => ({
-      id: option.id?.trim() || `option-${index + 1}`,
-      label: option.label?.trim() || `选项 ${index + 1}`,
-      description: option.description?.trim() || '',
-      instruction: option.instruction?.trim() || option.label?.trim() || '',
-    }))
-    .filter((option) => option.instruction);
-
-  return {
-    kind: 'choice',
-    answer: [
-      request.summary?.trim() || '当前请求存在多个可行路径，请选择下一步。',
-      request.reason?.trim() ? `\n${request.reason.trim()}` : '',
-    ].filter(Boolean).join('\n'),
-    choices,
-    citations,
-  };
-}
-
 function paperSelectionResultFromContextRequest(
   request: LibraryAgentContextRequest | null | undefined,
   instruction: string,
@@ -1469,63 +1430,6 @@ function paperSelectionResultFromContextRequest(
 function normalizeModelThinking(value: string | null | undefined): string | null {
   const normalized = value?.replace(/<\/?think\b[^>]*>/gi, '').trim();
   return normalized || null;
-}
-
-function hasValidUserChoices(request: LibraryAgentUserChoiceRequest | null | undefined): request is LibraryAgentUserChoiceRequest {
-  return Boolean(
-    request &&
-    Array.isArray(request.options) &&
-    request.options.some((option) => Boolean(option?.instruction?.trim() || option?.label?.trim())),
-  );
-}
-
-function resultFromGeneratedResponse({
-  response,
-  papers,
-  contextLabel,
-  fallbackTool = 'classify',
-  responseLanguage,
-  currentPaperScopeIds = [],
-  citations,
-}: {
-  response: LibraryAgentGeneratedResponse;
-  papers: LiteraturePaper[];
-  contextLabel: string;
-  fallbackTool?: LibraryAgentTool;
-  responseLanguage?: string;
-  currentPaperScopeIds?: string[];
-  citations?: LibraryAgentRagCitation[];
-}): LibraryAgentRunResult | null {
-  if (response.kind === 'answer') {
-    return {
-      kind: 'answer',
-      answer: response.answer?.trim() || buildEmptyAgentAnswerFallback(
-        currentScopePapers(papers, currentPaperScopeIds),
-        responseLanguage,
-      ),
-      contextLabel,
-      thinking: normalizeModelThinking(response.thinking),
-      citations,
-    };
-  }
-
-  if (response.plan) {
-    return {
-      kind: 'plan',
-      plan: convertGeneratedAgentPlan(response.plan.tool ?? fallbackTool, papers, response.plan),
-      thinking: normalizeModelThinking(response.thinking),
-      citations,
-    };
-  }
-
-  if (response.kind === 'choice-request' && hasValidUserChoices(response.userChoices)) {
-    return {
-      ...choiceResultFromRequest(response.userChoices, citations),
-      thinking: normalizeModelThinking(response.thinking),
-    };
-  }
-
-  return null;
 }
 
 function paperToAgentInput(
@@ -1978,26 +1882,14 @@ function convertGeneratedAgentPlan(
   };
 }
 
-function isLikelyAgentStreamUnsupportedError(message: string): boolean {
-  const normalized = message.toLocaleLowerCase();
-
-  return [
-    'stream',
-    'sse',
-    'event-stream',
-    'readable body',
-    'readablestream',
-  ].some((signal) => normalized.includes(signal));
-}
-
-function legacyAgentAbortError(): Error {
+function agentAbortError(): Error {
   const error = new Error('Agent run aborted');
   error.name = 'AbortError';
   return error;
 }
 
-/** legacy IPC 调用无法直接接收 AbortSignal，改用 requestId + agent_chat_turn_cancel 实现取消。 */
-function wireLegacyAgentTurnCancel(signal: AbortSignal | undefined, requestId: string): () => void {
+/** 主进程 IPC 调用无法直接接收 AbortSignal，改用 requestId + agent_chat_turn_cancel 实现取消。 */
+function wireAgentTurnCancel(signal: AbortSignal | undefined, requestId: string): () => void {
   if (!signal) {
     return () => {};
   }
@@ -2014,100 +1906,6 @@ function wireLegacyAgentTurnCancel(signal: AbortSignal | undefined, requestId: s
   return () => signal.removeEventListener('abort', cancel);
 }
 
-async function generateLibraryAgentPlanOpenAICompatible(
-  options: OpenAICompatibleLibraryAgentOptions,
-  streamHandlers?: LibraryAgentStreamHandlers,
-  signal?: AbortSignal,
-): Promise<LibraryAgentGeneratedResponse> {
-  const requestId = crypto.randomUUID();
-  const unwireCancel = wireLegacyAgentTurnCancel(signal, requestId);
-
-  try {
-    if (streamHandlers) {
-      let answer = '';
-      let thinking = '';
-      let streamError = '';
-      const unlisten = await listen<LibraryAgentStreamEventPayload>(AGENT_STREAM_EVENT, (event) => {
-        const payload = event.payload;
-
-        if (!payload || payload.requestId !== requestId) {
-          return;
-        }
-
-        if (payload.kind === 'delta' || payload.kind === 'answer-delta') {
-          const delta = payload.text ?? '';
-
-          if (!delta) {
-            return;
-          }
-
-          answer += delta;
-          streamHandlers.onDelta?.(delta, answer);
-          return;
-        }
-
-        if (payload.kind === 'thinking-delta') {
-          const delta = payload.text ?? '';
-
-          if (!delta) {
-            return;
-          }
-
-          thinking += delta;
-          streamHandlers.onThinkingDelta?.(delta, thinking);
-          return;
-        }
-
-        if (payload.kind === 'error') {
-          streamError = payload.error || 'Agent stream failed';
-          return;
-        }
-
-        streamHandlers.onDone?.();
-      });
-
-      try {
-        const response = await invoke<LibraryAgentGeneratedResponse>('generate_library_agent_plan_openai_compatible_stream', {
-          requestId,
-          options,
-        });
-
-        if (streamError) {
-          throw new Error(streamError);
-        }
-
-        return response;
-      } catch (error) {
-        const message = toErrorMessage(error, streamError || 'Agent stream request failed');
-
-        if (isLikelyAgentStreamUnsupportedError(message)) {
-          return await invoke<LibraryAgentGeneratedResponse>('generate_library_agent_plan_openai_compatible', {
-            requestId,
-            options,
-          });
-        }
-
-        streamHandlers.onError?.(message);
-        throw new Error(message);
-      } finally {
-        unlisten();
-      }
-    }
-
-    return await invoke<LibraryAgentGeneratedResponse>('generate_library_agent_plan_openai_compatible', {
-      requestId,
-      options,
-    });
-  } catch (error) {
-    if (signal?.aborted) {
-      throw legacyAgentAbortError();
-    }
-    throw new Error(toErrorMessage(error, '调用大模型 Agent 工具失败'));
-  } finally {
-    unwireCancel();
-  }
-}
-
 async function decideLibraryAgentPaperContextOpenAICompatible(
   options: OpenAICompatibleLibraryAgentOptions,
   signal?: AbortSignal,
@@ -2117,7 +1915,7 @@ async function decideLibraryAgentPaperContextOpenAICompatible(
   }
 
   const requestId = crypto.randomUUID();
-  const unwireCancel = wireLegacyAgentTurnCancel(signal, requestId);
+  const unwireCancel = wireAgentTurnCancel(signal, requestId);
 
   try {
     return await invoke<LibraryAgentPaperContextDecision>('decide_library_agent_paper_context_openai_compatible', {
@@ -2126,573 +1924,13 @@ async function decideLibraryAgentPaperContextOpenAICompatible(
     });
   } catch (error) {
     if (signal?.aborted) {
-      throw legacyAgentAbortError();
+      throw agentAbortError();
     }
     console.warn('Failed to run paper-context decision', error);
     return null;
   } finally {
     unwireCancel();
   }
-}
-
-async function retryWithoutUserChoice({
-  papers,
-  categories = [],
-  instruction,
-  preset,
-  streamHandlers,
-  responseLanguage,
-  historyMessages = [],
-  currentPaperScopeIds = [],
-  paperScopes = [],
-  contextLabel,
-  paperInputs,
-  citations,
-  reason,
-  signal,
-}: {
-  papers: LiteraturePaper[];
-  categories?: LiteratureCategory[];
-  instruction: string;
-  preset: LibraryAgentModelPreset;
-  streamHandlers?: LibraryAgentStreamHandlers;
-  responseLanguage?: string;
-  historyMessages?: LibraryAgentConversationMessage[];
-  currentPaperScopeIds?: string[];
-  paperScopes?: LibraryAgentPaperScopeInput[];
-  contextLabel: string;
-  paperInputs?: LibraryAgentPaperInput[];
-  citations?: LibraryAgentRagCitation[];
-  reason?: string;
-  signal?: AbortSignal;
-}): Promise<LibraryAgentRunResult> {
-  const categoryPayload = buildAgentCategoryPayload(categories);
-  const retryResponse = await generateLibraryAgentPlanOpenAICompatible(
-    {
-      baseUrl: preset.baseUrl,
-      apiKey: preset.apiKey.trim(),
-      model: preset.model,
-      apiMode: preset.apiMode,
-      temperature: preset.temperature,
-      reasoningEffort: preset.reasoningEffort,
-      responseLanguage,
-      allowContextRequest: false,
-      tool: 'auto',
-      instruction: [
-        instruction,
-        '',
-        'The user has already selected the target papers for this turn.',
-        'Do not return kind "choice-request" or "context-request".',
-        'If the request is actionable, return kind "plan" with reviewable items for the selected papers.',
-        'If the request is underspecified, return kind "answer" and ask one concise clarification question.',
-        reason ? `Previous invalid response reason: ${reason}` : '',
-      ].filter(Boolean).join('\n'),
-      messages: historyMessages,
-      currentPaperScopeIds,
-      paperScopes,
-      categories: categoryPayload.categories,
-      papers: paperInputs ?? papers.map((paper) => paperToAgentInput(
-        paper,
-        undefined,
-        categoryPayload.categoryPathById,
-      )),
-    },
-    streamHandlers,
-    signal,
-  );
-
-  const parsed = resultFromGeneratedResponse({
-    response: retryResponse,
-    papers,
-    contextLabel,
-    responseLanguage,
-    currentPaperScopeIds,
-    citations,
-  });
-
-  if (parsed) {
-    return parsed;
-  }
-
-  return {
-    kind: 'answer',
-    contextLabel,
-    answer: [
-      '已收到本轮选择的论文，但模型没有返回可执行计划。',
-      '请补充标题修改规则或目标标题，例如“把标题改成 DOI 查询到的正式标题”或“给标题前加上已读”。',
-    ].join('\n'),
-    thinking: normalizeModelThinking(retryResponse.thinking),
-    citations,
-  };
-}
-
-async function requestDynamicUserChoices({
-  papers,
-  categories = [],
-  instruction,
-  previousAnswer,
-  preset,
-  streamHandlers,
-  responseLanguage,
-  historyMessages = [],
-  currentPaperScopeIds = [],
-  paperScopes = [],
-  signal,
-}: {
-  papers: LiteraturePaper[];
-  categories?: LiteratureCategory[];
-  instruction: string;
-  previousAnswer: string;
-  preset: LibraryAgentModelPreset;
-  streamHandlers?: LibraryAgentStreamHandlers;
-  responseLanguage?: string;
-  historyMessages?: LibraryAgentConversationMessage[];
-  currentPaperScopeIds?: string[];
-  paperScopes?: LibraryAgentPaperScopeInput[];
-  signal?: AbortSignal;
-}): Promise<LibraryAgentRunResult> {
-  const categoryPayload = buildAgentCategoryPayload(categories);
-  const response = await generateLibraryAgentPlanOpenAICompatible(
-    {
-      baseUrl: preset.baseUrl,
-      apiKey: preset.apiKey.trim(),
-      model: preset.model,
-      apiMode: preset.apiMode,
-      temperature: preset.temperature,
-      reasoningEffort: preset.reasoningEffort,
-      responseLanguage,
-      allowContextRequest: true,
-      tool: 'auto',
-      instruction: [
-        instruction,
-        '',
-        'Your previous draft was not actionable enough because it only said the answer was based on metadata or suggested loading more content.',
-        `Previous draft: ${previousAnswer}`,
-        'Do not answer directly. Call present_user_options and generate 2 to 5 dynamic next-step choices tailored to this request and these papers. Each option must include an executable instruction for the app to run if the user clicks it.',
-      ].join('\n'),
-      messages: historyMessages,
-      currentPaperScopeIds,
-      paperScopes,
-      categories: categoryPayload.categories,
-      papers: papers.map((paper) => paperToAgentInput(paper, undefined, categoryPayload.categoryPathById)),
-    },
-    streamHandlers,
-    signal,
-  );
-
-  if (response.kind === 'choice-request' && hasValidUserChoices(response.userChoices)) {
-    return {
-      ...choiceResultFromRequest(response.userChoices),
-      thinking: normalizeModelThinking(response.thinking),
-    };
-  }
-
-  const parsed = resultFromGeneratedResponse({
-    response,
-    papers,
-    contextLabel: 'metadata only',
-    responseLanguage,
-    currentPaperScopeIds,
-  });
-
-  if (parsed) {
-    return parsed;
-  }
-
-  if (response.kind === 'answer') {
-    return {
-      kind: 'answer',
-      answer: response.answer?.trim() || previousAnswer,
-      contextLabel: 'metadata only',
-      thinking: normalizeModelThinking(response.thinking),
-    };
-  }
-
-  if (response.plan) {
-    return {
-      kind: 'plan',
-      plan: convertGeneratedAgentPlan(response.plan.tool ?? 'classify', papers, response.plan),
-      thinking: normalizeModelThinking(response.thinking),
-    };
-  }
-
-  return {
-    kind: 'answer',
-    answer: previousAnswer,
-    contextLabel: 'metadata only',
-    thinking: normalizeModelThinking(response.thinking),
-  };
-}
-
-export async function buildToolUseLibraryAgentPlan({
-  tool,
-  papers,
-  categories = [],
-  instruction,
-  preset,
-}: {
-  tool: LibraryAgentTool;
-  papers: LiteraturePaper[];
-  categories?: LiteratureCategory[];
-  instruction?: string;
-  preset: LibraryAgentModelPreset;
-}): Promise<LibraryAgentPlan> {
-  if (!preset.baseUrl.trim() || !preset.apiKey.trim() || !preset.model.trim()) {
-    throw new Error('请先在设置里配置支持 tool/function calling 的 OpenAI-compatible 模型。');
-  }
-
-  const categoryPayload = buildAgentCategoryPayload(categories);
-  const generatedResponse = await generateLibraryAgentPlanOpenAICompatible({
-    baseUrl: preset.baseUrl,
-    apiKey: preset.apiKey.trim(),
-    model: preset.model,
-    apiMode: preset.apiMode,
-    temperature: preset.temperature,
-    reasoningEffort: preset.reasoningEffort,
-    tool,
-    instruction,
-    categories: categoryPayload.categories,
-    papers: papers.map((paper) => paperToAgentInput(paper, undefined, categoryPayload.categoryPathById)),
-  });
-  const generatedPlan = generatedResponse.plan;
-
-  if (!generatedPlan) {
-    throw new Error('模型没有返回可审查的工具计划。');
-  }
-
-  return convertGeneratedAgentPlan(tool, papers, generatedPlan);
-}
-
-async function runLegacyConversationalLibraryAgent({
-  papers,
-  categories = [],
-  instruction,
-  preset,
-  streamHandlers,
-  historyMessages = [],
-  currentPaperScopeIds = [],
-  paperScopes = [],
-  responseLanguage,
-  ragEnabled = true,
-  signal,
-}: {
-  papers: LiteraturePaper[];
-  categories?: LiteratureCategory[];
-  instruction: string;
-  preset: LibraryAgentModelPreset;
-  streamHandlers?: LibraryAgentStreamHandlers;
-  historyMessages?: LibraryAgentConversationMessage[];
-  currentPaperScopeIds?: string[];
-  paperScopes?: LibraryAgentPaperScopeInput[];
-  responseLanguage?: string;
-  ragEnabled?: boolean;
-  signal?: AbortSignal;
-}): Promise<LibraryAgentRunResult> {
-  if (!preset.baseUrl.trim() || !preset.apiKey.trim() || !preset.model.trim()) {
-    throw new Error('请先在设置里配置支持 tool/function calling 的 OpenAI-compatible 模型。');
-  }
-
-  const normalizedInstruction = instruction.trim();
-  const instructionForModel = buildAgentInstructionWithHistory(normalizedInstruction, historyMessages);
-  const categoryPayload = buildAgentCategoryPayload(categories);
-
-  if (!normalizedInstruction) {
-    throw new Error('请输入要让 Agent 执行的文库整理指令。');
-  }
-  const metadataContextLabel = papers.length > 0 ? 'metadata only' : 'general chat';
-  const paperInputsWithoutContext = papers.map((paper) => paperToAgentInput(
-    paper,
-    undefined,
-    categoryPayload.categoryPathById,
-  ));
-  const paperContextDecision = await decideLibraryAgentPaperContextOpenAICompatible(
-    {
-      baseUrl: preset.baseUrl,
-      apiKey: preset.apiKey.trim(),
-      model: preset.model,
-      apiMode: preset.apiMode,
-      temperature: preset.temperature,
-      reasoningEffort: preset.reasoningEffort,
-      responseLanguage,
-      allowContextRequest: true,
-      tool: 'auto',
-      instruction: instructionForModel,
-      messages: historyMessages,
-      currentPaperScopeIds,
-      paperScopes,
-      categories: categoryPayload.categories,
-      papers: paperInputsWithoutContext,
-    },
-    signal,
-  );
-
-  if (paperContextDecision?.action === 'ask-user-to-select-papers' && paperContextDecision.paperIds.length === 0) {
-    return paperSelectionResultFromContextRequest(
-      {
-        summary: paperContextDecision.summary,
-        mode: paperContextDecision.mode,
-        reason: paperContextDecision.reason,
-        paperIds: [],
-      },
-      normalizedInstruction,
-      normalizeModelThinking(paperContextDecision.thinking),
-    );
-  }
-
-  const generatedResponse = paperContextDecision?.action === 'load-context'
-    ? {
-      kind: 'context-request' as const,
-      thinking: paperContextDecision.thinking,
-      contextRequest: {
-        summary: paperContextDecision.summary,
-        mode: paperContextDecision.mode,
-        reason: paperContextDecision.reason,
-        paperIds: paperContextDecision.paperIds,
-      },
-    }
-    : await generateLibraryAgentPlanOpenAICompatible(
-    {
-      baseUrl: preset.baseUrl,
-      apiKey: preset.apiKey.trim(),
-      model: preset.model,
-      apiMode: preset.apiMode,
-      temperature: preset.temperature,
-      reasoningEffort: preset.reasoningEffort,
-      responseLanguage,
-      allowContextRequest: true,
-      tool: 'auto',
-      instruction: instructionForModel,
-      messages: historyMessages,
-      currentPaperScopeIds,
-      paperScopes,
-      categories: categoryPayload.categories,
-      papers: paperInputsWithoutContext,
-    },
-    streamHandlers,
-    signal,
-  );
-
-  if (generatedResponse.kind === 'answer') {
-    const answer = generatedResponse.answer?.trim() || buildEmptyAgentAnswerFallback(
-      currentScopePapers(papers, currentPaperScopeIds),
-      responseLanguage,
-    );
-
-    if (isInsufficientMetadataOnlyAnswer(answer)) {
-      return requestDynamicUserChoices({
-        papers,
-        categories,
-        instruction: instructionForModel,
-        previousAnswer: answer,
-        preset,
-        streamHandlers,
-        responseLanguage,
-        historyMessages,
-        currentPaperScopeIds,
-        paperScopes,
-        signal,
-      });
-    }
-
-    return {
-      kind: 'answer',
-      contextLabel: metadataContextLabel,
-      answer,
-      thinking: normalizeModelThinking(generatedResponse.thinking),
-    };
-  }
-
-  if (generatedResponse.kind === 'choice-request') {
-    if (!hasValidUserChoices(generatedResponse.userChoices)) {
-      if (papers.length > 0) {
-        return retryWithoutUserChoice({
-          papers,
-          categories,
-          instruction: instructionForModel,
-          preset,
-          streamHandlers,
-          responseLanguage,
-          historyMessages,
-          currentPaperScopeIds,
-          paperScopes,
-          contextLabel: metadataContextLabel,
-          reason: 'Model returned choice-request without valid options even though target papers were already provided.',
-          signal,
-        });
-      }
-
-      return paperSelectionResultFromContextRequest(
-        null,
-        normalizedInstruction,
-        normalizeModelThinking(generatedResponse.thinking),
-      );
-    }
-
-    if (!generatedResponse.userChoices) {
-      throw new Error('模型请求用户选择，但没有返回有效选项。');
-    }
-
-    return {
-      ...choiceResultFromRequest(generatedResponse.userChoices),
-      thinking: normalizeModelThinking(generatedResponse.thinking),
-    };
-  }
-
-  if (generatedResponse.kind === 'context-request') {
-    const contextRequest = generatedResponse.contextRequest;
-    const thinking = normalizeModelThinking(generatedResponse.thinking);
-    const effectiveContextRequest = buildEffectiveContextRequest(
-      contextRequest,
-      papers,
-      currentPaperScopeIds,
-    );
-    const contextPapers = currentScopePapers(papers, effectiveContextRequest?.paperIds ?? currentPaperScopeIds);
-
-    if (!effectiveContextRequest) {
-      return paperSelectionResultFromContextRequest(contextRequest, normalizedInstruction, thinking);
-    }
-
-    if (contextPapers.length === 0) {
-      return paperSelectionResultFromContextRequest(effectiveContextRequest, normalizedInstruction, thinking);
-    }
-
-    const enrichedContext = await buildPapersWithRequestedContext(contextPapers, effectiveContextRequest, {
-      ragEnabled,
-      categoryPathById: categoryPayload.categoryPathById,
-    });
-    let enrichedResponse: LibraryAgentGeneratedResponse;
-
-    try {
-      enrichedResponse = await generateLibraryAgentPlanOpenAICompatible(
-        {
-          baseUrl: preset.baseUrl,
-          apiKey: preset.apiKey.trim(),
-          model: preset.model,
-          apiMode: preset.apiMode,
-          temperature: preset.temperature,
-          reasoningEffort: preset.reasoningEffort,
-          responseLanguage,
-          allowContextRequest: false,
-          tool: 'auto',
-          instruction: [
-            instructionForModel,
-            '',
-            'The app has loaded the paper context requested by the previous tool call.',
-            `Context mode: ${effectiveContextRequest.mode}.`,
-            `Context reason: ${effectiveContextRequest.reason}.`,
-            `Context paperIds: ${effectiveContextRequest.paperIds?.join(', ') || 'current selected papers'}.`,
-            'Use the provided contextText fields when answering. Do not call request_paper_context again unless the loaded context is empty for all target papers.',
-          ].join('\n'),
-          messages: historyMessages,
-          currentPaperScopeIds,
-          paperScopes,
-          categories: categoryPayload.categories,
-          papers: enrichedContext.inputs,
-        },
-        streamHandlers,
-        signal,
-      );
-    } catch (contextError) {
-      if (!isLikelyContextSizeError(contextError)) {
-        throw contextError;
-      }
-
-      return requestDynamicUserChoices({
-        papers,
-        categories,
-        instruction: [
-          instructionForModel,
-          '',
-          `The app tried to send ${enrichedContext.label}, but the model request failed, likely because the context was too large or the network rejected the large payload.`,
-          'Offer dynamic next-step choices such as summary-only context, narrowing the selected papers, metadata-only answer, or metadata completion when appropriate.',
-        ].join('\n'),
-        previousAnswer: contextError instanceof Error ? contextError.message : String(contextError),
-        preset,
-        streamHandlers,
-        responseLanguage,
-        historyMessages,
-        currentPaperScopeIds,
-        paperScopes,
-        signal,
-      });
-    }
-
-    if (enrichedResponse.kind === 'answer') {
-      return {
-        kind: 'answer',
-        answer: enrichedResponse.answer?.trim() || buildEmptyAgentAnswerFallback(
-          currentScopePapers(papers, currentPaperScopeIds),
-          responseLanguage,
-        ),
-        contextLabel: enrichedContext.label,
-        thinking: normalizeModelThinking(enrichedResponse.thinking),
-        citations: enrichedContext.citations,
-        ragNotice: buildAgentRagNotice(enrichedContext.ragErrors),
-      };
-    }
-
-    if (enrichedResponse.kind === 'choice-request') {
-      if (!hasValidUserChoices(enrichedResponse.userChoices)) {
-        return retryWithoutUserChoice({
-          papers,
-          categories,
-          instruction: [
-            instructionForModel,
-            '',
-            `The app already loaded ${enrichedContext.label} for the selected papers.`,
-            'Do not ask the user to choose papers again.',
-          ].join('\n'),
-          preset,
-          streamHandlers,
-          responseLanguage,
-          historyMessages,
-          currentPaperScopeIds,
-          paperScopes,
-          contextLabel: enrichedContext.label,
-          paperInputs: enrichedContext.inputs,
-          citations: enrichedContext.citations,
-          reason: 'Model returned choice-request without valid options after paper context was loaded.',
-          signal,
-        });
-      }
-
-      if (!enrichedResponse.userChoices) {
-        throw new Error('模型请求用户选择，但没有返回有效选项。');
-      }
-
-      return {
-        ...choiceResultFromRequest(enrichedResponse.userChoices, enrichedContext.citations),
-        ragNotice: buildAgentRagNotice(enrichedContext.ragErrors),
-        thinking: normalizeModelThinking(enrichedResponse.thinking),
-      };
-    }
-
-    if (enrichedResponse.kind === 'context-request') {
-      throw new Error('模型已经读取过一次文献上下文，但仍继续请求上下文。请减少选中的论文数量，或直接指定要分析的文献。');
-    }
-
-    if (!enrichedResponse.plan) {
-      throw new Error('模型没有返回可审查的工具计划。');
-    }
-
-      return {
-        kind: 'plan',
-        plan: convertGeneratedAgentPlan(enrichedResponse.plan.tool ?? 'classify', contextPapers, enrichedResponse.plan),
-        thinking: normalizeModelThinking(enrichedResponse.thinking),
-        citations: enrichedContext.citations,
-        ragNotice: buildAgentRagNotice(enrichedContext.ragErrors),
-      };
-  }
-
-  if (!generatedResponse.plan) {
-    throw new Error('模型没有返回可审查的工具计划。');
-  }
-
-  return {
-    kind: 'plan',
-    plan: convertGeneratedAgentPlan(generatedResponse.plan.tool ?? 'classify', papers, generatedResponse.plan),
-    thinking: normalizeModelThinking(generatedResponse.thinking),
-  };
 }
 
 function addUniqueAgentCitations(
@@ -2959,22 +2197,6 @@ export async function runConversationalLibraryAgent({
       visionNotice: preset.supportsVision === true ? null : '当前模型未标记为支持视觉，调研阶段未发送论文图片。',
       ragNotice: buildAgentRagNotice(ragErrors),
     };
-  }
-
-  if (selectLibraryAgentExecutionPath(persisted.settings) === 'legacy') {
-    return runLegacyConversationalLibraryAgent({
-      papers,
-      categories,
-      instruction: normalizedInstruction,
-      preset,
-      streamHandlers,
-      historyMessages,
-      currentPaperScopeIds,
-      paperScopes,
-      responseLanguage,
-      ragEnabled,
-      signal,
-    });
   }
 
   const categoryPayload = buildAgentCategoryPayload(categories);
@@ -3413,6 +2635,16 @@ export async function runConversationalLibraryAgent({
   }
 
   if (result.kind === 'memory-plan') {
+    return {
+      ...result,
+      citations,
+      figures: figureReferences,
+      visionNotice,
+      ragNotice,
+    };
+  }
+
+  if (result.kind === 'note-plan') {
     return {
       ...result,
       citations,

@@ -1,5 +1,6 @@
 import type { DocumentChatAttachment } from '../types/reader';
 import type { AgentMemoryWritePlan } from './agentMemory';
+import type { AgentNoteWritePlan } from './agentNotePlan';
 import {
   AGENT_VISUAL_CONTEXT_MESSAGE,
   compactMessagesAtUserBoundary,
@@ -42,6 +43,8 @@ export interface AgentToolResult {
   plan?: LibraryAgentPlan;
   /** Memory writes use an independent approval card instead of paper mutations. */
   memoryPlan?: AgentMemoryWritePlan;
+  /** Note writes use an independent approval card; never applied by the loop. */
+  notePlan?: AgentNoteWritePlan;
 }
 
 export interface AgentToolMountContext {
@@ -146,6 +149,7 @@ export interface AgentLoopOptions {
 }
 
 const MEMORY_WRITE_TOOL_NAME = 'write_memory';
+const NOTE_WRITE_TOOL_NAME = 'write_notes';
 
 function isLikelyContextSizeErrorMessage(message: string): boolean {
   const normalized = message.toLocaleLowerCase();
@@ -414,7 +418,14 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<LibraryAg
 
       if (writeCalls.length > 0) {
         const memoryWriteCalls = writeCalls.filter((call) => call.name === MEMORY_WRITE_TOOL_NAME);
-        const paperWriteCalls = writeCalls.filter((call) => call.name !== MEMORY_WRITE_TOOL_NAME);
+        const noteWriteCalls = writeCalls.filter((call) => call.name === NOTE_WRITE_TOOL_NAME);
+        const paperWriteCalls = writeCalls.filter(
+          (call) => call.name !== MEMORY_WRITE_TOOL_NAME && call.name !== NOTE_WRITE_TOOL_NAME,
+        );
+        const writeKindsPresent =
+          (memoryWriteCalls.length > 0 ? 1 : 0)
+          + (noteWriteCalls.length > 0 ? 1 : 0)
+          + (paperWriteCalls.length > 0 ? 1 : 0);
 
         // 先落 assistant 消息，保证后续 tool 结果消息有合法前置。
         messages.push({
@@ -427,9 +438,9 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<LibraryAg
           })),
         });
 
-        // 执行前预检混合写：论文写入与记忆写入必须拆成独立可审批动作，错误喂回模型分拆。
-        if (memoryWriteCalls.length > 0 && paperWriteCalls.length > 0) {
-          const message = 'PaperQuay requires paper writes and memory writes in separate turns. Propose only one kind of write plan this turn.';
+        // 执行前预检混合写：论文/笔记/记忆写入必须拆成独立可审批动作，错误喂回模型分拆。
+        if (writeKindsPresent > 1) {
+          const message = 'PaperQuay requires paper, note, and memory writes in separate turns. Propose only one kind of write plan this turn.';
 
           for (const call of writeCalls) {
             emit({ kind: 'tool_call', turn, callId: call.id, name: call.name, args: normalizeToolArguments(call.arguments) });
@@ -453,6 +464,7 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<LibraryAg
 
         const plans: LibraryAgentPlan[] = [];
         const memoryPlans: AgentMemoryWritePlan[] = [];
+        const notePlans: AgentNoteWritePlan[] = [];
         let writeToolFailed = false;
 
         for (const call of writeCalls) {
@@ -469,6 +481,7 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<LibraryAg
             emit({ kind: 'tool_result', turn, callId: call.id, name: call.name, ok: true, preview: content.slice(0, 500) });
             if (result.plan) plans.push(result.plan);
             if (result.memoryPlan) memoryPlans.push(result.memoryPlan);
+            if (result.notePlan) notePlans.push(result.notePlan);
           } catch (error) {
             throwIfAborted(options.signal);
             // 与读工具对齐：写工具失败作为 tool 结果喂回模型，由下一轮修正或解释，而不是硬终止 run。
@@ -507,6 +520,16 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<LibraryAg
           return {
             kind: 'memory-plan',
             memoryPlan: memoryPlans[0],
+            citations: options.citations,
+            ragNotice: options.ragNotice,
+          };
+        }
+
+        if (notePlans.length > 0) {
+          checkpoint(turn);
+          return {
+            kind: 'note-plan',
+            notePlan: notePlans[0],
             citations: options.citations,
             ragNotice: options.ragNotice,
           };

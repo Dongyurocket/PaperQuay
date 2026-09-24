@@ -1,7 +1,7 @@
 import type { JSONContent } from '@tiptap/core';
 import type { Note, NoteAnchor, NoteType } from '../../types/notes';
 import type { SelectedExcerpt } from '../../types/reader';
-import { collectText, noteContentToTiptap } from './notesTiptap';
+import { collectText, noteContentToTiptap } from './notesTiptap.ts';
 
 export const NOTE_COLORS = [
   { id: 'yellow', label: 'Important', value: '#fef3c7' },

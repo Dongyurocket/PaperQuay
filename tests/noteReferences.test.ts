@@ -210,9 +210,10 @@ test('buildReferenceListNodes builds a heading plus ordered list', () => {
   assert.equal(nodes[0].content[0].text, REFERENCE_LIST_HEADING);
   assert.equal(nodes[1].type, 'orderedList');
   assert.equal(nodes[1].content.length, 2);
+  // 默认 GB/T 7714 顺序编码制；文献缺刊名/类型时按 EB/OL 兜底。
   assert.equal(
     nodes[1].content[0].content[0].content[0].text,
-    'Attention Is All You Need. Ashish Vaswani, Noam Shazeer. 2017.',
+    'Ashish Vaswani, Noam Shazeer. Attention Is All You Need[EB/OL]. 2017.',
   );
 });
 

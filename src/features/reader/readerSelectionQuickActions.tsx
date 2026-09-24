@@ -135,6 +135,10 @@ export interface SelectionQuickActionsProps {
   autoTranslateSelection: boolean;
   onAppendSelectedExcerptToQa: () => void;
   onAddSelectionToNote: () => void;
+  onDistillSelectionToNote: () => void;
+  onDistillSelectionAppendToCard: () => void;
+  activeExcerptCardTitle: string | null;
+  selectionDistilling: boolean;
   onTranslateSelectedExcerpt: () => void;
   onClearSelectedExcerpt: () => void;
 }
@@ -148,6 +152,10 @@ export function SelectionQuickActions({
   autoTranslateSelection,
   onAppendSelectedExcerptToQa,
   onAddSelectionToNote,
+  onDistillSelectionToNote,
+  onDistillSelectionAppendToCard,
+  activeExcerptCardTitle,
+  selectionDistilling,
   onTranslateSelectedExcerpt,
   onClearSelectedExcerpt,
 }: SelectionQuickActionsProps) {
@@ -413,6 +421,29 @@ export function SelectionQuickActions({
           >
             {l('加入笔记', 'Add to Note')}
           </button>
+          {aiConfigured ? (
+            <button
+              type="button"
+              onClick={onDistillSelectionToNote}
+              disabled={selectionDistilling}
+              className="inline-flex items-center rounded-xl border border-teal-200 bg-teal-50 px-3 py-2 text-sm font-medium text-teal-700 transition-all duration-200 hover:border-teal-300 hover:bg-teal-100 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {selectionDistilling
+                ? l('正在提炼…', 'Distilling…')
+                : l('AI 提炼为摘录卡', 'AI Distill to Card')}
+            </button>
+          ) : null}
+          {aiConfigured && activeExcerptCardTitle ? (
+            <button
+              type="button"
+              onClick={onDistillSelectionAppendToCard}
+              disabled={selectionDistilling}
+              title={activeExcerptCardTitle}
+              className="inline-flex items-center rounded-xl border border-teal-200 bg-white px-3 py-2 text-sm font-medium text-teal-700 transition-all duration-200 hover:border-teal-300 hover:bg-teal-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {l('追加到当前摘录卡', 'Append to Current Card')}
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={onTranslateSelectedExcerpt}

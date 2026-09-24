@@ -22,6 +22,10 @@ import {
   writeAgentMemory,
   type AgentMemoryWritePlan,
 } from '../../services/agentMemory';
+import {
+  applyAgentNoteWritePlan,
+  type AgentNoteWritePlan,
+} from '../../services/agentNotePlan';
 import type { AgentLoopEvent, AgentLoopMessage } from '../../services/agentLoop';
 import { isComparativeSurveyInstruction } from '../../services/agentCapabilityTrigger';
 import type { ComparativeSurveyArtifacts, ComparativeSurveyEvent } from '../../services/agentCapability';
@@ -600,6 +604,37 @@ function AgentWorkspace() {
     setHistorySessions((current) => {
       const target = current.find((session) => session.id === sessionId);
       const targetMessage = target?.messages.find((entry) => entry.memoryPlan?.id === memoryPlanId);
+
+      if (!target || !targetMessage) {
+        return current;
+      }
+
+      return patchAgentHistorySessionMessage(current, {
+        sessionId,
+        messageId: targetMessage.id,
+        updater: applyStatus,
+        locale,
+      });
+    });
+  };
+
+  const markNotePlanTerminalStatus = (
+    sessionId: string,
+    notePlanId: string,
+    status: 'applied' | 'cancelled',
+  ) => {
+    const applyStatus = (message: AgentChatMessage): AgentChatMessage =>
+      message.notePlan?.id === notePlanId && !message.notePlanStatus
+        ? { ...message, notePlanStatus: status }
+        : message;
+
+    if (activeSessionIdRef.current === sessionId) {
+      setMessages((current) => current.map(applyStatus));
+    }
+
+    setHistorySessions((current) => {
+      const target = current.find((session) => session.id === sessionId);
+      const targetMessage = target?.messages.find((entry) => entry.notePlan?.id === notePlanId);
 
       if (!target || !targetMessage) {
         return current;
@@ -1378,6 +1413,33 @@ function AgentWorkspace() {
         return;
       }
 
+      if (result.kind === 'note-plan') {
+        updateSessionMessage(sessionId, assistantMessageId, (message) => ({
+          ...message,
+          content: l(
+            '模型建议修改笔记。请审核笔记计划后确认写入。',
+            'The model proposed note changes. Review the note plan before applying.',
+          ),
+          meta: `note approval · ${durationLabel(durationMs, locale)}`,
+          thinking: message.thinking,
+          ragCitations: result.citations,
+          ragFigures: result.figures,
+          visionNotice: result.visionNotice,
+          ragNotice: result.ragNotice,
+          trace: message.trace,
+          toolCall: undefined,
+          plan: undefined,
+          notePlan: result.notePlan,
+          choices: undefined,
+          paperSelectionRequest: undefined,
+          error: undefined,
+        }));
+        if (isTargetSessionActive()) {
+          setStatusMessage(result.notePlan.summary);
+        }
+        return;
+      }
+
       const nextPlan = result.plan;
       const nextToolCall = buildToolCallView(nextPlan, instruction, paperCount, durationMs, locale);
 
@@ -1601,6 +1663,43 @@ function AgentWorkspace() {
   const rejectMemoryPlan = (memoryPlan: AgentMemoryWritePlan) => {
     markMemoryPlanTerminalStatus(activeSessionId, memoryPlan.id, 'cancelled');
     setStatusMessage(l('已拒绝本次 Agent 记忆写入。', 'The Agent memory update was rejected.'));
+  };
+
+  const applyNotePlan = async (notePlan: AgentNoteWritePlan) => {
+    const sessionId = activeSessionId;
+
+    try {
+      const result = await applyAgentNoteWritePlan(notePlan);
+      markNotePlanTerminalStatus(sessionId, notePlan.id, 'applied');
+      const detail =
+        result.failed > 0
+          ? l(
+              `${notePlan.summary}（${result.applied} 成功 / ${result.failed} 失败）`,
+              `${notePlan.summary} (${result.applied} applied / ${result.failed} failed)`,
+            )
+          : notePlan.summary;
+      appendAssistantMessageToSession(
+        sessionId,
+        result.failed > 0
+          ? l(`笔记变更部分失败：${result.errors.join('；')}`, `Some note changes failed: ${result.errors.join('; ')}`)
+          : l('笔记变更已写入。', 'Note changes were applied.'),
+        detail,
+      );
+      setStatusMessage(
+        result.failed > 0
+          ? l('笔记变更部分失败。', 'Some note changes failed.')
+          : l('笔记变更已写入。', 'Note changes applied.'),
+      );
+    } catch (nextError) {
+      const message = nextError instanceof Error ? nextError.message : l('写入笔记失败', 'Failed to apply note changes');
+      setError(message);
+      setStatusMessage(message);
+    }
+  };
+
+  const rejectNotePlan = (notePlan: AgentNoteWritePlan) => {
+    markNotePlanTerminalStatus(activeSessionId, notePlan.id, 'cancelled');
+    setStatusMessage(l('已拒绝本次笔记变更。', 'The note changes were rejected.'));
   };
 
   const cancelPlan = () => {
@@ -2112,6 +2211,10 @@ function AgentWorkspace() {
         void applyMemoryPlan(memoryPlan);
       }}
       onRejectMemoryPlan={rejectMemoryPlan}
+      onApplyNotePlan={(notePlan) => {
+        void applyNotePlan(notePlan);
+      }}
+      onRejectNotePlan={rejectNotePlan}
       onCancelAgentRun={handleCancelAgentRun}
       onCancelPlan={cancelPlan}
       onClearSelection={clearSelection}

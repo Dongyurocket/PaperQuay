@@ -31,6 +31,7 @@ import { ModelPresetPicker } from '../../components/ModelPresetPicker';
 import { isImeComposing, useImeSafeTextareaValue } from '../../hooks/useImeSafeTextareaValue';
 import type { LibraryAgentPlan, LibraryAgentRagCitation } from '../../services/libraryAgent';
 import type { AgentMemoryWritePlan } from '../../services/agentMemory';
+import type { AgentNoteWritePlan } from '../../services/agentNotePlan';
 import type { LiteraturePaper } from '../../types/library';
 import type { DocumentChatAttachment, ModelReasoningEffort, QaModelPreset, UiLanguage } from '../../types/reader';
 import type {
@@ -81,6 +82,8 @@ interface AgentWorkspaceViewProps {
   onApplyPlan: () => void;
   onApplyMemoryPlan: (memoryPlan: AgentMemoryWritePlan) => void;
   onRejectMemoryPlan: (memoryPlan: AgentMemoryWritePlan) => void;
+  onApplyNotePlan: (notePlan: AgentNoteWritePlan) => void;
+  onRejectNotePlan: (notePlan: AgentNoteWritePlan) => void;
   onAgentPresetChange: (presetId: string) => void;
   onAgentReasoningEffortChange: (reasoningEffort: ModelReasoningEffort) => void;
   onCancelAgentRun: () => void;
@@ -310,6 +313,8 @@ export default function AgentWorkspaceView({
   onApplyPlan,
   onApplyMemoryPlan,
   onRejectMemoryPlan,
+  onApplyNotePlan,
+  onRejectNotePlan,
   onAgentPresetChange,
   onAgentReasoningEffortChange,
   onCancelAgentRun,
@@ -582,6 +587,8 @@ export default function AgentWorkspaceView({
                       onApplyPlan={onApplyPlan}
                       onApplyMemoryPlan={onApplyMemoryPlan}
                       onRejectMemoryPlan={onRejectMemoryPlan}
+                      onApplyNotePlan={onApplyNotePlan}
+                      onRejectNotePlan={onRejectNotePlan}
                       onCancelPlan={onCancelPlan}
                   onCopyToolParameters={onCopyToolParameters}
                   onContinueWithSelectedPapers={onInlinePaperSelectionContinue}

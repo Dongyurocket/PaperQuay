@@ -427,104 +427,6 @@ async function openAiChatWithAgentFallback(options, messages, requestExtras, all
   }
 }
 
-function buildLibraryAgentModelRequest(options) {
-  const allowPaperContextTool = options.allowContextRequest !== false &&
-    Array.isArray(options.papers) &&
-    options.papers.length > 0;
-  const systemPrompt = [
-    'You are PaperQuay library agent. You may answer directly in natural language for ordinary questions.',
-    'Return JSON only when you need a structured app action with kind "plan", "context-request", or "choice-request", unless you call the request_paper_context tool.',
-    'For direct answers, do not wrap the answer in JSON.',
-    'For plan, return one valid JSON object only, without Markdown fences, comments, trailing commas, or extra prose.',
-    'The exact plan shape is {"kind":"plan","plan":{"tool":"rename|metadata|smart-tags|clean-tags|classify","summary":"...","items":[{"paperId":"...","title":"...","description":"...","before":"...","after":"...","update":{...},"targetCategoryName":"...","targetCategoryParentName":"..."}]}}.',
-    'Never use UI/function names such as rename_papers, update_paper_metadata, update_paper_tags, clean_paper_tags, or classify_papers as plan.tool. Use only rename, metadata, smart-tags, clean-tags, or classify.',
-    'For rename plans, every item must include paperId, before, after, and update.title. update.title must exactly equal after. Do not put the new paper title only in title, description, or after.',
-    'For simple rename rules such as prefix, suffix, or replace, do not call request_paper_context. Use the titles already provided in papers.',
-    'If currentPaperScopeIds is non-empty and the user gives a write action, create exactly one plan item for each valid ID in currentPaperScopeIds unless the user explicitly says otherwise. Do not return an empty items array.',
-    'Rename example: if currentPaperScopeIds is ["paper-a","paper-b"], paper-a title is "Alpha", paper-b title is "Beta", and the user says "前面加 已读", return exactly {"kind":"plan","plan":{"tool":"rename","summary":"给 2 篇选中文献标题前加“已读”。","items":[{"paperId":"paper-a","title":"重命名：Alpha","description":"Alpha -> 已读 Alpha","before":"Alpha","after":"已读 Alpha","update":{"title":"已读 Alpha"}},{"paperId":"paper-b","title":"重命名：Beta","description":"Beta -> 已读 Beta","before":"Beta","after":"已读 Beta","update":{"title":"已读 Beta"}}]}}.',
-    'The user payload includes categories and papers. Each paper may include categoryIds, categories, and categoryPaths.',
-    'If the user names a category or folder, restrict your analysis and any requested paper context to papers whose categoryPaths or categoryIds match that scope. Do not invent category membership.',
-    'The payload may include currentPaperScopeIds and paperScopes. Treat currentPaperScopeIds as the default paper scope for this turn.',
-    'paperScopes may include current and historical paper groups from the same conversation. Use historical scopes only when the conversation context semantically requires earlier or multiple paper groups; do not rely on keyword matching.',
-    'The papers array can include both the current scope and historical-scope candidates. Do not treat every paper in papers as active when currentPaperScopeIds is non-empty.',
-    'If papers is non-empty, do not return kind "choice-request" merely to ask the user to select papers; use the current scope by default and historical scopes only when needed.',
-    'You can retrieve full paper content by calling request_paper_context with mode "pdf-text" and paperIds from papers. PaperQuay will resolve those IDs to cached MinerU parsed content when possible or PDF text otherwise.',
-    'For paper comparison, detailed analysis, methodology, experiments, contributions, limitations, literature review, or "read/summarize/analyze these papers" requests, call request_paper_context in mode "pdf-text" before answering unless contextText is already present for every target paper.',
-    'If the user refers to "刚才", "之前", "前面", "上面", "那几篇", "the previous papers", or asks to compare the current papers with earlier papers in the same conversation, use paperScopes to include the relevant historical paperIds. Do not say you only have IDs; use the IDs to request context.',
-    'When comparing multiple paper groups, load context for all compared paperIds in one request_paper_context call. Then answer with a structured comparison grounded in the loaded context.',
-    'Tool-call example: if currentPaperScopeIds is ["paper-a","paper-b"], paperScopes contains a historical group ["paper-c","paper-d","paper-e"], and the user asks to compare the current two papers with the previous three, call request_paper_context with {"summary":"加载当前论文和上一组论文的正文用于对比","mode":"pdf-text","reason":"The user asked for a cross-turn paper comparison that requires full document content.","paperIds":["paper-a","paper-b","paper-c","paper-d","paper-e"]}.',
-    'For write actions such as rename, metadata updates, tags, or classification, create plan items for currentPaperScopeIds by default unless the user explicitly narrows, broadens, or changes the target scope.',
-    'For kind "answer", the answer string must be non-empty, concrete, and useful to the user.',
-    'If the user asks to rename or change paper titles but does not provide a new title or a clear rename rule, return kind "answer" with one concise clarification question and mention the current target papers.',
-    'Only return kind "choice-request" when you include non-empty userChoices.options with executable instruction values.',
-    'When additional paper content is required and the request_paper_context tool is available, call that tool instead of returning JSON. Its paperIds must be chosen from papers.',
-    'Only return kind "context-request" when additional paper content is required and no tool call is available; include mode, reason, and paperIds chosen from papers. If paperIds are unknown, return paperIds: [] instead of omitting it.',
-    'When currentPaperScopeIds is non-empty and you need paper context for the current turn, use currentPaperScopeIds as request_paper_context.paperIds unless the conversation semantically requires a different historical scope.',
-    'Never ask the user to select papers again when currentPaperScopeIds is non-empty and those IDs exist in papers.',
-    'For answer, plan, and context-request outputs, only reference paper IDs that exist in the provided papers array.',
-    'For write actions, return a reviewable plan and do not claim that changes were already applied.',
-    'Write user-visible answer, summary, title, and description strings in responseLanguage when it is provided.',
-  ].join(' ');
-  const visionAttachments = (Array.isArray(options.messages) ? options.messages : [])
-    .flatMap((message) => Array.isArray(message?.attachments) ? message.attachments : [])
-    .filter((attachment) => {
-      const kind = String(attachment?.kind ?? '').trim();
-      const mimeType = String(attachment?.mimeType ?? '').trim().toLowerCase();
-      const dataUrl = String(attachment?.dataUrl ?? '').trim();
-
-      return dataUrl && (kind === 'image' || kind === 'screenshot' || mimeType.startsWith('image/'));
-    });
-  const messagesForPayload = (Array.isArray(options.messages) ? options.messages : []).map((message) => ({
-    ...message,
-    attachments: Array.isArray(message?.attachments)
-      ? message.attachments.map((attachment) => ({
-        id: attachment?.id,
-        kind: attachment?.kind,
-        name: attachment?.name,
-        mimeType: attachment?.mimeType,
-        size: attachment?.size,
-        summary: attachment?.summary,
-        textContent: attachment?.textContent,
-      }))
-      : undefined,
-  }));
-  const userPayload = {
-    response_format_instruction: allowPaperContextTool
-      ? 'Answer naturally unless a structured app action is needed. If you need paper context, call request_paper_context.'
-      : 'Answer naturally unless a structured app action is needed. Use JSON only for structured app actions.',
-    paperSkill: {
-      currentScopeMeaning: 'currentPaperScopeIds are the papers selected for the current turn',
-      historicalScopeMeaning: 'paperScopes with source "history" are paper groups from earlier turns in this Agent chat',
-      contextTool: allowPaperContextTool ? REQUEST_PAPER_CONTEXT_TOOL_NAME : null,
-      canLoadFullDocumentByPaperId: allowPaperContextTool,
-      fullDocumentMode: 'pdf-text loads MinerU parsed content first when available, then PDF text',
-    },
-    tool: options.tool,
-    instruction: options.instruction,
-    currentPaperScopeIds: options.currentPaperScopeIds,
-    paperScopes: options.paperScopes,
-    responseLanguage: options.responseLanguage,
-    categories: options.categories,
-    papers: options.papers,
-    messages: messagesForPayload,
-  };
-  const messages = [
-    { role: 'system', content: systemPrompt },
-    {
-      role: 'user',
-      content: `${userPayload.response_format_instruction}\n\n${JSON.stringify(userPayload)}`,
-      attachments: visionAttachments,
-    },
-  ];
-  const requestExtras = {
-    tools: allowPaperContextTool ? [REQUEST_PAPER_CONTEXT_TOOL] : undefined,
-    toolChoice: allowPaperContextTool ? 'auto' : undefined,
-    reasoningSummary: 'auto',
-  };
-
-  return { allowPaperContextTool, messages, requestExtras };
-}
-
 async function openAiChatAgentStreamWithFallback(options, messages, requestExtras, allowPaperContextTool) {
   const execute = async (currentOptions) => {
     const request = async (extras) => {
@@ -840,13 +742,13 @@ async function runAgentChatTurn(request, event) {
   }
 }
 
-function normalizeLegacyAgentRequestId(requestId) {
+function normalizeAgentRequestId(requestId) {
   return typeof requestId === 'string' ? requestId.trim().slice(0, 180) : '';
 }
 
-/** 为 legacy Agent 命令注册与 agent_chat_turn_cancel 共用的可取消 controller。 */
-async function withLegacyAgentTurnController(requestId, requestExtras, execute) {
-  const normalizedRequestId = normalizeLegacyAgentRequestId(requestId);
+/** 为 Agent 命令注册与 agent_chat_turn_cancel 共用的可取消 controller。 */
+async function withAgentTurnController(requestId, requestExtras, execute) {
+  const normalizedRequestId = normalizeAgentRequestId(requestId);
 
   if (!normalizedRequestId) {
     return execute();
@@ -869,51 +771,6 @@ async function withLegacyAgentTurnController(requestId, requestExtras, execute) 
       activeAgentTurnControllers.delete(normalizedRequestId);
     }
   }
-}
-
-function parseLibraryAgentModelOutput(data, options) {
-  const thinking = pickChatThinking(data);
-  const contextToolRequest = pickToolCalls(data)
-    .map((toolCall) => contextRequestFromToolCall(toolCall, options))
-    .find(Boolean);
-
-  if (contextToolRequest) {
-    return thinking ? { ...contextToolRequest, thinking } : contextToolRequest;
-  }
-
-  const text = pickChatText(data);
-
-  if (!text) {
-    const currentScopeRequest = contextRequestFromCurrentScope(options);
-
-    if (currentScopeRequest) {
-      return thinking ? { ...currentScopeRequest, thinking } : currentScopeRequest;
-    }
-
-    const emptyAnswer = {
-      kind: 'answer',
-      answer: '模型没有返回可显示的文本内容，也没有发起可执行的工具调用。请换一种问法，或检查当前模型是否支持工具调用。',
-    };
-    return thinking ? { ...emptyAnswer, thinking } : emptyAnswer;
-  }
-
-  try {
-    const parsed = parseJsonObject(text);
-
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      const normalized = normalizeParsedLibraryAgentJson(parsed);
-      return thinking ? { ...normalized, thinking } : normalized;
-    }
-  } catch {
-    // Plain text is a valid direct answer for conversational Agent turns.
-  }
-
-  const answer = {
-    kind: 'answer',
-    answer: text,
-  };
-
-  return thinking ? { ...answer, thinking } : answer;
 }
 
 function stripThinkBlocks(text) {
@@ -1218,8 +1075,34 @@ function buildHtmlVisualQaPrompt(options) {
   ].join('\n');
 }
 
-function buildNotePolishPrompt(scope, evidence) {
-  const sourceInstructions = evidence.length > 0
+function buildNoteDistillPrompt() {
+  // 提炼式摘录两步 CoT（借鉴 llm_wiki ingest）：先识别+清洗，再提炼改写；
+  // 红线：提炼可以自由，证据必须保真——数字/术语/结论不得超出原文。
+  return [
+    'You are an academic note assistant distilling a PDF excerpt into a distilled excerpt card.',
+    'Work in two steps silently, then output only the final JSON:',
+    'Step 1 (recognize): identify what the excerpt is (definition / method / result / claim / dataset / background ...) and clean up OCR or layout artifacts (broken line wraps, hyphenation, citation markers) without altering meaning.',
+    'Step 2 (distill): rewrite the excerpt as a self-contained distilled note.',
+    'Rules:',
+    '- Paraphrase in your own words; do NOT copy sentences verbatim. Keep technical terms, numbers, and conclusions exact.',
+    '- Never add facts, interpretations, or references beyond the excerpt itself.',
+    '- Keep the excerpt language: Chinese excerpt → Chinese note; English excerpt → English note.',
+    '- title: a specific short title (≤ 30 characters) naming the distilled point; never use generic words like "摘录" or "Note".',
+    '- text: concise Markdown — one short summary paragraph plus bullets when the content enumerates.',
+    'Return a JSON object only: {"title":"...", "text":"distilled Markdown"}.',
+  ].join('\n');
+}
+
+function parseNoteDistillResponse(value) {
+  const parsed = parseNotePolishResponse(value);
+  const text = notePolishText(parsed.text);
+  const title = typeof parsed.title === 'string'
+    ? parsed.title.replace(/\s+/g, ' ').trim().slice(0, 60)
+    : '';
+  return { title, text };
+}
+
+function buildNotePolishPrompt(scope, evidence) {const sourceInstructions = evidence.length > 0
     ? [
         'You may use only the source identifiers in the evidence block when a statement depends on source material.',
         'Return the source IDs in citations. Never invent a source ID, paper, page, or quotation.',
@@ -1608,6 +1491,29 @@ function createAiCommands(context) {
       };
     },
 
+    async notes_distill_excerpt_openai_compatible({ options }) {
+      const text = notePolishText(options?.text);
+      if (!text) {
+        throw new Error('请先在 PDF 中选中需要提炼的内容。');
+      }
+      const data = await openAiChat(options, [
+        { role: 'system', content: buildNoteDistillPrompt() },
+        {
+          role: 'user',
+          content: JSON.stringify({
+            paperTitle: typeof options?.paperTitle === 'string' ? options.paperTitle.trim().slice(0, 300) : '',
+            pageLabel: typeof options?.pageLabel === 'string' ? options.pageLabel.trim().slice(0, 30) : '',
+            excerpt: text,
+          }),
+        },
+      ], { responseFormat: { type: 'json_object' }, temperature: 0.2 });
+      const result = parseNoteDistillResponse(pickChatText(data));
+      if (!result.text) {
+        throw new Error('模型没有返回可用的提炼内容，请重试。');
+      }
+      return result;
+    },
+
     async ask_document_openai_compatible_stream({ requestId, options }, event) {
       const sender = event.sender;
       const response = await openAiChat(options, qaMessages(options), { stream: true });
@@ -1774,50 +1680,10 @@ function createAiCommands(context) {
     async decide_library_agent_paper_context_openai_compatible({ options, requestId }) {
       const { messages, requestExtras } = buildPaperSkillDecisionRequest(options);
       requestExtras.timeoutMs = 120_000;
-      return withLegacyAgentTurnController(requestId, requestExtras, async () => {
+      return withAgentTurnController(requestId, requestExtras, async () => {
         const data = await openAiChatWithAgentFallback(options, messages, requestExtras, true);
 
         return parsePaperSkillDecisionOutput(data, options);
-      });
-    },
-
-    async generate_library_agent_plan_openai_compatible({ options, requestId }) {
-      const { allowPaperContextTool, messages, requestExtras } = buildLibraryAgentModelRequest(options);
-      requestExtras.timeoutMs = 300_000;
-      return withLegacyAgentTurnController(requestId, requestExtras, async () => {
-        const data = await openAiChatWithAgentFallback(options, messages, requestExtras, allowPaperContextTool);
-
-        return parseLibraryAgentModelOutput(data, options);
-      });
-    },
-
-    async generate_library_agent_plan_openai_compatible_stream({ requestId, options }, event) {
-      const sender = event.sender;
-      const { allowPaperContextTool, messages, requestExtras } = buildLibraryAgentModelRequest(options);
-
-      return withLegacyAgentTurnController(requestId, requestExtras, async () => {
-        try {
-          const streamResult = await openAiChatAgentStreamWithFallback(
-            options,
-            messages,
-            requestExtras,
-            allowPaperContextTool,
-          );
-          const response = streamResult?.response || streamResult;
-          const effectiveOptions = streamResult?.effectiveOptions || options;
-          const data = await readAgentStreamResponse({ requestId, options: effectiveOptions, response, sender });
-          const result = parseLibraryAgentModelOutput(data, effectiveOptions);
-
-          sender.send('paperquay:event', AGENT_STREAM_EVENT, { requestId, kind: 'done' });
-          return result;
-        } catch (error) {
-          const message = error instanceof Error && error.message
-            ? error.message
-            : String(error ?? 'Agent stream failed');
-
-          sender.send('paperquay:event', AGENT_STREAM_EVENT, { requestId, kind: 'error', error: message });
-          throw error;
-        }
       });
     },
   };

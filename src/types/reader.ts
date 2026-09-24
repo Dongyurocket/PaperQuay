@@ -620,8 +620,6 @@ export interface ReaderSettings {
   summaryModelPresetId: string;
   reviewModelPresetId: string;
   agentModelPresetId: string;
-  /** Temporary P3 compatibility switch for the previous one-shot Agent path. */
-  agentLegacyMode: boolean;
   embeddingBaseUrl: string;
   embeddingModel: string;
   embeddingDimensions: number | null;

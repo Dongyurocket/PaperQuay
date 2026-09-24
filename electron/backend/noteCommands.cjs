@@ -1,5 +1,5 @@
 function createNoteCommands(context) {
-  const { noteStore } = context;
+  const { noteStore, noteVault } = context;
 
   return {
     notes_list({ request = {} }) {
@@ -28,6 +28,34 @@ function createNoteCommands(context) {
 
     notes_backlinks({ noteId }) {
       return noteStore.listBacklinks({ noteId });
+    },
+
+    notes_folders_list() {
+      return noteStore.listFolders();
+    },
+
+    notes_folder_create({ request }) {
+      return noteStore.createFolder(request ?? {});
+    },
+
+    notes_folder_rename({ id, name }) {
+      return noteStore.renameFolder({ id, name });
+    },
+
+    notes_folder_delete({ id }) {
+      return noteStore.deleteFolder({ id });
+    },
+
+    notes_vault_get_settings() {
+      return noteVault.getSettings();
+    },
+
+    async notes_vault_update_settings({ settings }) {
+      return noteVault.updateSettings(settings ?? {});
+    },
+
+    notes_vault_sync_now() {
+      return noteVault.syncNow();
     },
   };
 }

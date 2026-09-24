@@ -1,4 +1,7 @@
 import type { LiteraturePaper } from '../types/library';
+import type { Note, NoteType } from '../types/notes';
+import { getNote, listNotes } from './notes';
+import { createAgentNoteWritePlan } from './agentNotePlan';
 import type { AgentMemoryFile, AgentMemoryWritePlan } from './agentMemory';
 import type {
   AgentToolDefinition,
@@ -54,6 +57,50 @@ function paperMetadata(paper: LiteraturePaper) {
     keywords: paper.keywords,
     tags: paper.tags.map((tag) => tag.name),
     categoryIds: paper.categoryIds,
+  };
+}
+
+const NOTE_TYPES: ReadonlySet<string> = new Set(['highlight', 'area', 'standalone', 'ai-chat']);
+
+function noteTypeValue(value: unknown): NoteType | undefined {
+  const raw = stringValue(value);
+  return NOTE_TYPES.has(raw) ? (raw as NoteType) : undefined;
+}
+
+function noteSummary(note: Note) {
+  const body = (note.contentText ?? note.content ?? '').replace(/\s+/g, ' ').trim();
+  return {
+    id: note.id,
+    title: note.title,
+    type: note.type,
+    paperId: note.paperId || null,
+    tags: note.tags,
+    excerpt: note.excerpt?.trim() || body.slice(0, 200) || null,
+    folderId: note.folderId ?? null,
+    anchorsCount: note.anchors.length,
+    updatedAt: note.updatedAt,
+  };
+}
+
+const AGENT_NOTE_CONTENT_LIMIT = 12000;
+
+function noteDetail(note: Note) {
+  const body = (note.contentText ?? note.content ?? '').trim();
+  return {
+    ...noteSummary(note),
+    content: body.slice(0, AGENT_NOTE_CONTENT_LIMIT),
+    contentTruncated: body.length > AGENT_NOTE_CONTENT_LIMIT,
+    anchors: note.anchors.map((anchor) => ({
+      id: anchor.id,
+      label: anchor.label,
+      paperId: anchor.paperId ?? null,
+      pageIndex: anchor.pageIndex ?? null,
+      blockId: anchor.blockId ?? null,
+      source: anchor.source ?? null,
+    })),
+    linkedNoteIds: note.linkedNoteIds,
+    linkedPaperIds: note.linkedPaperIds,
+    createdAt: note.createdAt,
   };
 }
 
@@ -352,6 +399,116 @@ export function createLibraryAgentTools(options: CreateLibraryAgentToolsOptions)
             })),
           }),
           cards: [{ kind: 'papers', title: `${contexts.length} paper context result(s)` }],
+        };
+      },
+    },
+    {
+      name: 'search_notes',
+      description: 'Search PaperQuay notes by keyword, paper, tag, or note type. Returns note summaries (id, title, type, tags, excerpt); use read_note for the full content of a specific note.',
+      kind: 'read',
+      available: (ctx: AgentToolMountContext) => ctx.localLibraryMode,
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string' },
+          paperId: { type: 'string' },
+          linkedPaperId: { type: 'string' },
+          tag: { type: 'string' },
+          type: { type: 'string', enum: ['highlight', 'area', 'standalone', 'ai-chat'] },
+          limit: { type: 'integer', minimum: 1, maximum: 50 },
+        },
+      },
+      async execute(args): Promise<AgentToolResult> {
+        const limit = boundedInteger(args.limit, 20, 50);
+        const notes = await listNotes({
+          search: stringValue(args.query) || null,
+          paperId: stringValue(args.paperId) || null,
+          linkedPaperId: stringValue(args.linkedPaperId) || null,
+          tag: stringValue(args.tag) || null,
+          type: noteTypeValue(args.type) ?? null,
+          limit,
+        });
+
+        return {
+          content: JSON.stringify({
+            count: notes.length,
+            matches: notes.map(noteSummary),
+          }),
+          cards: [{ kind: 'text', title: `${notes.length} note match(es)` }],
+        };
+      },
+    },
+    {
+      name: 'read_note',
+      description: 'Read the full content of one PaperQuay note by its note ID: title, body text, tags, anchors (PDF page/block locations), and linked notes/papers.',
+      kind: 'read',
+      available: (ctx: AgentToolMountContext) => ctx.localLibraryMode,
+      parameters: {
+        type: 'object',
+        properties: { noteId: { type: 'string' } },
+        required: ['noteId'],
+      },
+      async execute(args): Promise<AgentToolResult> {
+        const noteId = stringValue(args.noteId);
+
+        if (!noteId) {
+          throw new Error('read_note requires a noteId.');
+        }
+
+        const note = await getNote(noteId);
+
+        if (!note || note.deletedAt) {
+          return { content: JSON.stringify({ noteId, note: null, status: 'not_found' }) };
+        }
+
+        return {
+          content: JSON.stringify(noteDetail(note)),
+          cards: [{ kind: 'text', title: note.title, detail: 'Note' }],
+        };
+      },
+    },
+    {
+      name: 'write_notes',
+      description:
+        'Create, update, or delete PaperQuay notes. Produces a reviewable plan only — nothing is written until the user approves. Each operation: {kind:"create",title,content,tags?,paperId?,reason?} | {kind:"update",noteId,title?,content?,tags?,reason?} | {kind:"delete",noteId,reason?}. Content is Markdown/plain text.',
+      kind: 'write',
+      available: (ctx: AgentToolMountContext) => ctx.localLibraryMode,
+      parameters: {
+        type: 'object',
+        properties: {
+          summary: { type: 'string' },
+          operations: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                kind: { type: 'string', enum: ['create', 'update', 'delete'] },
+                noteId: { type: 'string' },
+                title: { type: 'string' },
+                content: { type: 'string' },
+                tags: { type: 'array', items: { type: 'string' } },
+                paperId: { type: 'string' },
+                reason: { type: 'string' },
+              },
+              required: ['kind'],
+            },
+          },
+        },
+        required: ['operations'],
+      },
+      async execute(args): Promise<AgentToolResult> {
+        const notePlan = await createAgentNoteWritePlan({
+          summary: args.summary,
+          operations: args.operations,
+        });
+
+        if (notePlan.operations.length === 0) {
+          throw new Error('write_notes requires at least one valid operation.');
+        }
+
+        return {
+          content: `Created a reviewable note plan with ${notePlan.operations.length} operation(s). No note has been written yet.`,
+          notePlan,
         };
       },
     },

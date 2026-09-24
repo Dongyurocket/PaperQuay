@@ -2,6 +2,7 @@ import type { Editor } from '@tiptap/core';
 import type { LiteraturePaper } from '../../types/library';
 import type { NoteAnchor } from '../../types/notes';
 import { resolveNoteAnchorLocation } from './noteAnchorLocation.ts';
+import { formatBibliographyEntry, type NoteCitationStyle } from './bibliography.ts';
 
 export const REFERENCE_LIST_HEADING = '参考文献';
 export const NOTE_POLISH_ANCHOR_PREFIX = 'note-polish:';
@@ -139,7 +140,11 @@ export function formatReferenceListEntryText(entry: NoteReferenceEntry, paper: L
   return `${parts.join('. ')}.`;
 }
 
-export function buildReferenceListNodes(entries: NoteReferenceEntry[], papers: LiteraturePaper[]) {
+export function buildReferenceListNodes(
+  entries: NoteReferenceEntry[],
+  papers: LiteraturePaper[],
+  style: NoteCitationStyle = 'gbt7714',
+) {
   const paperById = new Map(papers.map((paper) => [paper.id, paper]));
   return [
     {
@@ -150,13 +155,22 @@ export function buildReferenceListNodes(entries: NoteReferenceEntry[], papers: L
     {
       type: 'orderedList',
       attrs: { start: 1 },
-      content: entries.map((entry) => ({
-        type: 'listItem',
-        content: [{
-          type: 'paragraph',
-          content: [{ type: 'text', text: formatReferenceListEntryText(entry, paperById.get(entry.paperId)) }],
-        }],
-      })),
+      content: entries.map((entry) => {
+        const paper = paperById.get(entry.paperId);
+        return {
+          type: 'listItem',
+          content: [{
+            type: 'paragraph',
+            content: [{
+              type: 'text',
+              // 学术化格式（GB/T 7714 默认）；paper 缺失时退化为旧简式格式，避免只剩裸标题。
+              text: paper
+                ? formatBibliographyEntry(paper, entry.label, style)
+                : formatReferenceListEntryText(entry, paper),
+            }],
+          }],
+        };
+      }),
     },
   ];
 }
@@ -177,6 +191,7 @@ export function upsertNoteReferenceList(
   editor: Editor,
   entries: NoteReferenceEntry[],
   papers: LiteraturePaper[],
+  style: NoteCitationStyle = 'gbt7714',
 ): boolean {
   if (entries.length === 0) return false;
 
@@ -201,6 +216,6 @@ export function upsertNoteReferenceList(
     editor.chain().deleteRange({ from, to }).run();
   }
 
-  editor.chain().focus('end').insertContent(buildReferenceListNodes(entries, papers)).run();
+  editor.chain().focus('end').insertContent(buildReferenceListNodes(entries, papers, style)).run();
   return true;
 }

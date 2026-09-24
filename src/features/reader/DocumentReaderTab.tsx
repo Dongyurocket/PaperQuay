@@ -149,6 +149,8 @@ import {
   createNoteAnchorFromSelection,
   titleFromText,
 } from '../notes/noteUtils';
+import { buildDistilledExcerptAppendPatch, buildDistilledExcerptNoteCreateRequest, isExcerptCard } from '../notes/noteDistill';
+import { distillExcerpt } from '../../services/noteDistill';
 import {
   chunkItems,
   getModelRuntimeConfig,
@@ -445,6 +447,7 @@ function DocumentReaderTab({
   }, [onAttachTranslatedPdf, currentDocument]);
   const [capturingScreenshot, setCapturingScreenshot] = useState(false);
   const [selectedExcerpt, setSelectedExcerpt] = useState<SelectedExcerpt | null>(null);
+  const [selectionDistilling, setSelectionDistilling] = useState(false);
   const [pendingNoteAnchorInsert, setPendingNoteAnchorInsert] = useState<NoteAnchorInsertRequest | null>(null);
   const [pendingBlockAnchorJump, setPendingBlockAnchorJump] =
     useState<JumpToNoteAnchorEventDetail | null>(null);
@@ -2854,6 +2857,84 @@ function DocumentReaderTab({
     setAssistantActivePanel,
   ]);
 
+  const activeExcerptCard = (() => {
+    const target = resolveReaderNoteAnchorTarget(notes, activeNoteId);
+    return isExcerptCard(target) ? target : null;
+  })();
+
+  const handleDistillSelectionToNote = useCallback(async (options?: {
+    excerpt?: SelectedExcerpt;
+    appendToActiveCard?: boolean;
+  }) => {
+    const excerpt = options?.excerpt ?? selectedExcerpt;
+
+    if (!excerpt?.text.trim()) {
+      setStatusMessage(lRef.current('请先在 PDF 或正文中划词', 'Select text in the PDF or document first'));
+      return;
+    }
+    if (selectionDistilling) return;
+
+    const appendTarget = options?.appendToActiveCard
+      ? (() => {
+          const target = resolveReaderNoteAnchorTarget(notes, activeNoteId);
+          return isExcerptCard(target) ? target : null;
+        })()
+      : null;
+
+    setSelectionDistilling(true);
+    setStatusMessage(lRef.current('正在提炼摘录…', 'Distilling excerpt…'));
+    try {
+      const anchor = createNoteAnchorFromSelection(excerpt, currentDocument.workspaceId, currentDocument.title);
+      const distilled = await distillExcerpt({
+        text: excerpt.text,
+        paperTitle: currentDocument.title,
+        pageLabel: anchor.label,
+      });
+      if (appendTarget) {
+        // 多段累加：新锚点 + 提炼正文追加到当前摘录卡，已有锚点只增不改。
+        const { patch } = buildDistilledExcerptAppendPatch({
+          note: appendTarget,
+          paperId: currentDocument.workspaceId,
+          selectedExcerpt: excerpt,
+          sourceTitle: currentDocument.title,
+          distilledText: distilled.text,
+        });
+        await handleUpdateNote(appendTarget.id, patch);
+        setStatusMessage(lRef.current('已追加提炼到当前摘录卡', 'Appended the distilled excerpt to the current card'));
+      } else {
+        const created = await handleCreateNote(
+          buildDistilledExcerptNoteCreateRequest({
+            paperId: currentDocument.workspaceId,
+            selectedExcerpt: excerpt,
+            sourceTitle: currentDocument.title,
+            distilledTitle: distilled.title,
+            distilledText: distilled.text,
+          }),
+        );
+        if (created) {
+          setStatusMessage(lRef.current('已生成提炼式摘录卡', 'Created a distilled excerpt card'));
+        }
+      }
+    } catch (error) {
+      setStatusMessage(
+        error instanceof Error
+          ? error.message
+          : lRef.current('提炼摘录失败', 'Failed to distill the excerpt'),
+      );
+    } finally {
+      setSelectionDistilling(false);
+    }
+  }, [
+    activeNoteId,
+    currentDocument.title,
+    currentDocument.workspaceId,
+    handleCreateNote,
+    handleUpdateNote,
+    notes,
+    selectedExcerpt,
+    selectionDistilling,
+  ]);
+
   const handleAddBlockToNote = useCallback(
     (block: PositionedMineruBlock, selection: TextSelectionPayload) => {
       const normalizedText = normalizeSelectedText(selection.text);
@@ -4136,6 +4217,10 @@ function DocumentReaderTab({
         onOpenPreferences={onOpenPreferences}
         notes={notes}
         onAddSelectionToNote={() => void handleAddSelectionToNote()}
+        onDistillSelectionToNote={() => void handleDistillSelectionToNote()}
+        onDistillSelectionAppendToCard={() => void handleDistillSelectionToNote({ appendToActiveCard: true })}
+        activeExcerptCardTitle={activeExcerptCard?.title ?? null}
+        selectionDistilling={selectionDistilling}
         annotations={annotations}
         selectedAnnotationId={selectedAnnotationId}
         onSelectAnnotation={handleSelectAnnotation}

@@ -34,7 +34,7 @@ const options = parseArgs();
 const service = new PaperQuayKnowledgeService({ dataDir: options.dataDir });
 
 const SERVER_NAME = 'paperquay-knowledge-mcp';
-const SERVER_VERSION = '0.1.48';
+const SERVER_VERSION = '0.2.0';
 
 const ALLOW_WHILE_APP_RUNNING_SCHEMA = {
   type: 'boolean',
@@ -162,6 +162,137 @@ const TOOLS = [
           default: 10,
         },
       },
+    },
+  },
+  {
+    name: 'create_note',
+    description:
+      'Create a new PaperQuay note. Tags and [[wiki-links]] inside the content are extracted automatically, the full-text index is updated, and the note is linked to a paper when paperId is given (otherwise it becomes a global note). Refused while the PaperQuay desktop app is running unless allowWhileAppRunning is true (the app UI holds an in-memory snapshot and will not show external writes until reload).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        title: {
+          type: 'string',
+          description: 'Note title. Falls back to "Untitled Note" when empty but content is given.',
+        },
+        content: {
+          type: 'string',
+          description: 'Note body as Markdown/plain text. #tags and [[note titles]] inside are parsed into tags and wiki links.',
+        },
+        tags: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Explicit tags (leading # is stripped). Merged with #tags found in the content.',
+        },
+        paperId: {
+          type: 'string',
+          description: 'Paper ID to attach the note to. Omit for a global note.',
+        },
+        type: {
+          type: 'string',
+          enum: ['standalone', 'highlight', 'area', 'ai-chat'],
+          description: 'Note type; defaults to standalone.',
+        },
+        folderId: {
+          type: 'string',
+          description: 'Note folder ID (see list_note_folders). Omit for uncategorized.',
+        },
+        allowWhileAppRunning: ALLOW_WHILE_APP_RUNNING_SCHEMA,
+      },
+    },
+  },
+  {
+    name: 'update_note',
+    description:
+      'Update an existing note by noteId. Only the provided fields change: title, content (Markdown/plain text; replacing content clears the stored rich-text JSON so the editor rebuilds it), tags (full replacement, leading # stripped), and/or folderId (pass an empty string to move the note to uncategorized). At least one field is required. Refused while the PaperQuay desktop app is running unless allowWhileAppRunning is true.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        noteId: { type: 'string', description: 'The unique ID of the note (see search_notes).' },
+        title: { type: 'string' },
+        content: { type: 'string', description: 'New note body as Markdown/plain text.' },
+        tags: { type: 'array', items: { type: 'string' }, description: 'Full tag list, replacing the existing one.' },
+        folderId: { type: 'string', description: 'Move the note into this folder (see list_note_folders); empty string moves it to uncategorized.' },
+        allowWhileAppRunning: ALLOW_WHILE_APP_RUNNING_SCHEMA,
+      },
+      required: ['noteId'],
+    },
+  },
+  {
+    name: 'delete_note',
+    description:
+      'Soft-delete a note by noteId (the note is marked deleted and removed from the full-text index). Refused while the PaperQuay desktop app is running unless allowWhileAppRunning is true.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        noteId: { type: 'string', description: 'The unique ID of the note (see search_notes).' },
+        allowWhileAppRunning: ALLOW_WHILE_APP_RUNNING_SCHEMA,
+      },
+      required: ['noteId'],
+    },
+  },
+  {
+    name: 'list_note_tags',
+    description:
+      'List all note tags with usage counts, optionally filtered to notes of one paper. Read-only. Use it to discover existing tags before create_note/update_note.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        paperId: {
+          type: 'string',
+          description: 'Optional paper ID to only count tags on that paper\'s notes.',
+        },
+      },
+    },
+  },
+  {
+    name: 'list_note_folders',
+    description:
+      'List the note folder tree (id, name, parentId, sortOrder). Read-only. Use it to discover folderId values before create_note/update_note/create_note_folder.',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  {
+    name: 'create_note_folder',
+    description:
+      'Create a note folder, optionally nested under parentId. Refused while the PaperQuay desktop app is running unless allowWhileAppRunning is true.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Folder name.' },
+        parentId: { type: 'string', description: 'Optional parent folder ID (see list_note_folders).' },
+        allowWhileAppRunning: ALLOW_WHILE_APP_RUNNING_SCHEMA,
+      },
+      required: ['name'],
+    },
+  },
+  {
+    name: 'rename_note_folder',
+    description:
+      'Rename a note folder by folderId. Refused while the PaperQuay desktop app is running unless allowWhileAppRunning is true.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        folderId: { type: 'string', description: 'The unique ID of the folder (see list_note_folders).' },
+        name: { type: 'string', description: 'New folder name.' },
+        allowWhileAppRunning: ALLOW_WHILE_APP_RUNNING_SCHEMA,
+      },
+      required: ['folderId', 'name'],
+    },
+  },
+  {
+    name: 'delete_note_folder',
+    description:
+      'Delete a note folder and all its subfolders; notes inside are moved to uncategorized (not deleted). Refused while the PaperQuay desktop app is running unless allowWhileAppRunning is true.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        folderId: { type: 'string', description: 'The unique ID of the folder (see list_note_folders).' },
+        allowWhileAppRunning: ALLOW_WHILE_APP_RUNNING_SCHEMA,
+      },
+      required: ['folderId'],
     },
   },
   {
@@ -466,6 +597,22 @@ async function handleToolCall(name, args) {
       return service.readPaperContent(args || {});
     case 'search_notes':
       return service.searchNotes(args || {});
+    case 'create_note':
+      return service.createNote(args || {});
+    case 'update_note':
+      return service.updateNote(args || {});
+    case 'delete_note':
+      return service.deleteNote(args || {});
+    case 'list_note_tags':
+      return service.listNoteTags(args || {});
+    case 'list_note_folders':
+      return service.listNoteFolders(args || {});
+    case 'create_note_folder':
+      return service.createNoteFolder(args || {});
+    case 'rename_note_folder':
+      return service.renameNoteFolder(args || {});
+    case 'delete_note_folder':
+      return service.deleteNoteFolder(args || {});
     case 'zotero_list_collections':
       return service.zoteroListCollections(args || {});
     case 'zotero_search_items':

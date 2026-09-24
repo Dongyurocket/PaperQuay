@@ -110,6 +110,19 @@ function createSchema(db) {
   ensureColumn(db, 'note_links', 'link_text', 'TEXT');
   ensureColumn(db, 'note_links', 'created_at', 'INTEGER NOT NULL DEFAULT 0');
 
+  // 文件夹树入库：此前只存 localStorage，换设备/清缓存即丢失，且笔记的
+  // folder_id 外键没有对应实体可查。删除文件夹时子文件夹级联删除、笔记归入未分类。
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS note_folders (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      parent_id TEXT,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL DEFAULT 0,
+      updated_at INTEGER NOT NULL DEFAULT 0
+    );
+  `);
+
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_notes_paper_id ON notes(paper_id, updated_at DESC);
     CREATE INDEX IF NOT EXISTS idx_notes_linked_paper_id ON notes(linked_paper_id, updated_at DESC);
@@ -120,6 +133,7 @@ function createSchema(db) {
     CREATE INDEX IF NOT EXISTS idx_note_tags_tag ON note_tags(tag);
     CREATE INDEX IF NOT EXISTS idx_note_links_target ON note_links(target_note_id);
     CREATE INDEX IF NOT EXISTS idx_note_paper_links_paper_id ON note_paper_links(paper_id);
+    CREATE INDEX IF NOT EXISTS idx_note_folders_parent ON note_folders(parent_id, sort_order);
   `);
 
   try {
@@ -834,6 +848,32 @@ function getNoteById(db, noteId, options = {}) {
   return hydrateNotes(db, row ? [row] : [])[0] ?? null;
 }
 
+function rowToFolder(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    name: row.name,
+    parentId: row.parent_id ?? null,
+    sortOrder: Number(row.sort_order) || 0,
+    createdAt: Number(row.created_at) || 0,
+    updatedAt: Number(row.updated_at) || 0,
+  };
+}
+
+function getFolderDescendantIds(db, folderId) {
+  const ids = [];
+  const stack = [folderId];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    const rows = db.prepare('SELECT id FROM note_folders WHERE parent_id = ?').all(current);
+    for (const row of rows) {
+      ids.push(row.id);
+      stack.push(row.id);
+    }
+  }
+  return ids;
+}
+
 function createNoteStore(appPaths) {
   if (!appPaths?.notesDatabasePath) {
     throw new Error('notesDatabasePath is required');
@@ -943,6 +983,68 @@ function createNoteStore(appPaths) {
     deleteFtsRow(db, noteId);
   }
 
+  function listFolders() {
+    return db.prepare(`
+      SELECT id, name, parent_id, sort_order, created_at, updated_at
+      FROM note_folders
+      ORDER BY sort_order ASC, created_at ASC
+    `).all().map(rowToFolder);
+  }
+
+  function createFolder(request) {
+    const name = cleanString(request?.name);
+    if (!name) throw new Error('folder name is required');
+    const parentId = cleanString(request?.parentId) || null;
+
+    if (parentId) {
+      const parent = db.prepare('SELECT id FROM note_folders WHERE id = ?').get(parentId);
+      if (!parent) throw new Error(`Parent folder does not exist: ${parentId}`);
+    }
+
+    const timestamp = now();
+    const folderId = cleanString(request?.id) || id('note-folder');
+    const maxSort = db.prepare(
+      'SELECT COALESCE(MAX(sort_order), 0) AS maxSort FROM note_folders WHERE parent_id IS ?',
+    ).get(parentId);
+
+    db.prepare(`
+      INSERT INTO note_folders (id, name, parent_id, sort_order, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(folderId, name, parentId, (Number(maxSort?.maxSort) || 0) + 1, timestamp, timestamp);
+
+    return rowToFolder(db.prepare('SELECT * FROM note_folders WHERE id = ?').get(folderId));
+  }
+
+  function renameFolder(request) {
+    const folderId = cleanString(request?.id);
+    const name = cleanString(request?.name);
+    if (!folderId) throw new Error('folder id is required');
+    if (!name) throw new Error('folder name is required');
+
+    const result = db.prepare('UPDATE note_folders SET name = ?, updated_at = ? WHERE id = ?')
+      .run(name, now(), folderId);
+    if (result.changes === 0) throw new Error(`Folder does not exist: ${folderId}`);
+    return rowToFolder(db.prepare('SELECT * FROM note_folders WHERE id = ?').get(folderId));
+  }
+
+  // 删除文件夹及其全部后代；其中的笔记归入未分类（folder_id 置 NULL）。
+  function deleteFolder(request) {
+    const folderId = cleanString(request?.id);
+    if (!folderId) throw new Error('folder id is required');
+
+    const existing = db.prepare('SELECT id FROM note_folders WHERE id = ?').get(folderId);
+    if (!existing) throw new Error(`Folder does not exist: ${folderId}`);
+
+    return withTransaction(db, () => {
+      const removedIds = [folderId, ...getFolderDescendantIds(db, folderId)];
+      const placeholders = removedIds.map(() => '?').join(',');
+      db.prepare(`UPDATE notes SET folder_id = NULL, updated_at = ? WHERE folder_id IN (${placeholders})`)
+        .run(now(), ...removedIds);
+      db.prepare(`DELETE FROM note_folders WHERE id IN (${placeholders})`).run(...removedIds);
+      return { deletedFolderIds: removedIds };
+    });
+  }
+
   function close() {
     if (db.isOpen) {
       db.close();
@@ -951,8 +1053,12 @@ function createNoteStore(appPaths) {
 
   return {
     close,
+    createFolder,
     createNote,
+    deleteFolder,
     deleteNote,
+    listFolders,
+    renameFolder,
     getNote(request) {
       return getNoteById(db, request?.id, {
         includeDeleted: request?.includeDeleted === true,

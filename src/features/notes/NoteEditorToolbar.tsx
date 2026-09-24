@@ -36,6 +36,7 @@ import {
   type NoteTemplate,
 } from './noteEditorUtils';
 import { extractNoteReferences, upsertNoteReferenceList } from './noteReferences';
+import { NOTE_CITATION_STYLE_OPTIONS, type NoteCitationStyle } from './bibliography';
 import type { LiteraturePaper } from '../../types/library';
 
 const TOOLBAR_TEXT = {
@@ -137,6 +138,8 @@ export function NoteEditorToolbar({
   polishActive = false,
   polishDisabled = false,
   papers = [],
+  citationStyle = 'gbt7714',
+  onCitationStyleChange,
   referencePickerOpen = false,
   onReferencePickerToggle,
   onReferencePickerClose,
@@ -146,6 +149,8 @@ export function NoteEditorToolbar({
   polishActive?: boolean;
   polishDisabled?: boolean;
   papers?: LiteraturePaper[];
+  citationStyle?: NoteCitationStyle;
+  onCitationStyleChange?: (style: NoteCitationStyle) => void;
   referencePickerOpen?: boolean;
   onReferencePickerToggle?: () => void;
   onReferencePickerClose?: () => void;
@@ -304,7 +309,7 @@ export function NoteEditorToolbar({
       setReferenceListHint('笔记中还没有参考文献引用，请先插入引用。');
       return;
     }
-    upsertNoteReferenceList(editor, entries, papers);
+    upsertNoteReferenceList(editor, entries, papers, citationStyle);
     closeReferencePicker();
   };
   const submitInputMenu = () => {
@@ -458,6 +463,26 @@ export function NoteEditorToolbar({
               ))}
             </div>
             <div className="border-t border-[var(--pq-border-subtle)] p-2">
+              <div className="mb-2 flex items-center gap-1.5">
+                <span className="text-[11px] text-[var(--pq-text-faint)]">引用样式</span>
+                <div className="ml-auto flex gap-1">
+                  {NOTE_CITATION_STYLE_OPTIONS.map((option) => (
+                    <button
+                      key={option.id}
+                      type="button"
+                      onClick={() => onCitationStyleChange?.(option.id)}
+                      className={cn(
+                        'h-6 rounded px-1.5 text-[11px] transition',
+                        citationStyle === option.id
+                          ? 'bg-[var(--pq-accent-bg)] font-medium text-[var(--pq-accent)]'
+                          : 'text-[var(--pq-text-faint)] hover:bg-[var(--pq-bg-secondary)] hover:text-[var(--pq-text)]',
+                      )}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
               <button
                 type="button"
                 className="pq-button h-7 w-full px-2 text-xs"

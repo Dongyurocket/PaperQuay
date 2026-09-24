@@ -78,7 +78,20 @@ test('node builders create stable Tiptap JSON blocks', () => {
 test('note templates expose expected slash-command templates', () => {
   assert.deepEqual(
     NOTE_TEMPLATES.map((template) => template.id),
-    ['literature-review', 'method-analysis', 'experiment-note', 'qa-summary'],
+    [
+      'literature-review',
+      'method-analysis',
+      'experiment-note',
+      'qa-summary',
+      // 页面类型模板（docs/notes-charter.md §1）
+      'paper-card',
+      'concept',
+      'synthesis',
+      'excerpt-card',
+      'index-page',
+      'research-log',
+      'overview-page',
+    ],
   );
 });
 

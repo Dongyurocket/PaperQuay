@@ -97,6 +97,12 @@ import {
 import { NoteBlockControls } from './NoteBlockControls';
 import { NoteEditorToolbar } from './NoteEditorToolbar';
 import { extractNoteReferences, upsertNoteReferenceList } from './noteReferences';
+import {
+  loadNoteCitationStyle,
+  normalizeNoteCitationStyle,
+  saveNoteCitationStyle,
+  type NoteCitationStyle,
+} from './bibliography';
 import { buildNotePolishNodes, normalizeNotePolishScope } from './notePolish';
 import { polishNote } from '../../services/notePolish';
 import {
@@ -681,6 +687,8 @@ export function NoteEditor({
   const handledAnchorInsertRequestRef = useRef('');
   const polishSelectionRef = useRef<{ from: number; to: number } | null>(null);
   const pendingAnchorsRef = useRef(new Map<string, NoteAnchor>());
+  const [citationStyle, setCitationStyle] = useState<NoteCitationStyle>(() => loadNoteCitationStyle());
+  const latestCitationStyleRef = useRef<NoteCitationStyle>(citationStyle);
 
   useEffect(() => {
     if (editorSourceId && editorSourceIdRef.current !== editorSourceId) {
@@ -695,6 +703,10 @@ export function NoteEditor({
   useEffect(() => {
     latestAnchorsRef.current = note?.anchors ?? [];
   }, [note?.anchors]);
+
+  useEffect(() => {
+    latestCitationStyleRef.current = citationStyle;
+  }, [citationStyle]);
 
   useEffect(() => {
     if (!tagEditorOpen) return undefined;
@@ -773,6 +785,7 @@ export function NoteEditor({
             editor,
             extractNoteReferences(editor.getJSON(), latestAnchorsRef.current),
             latestCandidatesRef.current.papers ?? [],
+            latestCitationStyleRef.current,
           );
           return;
         }
@@ -821,6 +834,8 @@ export function NoteEditor({
     }),
     PaperReference.configure({
       HTMLAttributes: { class: 'pq-tiptap-token pq-tiptap-paper-ref' },
+      citationStyle: () => latestCitationStyleRef.current,
+      papers: () => latestCandidatesRef.current.papers ?? [],
       items: (query) => {
         const normalized = normalizeSuggestionQuery(query, ['@']);
         return latestCandidatesRef.current.papers
@@ -902,6 +917,19 @@ export function NoteEditor({
       lastSelectionRef.current = { from, to };
     },
   }, [note?.id]);
+
+  // 引用样式切换：持久化到 localStorage，并通过 meta 事务触发编号 decoration 重建。
+  const handleCitationStyleChange = useCallback(
+    (style: NoteCitationStyle) => {
+      const normalized = normalizeNoteCitationStyle(style);
+      saveNoteCitationStyle(normalized);
+      setCitationStyle(normalized);
+      if (editor && !editor.isDestroyed) {
+        editor.view.dispatch(editor.state.tr.setMeta('noteCitationStyleChanged', true));
+      }
+    },
+    [editor],
+  );
 
   const openPolish = useCallback(() => {
     if (!editor || editor.isDestroyed || !note) return;
@@ -1806,6 +1834,8 @@ export function NoteEditor({
         polishActive={polishOpen}
         polishDisabled={!note || polishLoading}
         papers={papers ?? []}
+        citationStyle={citationStyle}
+        onCitationStyleChange={handleCitationStyleChange}
         referencePickerOpen={referencePickerOpen}
         onReferencePickerToggle={() => setReferencePickerOpen((open) => !open)}
         onReferencePickerClose={() => setReferencePickerOpen(false)}

@@ -620,24 +620,6 @@ export function ReaderPreferencesModelsSection({
           })}
         </div>
       </SettingsField>
-
-      <SettingsField
-        label={l('Agent 兼容模式', 'Agent Compatibility')}
-        description={l(
-          '默认使用多轮 ReAct 工具循环。仅在排查兼容问题时切回旧的一次性 Agent 路径。',
-          'The multi-turn ReAct loop is used by default. Switch back to the previous one-shot Agent path only for compatibility troubleshooting.',
-        )}
-      >
-        <ToggleRow
-          title={l('使用旧版 Agent 路径', 'Use legacy Agent path')}
-          description={l(
-            '旧路径保留现有审批语义，但不使用多轮只读工具、运行轨迹或 token 用量。',
-            'The legacy path keeps existing approval semantics but does not use multi-turn read tools, run traces, or token accounting.',
-          )}
-          checked={settings.agentLegacyMode}
-          onChange={(agentLegacyMode) => onSettingChange('agentLegacyMode', agentLegacyMode)}
-        />
-      </SettingsField>
     </>
   );
 }

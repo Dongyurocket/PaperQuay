@@ -93,3 +93,67 @@ test('anchors keep pdfLocation and normalize invalid position fields', () => {
     rmSync(dataDir, { recursive: true, force: true });
   }
 });
+
+test('note folders support create/list/rename and cascade delete moves notes to uncategorized', () => {
+  const { dataDir, store } = createStore();
+
+  try {
+    const parent = store.createFolder({ name: '论文笔记' });
+    const child = store.createFolder({ name: '深度模型', parentId: parent.id });
+
+    let folders = store.listFolders();
+    assert.equal(folders.length, 2);
+    assert.equal(folders[0].id, parent.id);
+    assert.equal(folders[0].sortOrder, 1);
+    assert.equal(folders[1].parentId, parent.id);
+
+    const note = store.createNote({
+      paperId: 'native-library:paper-1',
+      type: 'standalone',
+      title: '子文件夹里的笔记',
+      content: '正文',
+      folderId: child.id,
+    });
+    assert.equal(note.folderId, child.id);
+
+    const renamed = store.renameFolder({ id: parent.id, name: '读论文' });
+    assert.equal(renamed.name, '读论文');
+
+    const { deletedFolderIds } = store.deleteFolder({ id: parent.id });
+    assert.deepEqual(new Set(deletedFolderIds), new Set([parent.id, child.id]));
+
+    folders = store.listFolders();
+    assert.equal(folders.length, 0);
+
+    // 笔记不被删除，而是归入未分类。
+    const reloaded = store.getNote({ id: note.id });
+    assert.equal(reloaded.folderId, null);
+
+    assert.throws(() => store.createFolder({ name: '' }), /folder name is required/);
+    assert.throws(
+      () => store.createFolder({ name: '孤儿', parentId: 'missing-folder' }),
+      /Parent folder does not exist/,
+    );
+    assert.throws(() => store.deleteFolder({ id: 'missing-folder' }), /Folder does not exist/);
+  } finally {
+    store.close();
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('note folders can be created with an explicit id for localStorage migration', () => {
+  const { dataDir, store } = createStore();
+
+  try {
+    const migrated = store.createFolder({ id: 'note-folder-legacy-1', name: '迁移来的' });
+    assert.equal(migrated.id, 'note-folder-legacy-1');
+
+    // 迁移后新建文件夹走自动生成的 id，不与迁移 id 冲突。
+    const fresh = store.createFolder({ name: '新建的' });
+    assert.notEqual(fresh.id, 'note-folder-legacy-1');
+    assert.ok(fresh.id);
+  } finally {
+    store.close();
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});

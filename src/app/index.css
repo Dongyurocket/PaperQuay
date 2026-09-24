@@ -1425,6 +1425,22 @@ textarea,
   color: var(--pq-warning);
 }
 
+/* 学术引用模式（痛点 7）：隐藏 @标题 芯片文本，用 ::after 呈现 decoration 注入的
+   [n]（顺序编码制）或 (作者, 年)（APA）。编号不写进文档，纯渲染层。 */
+.pq-tiptap-paper-ref.pq-paper-ref--citation {
+  background: transparent;
+  color: var(--pq-accent);
+  font-weight: 500;
+}
+
+.pq-tiptap-paper-ref.pq-paper-ref--citation .pq-paper-ref-label {
+  display: none;
+}
+
+.pq-tiptap-paper-ref.pq-paper-ref--citation::after {
+  content: attr(data-cite-text);
+}
+
 .pq-tiptap-note-anchor {
   background: var(--pq-accent-bg);
   color: var(--pq-accent);

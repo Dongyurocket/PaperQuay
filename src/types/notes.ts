@@ -93,6 +93,15 @@ export interface NoteTagSummary {
   count: number;
 }
 
+export interface NoteFolder {
+  id: string;
+  name: string;
+  parentId: string | null;
+  sortOrder: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface ListNotesRequest {
   paperId?: string | null;
   linkedPaperId?: string | null;

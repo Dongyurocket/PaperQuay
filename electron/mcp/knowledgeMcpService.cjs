@@ -15,10 +15,34 @@ const {
 } = require('../backend/zoteroLocal.cjs');
 const { execFileSync } = require('node:child_process');
 const { attachCategoryCounts, createLibraryStore, normalizeAuthor, normalizeTag } = require('../backend/libraryStore.cjs');
+const { createNoteStore } = require('../backend/noteStore.cjs');
 const { id, now, safeFileName, fileNameFromPath, hashBytes, isPdf } = require('../backend/utils.cjs');
 
 function cleanString(value) {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+// 笔记对外返回的精简形状：避免 contentJson 等大字段撑爆 MCP 响应。
+function slimNote(note) {
+  if (!note || typeof note !== 'object') return null;
+  return {
+    id: note.id,
+    paperId: note.paperId,
+    linkedPaperId: note.linkedPaperId ?? null,
+    type: note.type,
+    title: note.title,
+    content: note.contentText || note.content || '',
+    excerpt: note.excerpt ?? null,
+    folderId: note.folderId ?? null,
+    tags: Array.isArray(note.tags) ? note.tags : [],
+    linkedNoteIds: Array.isArray(note.linkedNoteIds) ? note.linkedNoteIds : [],
+    linkedPaperIds: Array.isArray(note.linkedPaperIds) ? note.linkedPaperIds : [],
+    isFavorite: Boolean(note.isFavorite),
+    isPinned: Boolean(note.isPinned),
+    wordCount: note.wordCount ?? 0,
+    createdAt: note.createdAt,
+    updatedAt: note.updatedAt,
+  };
 }
 
 function buildPaperAuthors(item) {
@@ -1441,6 +1465,147 @@ class PaperQuayKnowledgeService {
     } finally {
       store.close();
     }
+  }
+
+  // 笔记库与文库不同：noteStore 逐条 SQL 写入而非全量重写，桌面应用不会
+  // 静默覆盖外部写入。但应用内的笔记列表/编辑器持有内存快照，外部写入后
+  // 界面需重新加载才能看到；因此仍走同一道「显式拒绝 + 可覆盖」护栏。
+  withWritableNoteStore(mutator, { allowWhileAppRunning = false } = {}) {
+    const guard = this.assertWritable(allowWhileAppRunning);
+    const store = createNoteStore(this.appPaths);
+    try {
+      const result = mutator(store);
+      if (guard.warning && result && typeof result === 'object' && !Array.isArray(result)) {
+        return { ...result, warning: guard.warning };
+      }
+      return result;
+    } finally {
+      store.close();
+    }
+  }
+
+  // ---- 笔记写入工具 ----
+  // 复用 noteStore 写路径：FTS 同步、双链解析、标签归一化全部与桌面端一致。
+
+  createNote({ title = '', content = '', tags = [], paperId = '', type = '', folderId = '', allowWhileAppRunning = false } = {}) {
+    const cleanTitle = cleanString(title);
+    const cleanContent = typeof content === 'string' ? content : String(content ?? '');
+    if (!cleanTitle && !cleanContent.trim()) {
+      throw new Error('create_note requires a non-empty title or content');
+    }
+    const cleanTags = (Array.isArray(tags) ? tags : [])
+      .map((tag) => cleanString(tag).replace(/^#/, ''))
+      .filter(Boolean)
+      .slice(0, 30);
+    const noteType = cleanString(type);
+    if (noteType && !['highlight', 'area', 'standalone', 'ai-chat'].includes(noteType)) {
+      throw new Error(`Unsupported note type: ${noteType}`);
+    }
+    return this.withWritableNoteStore((store) => {
+      const note = store.createNote({
+        paperId: cleanString(paperId) || 'global-notes',
+        type: noteType || 'standalone',
+        title: cleanTitle || 'Untitled Note',
+        content: cleanContent,
+        contentText: cleanContent,
+        contentJson: null,
+        contentHtml: null,
+        tags: cleanTags,
+        folderId: cleanString(folderId) || null,
+      });
+      return { note: slimNote(note), noteId: note.id };
+    }, { allowWhileAppRunning });
+  }
+
+  updateNote({ noteId = '', title, content, tags, folderId, allowWhileAppRunning = false } = {}) {
+    const idValue = cleanString(noteId);
+    if (!idValue) throw new Error('update_note requires noteId');
+    const patch = {};
+    if (typeof title === 'string') patch.title = title;
+    if (typeof content === 'string') {
+      patch.content = content;
+      patch.contentText = content;
+      // 与内置 Agent 一致：正文被替换时清空结构化 JSON，让编辑器从新文本重建。
+      patch.contentJson = null;
+      patch.contentHtml = null;
+    }
+    if (Array.isArray(tags)) {
+      patch.tags = tags.map((tag) => cleanString(tag).replace(/^#/, '')).filter(Boolean).slice(0, 30);
+    }
+    // 传空字符串表示移动到「未分类」。
+    if (typeof folderId === 'string') {
+      patch.folderId = cleanString(folderId) || null;
+    }
+    if (Object.keys(patch).length === 0) {
+      throw new Error('update_note requires at least one of title, content, tags, folderId');
+    }
+    return this.withWritableNoteStore((store) => {
+      const note = store.updateNote({ id: idValue, patch });
+      return { note: slimNote(note), noteId: note.id };
+    }, { allowWhileAppRunning });
+  }
+
+  deleteNote({ noteId = '', allowWhileAppRunning = false } = {}) {
+    const idValue = cleanString(noteId);
+    if (!idValue) throw new Error('delete_note requires noteId');
+    return this.withWritableNoteStore((store) => {
+      const existing = store.getNote({ id: idValue });
+      if (!existing) throw new Error(`Note does not exist: ${idValue}`);
+      store.deleteNote({ id: idValue });
+      return { deleted: true, noteId: idValue, title: existing.title };
+    }, { allowWhileAppRunning });
+  }
+
+  listNoteTags({ paperId = '' } = {}) {
+    const store = createNoteStore(this.appPaths);
+    try {
+      const tags = store.listTags({ paperId: cleanString(paperId) });
+      return { tags, total: tags.length };
+    } finally {
+      store.close();
+    }
+  }
+
+  // ---- 笔记文件夹工具 ----
+  // 文件夹树已入库（note_folders 表），外部 agent 可与桌面端维护同一套组织结构。
+
+  listNoteFolders() {
+    const store = createNoteStore(this.appPaths);
+    try {
+      const folders = store.listFolders();
+      return { folders, total: folders.length };
+    } finally {
+      store.close();
+    }
+  }
+
+  createNoteFolder({ name = '', parentId = '', allowWhileAppRunning = false } = {}) {
+    const cleanName = cleanString(name);
+    if (!cleanName) throw new Error('create_note_folder requires a non-empty name');
+    return this.withWritableNoteStore((store) => {
+      const folder = store.createFolder({ name: cleanName, parentId: cleanString(parentId) || null });
+      return { folder, folderId: folder.id };
+    }, { allowWhileAppRunning });
+  }
+
+  renameNoteFolder({ folderId = '', name = '', allowWhileAppRunning = false } = {}) {
+    const idValue = cleanString(folderId);
+    const cleanName = cleanString(name);
+    if (!idValue) throw new Error('rename_note_folder requires folderId');
+    if (!cleanName) throw new Error('rename_note_folder requires a non-empty name');
+    return this.withWritableNoteStore((store) => {
+      const folder = store.renameFolder({ id: idValue, name: cleanName });
+      return { folder, folderId: folder.id };
+    }, { allowWhileAppRunning });
+  }
+
+  deleteNoteFolder({ folderId = '', allowWhileAppRunning = false } = {}) {
+    const idValue = cleanString(folderId);
+    if (!idValue) throw new Error('delete_note_folder requires folderId');
+    return this.withWritableNoteStore((store) => {
+      const result = store.deleteFolder({ id: idValue });
+      return { deleted: true, deletedFolderIds: result.deletedFolderIds };
+    }, { allowWhileAppRunning });
   }
 
   // 只读：列出全部分类（含系统分类）及文献计数，供写工具发现 categoryId。
