@@ -125,6 +125,9 @@
     "files": [
       "dist/**/*",
       "electron/**/*",
+      "office-addin/**/*",
+      "!office-addin/.certs/**/*",
+      "!office-addin/manifest.local.xml",
       "package.json",
       "node_modules/adm-zip/**/*",
       "node_modules/electron-updater/**/*",
