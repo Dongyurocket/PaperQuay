@@ -64,6 +64,7 @@ interface PaperEditDraft {
   titleZh: string;
   itemType: string;
   publisher: string;
+  publisherPlace: string;
   institution: string;
   reportNumber: string;
   volume: string;
@@ -278,6 +279,7 @@ function draftFromPaper(paper: LiteraturePaper | null): PaperEditDraft {
     titleZh: paper?.titleZh ?? '',
     itemType: paper?.itemType ?? 'journalArticle',
     publisher: paper?.publisher ?? '',
+    publisherPlace: paper?.publisherPlace ?? '',
     institution: paper?.institution ?? '',
     reportNumber: paper?.reportNumber ?? '',
     volume: paper?.volume ?? '',
@@ -571,6 +573,7 @@ export default function LiteraturePaperDetails({
       titleZh: inputValue(draft.titleZh),
       itemType: draft.itemType || 'journalArticle',
       publisher: inputValue(draft.publisher),
+      publisherPlace: inputValue(draft.publisherPlace),
       institution: inputValue(draft.institution),
       reportNumber: inputValue(draft.reportNumber),
       volume: inputValue(draft.volume),
@@ -921,6 +924,19 @@ export default function LiteraturePaperDetails({
                     />
                   </label>
                 </div>
+
+                {(draft.itemType === 'book'
+                  || draft.itemType === 'bookSection'
+                  || draft.itemType === 'thesis') ? (
+                  <label>
+                    <FieldLabel>{l('出版地', 'Place of Publication')}</FieldLabel>
+                    <TextInput
+                      value={draft.publisherPlace}
+                      placeholder={l('例如：北京、Berlin', 'e.g. Beijing, Berlin')}
+                      onChange={(value) => patchDraft({ publisherPlace: value })}
+                    />
+                  </label>
+                ) : null}
 
                 {draft.itemType === 'report' ? (
                   <label>

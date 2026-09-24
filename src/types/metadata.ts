@@ -16,6 +16,7 @@ export interface MetadataLookupResult {
   /** 以下为 LLM 提取（source === 'llm-extract'）可能额外提供的字段。 */
   keywords?: string[];
   publisher?: string | null;
+  publisherPlace?: string | null;
   volume?: string | null;
   issue?: string | null;
   pages?: string | null;

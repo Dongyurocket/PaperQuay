@@ -9,6 +9,7 @@ const { createMineruCacheCommands } = require('./backend/mineruCacheCommands.cjs
 const { createNoteCommands } = require('./backend/noteCommands.cjs');
 const { createNoteStore } = require('./backend/noteStore.cjs');
 const { createNoteVault } = require('./backend/noteVault.cjs');
+const { createOfficeCommands } = require('./backend/officeCommands.cjs');
 const { createPaddleOcrCommands } = require('./backend/paddleOcrCommands.cjs');
 const { createReviewCommands } = require('./backend/reviewCommands.cjs');
 const { createUpdateCommands } = require('./backend/updateCommands.cjs');
@@ -134,6 +135,7 @@ function createBackend({ app }) {
     ...createPaddleOcrCommands(context),
     ...createLibraryCommands(context),
     ...createNoteCommands(context),
+    ...createOfficeCommands(context),
     ...createAiCommands(context),
     ...createKnowledgeGraphCommands(context),
     ...createIntegrationCommands(context),

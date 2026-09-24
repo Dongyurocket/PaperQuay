@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PaperQuay 引用</title>
+    <link rel="stylesheet" href="taskpane.css" />
+    <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+    <script src="dist/citation-shared.js"></script>
+  </head>
+  <body>
+    <main class="pane">
+      <header class="pane__header">
+        <div class="pane__brand">PaperQuay 引用</div>
+        <div id="bridge-status" class="status status--idle">未连接</div>
+      </header>
+
+      <section class="card">
+        <div class="card__title">连接 PaperQuay</div>
+        <p class="hint">
+          在 PaperQuay 的「文库设置 → Word 加载项」里点击“复制连接信息”，粘贴到下面（形如
+          <code>23120:3f9c…</code>）。
+        </p>
+        <div class="row">
+          <input id="connection-input" type="text" placeholder="端口:令牌" autocomplete="off" />
+          <button id="connect-button" type="button" class="button button--primary">连接</button>
+        </div>
+        <div id="connection-note" class="note" hidden></div>
+      </section>
+
+      <section class="card">
+        <div class="card__title">引用样式</div>
+        <div class="row">
+          <select id="style-select"></select>
+          <button id="apply-style-button" type="button" class="button">应用样式</button>
+        </div>
+        <p class="hint" id="style-hint">默认 GB/T 7714-2015 顺序编码制（正文 [1]，文献表按引用顺序）。</p>
+      </section>
+
+      <section class="card">
+        <div class="card__title">检索文献库</div>
+        <div class="row">
+          <input id="search-input" type="search" placeholder="标题 / 作者 / 期刊 / DOI" />
+          <button id="search-button" type="button" class="button">检索</button>
+        </div>
+        <div id="search-results" class="results"></div>
+        <div id="selection" class="selection"></div>
+      </section>
+
+      <section class="card">
+        <div class="card__title">引用选项</div>
+        <div class="grid">
+          <label>页码/定位<input id="locator-input" type="text" placeholder="如 25 或 p. 25" /></label>
+          <label>前缀<input id="prefix-input" type="text" placeholder="如 参见" /></label>
+          <label>后缀<input id="suffix-input" type="text" placeholder="如 。" /></label>
+          <label class="checkbox">
+            <input id="suppress-author-input" type="checkbox" />
+            著者-出版年制下只显示年份
+          </label>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card__title">操作</div>
+        <div class="actions">
+          <button id="insert-citation-button" type="button" class="button button--primary">插入引用</button>
+          <button id="insert-bibliography-button" type="button" class="button">插入参考文献表</button>
+          <button id="refresh-button" type="button" class="button">刷新编号</button>
+          <button id="unlink-button" type="button" class="button button--danger">取消链接</button>
+        </div>
+        <div class="row row--tight">
+          <input id="bibliography-title-input" type="text" value="参考文献" />
+          <span class="hint">文献表标题</span>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card__title">本文引用</div>
+        <div id="document-citations" class="citations"></div>
+      </section>
+
+      <div id="log" class="log" hidden></div>
+    </main>
+    <script src="taskpane.js"></script>
+  </body>
+</html>

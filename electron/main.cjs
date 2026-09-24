@@ -157,6 +157,14 @@ app.whenReady().then(() => {
   perfMark('backend:ready');
   perfMeasure('startup:backend-init', 'app:ready');
 
+  // Office 桥随应用启动（设置里可关闭）；失败不影响主窗口。
+  void getBackend()
+    .invoke('office_start_bridge', {}, null)
+    .then((status) => {
+      if (status?.error) console.warn(`PaperQuay Office bridge did not start: ${status.error}`);
+    })
+    .catch((error) => console.warn('PaperQuay Office bridge did not start:', error?.message ?? error));
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow();
@@ -171,5 +179,8 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
+  if (backend) {
+    void backend.invoke('office_stop_bridge', {}, null).catch(() => {});
+  }
   backend?.close();
 });

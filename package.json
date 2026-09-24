@@ -1,7 +1,7 @@
 {
   "name": "paperquay",
   "private": true,
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "AI-assisted desktop literature reader and library manager.",
   "author": {
     "name": "PaperQuay Developers",
@@ -15,7 +15,13 @@
     "dev": "node electron/dev.cjs",
     "electron:dev": "node electron/dev.cjs",
     "mcp": "node bin/paperquay-mcp.cjs",
-    "build": "tsc && vite build",
+    "build:citation": "node scripts/build-citation.mjs",
+    "build": "npm run build:citation && tsc && vite build",
+    "office-addin:build": "npm run build:citation -- --addin-only && node scripts/generate-office-addin-icons.mjs",
+    "office-addin:serve": "node scripts/office-addin-server.mjs",
+    "office-addin:smoke": "node scripts/office-addin-smoke.mjs",
+    "office-addin:install": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Install-OfficeAddin.ps1",
+    "office-addin:installer": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Build-OfficeAddinInstaller.ps1",
     "test": "node --test \"tests/*.test.ts\"",
     "check": "npm run build && npm test",
     "preview": "vite preview --host 127.0.0.1 --port 4173",

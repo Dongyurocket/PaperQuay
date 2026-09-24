@@ -1,0 +1,5 @@
+# 本地自签证书与 PFX（由 scripts/office-addin-server.mjs 生成，勿提交）
+.certs/
+
+# 本地侧载清单（按实际 scheme/端口从 manifest.xml 生成，勿提交）
+manifest.local.xml

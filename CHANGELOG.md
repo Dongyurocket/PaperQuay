@@ -4,7 +4,23 @@
 
 各平台安装包见 [GitHub Releases](https://github.com/Dongyurocket/PaperQuay/releases)。
 
-## [Unreleased]
+## [0.3.0] - 2026-09-25
+
+### 新增
+
+- **Word 加载项（Office 桥）**：新增 Microsoft Word 的 Office.js 任务窗格加载项（`office-addin/`），在正文插入引用域、在文末生成参考文献表域，引用增删后一键刷新重排编号；默认 GB/T 7714-2015 顺序编码制，可切 GB/T 7714-2015 著者-出版年 / APA 7 / IEEE；支持页码、前后缀、隐藏作者、取消链接与「本文引用过」回写。加载项经 `127.0.0.1`（默认端口 23120，Bearer 令牌）的**只读** HTTP 桥访问文献库，唯一写入路径可单独关闭；CORS 只回显白名单来源，绝不使用 `*`。加载项页面由本体托管（`officeAddinHost.cjs`，`https://localhost:3000`），并提供 exe 安装器（`PaperQuay-OfficeAddin-Setup-<版本>.exe`，`npm run office-addin:installer` 编译）一键完成证书、清单与侧载注册。仅支持 Microsoft Word，不含 WPS 与 LibreOffice。新增 `electron/backend/officeBridge.cjs`、`officeAddinHost.cjs`、`officeCommands.cjs`、`paper_citations` 表、设置页「Word 加载项（Office 桥）」分区、`scripts/{Build,Install}-OfficeAddin.ps1`、`scripts/Build-OfficeAddinInstaller.ps1` 与 `scripts/office-addin-server.mjs`。
+- **引用格式化收敛为唯一真源**：新增 `src/shared/citation/`，笔记工作区、Obsidian vault 导出、MCP、Office 桥与 Word 加载项共用同一实现；`electron/backend/noteVault.cjs` 里「同规则精简移植」的分叉删除。新增 `scripts/build-citation.mjs`（esbuild）产出 `electron/generated/citationFormatters.cjs` 与 `office-addin/dist/citation-shared.js`，`npm run build` 前置执行。
+- **文献新增「出版地」字段**：`papers.publisher_place`（幂等 `ALTER TABLE` 迁移），链路打通 `LiteraturePaper`、更新请求、元数据提取、文献详情表单与 MCP 字段白名单；GB/T 专著/学位论文条目按「出版地: 出版者, 年」输出。
+
+### 修复
+
+- **GB/T 会议论文条目写法**：由 `[C]. 论文集名, 年` 改为 GB/T 7714-2015 的 `[C]//论文集名. 年, 卷(期). 出版地: 出版者: 页`。
+- **西文作者按「姓 + 名首字母」**：库内有结构化姓名（`familyName`/`givenName`，Zotero 导入的文献具备）时，GB/T 条目输出 `Vaswani A` 而非整串姓名；只有 `name` 的旧数据保持原输出。
+- **数字年份不再被静默丢弃**：`cleanPart` 对有限数字按文本处理，年份/卷/期/页来自导入链路时可能是数字。
+
+### 文档
+
+- 新增 [docs/OFFICE_ADDIN.zh-CN.md](docs/OFFICE_ADDIN.zh-CN.md)：Word 加载项的安装、使用、接口契约、文档模型、已知限制与排障；README / README_EN 增加「Word 加载项（Office 桥）」章节与功能行。
 
 ## [0.2.1] - 2026-09-25
 

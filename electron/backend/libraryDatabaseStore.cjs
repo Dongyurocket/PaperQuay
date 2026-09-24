@@ -57,6 +57,7 @@ function createSchema(db) {
       abstract_text TEXT,
       item_type TEXT,
       publisher TEXT,
+      publisher_place TEXT,
       institution TEXT,
       report_number TEXT,
       volume TEXT,
@@ -144,6 +145,16 @@ function createSchema(db) {
       FOREIGN KEY (paper_id) REFERENCES papers(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS paper_citations (
+      paper_id TEXT NOT NULL,
+      document_id TEXT NOT NULL,
+      document_title TEXT,
+      cited_at INTEGER NOT NULL,
+      source TEXT NOT NULL DEFAULT 'office-addin',
+      PRIMARY KEY (paper_id, document_id),
+      FOREIGN KEY (paper_id) REFERENCES papers(id) ON DELETE CASCADE
+    );
+
     CREATE INDEX IF NOT EXISTS idx_papers_sort_order ON papers(sort_order);
     CREATE INDEX IF NOT EXISTS idx_papers_imported_at ON papers(imported_at);
     CREATE INDEX IF NOT EXISTS idx_papers_is_favorite ON papers(is_favorite);
@@ -183,11 +194,13 @@ function createSchema(db) {
     CREATE INDEX IF NOT EXISTS idx_tags_paper_id ON tags(paper_id, sort_order);
     CREATE INDEX IF NOT EXISTS idx_paper_references_paper_id ON paper_references(paper_id);
     CREATE INDEX IF NOT EXISTS idx_paper_references_doi ON paper_references(doi);
+    CREATE INDEX IF NOT EXISTS idx_paper_citations_paper_id ON paper_citations(paper_id);
   `);
 
   ensureColumn(db, 'papers', 'title_zh', 'TEXT');
   ensureColumn(db, 'papers', 'item_type', 'TEXT');
   ensureColumn(db, 'papers', 'publisher', 'TEXT');
+  ensureColumn(db, 'papers', 'publisher_place', 'TEXT');
   ensureColumn(db, 'papers', 'institution', 'TEXT');
   ensureColumn(db, 'papers', 'report_number', 'TEXT');
   ensureColumn(db, 'papers', 'volume', 'TEXT');
@@ -286,6 +299,7 @@ const PAPER_SELECT_COLUMNS = `
   abstract_text AS abstractText,
   item_type AS itemType,
   publisher,
+  publisher_place AS publisherPlace,
   institution,
   report_number AS reportNumber,
   volume,
@@ -484,6 +498,56 @@ function getPaperFromDb(db, paperId) {
   const row = db.prepare(`SELECT ${PAPER_SELECT_COLUMNS} FROM papers WHERE id = ?`).get(id);
   if (!row) return null;
   return hydratePaperRows(db, [row])[0];
+}
+
+/** 「本文引用过」：按（文献, 文档）去重 upsert，供 Word 加载项回写使用。 */
+function recordPaperCitationsToDb(db, request) {
+  const documentId = cleanString(request?.documentId);
+  if (!documentId) throw new Error('documentId is required');
+  const requestedIds = [...new Set((Array.isArray(request?.paperIds) ? request.paperIds : []).map(cleanString).filter(Boolean))];
+  if (requestedIds.length === 0) return { updated: 0, paperIds: [], missingPaperIds: [] };
+
+  const placeholders = requestedIds.map(() => '?').join(', ');
+  const existingIds = new Set(
+    db.prepare(`SELECT id FROM papers WHERE id IN (${placeholders})`).all(...requestedIds).map((row) => row.id),
+  );
+  const paperIds = requestedIds.filter((paperId) => existingIds.has(paperId));
+  const missingPaperIds = requestedIds.filter((paperId) => !existingIds.has(paperId));
+  if (paperIds.length === 0) return { updated: 0, paperIds: [], missingPaperIds };
+
+  const statement = db.prepare(`
+    INSERT INTO paper_citations (paper_id, document_id, document_title, cited_at, source)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT (paper_id, document_id) DO UPDATE SET
+      document_title = excluded.document_title,
+      cited_at = excluded.cited_at,
+      source = excluded.source
+  `);
+  const citedAt = Number(request?.citedAt) || Date.now();
+  const documentTitle = cleanString(request?.documentTitle) || null;
+  const source = cleanString(request?.source) || 'office-addin';
+  let updated = 0;
+  withTransaction(db, () => {
+    for (const paperId of paperIds) {
+      const result = statement.run(paperId, documentId, documentTitle, citedAt, source);
+      updated += Number(result?.changes) || 0;
+    }
+  });
+  return { updated, paperIds, missingPaperIds };
+}
+
+function listPaperCitationsFromDb(db, paperId) {
+  return db.prepare(`
+    SELECT
+      paper_id AS paperId,
+      document_id AS documentId,
+      document_title AS documentTitle,
+      cited_at AS citedAt,
+      source
+    FROM paper_citations
+    WHERE paper_id = ?
+    ORDER BY cited_at DESC
+  `).all(cleanString(paperId));
 }
 
 function getPaperIdByAttachmentId(db, attachmentId) {
@@ -730,6 +794,7 @@ const PAPER_TABLE_COLUMNS = [
   'abstract_text',
   'item_type',
   'publisher',
+  'publisher_place',
   'institution',
   'report_number',
   'volume',
@@ -765,6 +830,7 @@ function paperRowValues(paper) {
     paper.abstractText ?? null,
     paper.itemType ?? 'journalArticle',
     paper.publisher ?? null,
+    paper.publisherPlace ?? null,
     paper.institution ?? null,
     paper.reportNumber ?? null,
     paper.volume ?? null,
@@ -1024,6 +1090,14 @@ function createLibraryDatabaseStore(appPaths, helpers) {
 
     getPaper(paperId) {
       return getPaperFromDb(db, paperId);
+    },
+
+    recordPaperCitations(request) {
+      return recordPaperCitationsToDb(db, request ?? {});
+    },
+
+    listPaperCitations(paperId) {
+      return listPaperCitationsFromDb(db, paperId);
     },
 
     getPaperIdByAttachment(attachmentId) {

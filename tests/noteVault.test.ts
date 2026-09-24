@@ -248,7 +248,7 @@ test('serializeNoteMarkdown：paperReference 渲染为 [n] 且同文献同号，
   assert.match(markdown, /再次引用\[1\]/);
   assert.match(markdown, /\[P3 摘录\]\(paperquay:\/\/anchor\/anchor-9\)/);
   assert.match(markdown, /## 参考文献/);
-  assert.match(markdown, /1\. Ashish Vaswani, Noam Shazeer\. Attention Is All You Need\[C\]\. NeurIPS, 2017, 30\./);
+  assert.match(markdown, /1\. Ashish Vaswani, Noam Shazeer\. Attention Is All You Need\[C\]\/\/NeurIPS\. 2017, 30\./);
   assert.match(markdown, /2\. Jacob Devlin\. BERT\[J\]\. NAACL, 2019\./);
 });
 

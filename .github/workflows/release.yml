@@ -152,6 +152,11 @@ jobs:
       - name: Build frontend
         run: npm run build
 
+      - name: Build Office add-in installer
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Build-OfficeAddinInstaller.ps1
+
       - name: Package Electron app
         shell: bash
         run: |

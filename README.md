@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.2.1-2563eb?style=flat-square" alt="Version v0.2.1">
+  <img src="https://img.shields.io/badge/version-v0.3.0-2563eb?style=flat-square" alt="Version v0.3.0">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-4b5563?style=flat-square" alt="Windows macOS Linux">
   <img src="https://img.shields.io/badge/built%20with-Electron-47848f?style=flat-square" alt="Electron">
   <img src="https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-0f766e?style=flat-square" alt="React TypeScript">
@@ -46,6 +46,7 @@
   <a href="#核心工作流">核心工作流</a> |
   <a href="#已完成功能">已完成功能</a> |
   <a href="#mcp-服务与外部-agent-接入">MCP 服务</a> |
+  <a href="#word-加载项office-桥">Word 加载项</a> |
   <a href="#agent-skills-编写与工作流协同">Skills 编写</a> |
   <a href="#技术架构">技术架构</a> |
   <a href="#zotero-兼容与选择性同步">Zotero 兼容</a> |
@@ -55,6 +56,13 @@
 ---
 
 ## 近期更新
+
+### v0.3.0 - Word 加载项（Office 桥）
+
+- **在 Word 里插入引用与参考文献表**：新增 Microsoft Word 的 Office.js 任务窗格加载项，正文引用以 ContentControl 域保存，文末参考文献表是一个可刷新的域；默认 GB/T 7714-2015 顺序编码制，可切 GB/T 7714-2015 著者-出版年 / APA 7 / IEEE；支持页码、前后缀、隐藏作者、取消链接，以及「某文献被哪些 Word 文档引用过」回写。
+- **本地只读桥，数据不出本机**：PaperQuay 在 `127.0.0.1`（默认 23120）开一个带令牌的只读 HTTP 桥，加载项凭端口与令牌取文献和格式化结果；唯一写入路径是「本文引用过」记录，可单独关闭。
+- **引用格式化收敛为唯一真源**：笔记工作区、Obsidian vault 导出、MCP 与 Word 加载项共用 `src/shared/citation/`，并顺带修正 GB/T 会议论文 `[C]//论文集名` 写法、补上专著/学位论文的**出版地**字段、西文作者按「姓 + 名首字母」输出。
+- 安装、使用、接口契约与限制见 [docs/OFFICE_ADDIN.zh-CN.md](./docs/OFFICE_ADDIN.zh-CN.md)；仅支持 Microsoft Word，不含 WPS 与 LibreOffice。
 
 ### v0.2.1 - 表格行内公式修复与中文用户手册
 
@@ -254,7 +262,35 @@ Agent 工作区不是普通聊天框，而是面向文献库操作设计。它�
 | 软件更新 | 支持应用内检查更新、Windows 和 Linux 自动更新流程，以及 macOS 打开发布页手动下载 |
 | 知识图谱 | 支持文献、笔记、标签、分类和引用节点，语义相似边、Crossref 参考文献同步、共同作者关系、自定义与 AI 关系，fcose 力导向全局布局、局部同心圆视图和 PNG/JSON 导出 |
 | 综述写作 | 支持大纲蓝图、分段并发写作、RAG 检索上下文、失败任务独立上报与续跑，以及 Word 导出（OMML 公式、中英文标题、参考文献和正文插图） |
+| Word 加载项 | 通过 Office.js 任务窗格在 Word 正文插入引用域、在文末生成参考文献表域，默认 GB/T 7714-2015 顺序编码制（可切著者-出版年 / APA 7 / IEEE），引用增删后一键刷新重排编号，支持页码/前后缀/隐藏作者、取消链接与「本文引用过」回写；加载项经本机 `127.0.0.1` 只读桥（Bearer 令牌）访问文献库，数据不出本机；仅 Microsoft Word（不含 WPS / LibreOffice），详见 [docs/OFFICE_ADDIN.zh-CN.md](./docs/OFFICE_ADDIN.zh-CN.md) |
 | 主题 | 支持浅色和深色主题，面向桌面端长时间阅读优化 |
+
+---
+
+## Word 加载项（Office 桥）
+
+写论文时不必再从笔记里手工抄参考文献：PaperQuay 提供一个 Microsoft Word 加载项（Office.js 任务窗格），在正文插入引用、在文末生成参考文献表，引用增删后一键刷新即可整篇重排编号。
+
+- **默认国标**：GB/T 7714-2015 顺序编码制（同一文献同号、连续编号折叠为 `[1-3]`），可切换 GB/T 7714-2015 著者-出版年、APA 7、IEEE；样式保存在文档里，换机器打开仍保持。
+- **引用是域不是死文本**：每条引用是一个 ContentControl 域（`pq:c|<citeId>`），文末表是单个 `pq:bib` 域，明细写在文档设置里；交付前可以用「取消链接」把域变成普通文字。
+- **本机只读桥**：加载项运行在浏览器环境，不能直接读数据库，因此 PaperQuay 主进程在 `127.0.0.1`（默认 23120，Zotero 用 23119）开一个只读 HTTP 桥，用每次启动随机生成的 Bearer token 鉴权，发现文件写在 `<userData>/PaperQuay/paperquay-office-bridge.json`。CORS 只回显白名单来源，绝不使用 `*`。唯一写入路径是把「本文引用过」记录回文献库，默认开启、可在设置里关闭。
+- **格式化真源唯一**：加载项不自己实现格式规则，而是复用 `src/shared/citation/`（笔记、vault 导出、MCP 与 Word 共用同一份实现），因此两侧的条目写法不会分叉。
+
+安装（Windows 桌面版，侧载，不需要商店账号），两条路径：
+
+- **exe 安装器（推荐）**：运行 `PaperQuay-OfficeAddin-Setup-<版本>.exe`（双击图形界面，或 `--silent` 静默 / `--uninstall` 卸载 / `--diagnose` 体检），自动完成证书、清单与侧载注册，只动当前用户、无需管理员权限；页面由运行中的 PaperQuay 本体托管。开发者可用 `npm run office-addin:installer` 自行编译（只依赖 Windows 自带的 .NET Framework csc）。
+- **开发者脚本路径**：
+
+```powershell
+npm run build                # 含 build:citation，产出共享格式化产物
+npm run office-addin:build   # 复制/校验加载项资源并生成图标
+npm run office-addin:serve   # 起本地 HTTPS 服务（自签证书，--trust 可导入信任）
+npm run office-addin:install # 侧载进 Word
+```
+
+然后在 Word 里打开「PaperQuay 引用」任务窗格，从 PaperQuay 设置 →「Word 加载项（Office 桥）」点「复制连接信息」，粘贴到加载项里连接即可。
+
+完整说明（安装细节、接口契约、文档模型、已知限制与排障）见 [docs/OFFICE_ADDIN.zh-CN.md](./docs/OFFICE_ADDIN.zh-CN.md)。
 
 ---
 

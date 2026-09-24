@@ -243,51 +243,31 @@ function serializeBlocks(content, ctx, indent = '') {
     .join('\n\n');
 }
 
-// GB/T 7714-2015 顺序编码制（与 src/features/notes/bibliography.ts 同规则的精简移植；
-// 后端无法 import TS，改动时请同步两侧）。
-function formatGbt7714Entry(paper, fallbackLabel) {
-  const clean = (value) => String(value ?? '').trim().replace(/[.。]+$/, '');
-  if (!paper) return `${clean(fallbackLabel)}.`;
-  const names = (Array.isArray(paper.authors) ? paper.authors : [])
-    .map((author) => clean(typeof author === 'string' ? author : author?.name))
-    .filter(Boolean);
-  let authors = names.slice(0, 3).join(', ');
-  if (names.length > 3) {
-    const isCjk = names[0] && !/\s/.test(names[0]) && /[　-鿿豈-﫿]/.test(names[0]);
-    authors += isCjk ? ', 等' : ', et al.';
-  }
-  const title = clean(paper.title) || clean(fallbackLabel);
-  const mark =
-    paper.itemType === 'conferencePaper' ? 'C'
-      : paper.itemType === 'book' || paper.itemType === 'bookSection' ? 'M'
-        : paper.itemType === 'thesis' ? 'D'
-          : paper.itemType === 'report' ? 'R'
-            : paper.itemType === 'preprint' ? 'EB/OL'
-              : clean(paper.publication) ? 'J' : 'EB/OL';
-  const year = clean(paper.year);
-  const publication = clean(paper.publication);
-  const volume = clean(paper.volume);
-  const issue = clean(paper.issue);
-  const pages = clean(paper.pages);
-  const doi = clean(paper.doi);
+// 引用格式化真源：由 scripts/build-citation.mjs 从 src/shared/citation/index.ts 生成的 CJS 产物，
+// 与渲染层（笔记）和 Word 加载项共用同一份实现，不再在后端精简化抄一份。
+let citationFormatters = null;
 
-  let entry = authors ? `${authors}. ${title}` : title;
-  entry += `[${mark}]`;
-  if (mark === 'M') {
-    const tail = [clean(paper.publisher), year].filter(Boolean).join(', ');
-    if (tail) entry += `. ${tail}`;
-    if (pages) entry += `: ${pages}`;
-  } else if (mark === 'EB/OL') {
-    const tail = [publication || clean(paper.publisher), year].filter(Boolean).join(', ');
-    if (tail) entry += `. ${tail}`;
-  } else {
-    const volumeIssue = issue ? `${volume}(${issue})` : volume;
-    const tail = [publication, year, volumeIssue].filter(Boolean).join(', ');
-    if (tail) entry += `. ${tail}`;
-    if (pages) entry += `: ${pages}`;
+function loadCitationFormatters() {
+  if (citationFormatters) return citationFormatters;
+  let loaded;
+  try {
+    loaded = require('../generated/citationFormatters.cjs');
+  } catch (error) {
+    throw new Error(
+      '引用格式化产物缺失（electron/generated/citationFormatters.cjs），请先运行 npm run build:citation。'
+        + `原始错误：${error && error.message ? error.message : error}`,
+    );
   }
-  if (doi) entry += `. DOI: ${doi}`;
-  return `${entry.replace(/[.。]+$/, '')}.`;
+  if (!loaded || typeof loaded.formatBibliographyEntry !== 'function') {
+    throw new Error('引用格式化产物不完整，请重新运行 npm run build:citation。');
+  }
+  citationFormatters = loaded;
+  return citationFormatters;
+}
+
+// GB/T 7714-2015 顺序编码制条目（笔记 Markdown 导出用）。
+function formatGbt7714Entry(paper, fallbackLabel) {
+  return loadCitationFormatters().formatBibliographyEntry(paper ?? undefined, fallbackLabel ?? '', 'gbt7714');
 }
 
 // 笔记正文 Markdown：优先从 contentJson 序列化（保引用编号/锚点链接），无 JSON 时用纯文本。

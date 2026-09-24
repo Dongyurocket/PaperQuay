@@ -3,6 +3,7 @@ import { Database, FolderOpen, RefreshCw, X } from 'lucide-react';
 
 import { useWheelScrollDelegate } from '../../../hooks/useWheelScrollDelegate';
 import { useLocaleText } from '../../../i18n/uiLanguage';
+import OfficeAddinSection from './OfficeAddinSection';
 import type {
   LibraryImportMode,
   LibrarySettings,
@@ -378,6 +379,11 @@ export default function LibrarySettingsDialog({
               />
             </div>
           </section>
+
+          <OfficeAddinSection
+            settings={settings.officeAddin}
+            onChange={(officeAddin) => patch({ officeAddin })}
+          />
         </div>
 
         <footer className="flex items-center justify-end gap-2 border-t border-[var(--pq-border)] px-6 py-4">

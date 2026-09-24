@@ -26,6 +26,10 @@ coverage/
 .turbo/
 *.tsbuildinfo
 
+# Word 加载项共享格式化产物（esbuild 生成）：测试直接加载它，需入库以保证 npm test 开箱可用
+!office-addin/dist/
+!office-addin/dist/**
+
 # Electron / desktop packaging output
 builder-debug.yml
 builder-effective-config.yaml

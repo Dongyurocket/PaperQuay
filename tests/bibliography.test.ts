@@ -58,7 +58,7 @@ test('GB/T 7714 journal entry: authors. title[J]. venue, year, volume(issue): pa
 test('GB/T 7714 western authors use et al. after 3, conference paper gets [C]', () => {
   assert.equal(
     formatBibliographyEntry(journalPaper, '', 'gbt7714'),
-    'Ashish Vaswani, Noam Shazeer, Niki Parmar, et al. Attention Is All You Need[C]. Advances in Neural Information Processing Systems, 2017, 30: 5998-6008. DOI: 10.48550/arXiv.1706.03762.',
+    'Ashish Vaswani, Noam Shazeer, Niki Parmar, et al. Attention Is All You Need[C]//Advances in Neural Information Processing Systems. 2017, 30: 5998-6008. DOI: 10.48550/arXiv.1706.03762.',
   );
 });
 

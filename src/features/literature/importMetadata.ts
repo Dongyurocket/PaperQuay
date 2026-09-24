@@ -127,6 +127,7 @@ export function mergeRemoteMetadataIntoDraft(
       normalizeWhitespace(metadata.abstractText ?? '') ||
       draftText(draft.abstractText),
     publisher: fillString(draft.publisher ?? '', metadata.publisher),
+    publisherPlace: fillString(draft.publisherPlace ?? '', metadata.publisherPlace),
     volume: fillString(draft.volume ?? '', metadata.volume),
     issue: fillString(draft.issue ?? '', metadata.issue),
     pages: fillString(draft.pages ?? '', metadata.pages),

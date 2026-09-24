@@ -12,6 +12,7 @@ export interface ImportDraftItem {
   categoryId: string;
   itemType?: LiteratureItemType;
   publisher?: string;
+  publisherPlace?: string;
   institution?: string;
   reportNumber?: string;
   volume?: string;

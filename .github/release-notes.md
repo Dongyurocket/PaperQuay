@@ -1,33 +1,49 @@
 # PaperQuay v{{VERSION}}
 
+## New
+
+- **Word add-in (Office bridge)**: a Microsoft Word task-pane add-in that inserts live citation fields and a refreshable bibliography field. Citations are Word content controls (`pq:c|<citeId>`), the bibliography is a single `pq:bib` field, and details live in document settings — so closing and reopening the document keeps refresh working, and inserting a citation in the middle renumbers the whole document on refresh. Defaults to GB/T 7714-2015 numeric (same paper keeps its number, consecutive numbers collapse to `[1-3]`), with GB/T 7714-2015 author-date, APA 7, and IEEE selectable; page locators, prefixes/suffixes, author suppression, unlink-to-plain-text, and a per-document "cited here" list are supported.
+- **Local read-only bridge**: the add-in talks to the library over a token-protected, loopback-only HTTP bridge (`127.0.0.1`, default port 23120; Zotero uses 23119). CORS echoes allowlisted origins only — never `*`. The single write path records which Word documents cite a paper (`paper_citations` table) and can be turned off in settings.
+- **One-click exe installer**: `PaperQuay-OfficeAddin-Setup-{{VERSION}}.exe` (in Assets) provisions the self-signed localhost certificate, writes the manifest, and registers the sideload key for the current user — no admin rights, no background process. The add-in pages themselves are hosted by the running PaperQuay app (`https://localhost:3000`). Command line: `--silent`, `--uninstall`, `--diagnose`, `--help`.
+- **Single citation-formatting source of truth**: notes, Obsidian vault export, MCP, the Office bridge, and the Word add-in all share `src/shared/citation/`; the drifted "lite port" in `noteVault.cjs` is gone.
+
 ## Fixes
 
-- **Inline math inside Markdown tables no longer degrades to literal `$`**: when a table cell contained bare LaTeX (for example `仅 T_i`), the inline-math wrapper's candidate run crossed the `|` cell delimiter and swallowed the neighbouring cell, so the inserted `$` delimiters landed in two different cells. remark-math never pairs across cells, so the entire row rendered as literal `$` and KaTeX produced no nodes at all. Table rows are now wrapped cell by cell; expressions containing `|` outside tables (`A = |x| < 1`, `P(A | B) = 0.5`) behave exactly as before. Seven regression cases were added in `tests/markdownTableMath.test.ts`.
+- **GB/T conference papers** now render as `[C]//proceedings…` per GB/T 7714-2015, with place of publication supported via a new `publisher_place` column (idempotent migration, wired through metadata extraction, the details form, and the MCP field whitelist).
+- **Western author names** render as "Family FM" when structured `familyName`/`givenName` data exists (e.g. Zotero imports); name-only records keep their previous output.
+- Numeric years/volumes/issues/pages from import pipelines are no longer silently dropped by citation formatting.
 
-## Documentation
+## Notes
 
-- **New Chinese user manual**: `docs/USER_MANUAL.zh-CN.md` is a complete end-user manual covering installation and first run, the library and reader, note authoring and maintenance (page types and templates, excerpt cards, academic citations, graph and health report, vault two-way sync), the Agent workspace, knowledge graph, review drafting, local RAG, MCP and external-agent integration, backups and privacy, a settings reference, and updating/troubleshooting — with keyboard-shortcut and FAQ appendices.
-- **README and MCP integration guide now document the notes feature set**: the README's quick navigation links the user manual, and the notes workspace/editor tables cover the v0.2.0 capabilities (page-type templates, database-backed folders, live sequential citations with GB/T 7714-2015 / APA 7 / IEEE styles, note write tools, Obsidian-compatible vault sync). `docs/MCP_AGENT_INTEGRATION.md` documents `list_note_tags` / `list_note_folders` plus a new "note maintenance tools (with guardrails)" section describing write semantics and the require-a-manifest rule for bulk deletes.
-- **CHANGELOG and README caught up on 0.2.0**: the 0.2.0 notes-system overhaul had no CHANGELOG entry and no README highlight; both are now recorded, and the stale `v0.1.48` version badges were updated.
+- Microsoft Word only — no WPS or LibreOffice. Track Changes should be off while inserting or refreshing.
+- The add-in requires the PaperQuay desktop app v{{VERSION}} or newer to be running (it hosts both the add-in pages and the bridge).
 
 ## Downloads
 
-Select the installer matching your system and architecture from Assets: Windows `.exe` or `.msi`, macOS `.dmg`, or Linux `.AppImage` / `.deb` / `.tar.gz`.
+Select the installer matching your system and architecture from Assets: Windows `.exe` or `.msi`, macOS `.dmg`, or Linux `.AppImage` / `.deb` / `.tar.gz`. The Word add-in setup is `PaperQuay-OfficeAddin-Setup-{{VERSION}}.exe` (Windows only).
 
 ---
 
 # PaperQuay v{{VERSION}} 中文说明
 
+## 新增
+
+- **Word 加载项（Office 桥）**：新增 Microsoft Word 任务窗格加载项，在正文插入引用域、在文末生成可刷新的参考文献表域。引用是 Word 内容控件（`pq:c|<citeId>`），文末表是单个 `pq:bib` 域，明细写在文档设置里——关闭重开文档仍可刷新，中间补一条引用后刷新即可整篇重排编号。默认 GB/T 7714-2015 顺序编码制（同一文献同号、连续编号折叠为 `[1-3]`），可切换 GB/T 7714-2015 著者-出版年、APA 7、IEEE；支持页码、前后缀、隐藏作者、取消链接转纯文本，以及按文档查看「本文引用过」。
+- **本机只读桥**：加载项通过带令牌的只读 HTTP 桥访问文献库（`127.0.0.1`，默认端口 23120，Zotero 用 23119）。CORS 只回显白名单来源，绝不使用 `*`。唯一写入路径是把「某文献被哪些 Word 文档引用过」记录回文献库，可在设置里关闭。
+- **exe 一键安装器**：Assets 中的 `PaperQuay-OfficeAddin-Setup-{{VERSION}}.exe` 自动完成 localhost 自签证书、清单写入与侧载注册表登记，只动当前用户、不需要管理员权限、不常驻进程；加载项页面由运行中的 PaperQuay 本体托管（`https://localhost:3000`）。命令行支持 `--silent` / `--uninstall` / `--diagnose` / `--help`。
+- **引用格式化收敛为唯一真源**：笔记工作区、Obsidian vault 导出、MCP、Office 桥与 Word 加载项共用 `src/shared/citation/`，`noteVault.cjs` 里分叉的「精简移植」已删除。
+
 ## 修复
 
-- **Markdown 表格内的行内公式不再退化为字面 `$`**：表格单元格里写裸 LaTeX（例如 `仅 T_i`）时，行内公式补全的候选串会跨过 `|` 单元格分隔符把相邻格内容一起吞下，补出的 `$` 因此分别落在两格里；remark-math 不会跨单元格配对，整行公式只剩字面 `$`，KaTeX 一个节点也不产出。现在表格行按单元格分别补全，`$` 不再跨格；非表格中含 `|` 的表达式（`A = |x| < 1`、`P(A | B) = 0.5`）行为完全不变。新增 `tests/markdownTableMath.test.ts` 七例回归。
+- **GB/T 会议论文条目**改为标准的 `[C]//论文集名…` 写法，并通过新增的 `publisher_place` 字段支持出版地（幂等迁移，元数据提取、文献详情表单与 MCP 字段白名单全链路打通）。
+- **西文作者**在有结构化 `familyName`/`givenName` 时按「姓 + 名首字母」输出（如 Zotero 导入的文献）；只有整串姓名的旧数据保持原输出。
+- 导入链路给出的数字年份/卷/期/页不再被引用格式化静默丢弃。
 
-## 文档
+## 注意
 
-- **新增中文用户手册**：`docs/USER_MANUAL.zh-CN.md` 是面向使用者的完整手册，覆盖安装与首次启动、文献库与阅读器、笔记的使用与维护（页面类型与模板、摘录卡、学术化引用、图谱与体检、vault 双向同步）、Agent 工作区、知识图谱、综述写作、本地 RAG、MCP 与外部 Agent 接入、数据备份与隐私、设置参考、更新与排障，并附快捷键与常见问题两个附录。
-- **README 与 MCP 接入指南同步笔记能力**：README 快速导航加入用户手册入口，笔记工作区与编辑器特性表补齐 v0.2.0 的能力（页面类型模板、分类入库持久化、实时顺序编号的内联引用与 GB/T 7714-2015 / APA 7 / IEEE 样式、笔记写入工具、Obsidian 兼容 vault 同步）；`docs/MCP_AGENT_INTEGRATION.md` 补入 `list_note_tags` / `list_note_folders` 与新增的「笔记维护工具（带运行护栏）」小节，说明写入语义约定与批量删除前先出清单确认的要求。
-- **CHANGELOG 与 README 补齐 0.2.0**：0.2.0 的笔记系统重构此前既没有 CHANGELOG 条目也没有 README 更新说明，现已补记，并更新了停留在 v0.1.48 的版本徽章。
+- 仅支持 Microsoft Word，不含 WPS 与 LibreOffice；插入/刷新前请关闭修订模式。
+- 加载项要求 PaperQuay 桌面端 v{{VERSION}} 或更高版本保持运行（页面源站与桥都由本体托管）。
 
 ## 下载
 
-请在 Assets 中选择对应系统和架构的安装包：Windows `.exe` 或 `.msi`、macOS `.dmg`、Linux `.AppImage` / `.deb` / `.tar.gz`。
+请在 Assets 中选择对应系统和架构的安装包：Windows `.exe` 或 `.msi`、macOS `.dmg`、Linux `.AppImage` / `.deb` / `.tar.gz`。Word 加载项安装器为 `PaperQuay-OfficeAddin-Setup-{{VERSION}}.exe`（仅 Windows）。

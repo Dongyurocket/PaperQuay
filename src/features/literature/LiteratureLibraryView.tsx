@@ -203,6 +203,7 @@ function buildManualMetadataUpdateRequest(
       | 'url'
       | 'abstractText'
       | 'publisher'
+      | 'publisherPlace'
       | 'volume'
       | 'issue'
       | 'pages'
@@ -229,6 +230,7 @@ function buildManualMetadataUpdateRequest(
     assignString('url', paper.url, metadata.url);
     assignString('abstractText', paper.abstractText, metadata.abstractText);
     assignString('publisher', paper.publisher ?? null, metadata.publisher);
+    assignString('publisherPlace', paper.publisherPlace ?? null, metadata.publisherPlace);
     assignString('volume', paper.volume ?? null, metadata.volume);
     assignString('issue', paper.issue ?? null, metadata.issue);
     assignString('pages', paper.pages ?? null, metadata.pages);
