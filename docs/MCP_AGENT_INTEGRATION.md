@@ -1,6 +1,6 @@
 # PaperQuay 知识库 MCP 接入指南
 
-PaperQuay 提供了基于标准 **Model Context Protocol (MCP)** 的知识库服务。Proma、Pi、Codex 等各类 AI Agent 可以通过 stdio 协议直连 PaperQuay 本地知识库，进行文献检索、证据定位、学术问答，以及受安全护栏约束的文库写入与分类管理（导入 PDF、更新元数据、调整分类等）。
+PaperQuay 提供了基于标准 **Model Context Protocol (MCP)** 的知识库服务。Proma、Pi、Codex 等各类 AI Agent 可以通过 stdio 协议直连 PaperQuay 本地知识库，进行文献检索、证据定位、学术问答，以及受安全护栏约束的文库与笔记维护（导入 PDF、更新元数据、调整分类、创建/更新/删除笔记、维护笔记分类等）。
 
 ---
 
@@ -24,6 +24,8 @@ PaperQuay 提供了基于标准 **Model Context Protocol (MCP)** 的知识库服
 | `search_knowledge_base` | 向量 + 全文混合检索 RAG 知识库证据 | `query`（必填）、`paperId`（可选）、`limit`、`mode`（`auto`/`hybrid`/`keyword`） | 带文献标题、页码、段落预览、匹配分数与命中通道（`vector`/`fts`）的证据切片 |
 | `read_paper_content` | 读取文献在知识库中的分块正文 | `paperId`（必填）、`pageIndex`（可选）、`limit` | 按页面或顺序排列的结构化正文内容 |
 | `search_notes` | 检索用户的阅读笔记与批注摘录 | `query`（可选）、`paperId`（可选）、`limit` | 用户个人笔记、高亮批注与摘录内容 |
+| `list_note_tags` | 列出笔记标签及使用次数 | `paperId`（可选，只看某篇文献的笔记） | 标签列表（`tag`、`count`），供写入前发现现有标签 |
+| `list_note_folders` | 读取笔记分类（文件夹）树 | 无 | 分类列表（`id`、`name`、`parentId`、`sortOrder`） |
 
 ### Zotero 本地选择性同步工具
 | 工具名称 | 说明 | 核心参数 | 返回内容 |
@@ -46,6 +48,25 @@ PaperQuay 提供了基于标准 **Model Context Protocol (MCP)** 的知识库服
 | `update_paper` | 更新文献元数据（白名单字段） | `paperId`（必填）+ `title`/`titleZh`/`authors`/`keywords`/`tags`/`isFavorite` 等可更新字段 | 更新后的文献对象；未知字段显式报错 |
 | `delete_papers` | 批量删除文献 | `paperIds`（必填）、`deleteFiles`（默认 `false`，为 `true` 时同时删除已入库的 PDF 文件） | 删除报告（`deleted`、`deletedFileCount`、`fileErrors`）；数据库先提交再删文件 |
 
+### 笔记维护工具（带运行护栏）
+
+笔记库采用逐条 SQL 写入，不会像文库那样被桌面应用整体覆盖；但应用内的笔记列表与编辑器持有内存快照，外部写入后需要重新加载界面才能看到，因此仍走同一道「默认拒绝 + 可覆盖」护栏。作业规范可参考仓库 `skills/paperquay-notes/SKILL.md`。
+
+| 工具名称 | 说明 | 核心参数 |
+| :--- | :--- | :--- |
+| `create_note` | 新建笔记 | `title` / `content`（至少一个非空，正文为 Markdown/纯文本）、`tags`（去 `#` 前缀，上限 30）、`paperId`（缺省为全局笔记）、`type`（`highlight`/`area`/`standalone`/`ai-chat`）、`folderId` |
+| `update_note` | 局部更新 | `noteId`（必填）+ `title`/`content`/`tags`/`folderId` 至少一项；`folderId` 传空串移动到未分类 |
+| `delete_note` | 软删除（标记删除并移出全文索引） | `noteId`（必填） |
+| `create_note_folder` | 新建分类（可嵌套） | `name`（必填）、`parentId`（可选） |
+| `rename_note_folder` | 重命名分类 | `folderId`、`name` |
+| `delete_note_folder` | 删除分类及子分类；其中笔记移动到未分类（不删除笔记） | `folderId` |
+
+笔记写入的语义约定：
+
+- 正文中的 `[[笔记标题]]` 会被解析为双链（仅当目标笔记已存在），`#标签` 自动归一化为标签。
+- 替换 `content` 会清空富文本缓存（`contentJson`/`contentHtml`），编辑器按纯文本重建——**不要用 MCP 覆盖含锚点块、文献引用或表格的笔记**，这类笔记请在应用内编辑或只用 MCP 改标题/标签/分类。
+- 批量删除前建议先让 Agent 列出待删清单并人工确认。
+
 ---
 
 ## 写入安全护栏
@@ -59,6 +80,8 @@ PaperQuay 提供了基于标准 **Model Context Protocol (MCP)** 的知识库服
 5. 设环境变量 `PAPERQUAY_MCP_WRITE=off` 可禁用全部写工具（此时服务等价于纯只读），该开关优先级高于 `allowWhileAppRunning`。
 
 Zotero 同步工具（`paperquay_sync_from_zotero`）同样受该护栏保护。建议让 Agent 形成「写前确认桌面应用已关闭」的标准作业程序。
+
+笔记库的护栏说明：笔记库是逐条 SQL 写入，桌面应用不会像文库那样用内存快照整体覆盖外部写入；但应用界面（笔记列表与编辑器）在写入前已加载的快照不会自动刷新，因此仍采用同一道「默认拒绝 + `allowWhileAppRunning` 可覆盖」护栏，并要求写入后重新加载应用界面。
 
 ---
 
