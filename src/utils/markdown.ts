@@ -324,25 +324,24 @@ function looksLikeInlineFormulaSegment(value: string) {
   );
 }
 
-function wrapInlineLatexSegments(line: string) {
-  if (!line.trim() || !/[\\_^=<>~]/.test(line)) {
-    return line;
+// Markdown 表格行：以 `|` 起头，或含至少两处两侧带空白的 `|` 单元格分隔符。
+// 单纯含 `|` 的数学表达式（如 `P(A | B)`、`A = |x| < 1`）不算表格行，保持原有处理。
+function isTableRowLine(line: string) {
+  if (/^\s*\|/.test(line)) {
+    return true;
   }
 
-  const protectedSegments: string[] = [];
-  const protectedLine = line.replace(PROTECTED_MATH_PATTERN, (segment) => {
-    const token = `\uE000${protectedSegments.length}\uE001`;
-    protectedSegments.push(segment);
-    return token;
-  });
+  return (line.match(/\s\|\s/g)?.length ?? 0) >= 2;
+}
 
+function wrapInlineLatexSegmentsInText(value: string) {
   let output = '';
   let index = 0;
 
-  while (index < protectedLine.length) {
-    const currentChar = protectedLine[index];
+  while (index < value.length) {
+    const currentChar = value[index];
 
-    if (index > 0 && protectedLine[index - 1] === '\\') {
+    if (index > 0 && value[index - 1] === '\\') {
       output += currentChar;
       index += 1;
       continue;
@@ -350,7 +349,7 @@ function wrapInlineLatexSegments(line: string) {
 
     if (
       !INLINE_FORMULA_START_PATTERN.test(currentChar) ||
-      !canStartInlineFormulaCandidate(protectedLine, index)
+      !canStartInlineFormulaCandidate(value, index)
     ) {
       output += currentChar;
       index += 1;
@@ -359,21 +358,21 @@ function wrapInlineLatexSegments(line: string) {
 
     let end = index;
 
-    while (end < protectedLine.length && INLINE_FORMULA_CHAR_PATTERN.test(protectedLine[end])) {
-      if (end > index && /^\s+[A-Za-z]{2,}\b/.test(protectedLine.slice(end))) {
+    while (end < value.length && INLINE_FORMULA_CHAR_PATTERN.test(value[end])) {
+      if (end > index && /^\s+[A-Za-z]{2,}\b/.test(value.slice(end))) {
         break;
       }
 
       end += 1;
     }
 
-    const candidate = protectedLine.slice(index, end);
+    const candidate = value.slice(index, end);
 
     if (
       candidate &&
       looksLikeInlineFormulaSegment(candidate) &&
-      isInlineFormulaBoundary(protectedLine[index - 1]) &&
-      isInlineFormulaBoundary(protectedLine[end])
+      isInlineFormulaBoundary(value[index - 1]) &&
+      isInlineFormulaBoundary(value[end])
     ) {
       const leadingWhitespace = candidate.match(/^\s*/)?.[0] ?? '';
       const trailingWhitespace = candidate.match(/\s*$/)?.[0] ?? '';
@@ -388,7 +387,32 @@ function wrapInlineLatexSegments(line: string) {
     index += 1;
   }
 
-  return output.replace(
+  return output;
+}
+
+function wrapInlineLatexSegments(line: string) {
+  if (!line.trim() || !/[\\_^=<>~]/.test(line)) {
+    return line;
+  }
+
+  const protectedSegments: string[] = [];
+  const protectedLine = line.replace(PROTECTED_MATH_PATTERN, (segment) => {
+    const token = `\uE000${protectedSegments.length}\uE001`;
+    protectedSegments.push(segment);
+    return token;
+  });
+
+  // 表格行按单元格分别处理：`INLINE_FORMULA_CHAR_PATTERN` 含 `|`，候选串会跨过单元格
+  // 分隔符把下一格的裸 LaTeX 一起吞进来，补出的 `$` 就分别落在相邻两格里；
+  // remark-math 不会跨单元格配对，于是整行公式退化成字面 `$`（截图中 `仅 $T_i | τ$ 预调度`）。
+  const wrapped = isTableRowLine(protectedLine)
+    ? protectedLine
+        .split('|')
+        .map((cell) => wrapInlineLatexSegmentsInText(cell))
+        .join('|')
+    : wrapInlineLatexSegmentsInText(protectedLine);
+
+  return wrapped.replace(
     /\uE000(\d+)\uE001/g,
     (_, rawIndex) => protectedSegments[Number(rawIndex)] ?? '',
   );
