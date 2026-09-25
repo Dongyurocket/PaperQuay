@@ -1,4 +1,4 @@
-import type { Note, NoteType } from '../types/notes';
+import type { Note, NotePageKind, NoteType } from '../types/notes';
 
 // 运行时才加载 notes 服务：测试环境没有 Electron invoke 通道，
 // 动态导入让纯计划构建逻辑保持可测，调用失败时按操作降级而非崩溃。
@@ -22,6 +22,7 @@ export interface AgentNoteWriteOperation {
   paperId?: string;
   /** 笔记类型，缺省 standalone。 */
   type?: NoteType;
+  pageKind?: NotePageKind;
   /** update 操作在生成计划时读到的原文，供审批卡做 diff 展示。 */
   before?: string;
   /** 该操作的目的说明。 */
@@ -69,6 +70,7 @@ function normalizeOperation(raw: unknown): AgentNoteWriteOperation | null {
       tags: cleanStringList(value.tags),
       paperId: cleanString(value.paperId) || undefined,
       type: cleanString(value.type) === 'standalone' ? 'standalone' : 'standalone',
+      pageKind: cleanString(value.pageKind) as NotePageKind || undefined,
       reason: cleanString(value.reason) || undefined,
     };
   }
@@ -87,6 +89,7 @@ function normalizeOperation(raw: unknown): AgentNoteWriteOperation | null {
       title,
       content,
       tags,
+      pageKind: cleanString(value.pageKind) as NotePageKind || undefined,
       reason: cleanString(value.reason) || undefined,
     };
   }
@@ -152,6 +155,7 @@ export async function applyAgentNoteWritePlan(plan: AgentNoteWritePlan): Promise
           {
             paperId: operation.paperId || 'global-notes',
             type: operation.type ?? 'standalone',
+            pageKind: operation.pageKind ?? null,
             title: operation.title || 'Untitled Note',
             content: operation.content ?? '',
             contentText: operation.content ?? '',
@@ -176,6 +180,7 @@ export async function applyAgentNoteWritePlan(plan: AgentNoteWritePlan): Promise
           patch.contentHtml = null;
         }
         if (operation.tags) patch.tags = operation.tags;
+        if (operation.pageKind) patch.pageKind = operation.pageKind;
         const note = await updateNote(operation.noteId, patch, { sourceId: 'agent' });
         result.noteIds.push(note.id);
         result.applied += 1;

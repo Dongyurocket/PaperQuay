@@ -193,7 +193,9 @@ function serializeInline(node, ctx) {
     return anchorId ? `[${label}](paperquay://anchor/${anchorId})` : label;
   }
   if (node.type === 'wikiLink') {
-    const label = cleanString(node.attrs?.label) || cleanString(node.attrs?.title) || '';
+    const noteId = cleanString(node.attrs?.noteId);
+    const currentTitle = noteId ? ctx.notesById?.get(noteId)?.title : '';
+    const label = cleanString(currentTitle) || cleanString(node.attrs?.label) || cleanString(node.attrs?.title) || cleanString(node.attrs?.id) || '';
     return label ? `[[${label}]]` : '';
   }
   if (node.type === 'hashTag') {
@@ -322,7 +324,7 @@ function formatGbt7714Entry(paper, fallbackLabel) {
 }
 
 // 笔记正文 Markdown：优先从 contentJson 序列化（保引用编号/锚点链接），无 JSON 时用纯文本。
-function serializeNoteMarkdown(note, papersById) {
+function serializeNoteMarkdown(note, papersById, notesById = new Map()) {
   let json = note.contentJson;
   if (typeof json === 'string') {
     try {
@@ -334,7 +336,7 @@ function serializeNoteMarkdown(note, papersById) {
   if (!json || typeof json !== 'object' || !Array.isArray(json.content)) {
     return noteBody(note);
   }
-  const ctx = { refNumberByPaperId: new Map(), refs: [] };
+  const ctx = { refNumberByPaperId: new Map(), refs: [], notesById };
   const body = serializeBlocks(json.content, ctx);
   if (ctx.refs.length === 0) return body;
   // 文末追加规范参考文献列表（编号与内联 [n] 同源同序）。
@@ -344,10 +346,11 @@ function serializeNoteMarkdown(note, papersById) {
   return `${body}\n\n## 参考文献\n\n${lines.join('\n')}`;
 }
 
-function buildNoteFileContent(note, folderPath, papersById) {
+function buildNoteFileContent(note, folderPath, papersById, notesById = new Map()) {
   const frontmatter = encodeFrontmatter({
     id: note.id,
     type: note.type,
+    pageKind: note.pageKind ?? null,
     paperId: note.paperId,
     folder: folderPath || null,
     tags: Array.isArray(note.tags) ? note.tags : [],
@@ -356,7 +359,7 @@ function buildNoteFileContent(note, folderPath, papersById) {
     updatedAt: note.updatedAt,
     anchors: Array.isArray(note.anchors) ? note.anchors : [],
   });
-  const body = serializeNoteMarkdown(note, papersById);
+  const body = serializeNoteMarkdown(note, papersById, notesById);
   return `${frontmatter}\n\n${body}${body ? '\n' : ''}`;
 }
 
@@ -482,7 +485,7 @@ function createNoteVault(context) {
           continue;
         }
         const contentChanged =
-          serializeNoteMarkdown(existing, papersById) !== contentText ||
+          serializeNoteMarkdown(existing, papersById, new Map(notes.map((item) => [item.id, item]))) !== contentText ||
           cleanString(existing.title) !== titleFromFile;
         const meta = manifest.metadata[noteId] || {};
         const fileHash = contentHash(raw);
@@ -519,6 +522,7 @@ function createNoteVault(context) {
               }),
               contentHtml: null,
               tags: Array.isArray(fields.tags) ? tags : existing.tags,
+              pageKind: fields.pageKind ?? existing.pageKind ?? null,
               folderId,
             },
           });
@@ -534,6 +538,7 @@ function createNoteVault(context) {
         const created = noteStore.createNote({
           paperId: 'global-notes',
           type: 'standalone',
+          pageKind: fields.pageKind ?? null,
           title: titleFromFile || '未命名笔记',
           content: contentText,
           contentText,
@@ -566,7 +571,12 @@ function createNoteVault(context) {
       // 标题或文件夹变化都让文件名跟随，旧文件在下方按 manifest 清理。
       let rel = `${expectedPrefix}${baseName}.md`;
 
-      const content = buildNoteFileContent(note, folderPath, papersById);
+      const content = buildNoteFileContent(
+        note,
+        folderPath,
+        papersById,
+        new Map(notes.map((item) => [item.id, item])),
+      );
       let existingContent = null;
       try {
         existingContent = fs.readFileSync(path.join(vaultDir, rel), 'utf8');

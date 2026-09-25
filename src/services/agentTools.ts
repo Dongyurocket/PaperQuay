@@ -1,5 +1,5 @@
 import type { LiteraturePaper } from '../types/library';
-import type { Note, NoteType } from '../types/notes';
+import type { Note, NotePageKind, NoteType } from '../types/notes';
 import { getNote, listNotes } from './notes';
 import { createAgentNoteWritePlan } from './agentNotePlan';
 import type { AgentMemoryFile, AgentMemoryWritePlan } from './agentMemory';
@@ -61,10 +61,18 @@ function paperMetadata(paper: LiteraturePaper) {
 }
 
 const NOTE_TYPES: ReadonlySet<string> = new Set(['highlight', 'area', 'standalone', 'ai-chat']);
+const NOTE_PAGE_KINDS: ReadonlySet<string> = new Set([
+  'paper-card', 'concept', 'synthesis', 'qa', 'excerpt', 'index', 'log', 'overview',
+]);
 
 function noteTypeValue(value: unknown): NoteType | undefined {
   const raw = stringValue(value);
   return NOTE_TYPES.has(raw) ? (raw as NoteType) : undefined;
+}
+
+function notePageKindValue(value: unknown): NotePageKind | undefined {
+  const raw = stringValue(value);
+  return NOTE_PAGE_KINDS.has(raw) ? (raw as NotePageKind) : undefined;
 }
 
 function noteSummary(note: Note) {
@@ -73,6 +81,7 @@ function noteSummary(note: Note) {
     id: note.id,
     title: note.title,
     type: note.type,
+    pageKind: note.pageKind,
     paperId: note.paperId || null,
     tags: note.tags,
     excerpt: note.excerpt?.trim() || body.slice(0, 200) || null,
@@ -415,6 +424,7 @@ export function createLibraryAgentTools(options: CreateLibraryAgentToolsOptions)
           linkedPaperId: { type: 'string' },
           tag: { type: 'string' },
           type: { type: 'string', enum: ['highlight', 'area', 'standalone', 'ai-chat'] },
+          pageKind: { type: 'string', enum: ['paper-card', 'concept', 'synthesis', 'qa', 'excerpt', 'index', 'log', 'overview'] },
           limit: { type: 'integer', minimum: 1, maximum: 50 },
         },
       },
@@ -426,6 +436,7 @@ export function createLibraryAgentTools(options: CreateLibraryAgentToolsOptions)
           linkedPaperId: stringValue(args.linkedPaperId) || null,
           tag: stringValue(args.tag) || null,
           type: noteTypeValue(args.type) ?? null,
+          pageKind: notePageKindValue(args.pageKind) ?? null,
           limit,
         });
 
@@ -488,6 +499,7 @@ export function createLibraryAgentTools(options: CreateLibraryAgentToolsOptions)
                 content: { type: 'string' },
                 tags: { type: 'array', items: { type: 'string' } },
                 paperId: { type: 'string' },
+                pageKind: { type: 'string', enum: ['paper-card', 'concept', 'synthesis', 'qa', 'excerpt', 'index', 'log', 'overview'] },
                 reason: { type: 'string' },
               },
               required: ['kind'],

@@ -1,6 +1,6 @@
 import type { Editor, JSONContent } from '@tiptap/core';
 import type { EditorView } from '@tiptap/pm/view';
-import type { Note, NoteAnchor } from '../../types/notes';
+import type { Note, NoteAnchor, NotePageKind } from '../../types/notes';
 import { collectText, noteContentToTiptap } from './notesTiptap.ts';
 
 export interface NoteTemplate {
@@ -8,6 +8,7 @@ export interface NoteTemplate {
   label: string;
   description: string;
   content: JSONContent[];
+  pageKind?: NotePageKind;
 }
 
 export interface NoteSlashCommandItem {
@@ -227,6 +228,7 @@ export const NOTE_TEMPLATES: NoteTemplate[] = [
       headingNode(2, '后续追问'),
       taskListNode(['确认原文表述', '补充相关论文']),
     ],
+    pageKind: 'qa',
   },
   // 以下模板对应 docs/notes-charter.md 的页面类型（page types）。
   {
@@ -247,6 +249,7 @@ export const NOTE_TEMPLATES: NoteTemplate[] = [
       headingNode(2, '我的判断'),
       paragraphNode(),
     ],
+    pageKind: 'paper-card',
   },
   {
     id: 'concept',
@@ -264,6 +267,7 @@ export const NOTE_TEMPLATES: NoteTemplate[] = [
       headingNode(2, '相关概念'),
       bulletListNode(['[[相关概念]]（用双链）']),
     ],
+    pageKind: 'concept',
   },
   {
     id: 'synthesis',
@@ -281,6 +285,7 @@ export const NOTE_TEMPLATES: NoteTemplate[] = [
       headingNode(2, '开放问题'),
       bulletListNode(['尚未解决的问题']),
     ],
+    pageKind: 'synthesis',
   },
   {
     id: 'excerpt-card',
@@ -296,6 +301,7 @@ export const NOTE_TEMPLATES: NoteTemplate[] = [
       headingNode(2, '我的推断'),
       paragraphNode('（非原文主张的推断须写在这里）'),
     ],
+    pageKind: 'excerpt',
   },
   {
     id: 'index-page',
@@ -309,6 +315,7 @@ export const NOTE_TEMPLATES: NoteTemplate[] = [
       headingNode(2, '待办'),
       taskListNode(['待整理的笔记']),
     ],
+    pageKind: 'index',
   },
   {
     id: 'research-log',
@@ -320,6 +327,7 @@ export const NOTE_TEMPLATES: NoteTemplate[] = [
       headingNode(2, '下一步'),
       taskListNode(['明天第一件事']),
     ],
+    pageKind: 'log',
   },
   {
     id: 'overview-page',
@@ -335,6 +343,7 @@ export const NOTE_TEMPLATES: NoteTemplate[] = [
       headingNode(2, '本周进展'),
       paragraphNode(),
     ],
+    pageKind: 'overview',
   },
 ];
 

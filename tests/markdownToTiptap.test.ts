@@ -19,12 +19,23 @@ test('Markdown 解析器重建基础 Tiptap 块和内联节点', () => {
     'codeBlock',
   ]);
   const paragraph = doc.content[1];
-  assert.ok(paragraph.content.some((node: any) => node.type === 'wikiLink' && node.attrs.id === '双链'));
+  assert.ok(paragraph.content.some((node: any) => node.type === 'wikiLink' && node.attrs.id === '双链' && node.attrs.noteId === null));
   assert.ok(paragraph.content.some((node: any) => node.type === 'hashTag' && node.attrs.tag === '标签'));
   assert.ok(paragraph.content.some((node: any) => node.marks?.[0]?.type === 'bold'));
   assert.ok(paragraph.content.some((node: any) => node.marks?.[0]?.type === 'italic'));
   assert.ok(paragraph.content.some((node: any) => node.marks?.[0]?.type === 'strike'));
   assert.ok(paragraph.content.some((node: any) => node.marks?.[0]?.type === 'code'));
+});
+
+test('Markdown 解析器为已知双链写入 noteId，未知双链保留标题快照', () => {
+  const doc = parseMarkdownToTiptap('已知 [[新标题]]，未知 [[手写旧标题]]', {
+    notes: [{ id: 'note-a', title: '新标题' }],
+  });
+  const links = doc.content[0].content.filter((node: any) => node.type === 'wikiLink');
+  assert.deepEqual(links.map((node: any) => node.attrs), [
+    { noteId: 'note-a', id: 'note-a', label: '新标题' },
+    { noteId: null, id: '手写旧标题', label: '手写旧标题' },
+  ]);
 });
 
 test('Markdown 解析器只为已知锚点和文献重建专用节点', () => {

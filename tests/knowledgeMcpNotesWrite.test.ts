@@ -58,6 +58,21 @@ test('create_note 拒绝空内容与非法类型', () => {
   try {
     assert.throws(() => service.createNote({}), /non-empty title or content/);
     assert.throws(() => service.createNote({ title: 'X', type: 'weird' }), /Unsupported note type/);
+    assert.throws(() => service.createNote({ title: 'X', pageKind: 'weird' }), /Unsupported note page kind/);
+  } finally {
+    cleanupDir(dir);
+  }
+});
+
+test('create_note 的 pageKind 可写入、回读并参与过滤', () => {
+  const { dir, service } = setup();
+  try {
+    const created = service.createNote({ title: '概念页', content: '内容', pageKind: 'concept' });
+    assert.equal(created.note.pageKind, 'concept');
+    const stored = service.withWritableNoteStore((store: any) => store.getNote({ id: created.noteId }));
+    assert.equal(stored.pageKind, 'concept');
+    assert.equal(service.searchNotes({ pageKind: 'concept' }).notes[0].id, created.noteId);
+    assert.throws(() => service.searchNotes({ pageKind: 'bad-kind' }), /Unsupported note page kind/);
   } finally {
     cleanupDir(dir);
   }

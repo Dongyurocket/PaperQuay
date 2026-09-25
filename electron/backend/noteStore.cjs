@@ -5,6 +5,16 @@ const { DatabaseSync, sqlStringLiteral, withTransaction } = require('./nodeSqlit
 const { cleanString, id, now } = require('./utils.cjs');
 
 const NOTE_TYPES = new Set(['highlight', 'area', 'standalone', 'ai-chat']);
+const NOTE_PAGE_KINDS = new Set([
+  'paper-card',
+  'concept',
+  'synthesis',
+  'qa',
+  'excerpt',
+  'index',
+  'log',
+  'overview',
+]);
 const GLOBAL_NOTES_PAPER_ID = 'global-notes';
 
 function openDatabase(databasePath) {
@@ -88,6 +98,7 @@ function createSchema(db) {
   `);
 
   ensureColumn(db, 'notes', 'content_json', 'TEXT');
+  ensureColumn(db, 'notes', 'page_kind', 'TEXT');
   ensureColumn(db, 'notes', 'content_html', 'TEXT');
   ensureColumn(db, 'notes', 'content_text', 'TEXT');
   ensureColumn(db, 'notes', 'excerpt', 'TEXT');
@@ -109,6 +120,16 @@ function createSchema(db) {
   ensureColumn(db, 'note_tags', 'created_at', 'INTEGER NOT NULL DEFAULT 0');
   ensureColumn(db, 'note_links', 'link_text', 'TEXT');
   ensureColumn(db, 'note_links', 'created_at', 'INTEGER NOT NULL DEFAULT 0');
+  db.exec(`
+    UPDATE notes
+    SET page_kind = CASE type
+      WHEN 'highlight' THEN 'excerpt'
+      WHEN 'ai-chat' THEN 'qa'
+      ELSE NULL
+    END
+    WHERE page_kind IS NULL
+      AND type IN ('highlight', 'ai-chat');
+  `);
 
   // 文件夹树入库：此前只存 localStorage，换设备/清缓存即丢失，且笔记的
   // folder_id 外键没有对应实体可查。删除文件夹时子文件夹级联删除、笔记归入未分类。
@@ -130,6 +151,7 @@ function createSchema(db) {
     CREATE INDEX IF NOT EXISTS idx_notes_updated_at ON notes(updated_at DESC);
     CREATE INDEX IF NOT EXISTS idx_notes_deleted_at ON notes(deleted_at);
     CREATE INDEX IF NOT EXISTS idx_notes_type ON notes(type);
+    CREATE INDEX IF NOT EXISTS idx_notes_page_kind ON notes(page_kind);
     CREATE INDEX IF NOT EXISTS idx_note_tags_tag ON note_tags(tag);
     CREATE INDEX IF NOT EXISTS idx_note_links_target ON note_links(target_note_id);
     CREATE INDEX IF NOT EXISTS idx_note_paper_links_paper_id ON note_paper_links(paper_id);
@@ -168,6 +190,13 @@ function normalizeNoteType(value) {
   const noteType = cleanString(value) || 'standalone';
   if (!NOTE_TYPES.has(noteType)) throw new Error(`Unsupported note type: ${noteType}`);
   return noteType;
+}
+
+function normalizePageKind(value) {
+  const pageKind = cleanString(value);
+  if (!pageKind) return null;
+  if (!NOTE_PAGE_KINDS.has(pageKind)) throw new Error(`Unsupported note page kind: ${pageKind}`);
+  return pageKind;
 }
 
 function normalizeTags(tags) {
@@ -415,6 +444,18 @@ function normalizeContentJson(value, fallback) {
   return typeof value === 'object' ? value : fallback ?? null;
 }
 
+function extractWikiLinkIds(value, output = []) {
+  if (!value || typeof value !== 'object') return output;
+  if (value.type === 'wikiLink') {
+    const noteId = cleanString(value.attrs?.noteId || value.attrs?.id);
+    if (noteId && !output.includes(noteId)) output.push(noteId);
+  }
+  for (const child of Array.isArray(value.content) ? value.content : []) {
+    extractWikiLinkIds(child, output);
+  }
+  return output;
+}
+
 function normalizeNoteInput(input, existing = null) {
   const timestamp = now();
   const contentJson = normalizeContentJson(input?.contentJson, existing?.contentJson);
@@ -445,6 +486,7 @@ function normalizeNoteInput(input, existing = null) {
     linkedPaperId ||
     GLOBAL_NOTES_PAPER_ID;
   const type = normalizeNoteType(input?.type ?? existing?.type);
+  const pageKind = normalizePageKind(input?.pageKind ?? existing?.pageKind);
   const title = cleanString(input?.title ?? existing?.title) || 'Untitled Note';
   const pdfLocation = input?.pdfLocation === undefined
     ? existing?.pdfLocation ?? null
@@ -467,6 +509,7 @@ function normalizeNoteInput(input, existing = null) {
     id: cleanString(input?.id ?? existing?.id) || id('note'),
     paperId,
     type,
+    pageKind,
     title,
     content,
     contentJson,
@@ -502,7 +545,10 @@ function normalizeNoteInput(input, existing = null) {
         : Number(existing?.wordCount) || countWords(contentText),
     isFavorite: normalizeBoolean(input?.isFavorite, existing?.isFavorite),
     isPinned: normalizeBoolean(input?.isPinned, existing?.isPinned),
-    linkedNoteIds: normalizeStringList(input?.linkedNoteIds ?? existing?.linkedNoteIds),
+    linkedNoteIds: normalizeStringList([
+      ...normalizeStringList(input?.linkedNoteIds ?? existing?.linkedNoteIds),
+      ...extractWikiLinkIds(contentJson),
+    ]),
     linkedNoteTitles,
     linkedPaperIds,
   };
@@ -526,6 +572,7 @@ function rowToNote(row, tags = [], linkedNoteIds = [], linkedPaperIds = [], back
     id: row.id,
     paperId: row.paper_id,
     type: row.type,
+    pageKind: row.page_kind ?? null,
     title: row.title,
     content: row.content,
     contentJson: parseJson(row.content_json, null),
@@ -669,7 +716,10 @@ function resolveNoteLinks(db, note) {
 
   for (const targetNoteId of note.linkedNoteIds) {
     if (!targetNoteId || targetNoteId === note.id) continue;
-    links.set(targetNoteId, findNoteTitleById(db, targetNoteId));
+    const target = db.prepare(
+      'SELECT id, title FROM notes WHERE id = ? AND deleted_at IS NULL',
+    ).get(targetNoteId);
+    if (target) links.set(target.id, target.title);
   }
 
   for (const title of note.linkedNoteTitles ?? []) {
@@ -750,6 +800,7 @@ function upsertNote(db, note) {
       id,
       paper_id,
       type,
+      page_kind,
       title,
       content,
       content_json,
@@ -775,10 +826,11 @@ function upsertNote(db, note) {
       is_favorite,
       is_pinned
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       paper_id = excluded.paper_id,
       type = excluded.type,
+      page_kind = excluded.page_kind,
       title = excluded.title,
       content = excluded.content,
       content_json = excluded.content_json,
@@ -806,6 +858,7 @@ function upsertNote(db, note) {
     note.id,
     note.paperId,
     note.type,
+    note.pageKind,
     note.title,
     note.content,
     toJson(note.contentJson),
@@ -885,6 +938,7 @@ function createNoteStore(appPaths) {
     const paperId = cleanString(request.paperId);
     const linkedPaperId = cleanString(request.linkedPaperId);
     const type = cleanString(request.type);
+    const pageKind = normalizePageKind(request.pageKind);
     const tag = cleanString(request.tag).replace(/^#/, '');
     const search = cleanString(request.search).toLowerCase();
     const limit = Math.max(1, Math.min(5000, Math.trunc(Number(request.limit)) || 500));
@@ -906,6 +960,10 @@ function createNoteStore(appPaths) {
     if (NOTE_TYPES.has(type)) {
       where.push('type = ?');
       args.push(type);
+    }
+    if (pageKind) {
+      where.push('page_kind = ?');
+      args.push(pageKind);
     }
     if (tag) {
       where.push('id IN (SELECT note_id FROM note_tags WHERE lower(tag) = lower(?))');

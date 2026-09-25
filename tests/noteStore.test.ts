@@ -7,6 +7,7 @@ import path from 'node:path';
 
 const require = createRequire(import.meta.url);
 const { createNoteStore } = require('../electron/backend/noteStore.cjs');
+const { DatabaseSync } = require('../electron/backend/nodeSqlite.cjs');
 
 function createStore() {
   const dataDir = mkdtempSync(path.join(tmpdir(), 'paperquay-notes-store-test-'));
@@ -152,6 +153,110 @@ test('note folders can be created with an explicit id for localStorage migration
     const fresh = store.createFolder({ name: '新建的' });
     assert.notEqual(fresh.id, 'note-folder-legacy-1');
     assert.ok(fresh.id);
+  } finally {
+    store.close();
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('page_kind migrates legacy source types once and remains idempotent', () => {
+  const { dataDir, store } = createStore();
+
+  try {
+    const highlight = store.createNote({ type: 'highlight', title: '摘录', content: '' });
+    const chat = store.createNote({ type: 'ai-chat', title: '问答', content: '' });
+    const area = store.createNote({ type: 'area', title: '区域', content: '' });
+    const standalone = store.createNote({ type: 'standalone', title: '独立', content: '' });
+    store.close();
+
+    const db = new DatabaseSync(path.join(dataDir, 'paperquay-notes.sqlite'));
+    db.prepare('UPDATE notes SET page_kind = NULL').run();
+    db.close();
+
+    const reopened = createNoteStore({
+      dataDir,
+      notesDatabasePath: path.join(dataDir, 'paperquay-notes.sqlite'),
+    });
+    assert.equal(reopened.getNote({ id: highlight.id }).pageKind, 'excerpt');
+    assert.equal(reopened.getNote({ id: chat.id }).pageKind, 'qa');
+    assert.equal(reopened.getNote({ id: area.id }).pageKind, null);
+    assert.equal(reopened.getNote({ id: standalone.id }).pageKind, null);
+    reopened.close();
+
+    const reopenedAgain = createNoteStore({
+      dataDir,
+      notesDatabasePath: path.join(dataDir, 'paperquay-notes.sqlite'),
+    });
+    assert.equal(reopenedAgain.getNote({ id: highlight.id }).pageKind, 'excerpt');
+    assert.equal(reopenedAgain.getNote({ id: chat.id }).pageKind, 'qa');
+    assert.equal(reopenedAgain.listNotes({ pageKind: 'excerpt' }).length, 1);
+    reopenedAgain.close();
+  } finally {
+    try { store.close(); } catch {}
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('page_kind validates values and filters listNotes', () => {
+  const { dataDir, store } = createStore();
+
+  try {
+    const concept = store.createNote({ title: '概念', content: '', pageKind: 'concept' });
+    store.createNote({ title: '日志', content: '', pageKind: 'log' });
+    store.createNote({ title: '无类型', content: '' });
+
+    assert.equal(store.getNote({ id: concept.id }).pageKind, 'concept');
+    assert.deepEqual(store.listNotes({ pageKind: 'concept' }).map((note: any) => note.id), [concept.id]);
+    assert.throws(
+      () => store.createNote({ title: '非法', content: '', pageKind: 'not-a-kind' }),
+      /Unsupported note page kind/,
+    );
+    assert.throws(
+      () => store.updateNote({ id: concept.id, patch: { pageKind: 'not-a-kind' } }),
+      /Unsupported note page kind/,
+    );
+    assert.throws(
+      () => store.listNotes({ pageKind: 'not-a-kind' }),
+      /Unsupported note page kind/,
+    );
+  } finally {
+    store.close();
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('wiki links remain ID-stable across target renames and re-saves', () => {
+  const { dataDir, store } = createStore();
+
+  try {
+    const target = store.createNote({ title: '原标题', content: '' });
+    const source = store.createNote({
+      title: '引用方',
+      content: '',
+      contentText: '[[原标题]]',
+      contentJson: {
+        type: 'doc',
+        content: [{
+          type: 'paragraph',
+          content: [{ type: 'wikiLink', attrs: { noteId: target.id, id: target.id, label: '原标题' } }],
+        }],
+      },
+    });
+
+    store.updateNote({ id: target.id, patch: { title: '新标题' } });
+    const resaved = store.updateNote({
+      id: source.id,
+      patch: { content: '[[原标题]]', contentText: '[[原标题]]', contentJson: source.contentJson },
+    });
+
+    assert.deepEqual(resaved.linkedNoteIds, [target.id]);
+    assert.equal(store.getNote({ id: target.id }).title, '新标题');
+    assert.equal(store.listBacklinks({ noteId: target.id })[0].sourceNoteId, source.id);
+
+    store.updateNote({ id: target.id, patch: { title: '循环标题' } });
+    store.updateNote({ id: target.id, patch: { title: '新标题' } });
+    const afterCycle = store.getNote({ id: source.id });
+    assert.deepEqual(afterCycle.linkedNoteIds, [target.id]);
   } finally {
     store.close();
     rmSync(dataDir, { recursive: true, force: true });

@@ -322,6 +322,41 @@ test('vault 往返保留标题、列表、双链、标签、锚点和文献引�
   }
 });
 
+test('vault 导出按 noteId 跟随改名，回导后仍恢复双链关系', () => {
+  const { dir, vaultDir, noteStore, vault } = setup();
+  try {
+    const target = noteStore.createNote({ title: '旧标题', content: '' });
+    const source = noteStore.createNote({
+      title: '引用方',
+      content: '',
+      contentText: '[[旧标题]]',
+      contentJson: {
+        type: 'doc',
+        content: [{
+          type: 'paragraph',
+          content: [{ type: 'wikiLink', attrs: { noteId: target.id, id: target.id, label: '旧标题' } }],
+        }],
+      },
+    });
+    vault.syncNow();
+
+    noteStore.updateNote({ id: target.id, patch: { title: '新标题' } });
+    vault.syncNow();
+    const sourcePath = path.join(vaultDir, '引用方.md');
+    assert.match(readFileSync(sourcePath, 'utf8'), /\[\[新标题\]\]/);
+
+    const sourceText = readFileSync(sourcePath, 'utf8');
+    writeFileSync(sourcePath, sourceText.replace('[[新标题]]', '[[新标题]]\n\n补充说明'));
+    const future = new Date(Date.now() + 60_000);
+    utimesSync(sourcePath, future, future);
+    assert.equal(vault.syncNow().updated, 1);
+    assert.deepEqual(noteStore.getNote({ id: source.id }).linkedNoteIds, [target.id]);
+  } finally {
+    noteStore.close();
+    cleanupDir(dir);
+  }
+});
+
 test('vault 双侧修改生成冲突副本且 DB 保持应用侧内容', () => {
   const { dir, vaultDir, noteStore, vault } = setup();
   try {

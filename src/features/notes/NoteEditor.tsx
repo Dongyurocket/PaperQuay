@@ -69,6 +69,7 @@ import type {
   Note,
   NoteAnchor,
   NoteAnchorInsertRequest,
+  NotePageKind,
   NotePolishResult,
   NotePolishScope,
   NoteTagSummary,
@@ -517,7 +518,7 @@ const NoteAnchorBlock = TiptapNode.create<NoteAnchorBlockOptions>({
   },
 });
 
-function runSlashCommand(editor: Editor, range: Range, item: NoteSlashCommandItem) {
+function runSlashCommand(editor: Editor, range: Range, item: NoteSlashCommandItem, onPageKind?: (pageKind: NotePageKind) => void) {
   const chain = editor.chain().focus().deleteRange(range);
 
   if (item.id === 'paragraph') {
@@ -587,6 +588,7 @@ function runSlashCommand(editor: Editor, range: Range, item: NoteSlashCommandIte
     const template = NOTE_TEMPLATES.find((entry) => entry.id === templateId);
     if (template) {
       chain.insertContent([...template.content, paragraphNode()]).run();
+      if (template.pageKind) onPageKind?.(template.pageKind);
     }
   }
 }
@@ -613,6 +615,7 @@ interface NoteEditorProps {
   onTagClick?: (tag: string) => void;
   onPaperClick?: (paperId: string, location?: PaperReferenceLocation) => void;
   onJumpToNoteAnchor?: (note: Note, anchor: NoteAnchor) => void;
+  onPageKindChange?: (pageKind: NotePageKind) => void;
 }
 
 function iconNode(node: ReactNode) {
@@ -649,11 +652,13 @@ export function NoteEditor({
   onTagClick,
   onPaperClick,
   onJumpToNoteAnchor,
+  onPageKindChange,
 }: NoteEditorProps) {
   const [title, setTitle] = useState('');
   const [tagText, setTagText] = useState('');
   const [tagEditorOpen, setTagEditorOpen] = useState(false);
   const [color, setColor] = useState('#fef3c7');
+  const [pageKind, setPageKind] = useState<NotePageKind | null>(note?.pageKind ?? null);
   const [revision, setRevision] = useState(0);
   const [externalUpdateAvailable, setExternalUpdateAvailable] = useState(false);
   const [polishOpen, setPolishOpen] = useState(false);
@@ -723,6 +728,7 @@ export function NoteEditor({
 
   useEffect(() => {
     latestNoteRef.current = note;
+    setPageKind(note?.pageKind ?? null);
     if (note) {
       for (const anchor of note.anchors) {
         pendingAnchorsRef.current.delete(anchor.id);
@@ -789,7 +795,10 @@ export function NoteEditor({
           );
           return;
         }
-        runSlashCommand(editor, range, item);
+        runSlashCommand(editor, range, item, (nextPageKind) => {
+          setPageKind(nextPageKind);
+          onPageKindChange?.(nextPageKind);
+        });
       },
     }),
     NoteAnchorLink.configure({
@@ -803,7 +812,7 @@ export function NoteEditor({
         return latestCandidatesRef.current.notes
           .filter((item) => item.id !== note?.id)
           .filter((item) => !normalized || item.title.toLocaleLowerCase().includes(normalized))
-          .slice(0, 8)
+          .slice(normalized ? 0 : undefined, normalized ? 8 : undefined)
           .map((item): NoteSuggestionItem => ({
             id: item.id,
             label: item.title || TEXT.untitled,
@@ -1567,6 +1576,7 @@ export function NoteEditor({
         anchors: nextAnchors,
         pdfLocation: nextAnchors[0]?.pdfLocation ?? null,
         linkedNoteTitles: extractWikiTitles(contentText),
+        pageKind,
         linkedPaperIds: extractPaperRefs(contentText),
       },
       { sourceId: editorSourceIdRef.current },
@@ -1581,7 +1591,7 @@ export function NoteEditor({
     clearNoteEditorDraft(editorSourceIdRef.current, note.id);
     setTitle(nextTitle);
     setRevision((value) => value + 1);
-  }, [color, editor, note, onUpdate, saving, setExternalUpdateState, tagText, title]);
+  }, [color, editor, note, onUpdate, pageKind, saving, setExternalUpdateState, tagText, title]);
 
   const refreshFromExternalUpdate = useCallback(() => {
     const incomingNote =

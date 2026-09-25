@@ -50,7 +50,15 @@ function parseMarkdownToTiptap(markdown, options = {}) {
       if (wiki) {
         const label = wiki[1].trim();
         const targets = notes.filter((note) => note.title?.toLocaleLowerCase() === label.toLocaleLowerCase());
-        result.push({ type: 'wikiLink', attrs: { id: targets.length === 1 ? targets[0].id : label, label } });
+        const target = targets.length === 1 ? targets[0] : null;
+        result.push({
+          type: 'wikiLink',
+          attrs: {
+            noteId: target?.id || null,
+            id: target?.id || label,
+            label,
+          },
+        });
         i += wiki[0].length; continue;
       }
       const ref = rest.match(/^\[(\d+)\](?!\()/);

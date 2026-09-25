@@ -82,6 +82,11 @@ const TOOLS = [
           type: 'string',
           description: 'The unique ID of the paper in PaperQuay.',
         },
+        pageKind: {
+          type: 'string',
+          enum: ['paper-card', 'concept', 'synthesis', 'qa', 'excerpt', 'index', 'log', 'overview'],
+          description: 'Filter by structural page kind.',
+        },
       },
       required: ['paperId'],
     },
@@ -193,9 +198,19 @@ const TOOLS = [
           enum: ['standalone', 'highlight', 'area', 'ai-chat'],
           description: 'Note type; defaults to standalone.',
         },
+        pageKind: {
+          type: 'string',
+          enum: ['paper-card', 'concept', 'synthesis', 'qa', 'excerpt', 'index', 'log', 'overview'],
+          description: 'Structural page kind.',
+        },
         folderId: {
           type: 'string',
           description: 'Note folder ID (see list_note_folders). Omit for uncategorized.',
+        },
+        pageKind: {
+          type: 'string',
+          enum: ['paper-card', 'concept', 'synthesis', 'qa', 'excerpt', 'index', 'log', 'overview'],
+          description: 'Structural page kind.',
         },
         allowWhileAppRunning: ALLOW_WHILE_APP_RUNNING_SCHEMA,
       },

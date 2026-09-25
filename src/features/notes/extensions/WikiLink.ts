@@ -72,6 +72,11 @@ export const WikiLink = Node.create<WikiLinkOptions>({
         parseHTML: (element) => element.getAttribute('data-id'),
         renderHTML: (attributes) => attributes.id ? { 'data-id': attributes.id } : {},
       },
+      noteId: {
+        default: null,
+        parseHTML: (element) => element.getAttribute('data-note-id'),
+        renderHTML: (attributes) => attributes.noteId ? { 'data-note-id': attributes.noteId } : {},
+      },
       label: {
         default: null,
         parseHTML: (element) => element.getAttribute('data-label'),
@@ -85,11 +90,14 @@ export const WikiLink = Node.create<WikiLinkOptions>({
   },
 
   renderHTML({ node, HTMLAttributes }): DOMOutputSpec {
-    const label = node.attrs.label || node.attrs.id || '';
+    const current = node.attrs.noteId
+      ? this.options.items('').find((item) => item.id === node.attrs.noteId)
+      : null;
+    const label = current?.label || node.attrs.label || node.attrs.id || '';
     return [
       'span',
       mergeAttributes(
-        { 'data-type': this.name, 'data-note-id': node.attrs.id, 'data-note-label': label },
+        { 'data-type': this.name, 'data-note-id': node.attrs.noteId || node.attrs.id, 'data-note-label': label },
         this.options.HTMLAttributes,
         HTMLAttributes,
       ),
@@ -98,7 +106,10 @@ export const WikiLink = Node.create<WikiLinkOptions>({
   },
 
   renderText({ node }) {
-    return `[[${node.attrs.label || node.attrs.id || ''}]]`;
+    const current = node.attrs.noteId
+      ? this.options.items('').find((item) => item.id === node.attrs.noteId)
+      : null;
+    return `[[${current?.label || node.attrs.label || node.attrs.id || ''}]]`;
   },
 
   addProseMirrorPlugins() {
@@ -119,6 +130,7 @@ export const WikiLink = Node.create<WikiLinkOptions>({
               type: this.name,
               attrs: {
                 id: props.id,
+                noteId: props.id,
                 label: props.label,
               },
             },
@@ -155,6 +167,7 @@ export const WikiLink = Node.create<WikiLinkOptions>({
                   type: this.name,
                   attrs: {
                     id: item.id,
+                    noteId: item.id,
                     label: item.label,
                   },
                 },

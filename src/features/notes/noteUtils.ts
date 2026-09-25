@@ -162,5 +162,8 @@ export function noteMatchesFilter(note: Note, filter: string) {
   if (filter === 'highlight') return note.type === 'highlight' || note.type === 'area';
   if (filter === 'ai-chat') return note.type === 'ai-chat';
   if (filter === 'standalone') return note.type === 'standalone';
+  if (['paper-card', 'concept', 'synthesis', 'qa', 'excerpt', 'index', 'log', 'overview'].includes(filter)) {
+    return note.pageKind === filter;
+  }
   return true;
 }

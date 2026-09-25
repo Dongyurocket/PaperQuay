@@ -90,6 +90,7 @@ export const useNotesStore = create<NotesState>()((set, get) => ({
         {
           paperId: draft.paperId || GLOBAL_NOTES_PAPER_ID,
           type: draft.type || 'standalone',
+          pageKind: draft.pageKind ?? null,
           title: draft.title || '未命名笔记',
           content: draft.content ?? '',
           contentJson: draft.contentJson ?? null,

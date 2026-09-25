@@ -2,6 +2,15 @@ import type { JSONContent } from '@tiptap/core';
 import type { BBox, BBoxCoordinateSystem, BBoxPageSize } from './reader';
 
 export type NoteType = 'highlight' | 'area' | 'standalone' | 'ai-chat';
+export type NotePageKind =
+  | 'paper-card'
+  | 'concept'
+  | 'synthesis'
+  | 'qa'
+  | 'excerpt'
+  | 'index'
+  | 'log'
+  | 'overview';
 export type NotePolishScope = 'none' | 'linked-papers' | 'library';
 
 export interface NotePolishCitation {
@@ -53,6 +62,7 @@ export interface Note {
   id: string;
   paperId: string;
   type: NoteType;
+  pageKind: NotePageKind | null;
   title: string;
   content: string;
   contentJson?: JSONContent | null;
@@ -106,6 +116,7 @@ export interface ListNotesRequest {
   paperId?: string | null;
   linkedPaperId?: string | null;
   type?: NoteType | null;
+  pageKind?: NotePageKind | null;
   tag?: string | null;
   search?: string | null;
   includeDeleted?: boolean;
@@ -115,6 +126,7 @@ export interface ListNotesRequest {
 export interface CreateNoteRequest {
   paperId: string;
   type: NoteType;
+  pageKind?: NotePageKind | null;
   title: string;
   content?: string;
   contentJson?: JSONContent | null;

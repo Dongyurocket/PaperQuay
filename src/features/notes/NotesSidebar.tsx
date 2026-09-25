@@ -11,7 +11,7 @@ import {
   Search,
   Trash2,
 } from 'lucide-react';
-import type { Note, NoteAnchor, NoteAnchorInsertRequest, UpdateNoteRequest } from '../../types/notes';
+import type { Note, NoteAnchor, NoteAnchorInsertRequest, NotePageKind, UpdateNoteRequest } from '../../types/notes';
 import type { LiteraturePaper } from '../../types/library';
 import type { SelectedExcerpt } from '../../types/reader';
 import { cn } from '../../utils/cn';
@@ -25,7 +25,7 @@ import {
 import { NotesList } from './NotesList';
 import { buildQuoteMarkdown, noteMatchesFilter } from './noteUtils';
 
-type NotesFilterKey = 'all' | 'highlight' | 'ai-chat' | 'standalone';
+type NotesFilterKey = 'all' | 'highlight' | 'ai-chat' | 'standalone' | NotePageKind;
 type DrawerTab = 'anchors' | 'notes';
 
 type SidebarContextMenu =
@@ -62,6 +62,12 @@ const FILTERS: Array<{ key: NotesFilterKey; label: string }> = [
   { key: 'highlight', label: 'PDF' },
   { key: 'ai-chat', label: 'AI' },
   { key: 'standalone', label: '笔记' },
+];
+const PAGE_KIND_FILTERS: Array<{ key: NotePageKind; label: string }> = [
+  { key: 'paper-card', label: '论文卡' }, { key: 'concept', label: '概念' },
+  { key: 'synthesis', label: '综述' }, { key: 'qa', label: '问答' },
+  { key: 'excerpt', label: '摘录' }, { key: 'index', label: '索引' },
+  { key: 'log', label: '日志' }, { key: 'overview', label: '总览' },
 ];
 
 function anchorPageLabel(anchor: NoteAnchor) {
@@ -473,6 +479,15 @@ export function NotesSidebar({
                   </button>
                 ))}
               </div>
+              <div className="mt-1 flex shrink-0 items-center gap-1 overflow-x-auto">
+                {PAGE_KIND_FILTERS.map((item) => (
+                  <button key={item.key} type="button" onClick={() => setFilter(item.key)}
+                    className={cn('shrink-0 rounded-md px-2 py-1 text-[11px] font-medium transition',
+                      filter === item.key ? 'bg-[var(--pq-bg-tertiary)] text-[var(--pq-text)]' : 'text-[var(--pq-text-muted)] hover:bg-[var(--pq-hover)] hover:text-[var(--pq-text)]')}>
+                    {item.label}
+                  </button>
+                ))}
+              </div>
 
               <div className="mt-2 min-h-0 flex-1 overflow-y-auto">
                 {loading ? (
@@ -512,6 +527,9 @@ export function NotesSidebar({
           externalUpdateNote={externalUpdateNote}
           onExternalUpdateApply={onExternalUpdateApply}
           onJumpToNoteAnchor={onJumpToNoteAnchor}
+          onPageKindChange={(nextPageKind) => {
+            if (activeNote) void onUpdateNote(activeNote.id, { pageKind: nextPageKind });
+          }}
           onPaperClick={onPaperClick}
           compact
         />

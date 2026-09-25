@@ -31,6 +31,7 @@ function slimNote(note) {
     paperId: note.paperId,
     linkedPaperId: note.linkedPaperId ?? null,
     type: note.type,
+    pageKind: note.pageKind ?? null,
     title: note.title,
     content: note.contentText || note.content || '',
     excerpt: note.excerpt ?? null,
@@ -990,7 +991,7 @@ class PaperQuayKnowledgeService {
     }
   }
 
-  searchNotes({ query = '', paperId = '', limit = 10 } = {}) {
+  searchNotes({ query = '', paperId = '', pageKind = '', limit = 10 } = {}) {
     const db = this.getNotesDb();
     if (!db) {
       return {
@@ -1003,7 +1004,10 @@ class PaperQuayKnowledgeService {
     try {
       const cleanQuery = cleanString(query).toLowerCase();
       const targetPaperId = cleanString(paperId);
+      const targetPageKind = cleanString(pageKind);
       const safeLimit = Math.max(1, Math.min(50, Number(limit) || 10));
+      const noteColumns = new Set(db.prepare('PRAGMA table_info(notes)').all().map((row) => row.name));
+      const hasPageKind = noteColumns.has('page_kind');
 
       const conditions = ['deleted_at IS NULL'];
       const params = [];
@@ -1011,6 +1015,16 @@ class PaperQuayKnowledgeService {
       if (targetPaperId) {
         conditions.push('(paper_id = ? OR linked_paper_id = ?)');
         params.push(targetPaperId, targetPaperId);
+      }
+      if (targetPageKind) {
+        if (!['paper-card', 'concept', 'synthesis', 'qa', 'excerpt', 'index', 'log', 'overview'].includes(targetPageKind)) {
+          throw new Error(`Unsupported note page kind: ${targetPageKind}`);
+        }
+        if (!hasPageKind) {
+          return { notes: [], total: 0 };
+        }
+        conditions.push('page_kind = ?');
+        params.push(targetPageKind);
       }
 
       if (cleanQuery) {
@@ -1031,6 +1045,7 @@ class PaperQuayKnowledgeService {
           id,
           paper_id AS paperId,
           type,
+          ${hasPageKind ? 'page_kind' : 'NULL'} AS pageKind,
           title,
           content_text AS contentText,
           content,
@@ -1051,6 +1066,7 @@ class PaperQuayKnowledgeService {
         id: row.id,
         paperId: row.paperId,
         type: row.type,
+        pageKind: row.pageKind,
         title: row.title,
         content: row.contentText || row.content,
         excerpt: row.excerpt || null,
@@ -1488,7 +1504,7 @@ class PaperQuayKnowledgeService {
   // ---- 笔记写入工具 ----
   // 复用 noteStore 写路径：FTS 同步、双链解析、标签归一化全部与桌面端一致。
 
-  createNote({ title = '', content = '', tags = [], paperId = '', type = '', folderId = '', allowWhileAppRunning = false } = {}) {
+  createNote({ title = '', content = '', tags = [], paperId = '', type = '', pageKind = '', folderId = '', allowWhileAppRunning = false } = {}) {
     const cleanTitle = cleanString(title);
     const cleanContent = typeof content === 'string' ? content : String(content ?? '');
     if (!cleanTitle && !cleanContent.trim()) {
@@ -1502,12 +1518,16 @@ class PaperQuayKnowledgeService {
     if (noteType && !['highlight', 'area', 'standalone', 'ai-chat'].includes(noteType)) {
       throw new Error(`Unsupported note type: ${noteType}`);
     }
+    if (pageKind && !['paper-card', 'concept', 'synthesis', 'qa', 'excerpt', 'index', 'log', 'overview'].includes(pageKind)) {
+      throw new Error(`Unsupported note page kind: ${pageKind}`);
+    }
     return this.withWritableNoteStore((store) => {
       const library = createLibraryStore(this.appPaths).load();
       const notes = store.listNotes({ includeDeleted: false });
       const note = store.createNote({
         paperId: cleanString(paperId) || 'global-notes',
         type: noteType || 'standalone',
+        pageKind: pageKind || null,
         title: cleanTitle || 'Untitled Note',
         content: cleanContent,
         contentText: cleanContent,
@@ -1523,7 +1543,7 @@ class PaperQuayKnowledgeService {
     }, { allowWhileAppRunning });
   }
 
-  updateNote({ noteId = '', title, content, tags, folderId, allowWhileAppRunning = false } = {}) {
+  updateNote({ noteId = '', title, content, tags, pageKind, folderId, allowWhileAppRunning = false } = {}) {
     const idValue = cleanString(noteId);
     if (!idValue) throw new Error('update_note requires noteId');
     const patch = {};
@@ -1537,12 +1557,18 @@ class PaperQuayKnowledgeService {
     if (Array.isArray(tags)) {
       patch.tags = tags.map((tag) => cleanString(tag).replace(/^#/, '')).filter(Boolean).slice(0, 30);
     }
+    if (typeof pageKind === 'string') {
+      if (pageKind && !['paper-card', 'concept', 'synthesis', 'qa', 'excerpt', 'index', 'log', 'overview'].includes(pageKind)) {
+        throw new Error(`Unsupported note page kind: ${pageKind}`);
+      }
+      patch.pageKind = pageKind || null;
+    }
     // 传空字符串表示移动到「未分类」。
     if (typeof folderId === 'string') {
       patch.folderId = cleanString(folderId) || null;
     }
     if (Object.keys(patch).length === 0) {
-      throw new Error('update_note requires at least one of title, content, tags, folderId');
+      throw new Error('update_note requires at least one of title, content, tags, pageKind, folderId');
     }
     return this.withWritableNoteStore((store) => {
       const library = createLibraryStore(this.appPaths).load();

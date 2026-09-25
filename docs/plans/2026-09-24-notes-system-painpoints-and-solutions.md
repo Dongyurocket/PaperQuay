@@ -3,7 +3,7 @@
 > 相关文档：[笔记宪章（Notes Charter）](../notes-charter.md) —— 页面类型、命名链接规范、摘录卡证据红线。
 
 - 日期：2026-09-24
-- 状态：**主体已落地，存在偏差项**（v0.2.0，commit `d092d2f`。2026-09-25 代码级复审后，P3-1/P3-2 已落地；P0-1～P0-3、P1-1～P1-5、P2-1～P2-3 主干功能均已上线，`npm test` 492 例全绿、TypeScript 零错误；其余路线图偏差逐项核对见「落地状态核对」、修正与后续方向见文末「复审结论与后续路线」。方案设计层面的评审（不合理处/可优化处/可深入处）见「方案设计评审」）
+- 状态：**主体已落地，存在偏差项**（v0.2.0，2026-09-26 复审后，P3-1/P3-2/P3-3/P3-6 已落地；P0-1～P0-3、P1-1～P1-5、P2-1～P2-3 主干功能均已上线，`npm test` 全绿、TypeScript 零错误；其余路线图偏差逐项核对见「落地状态核对」、修正与后续方向见文末「复审结论与后续路线」。方案设计层面的评审（不合理处/可优化处/可深入处）见「方案设计评审」）
 - 范围：笔记子系统（`src/features/notes/`、`electron/backend/noteStore.cjs` / `noteCommands.cjs`）、内置 Agent（`src/services/agentTools.ts` / `libraryAgent.ts` / `agentLoop.ts`）、MCP 知识库服务（`electron/mcp/knowledgeMcpService.cjs`、`bin/paperquay-mcp.cjs`）
 - 参考项目：[nashsu/llm_wiki](https://github.com/nashsu/llm_wiki)（Karpathy LLM Wiki 模式的桌面应用实现）
 
@@ -456,10 +456,10 @@ legacy 路径的全部残留点（已逐一定位）：
 |--------|------|------|------|
 | P3-1 | **Markdown→Tiptap 解析器**（vault 导入与 MCP 写入共用）：分级支持——先标题/列表/加粗斜体/代码块/引用块/`[[双链]]`/`#标签`，再 `paperquay://anchor` 链接重建锚点节点、`[n]`+文末列表重建 paperReference | 一趟解决 vault 往返塌格式与 MCP 写入无富文本两个最大短板；`notePolish.ts` 已有受限版 Markdown→节点转换器可作起点 | 中 |
 | P3-2 | **冲突副本 + frontmatter 时钟**：双侧变更生成 `--conflict-<时间戳>.md` 并计入同步统计；新旧判定以 frontmatter `updatedAt` 为主、mtime 为辅 | 消除静默丢数据，兑现本文档原始承诺 | 低 |
-| P3-3 | **页面类型入数据模型**：`notes` 表加 `page_kind` 列（8 值 + 旧 `type` 映射迁移），检索过滤与 MCP 白名单同步扩展 | 让宪章可校验、可检索；聚合管线（深入方向 1）的前置 | 中 |
+| P3-3 | ✅ **已落地**：`notes.page_kind` 入库，旧 `highlight/ai-chat` 幂等映射为 `excerpt/qa`，其余旧类型保留 `NULL`；编辑器模板、侧栏、内置 Agent、MCP 和检索过滤已接通并有白名单校验 | 让宪章可校验、可检索；聚合管线（深入方向 1）的前置 | 中 |
 | P3-4 | **宪章注入内置 Agent**：红线摘要写入 `write_notes` 工具描述或系统提示 | 内置 Agent 与外部 Agent 行为对齐 | 低 |
 | P3-5 | **MCP `search_notes` 切 FTS**：`notes_fts` 虚表现成，保留 LIKE 兜底 | 兑现 P0-3 未竟项，内外检索质量对齐 | 低 |
-| P3-6 | **改名双链传播**：笔记改名时全库重写 `[[旧标题]]`；或 wikilink 节点存 `targetId` + 标题快照、解析以 ID 优先 | 消除宪章已承认但无工具支撑的断链来源 | 中 |
+| P3-6 | ✅ **已落地（方案 b）**：wikiLink 节点存 `noteId` + 标题快照，解析、关系维护、显示和 vault 导出以 ID 优先；Markdown 仍保持 `[[标题]]` | 消除宪章已承认但无工具支撑的断链来源 | 中 |
 | P3-7 | **vault 自动同步**：应用启动时同步 + 可选 watcher/定时 | 双应用协作不断点 | 低 |
 | P3-8 | 引用样式迁入设置系统（随 WebDAV 同步）；笔记列表多条件排序与批量操作 | 小项补齐 | 低 |
 
