@@ -1027,20 +1027,7 @@ class PaperQuayKnowledgeService {
         params.push(targetPageKind);
       }
 
-      if (cleanQuery) {
-        conditions.push(`(
-          lower(title) LIKE ?
-          OR lower(content) LIKE ?
-          OR lower(COALESCE(content_text, '')) LIKE ?
-          OR lower(COALESCE(excerpt, '')) LIKE ?
-        )`);
-        const pattern = `%${cleanQuery}%`;
-        params.push(pattern, pattern, pattern, pattern);
-      }
-
-      params.push(safeLimit);
-
-      const sql = `
+      const selectSql = `
         SELECT
           id,
           paper_id AS paperId,
@@ -1056,12 +1043,48 @@ class PaperQuayKnowledgeService {
           created_at AS createdAt,
           updated_at AS updatedAt
         FROM notes
-        WHERE ${conditions.join(' AND ')}
-        ORDER BY is_pinned DESC, updated_at DESC
+      `;
+      const orderLimitSql = `
+        ORDER BY is_pinned DESC, updated_at DESC, created_at DESC, id ASC
         LIMIT ?
       `;
 
-      const rows = db.prepare(sql).all(...params);
+      let rows;
+      if (cleanQuery) {
+        const ftsExists = db.prepare(
+          `SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'notes_fts' LIMIT 1`,
+        ).get();
+        const queryTokens = cleanQuery.split(/\s+/).filter(Boolean);
+        // trigram 对少于 3 个字符的 token 不可检索；这类短查询直接走
+        // LIKE，避免中文短词在 FTS 路径下出现假阴性。
+        if (ftsExists && queryTokens.every((token) => token.length >= 3)) {
+          try {
+            const ftsQuery = queryTokens
+              .map((token) => `"${token.replaceAll('"', '""')}"`)
+              .join(' AND ');
+            const ftsConditions = [...conditions, 'notes.id IN (SELECT note_id FROM notes_fts WHERE notes_fts MATCH ?)'];
+            const ftsParams = [...params, ftsQuery, safeLimit];
+            rows = db.prepare(`${selectSql} WHERE ${ftsConditions.join(' AND ')} ${orderLimitSql}`).all(...ftsParams);
+          } catch {
+            rows = undefined;
+          }
+        }
+
+        if (!rows) {
+          const pattern = `%${cleanQuery}%`;
+          const likeConditions = [...conditions, `(
+            lower(title) LIKE ?
+            OR lower(content) LIKE ?
+            OR lower(COALESCE(content_text, '')) LIKE ?
+            OR lower(COALESCE(excerpt, '')) LIKE ?
+          )`];
+          rows = db.prepare(`${selectSql} WHERE ${likeConditions.join(' AND ')} ${orderLimitSql}`)
+            .all(...params, pattern, pattern, pattern, pattern, safeLimit);
+        }
+      } else {
+        rows = db.prepare(`${selectSql} WHERE ${conditions.join(' AND ')} ${orderLimitSql}`)
+          .all(...params, safeLimit);
+      }
       const notes = rows.map((row) => ({
         id: row.id,
         paperId: row.paperId,

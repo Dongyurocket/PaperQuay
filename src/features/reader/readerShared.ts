@@ -223,6 +223,9 @@ export const DEFAULT_SETTINGS: ReaderSettings = {
   translationTargetLanguage: 'Chinese',
   translationDisplayMode: 'translated',
   qaActivePresetId: 'default',
+  noteCitationStyle: 'gbt7714',
+  notesVaultAutoSyncEnabled: false,
+  notesVaultAutoSyncIntervalMinutes: 30,
 };
 
 export const DEFAULT_QA_PRESET: QaModelPreset = {
@@ -805,6 +808,15 @@ export function normalizeReaderSettings(value?: Partial<ReaderSettings> | null):
       merged.translationDisplayMode === 'original' || merged.translationDisplayMode === 'bilingual'
         ? merged.translationDisplayMode
         : 'translated',
+    noteCitationStyle:
+      merged.noteCitationStyle === 'apa7' || merged.noteCitationStyle === 'ieee'
+        ? merged.noteCitationStyle
+        : 'gbt7714',
+    notesVaultAutoSyncEnabled: merged.notesVaultAutoSyncEnabled === true,
+    notesVaultAutoSyncIntervalMinutes: Math.min(
+      60,
+      Math.max(15, Math.trunc(Number(merged.notesVaultAutoSyncIntervalMinutes)) || 30),
+    ),
   };
 }
 

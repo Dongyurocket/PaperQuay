@@ -9,6 +9,8 @@ interface NoteCardProps {
   onSelect: (note: Note) => void;
   onDelete: (note: Note) => void;
   onContextMenu?: (event: MouseEvent, note: Note) => void;
+  selected?: boolean;
+  onSelectedChange?: (selected: boolean) => void;
 }
 
 export function NoteCard({
@@ -17,6 +19,8 @@ export function NoteCard({
   onSelect,
   onDelete,
   onContextMenu,
+  selected = false,
+  onSelectedChange,
 }: NoteCardProps) {
   return (
     <article
@@ -30,11 +34,22 @@ export function NoteCard({
     >
       {active ? <div className="absolute inset-y-2 left-0 w-0.5 rounded-full bg-[var(--pq-accent)]" /> : null}
 
-      <button type="button" onClick={() => onSelect(note)} className="block w-full py-2 pl-3 pr-10 text-left">
-        <div className="truncate text-sm font-medium text-[var(--pq-text)]">
-          {note.title || 'Untitled Note'}
-        </div>
-      </button>
+      <div className="flex items-start">
+        {onSelectedChange ? (
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={(event) => onSelectedChange(event.target.checked)}
+            className="ml-3 mt-2 shrink-0"
+            aria-label={`选择 ${note.title}`}
+          />
+        ) : null}
+        <button type="button" onClick={() => onSelect(note)} className="block min-w-0 flex-1 py-2 pl-3 pr-10 text-left">
+          <div className="truncate text-sm font-medium text-[var(--pq-text)]">
+            {note.title || 'Untitled Note'}
+          </div>
+        </button>
+      </div>
 
       <div className="absolute right-2 top-2 flex items-center gap-1 opacity-0 transition group-hover:opacity-100">
         <button

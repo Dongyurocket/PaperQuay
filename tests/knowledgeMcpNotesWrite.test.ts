@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 
 const require = createRequire(import.meta.url);
 const { PaperQuayKnowledgeService } = require('../electron/mcp/knowledgeMcpService.cjs');
@@ -73,6 +74,84 @@ test('create_note 的 pageKind 可写入、回读并参与过滤', () => {
     assert.equal(stored.pageKind, 'concept');
     assert.equal(service.searchNotes({ pageKind: 'concept' }).notes[0].id, created.noteId);
     assert.throws(() => service.searchNotes({ pageKind: 'bad-kind' }), /Unsupported note page kind/);
+  } finally {
+    cleanupDir(dir);
+  }
+});
+
+test('search_notes 走 FTS 时支持中文、多关键词以及 pageKind/paperId 组合过滤', () => {
+  const { dir, service } = setup();
+  try {
+    const target = service.createNote({
+      title: '中文检索',
+      content: '键值缓存 分层检索',
+      paperId: 'paper-1',
+      pageKind: 'concept',
+    });
+    service.createNote({
+      title: '同样关键词',
+      content: '键值缓存 分层检索',
+      paperId: 'paper-2',
+      pageKind: 'concept',
+    });
+    service.createNote({
+      title: '其他页面',
+      content: '键值缓存 分层检索',
+      paperId: 'paper-1',
+      pageKind: 'excerpt',
+    });
+
+    const found = service.searchNotes({
+      query: '键值缓存 分层检索',
+      paperId: 'paper-1',
+      pageKind: 'concept',
+    });
+    assert.equal(found.total, 1);
+    assert.equal(found.notes[0].id, target.noteId);
+    assert.equal(found.notes[0].pageKind, 'concept');
+    assert.equal(found.notes[0].paperId, 'paper-1');
+  } finally {
+    cleanupDir(dir);
+  }
+});
+
+test('search_notes 的 FTS 排序在并列时间下按 id 稳定', () => {
+  const { dir, service } = setup();
+  try {
+    const first = service.createNote({ title: 'B', content: '稳定排序关键词' });
+    const second = service.createNote({ title: 'A', content: '稳定排序关键词' });
+    const db = new DatabaseSync(path.join(dir, 'paperquay-notes.sqlite'));
+    try {
+      db.prepare('UPDATE notes SET created_at = 100, updated_at = 200 WHERE id IN (?, ?)')
+        .run(first.noteId, second.noteId);
+    } finally {
+      db.close();
+    }
+
+    const found = service.searchNotes({ query: '稳定排序关键词' });
+    assert.deepEqual(
+      found.notes.map((note: any) => note.id),
+      [first.noteId, second.noteId].sort(),
+    );
+  } finally {
+    cleanupDir(dir);
+  }
+});
+
+test('search_notes 在 notes_fts 缺失时回退 LIKE', () => {
+  const { dir, service } = setup();
+  try {
+    const created = service.createNote({ title: 'LIKE 兜底', content: '缺失虚表仍可检索' });
+    const db = new DatabaseSync(path.join(dir, 'paperquay-notes.sqlite'));
+    try {
+      db.exec('DROP TABLE notes_fts');
+    } finally {
+      db.close();
+    }
+
+    const found = service.searchNotes({ query: '缺失虚表' });
+    assert.equal(found.total, 1);
+    assert.equal(found.notes[0].id, created.noteId);
   } finally {
     cleanupDir(dir);
   }

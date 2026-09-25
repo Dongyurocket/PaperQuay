@@ -4,8 +4,12 @@ import type { LiteraturePaper } from '../src/types/library.ts';
 import {
   formatBibliographyEntry,
   formatInlineApaCitation,
+  loadNoteCitationStyle,
   normalizeNoteCitationStyle,
+  NOTE_CITATION_STYLE_STORAGE_KEY,
+  saveNoteCitationStyle,
 } from '../src/features/notes/bibliography.ts';
+import { SETTINGS_STORAGE_KEY } from '../src/features/reader/readerShared.ts';
 
 const journalPaper = {
   id: 'paper-j1',
@@ -46,6 +50,30 @@ test('normalizeNoteCitationStyle falls back to gbt7714', () => {
   assert.equal(normalizeNoteCitationStyle('gbt7714'), 'gbt7714');
   assert.equal(normalizeNoteCitationStyle('unknown'), 'gbt7714');
   assert.equal(normalizeNoteCitationStyle(undefined), 'gbt7714');
+});
+
+test('引用样式从旧 localStorage 一次性迁移到阅读器设置并可回写', () => {
+  const previousWindow = (globalThis as { window?: unknown }).window;
+  const values = new Map<string, string>();
+  const storage = {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => values.set(key, value),
+    removeItem: (key: string) => values.delete(key),
+  };
+  Object.assign(globalThis, { window: { localStorage: storage } });
+
+  try {
+    values.set(NOTE_CITATION_STYLE_STORAGE_KEY, 'apa7');
+    assert.equal(loadNoteCitationStyle(), 'apa7');
+    assert.equal(values.get(`${NOTE_CITATION_STYLE_STORAGE_KEY}:migrated`), '1');
+    assert.equal(JSON.parse(values.get(SETTINGS_STORAGE_KEY) || '{}').noteCitationStyle, 'apa7');
+
+    saveNoteCitationStyle('ieee');
+    assert.equal(JSON.parse(values.get(SETTINGS_STORAGE_KEY) || '{}').noteCitationStyle, 'ieee');
+  } finally {
+    if (previousWindow === undefined) delete (globalThis as { window?: unknown }).window;
+    else Object.assign(globalThis, { window: previousWindow });
+  }
 });
 
 test('GB/T 7714 journal entry: authors. title[J]. venue, year, volume(issue): pages', () => {

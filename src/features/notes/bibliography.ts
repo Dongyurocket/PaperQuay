@@ -3,6 +3,7 @@
 // 数据组装优先级：库内结构化字段（authors/year/publication/volume/issue/pages/doi）
 // → paper.citation 预生成串兜底 → 标题兜底。本模块只做纯文本格式化，不依赖 DOM/编辑器。
 import type { LiteraturePaper } from '../../types/library';
+import { loadSettings, SETTINGS_STORAGE_KEY } from '../reader/readerShared.ts';
 
 export type NoteCitationStyle = 'gbt7714' | 'apa7' | 'ieee';
 
@@ -21,7 +22,18 @@ export function normalizeNoteCitationStyle(value: unknown): NoteCitationStyle {
 export function loadNoteCitationStyle(): NoteCitationStyle {
   try {
     if (typeof window === 'undefined') return 'gbt7714';
-    return normalizeNoteCitationStyle(window.localStorage.getItem(NOTE_CITATION_STYLE_STORAGE_KEY));
+    const settings = loadSettings();
+    const legacy = window.localStorage.getItem(NOTE_CITATION_STYLE_STORAGE_KEY);
+    if (legacy !== null && !window.localStorage.getItem(`${NOTE_CITATION_STYLE_STORAGE_KEY}:migrated`)) {
+      const migrated = normalizeNoteCitationStyle(legacy);
+      window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify({
+        ...settings,
+        noteCitationStyle: migrated,
+      }));
+      window.localStorage.setItem(`${NOTE_CITATION_STYLE_STORAGE_KEY}:migrated`, '1');
+      return migrated;
+    }
+    return normalizeNoteCitationStyle(settings.noteCitationStyle);
   } catch {
     return 'gbt7714';
   }
@@ -30,7 +42,11 @@ export function loadNoteCitationStyle(): NoteCitationStyle {
 export function saveNoteCitationStyle(style: NoteCitationStyle): void {
   try {
     if (typeof window === 'undefined') return;
-    window.localStorage.setItem(NOTE_CITATION_STYLE_STORAGE_KEY, normalizeNoteCitationStyle(style));
+    const settings = loadSettings();
+    window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify({
+      ...settings,
+      noteCitationStyle: normalizeNoteCitationStyle(style),
+    }));
   } catch {
     // 本地设置写入失败不阻断编辑。
   }

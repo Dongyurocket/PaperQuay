@@ -31,6 +31,25 @@ test("normalizeReaderSettings defaults review writing model preset", async () =>
   const settings = normalizeReaderSettings();
 
   assert.equal(settings.reviewModelPresetId, DEFAULT_SETTINGS.reviewModelPresetId);
+  assert.equal(settings.noteCitationStyle, 'gbt7714');
+  assert.equal(settings.notesVaultAutoSyncEnabled, false);
+  assert.equal(settings.notesVaultAutoSyncIntervalMinutes, 30);
+});
+
+test("normalizeReaderSettings constrains note settings", async () => {
+  const { normalizeReaderSettings } = await loadReaderShared();
+
+  assert.equal(normalizeReaderSettings({
+    noteCitationStyle: 'ieee',
+    notesVaultAutoSyncEnabled: true,
+    notesVaultAutoSyncIntervalMinutes: 90,
+  }).noteCitationStyle, 'ieee');
+  assert.equal(normalizeReaderSettings({
+    noteCitationStyle: 'unknown' as never,
+    notesVaultAutoSyncIntervalMinutes: 10,
+  }).noteCitationStyle, 'gbt7714');
+  assert.equal(normalizeReaderSettings({ notesVaultAutoSyncIntervalMinutes: 10 }).notesVaultAutoSyncIntervalMinutes, 15);
+  assert.equal(normalizeReaderSettings({ notesVaultAutoSyncIntervalMinutes: 90 }).notesVaultAutoSyncIntervalMinutes, 60);
 });
 
 test("normalizeReaderSettings migrates review writing model preset from overview preset", async () => {

@@ -42,6 +42,8 @@ import {
   updateNotesVaultSettings,
 } from '../../services/notes';
 import { selectDirectory } from '../../services/desktop';
+import { loadSettings } from '../reader/readerShared';
+import { shouldRunVaultAutoSync } from './notesQuickWins';
 import { cn } from '../../utils/cn';
 import { NoteEditor } from './NoteEditor';
 import { NotesGraphView } from './NotesGraphView';
@@ -773,6 +775,7 @@ export function NotesWorkspace() {
   const [draggingNoteId, setDraggingNoteId] = useState<string | null>(null);
   const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
   const [folderEditDraft, setFolderEditDraft] = useState<FolderEditDraft | null>(null);
+  const vaultAutoSyncLastRunRef = useRef<number | null>(null);
   const tabs = useTabsStore((state) => state.tabs);
   const activeTabId = useTabsStore((state) => state.activeTabId);
   const openNoteTab = useTabsStore((state) => state.openNoteTab);
@@ -836,6 +839,44 @@ export function NotesWorkspace() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    let timer: number | undefined;
+
+    const runVaultSync = async (force = false) => {
+      const settings = loadSettings();
+      try {
+        const vault = await getNotesVaultSettings();
+        if (!vault.dir || (!force && !shouldRunVaultAutoSync({
+          now: Date.now(),
+          lastRunAt: vaultAutoSyncLastRunRef.current,
+          intervalMinutes: settings.notesVaultAutoSyncIntervalMinutes,
+        }))) return;
+        vaultAutoSyncLastRunRef.current = Date.now();
+        await syncNotesVaultNow();
+        if (!cancelled) {
+          await loadNotes();
+          await refreshFolders();
+        }
+      } catch {
+        // Automatic synchronization is intentionally silent.
+      }
+    };
+
+    void runVaultSync(true);
+    const settings = loadSettings();
+    if (settings.notesVaultAutoSyncEnabled) {
+      timer = window.setInterval(
+        () => void runVaultSync(),
+        settings.notesVaultAutoSyncIntervalMinutes * 60_000,
+      );
+    }
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) window.clearInterval(timer);
+    };
+  }, [loadNotes, refreshFolders]);
 
   useEffect(() => {
     if (!activeFolderId || activeFolderId === UNCATEGORIZED_FOLDER_ID) return;

@@ -634,6 +634,9 @@ export interface ReaderSettings {
   translationTargetLanguage: string;
   translationDisplayMode: TranslationDisplayMode;
   qaActivePresetId: string;
+  noteCitationStyle: "gbt7714" | "apa7" | "ieee";
+  notesVaultAutoSyncEnabled: boolean;
+  notesVaultAutoSyncIntervalMinutes: number;
 }
 
 export interface ReaderSecrets {

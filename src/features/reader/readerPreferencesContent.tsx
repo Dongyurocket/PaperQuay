@@ -349,23 +349,64 @@ export function ReaderPreferencesContent({
   return (
     <div className="mx-auto max-w-3xl space-y-4">
       {activeSection === 'general' ? (
-        <SettingsField
-          label={l('软件语言', 'Software Language')}
-          description={l(
-            '切换后，主界面与设置界面会同步切换中英文。',
-            'Switch the main interface and settings between Chinese and English.',
-          )}
-        >
-          <SettingsSelect
-            value={settings.uiLanguage}
-            onChange={(event) =>
-              onSettingChange('uiLanguage', event.target.value as ReaderSettings['uiLanguage'])
-            }
+        <>
+          <SettingsField
+            label={l('软件语言', 'Software Language')}
+            description={l(
+              '切换后，主界面与设置界面会同步切换中英文。',
+              'Switch the main interface and settings between Chinese and English.',
+            )}
           >
-            <option value="zh-CN">简体中文</option>
-            <option value="en-US">English</option>
-          </SettingsSelect>
-        </SettingsField>
+            <SettingsSelect
+              value={settings.uiLanguage}
+              onChange={(event) =>
+                onSettingChange('uiLanguage', event.target.value as ReaderSettings['uiLanguage'])
+              }
+            >
+              <option value="zh-CN">简体中文</option>
+              <option value="en-US">English</option>
+            </SettingsSelect>
+          </SettingsField>
+          <SettingsField
+            label={l('笔记与 Vault', 'Notes & Vault')}
+            description={l(
+              '启动笔记工作区时静默同步已配置的 Markdown vault；定时同步默认关闭。',
+              'Silently sync the configured Markdown vault when Notes opens. Scheduled sync is off by default.',
+            )}
+          >
+            <ToggleRow
+              title={l('定时自动同步 Vault', 'Schedule Vault Sync')}
+              description={l('每 15–60 分钟检查并同步一次，不使用操作系统文件监听。', 'Sync every 15–60 minutes without an OS file watcher.')}
+              checked={settings.notesVaultAutoSyncEnabled}
+              onChange={(checked) => onSettingChange('notesVaultAutoSyncEnabled', checked)}
+            />
+            <div className="mt-3 flex items-center gap-2">
+              <SettingsInput
+                type="number"
+                min={15}
+                max={60}
+                step={5}
+                value={settings.notesVaultAutoSyncIntervalMinutes}
+                onChange={(event) =>
+                  onSettingChange('notesVaultAutoSyncIntervalMinutes', Number(event.target.value))
+                }
+                className="w-24"
+              />
+              <span className="text-xs text-slate-500">{l('分钟', 'minutes')}</span>
+            </div>
+            <SettingsSelect
+              className="mt-3"
+              value={settings.noteCitationStyle}
+              onChange={(event) =>
+                onSettingChange('noteCitationStyle', event.target.value as ReaderSettings['noteCitationStyle'])
+              }
+            >
+              <option value="gbt7714">GB/T 7714</option>
+              <option value="apa7">APA 7</option>
+              <option value="ieee">IEEE</option>
+            </SettingsSelect>
+          </SettingsField>
+        </>
       ) : null}
 
       {activeSection === 'library' ? (

@@ -506,6 +506,9 @@ export function NotesSidebar({
                     }}
                     onDelete={(note) => onDeleteNote(note.id)}
                     onContextMenu={openNoteContextMenu}
+                    onBatchUpdate={(patches) => {
+                      void Promise.all(patches.map(({ noteId, patch }) => onUpdateNote(noteId, patch)));
+                    }}
                   />
                 )}
               </div>

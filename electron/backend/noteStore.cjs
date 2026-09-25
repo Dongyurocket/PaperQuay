@@ -164,7 +164,8 @@ function createSchema(db) {
         note_id UNINDEXED,
         title,
         content_text,
-        excerpt
+        excerpt,
+        tokenize = 'trigram'
       );
     `);
   } catch (error) {
