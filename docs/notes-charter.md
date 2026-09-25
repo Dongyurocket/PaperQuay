@@ -50,8 +50,8 @@
 
 ## 5. 与 Obsidian 的边界
 
-Markdown vault 双向同步（规划中，P1-4）落地后：
+Markdown vault 双向同步已落地（v0.2.0；对应计划 `docs/plans/2026-09-24-notes-system-painpoints-and-solutions.md` 的 P1-3，同步由笔记工作区手动触发）：
 
-- 每篇笔记对应一个 `.md` 文件，frontmatter 携带 `id`、`paperId`、`tags`、`type`、`folder`、`sources[]`。
+- 每篇笔记对应一个 `.md` 文件，frontmatter 携带 `id`、`type`、`paperId`、`folder`、`tags`、`sources[]`、`anchors[]`、`createdAt`、`updatedAt`。
 - `id` 是同步锚，禁止在 Obsidian 侧修改；新增文件没有 `id` 时，导入时按新笔记处理。
-- 富文本元素（锚点芯片、文献引用）在 Markdown 中以占位语法表示，往返必须无损。
+- 富文本元素在 Markdown 中以占位语法表示：锚点芯片为 `paperquay://anchor/<id>` 链接，文献引用为 `[n]` + 文末 GB/T 7714 列表，`[[双链]]` 与 `#标签` 原样保留。共享 Markdown→Tiptap 解析器已在 vault 回导、MCP 笔记写入和编辑器缺失 `content_json` 兜底中启用：标题、列表、基础内联格式、代码块、引用块、双链和标签可重建；只有 frontmatter/本地文库已知的锚点 ID 与 paperId 才恢复为专用节点，未知值保留为普通文本。
