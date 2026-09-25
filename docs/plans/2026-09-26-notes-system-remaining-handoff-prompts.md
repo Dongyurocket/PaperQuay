@@ -44,15 +44,11 @@
 
 ---
 
-## 会话 B：低成本四项——宪章注入 / MCP FTS / vault 自动同步 / 样式入设置（P3-4/5/7/8）
+## 会话 B：低成本三项——MCP FTS / vault 自动同步 / 样式入设置（P3-5/7/8）
 
-在 `C:\Users\yusen\.proma\agent-workspaces\paperquery\workspace-files` 完成笔记系统复审路线 P3-4、P3-5、P3-7、P3-8 四个低成本项。先读 `docs/plans/2026-09-24-notes-system-painpoints-and-solutions.md` 的「复审结论与后续路线」对应条目与 `docs/notes-charter.md`。基线 `npm run check` 全绿（487 测试），开工先确认。
+> 2026-09-26 更新：P3-4（宪章注入）已由会话 D 顺带落地——系统提示（`libraryAgent.ts:727` 附近）已含聚合配方、引用红线、体检修复与系统页维护规则，`write_notes` 工具描述已补锚点/快照保真要求。B 不再包含 P3-4，原「任务一」删除。
 
-### 任务一：宪章注入内置 Agent（P3-4）
-
-- ReAct 系统提示组装点在 `src/services/libraryAgent.ts:726` 附近（`role: 'system'` 的 content 数组），`write_notes` 工具描述在 `src/services/agentTools.ts:471`。
-- 把宪章红线压缩注入：§0 三原则 + §3 摘录卡红线 + §4 Agent 行为准则，预算 ≤ 400 tokens，以独立段落追加进系统提示；同时在 `write_notes` 的 description 末尾补一句「新增页面优先使用对应页面类型模板；不得修改锚点与原文快照」。
-- 补一条 `agentLoop` 或工具描述级别的测试，断言注入文本存在且不超预算。
+在 `C:\Users\yusen\.proma\agent-workspaces\paperquery\workspace-files` 完成笔记系统复审路线 P3-5、P3-7、P3-8 三个低成本项。先读 `docs/plans/2026-09-24-notes-system-painpoints-and-solutions.md` 的「复审结论与后续路线」对应条目与 `docs/notes-charter.md`。基线 `npm run check` 全绿，开工先确认。
 
 ### 任务二：MCP `search_notes` 切 FTS（P3-5）
 

@@ -67,7 +67,10 @@ import {
 } from './AgentWorkspace.model';
 import type { AgentChatMessage, AgentHistorySession, AgentToolCallView } from './AgentWorkspace.types';
 import { useAppLocale, useLocaleText } from '../../i18n/uiLanguage';
-import { emitJumpToNoteAnchor } from '../../app/appEvents';
+import {
+  emitJumpToNoteAnchor,
+  OPEN_AGENT_WITH_INSTRUCTION_EVENT,
+} from '../../app/appEvents';
 import AgentWorkspaceView from './AgentWorkspaceView';
 import { buildAttachmentFromPath, buildScreenshotAttachmentFromPath } from '../reader/documentReaderShared';
 import { captureSystemScreenshot, selectChatAttachmentPaths } from '../../services/desktop';
@@ -339,6 +342,22 @@ function AgentWorkspace() {
         : current,
     );
   }, []);
+
+  useEffect(() => {
+    const handleOpenAgentWithInstruction = (event: Event) => {
+      const instruction = (event as CustomEvent<{ instruction?: string }>).detail?.instruction?.trim();
+      if (!instruction) return;
+      setComposerValue(instruction);
+      setStatusMessage(
+        l('已载入体检修复指令，请确认后发送。', 'Health-repair instruction loaded. Review it before sending.'),
+      );
+    };
+
+    window.addEventListener(OPEN_AGENT_WITH_INSTRUCTION_EVENT, handleOpenAgentWithInstruction);
+    return () => {
+      window.removeEventListener(OPEN_AGENT_WITH_INSTRUCTION_EVENT, handleOpenAgentWithInstruction);
+    };
+  }, [l]);
 
   useEffect(() => {
     setComposerValue((current) =>

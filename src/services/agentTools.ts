@@ -481,7 +481,7 @@ export function createLibraryAgentTools(options: CreateLibraryAgentToolsOptions)
     {
       name: 'write_notes',
       description:
-        'Create, update, or delete PaperQuay notes. Produces a reviewable plan only — nothing is written until the user approves. Each operation: {kind:"create",title,content,tags?,paperId?,reason?} | {kind:"update",noteId,title?,content?,tags?,reason?} | {kind:"delete",noteId,reason?}. Content is Markdown/plain text.',
+        'Create or update PaperQuay notes, or propose deletion only when the user explicitly approves it. Produces a reviewable plan only — nothing is written until the user approves. Each operation: {kind:"create",title,content,tags?,paperId?,pageKind?,reason?} | {kind:"update",noteId,title?,content?,tags?,pageKind?,reason?} | {kind:"delete",noteId,reason?}. Content is Markdown/plain text and is rebuilt through the shared parser, including stable wikiLink noteId resolution and paperReference reconstruction from [n] plus a unique ## 参考文献 list. Preserve anchors, source snapshots, and excerpt-card evidence.',
       kind: 'write',
       available: (ctx: AgentToolMountContext) => ctx.localLibraryMode,
       parameters: {

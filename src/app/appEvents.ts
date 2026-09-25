@@ -6,6 +6,7 @@ export const OPEN_STANDALONE_PDF_EVENT = 'paperquay:open-standalone-pdf';
 export const OPEN_LIBRARY_PAPER_EVENT = 'paperquay:open-library-paper';
 export const JUMP_TO_NOTE_ANCHOR_EVENT = 'paperquay:jump-to-note-anchor';
 export const NOTE_CHANGED_EVENT = 'paperquay:note-changed';
+export const OPEN_AGENT_WITH_INSTRUCTION_EVENT = 'paperquay:open-agent-with-instruction';
 
 export interface OpenPreferencesEventDetail {
   section?:
@@ -81,6 +82,14 @@ export function emitNoteChanged(detail: NoteChangedEventDetail) {
   window.dispatchEvent(
     new CustomEvent<NoteChangedEventDetail>(NOTE_CHANGED_EVENT, {
       detail,
+    }),
+  );
+}
+
+export function emitOpenAgentWithInstruction(instruction: string) {
+  window.dispatchEvent(
+    new CustomEvent<{ instruction: string }>(OPEN_AGENT_WITH_INSTRUCTION_EVENT, {
+      detail: { instruction },
     }),
   );
 }

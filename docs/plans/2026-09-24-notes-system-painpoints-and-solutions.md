@@ -3,7 +3,7 @@
 > 相关文档：[笔记宪章（Notes Charter）](../notes-charter.md) —— 页面类型、命名链接规范、摘录卡证据红线。
 
 - 日期：2026-09-24
-- 状态：**主体已落地，存在偏差项**（v0.2.0，2026-09-26 复审后，P3-1/P3-2/P3-3/P3-6 已落地；P0-1～P0-3、P1-1～P1-5、P2-1～P2-3 主干功能均已上线，`npm test` 全绿、TypeScript 零错误；其余路线图偏差逐项核对见「落地状态核对」、修正与后续方向见文末「复审结论与后续路线」。方案设计层面的评审（不合理处/可优化处/可深入处）见「方案设计评审」）
+- 状态：**主体已落地，存在偏差项**（v0.2.0，2026-09-26 复审后，P3-1/P3-2/P3-3/P3-4/P3-6 已落地；深入方向 1/2/4 已落地，P0-1～P0-3、P1-1～P1-5、P2-1～P2-3 主干功能均已上线，`npm run check` 全绿；其余路线图偏差逐项核对见「落地状态核对」、修正与后续方向见文末「复审结论与后续路线」。方案设计层面的评审（不合理处/可优化处/可深入处）见「方案设计评审」）
 - 范围：笔记子系统（`src/features/notes/`、`electron/backend/noteStore.cjs` / `noteCommands.cjs`）、内置 Agent（`src/services/agentTools.ts` / `libraryAgent.ts` / `agentLoop.ts`）、MCP 知识库服务（`electron/mcp/knowledgeMcpService.cjs`、`bin/paperquay-mcp.cjs`）
 - 参考项目：[nashsu/llm_wiki](https://github.com/nashsu/llm_wiki)（Karpathy LLM Wiki 模式的桌面应用实现）
 
@@ -457,7 +457,7 @@ legacy 路径的全部残留点（已逐一定位）：
 | P3-1 | **Markdown→Tiptap 解析器**（vault 导入与 MCP 写入共用）：分级支持——先标题/列表/加粗斜体/代码块/引用块/`[[双链]]`/`#标签`，再 `paperquay://anchor` 链接重建锚点节点、`[n]`+文末列表重建 paperReference | 一趟解决 vault 往返塌格式与 MCP 写入无富文本两个最大短板；`notePolish.ts` 已有受限版 Markdown→节点转换器可作起点 | 中 |
 | P3-2 | **冲突副本 + frontmatter 时钟**：双侧变更生成 `--conflict-<时间戳>.md` 并计入同步统计；新旧判定以 frontmatter `updatedAt` 为主、mtime 为辅 | 消除静默丢数据，兑现本文档原始承诺 | 低 |
 | P3-3 | ✅ **已落地**：`notes.page_kind` 入库，旧 `highlight/ai-chat` 幂等映射为 `excerpt/qa`，其余旧类型保留 `NULL`；编辑器模板、侧栏、内置 Agent、MCP 和检索过滤已接通并有白名单校验 | 让宪章可校验、可检索；聚合管线（深入方向 1）的前置 | 中 |
-| P3-4 | **宪章注入内置 Agent**：红线摘要写入 `write_notes` 工具描述或系统提示 | 内置 Agent 与外部 Agent 行为对齐 | 低 |
+| P3-4 | ✅ **已落地**：宪章红线、聚合配方、体检修复和系统页维护规则已注入内置 Agent 系统提示与 `write_notes` 工具描述 | 内置 Agent 与外部 Agent 行为对齐 | 低 |
 | P3-5 | **MCP `search_notes` 切 FTS**：`notes_fts` 虚表现成，保留 LIKE 兜底 | 兑现 P0-3 未竟项，内外检索质量对齐 | 低 |
 | P3-6 | ✅ **已落地（方案 b）**：wikiLink 节点存 `noteId` + 标题快照，解析、关系维护、显示和 vault 导出以 ID 优先；Markdown 仍保持 `[[标题]]` | 消除宪章已承认但无工具支撑的断链来源 | 中 |
 | P3-7 | **vault 自动同步**：应用启动时同步 + 可选 watcher/定时 | 双应用协作不断点 | 低 |
@@ -465,8 +465,8 @@ legacy 路径的全部残留点（已逐一定位）：
 
 ### 四、值得深入（下一阶段方向）
 
-1. **聚合管线（痛点 8 的终点）**："这篇文献的散摘录→精读卡""主题 X 的跨文献摘录→概念页"作为 Agent 高阶能力落地——依赖 P3-3 的页面类型做召回过滤，产出走既有 `write_notes` 审批，回链 `[[摘录卡]]` 与 `[n]` 引用由 P3-1 的解析器保真。
-2. **系统页自动维护**：Agent 每次批量写笔记后更新 `index`/`log`/`overview` 三页（类型已在宪章定义、模板已存在，缺触发机制）——这是 llm_wiki 三层架构中"导航与日志"价值真正兑现的一步。
+1. ✅ **已落地，聚合管线（痛点 8 的终点）**："这篇文献的散摘录→精读卡""主题 X 的跨文献摘录→概念页"通过 Agent 配方实现——使用 `pageKind='excerpt'` 与文献/标签/关键词召回，产出走既有 `write_notes` 审批，回链 `[[摘录卡]]`；`[n]` 与唯一参考文献条目由 P3-1 解析为 `paperReference`。
+2. ✅ **已落地，系统页自动维护**：批准的 Agent 笔记写入成功后追加 `log`，每累计 5 个成功写操作刷新 `index`/`overview`；系统页使用 `pageKind` 与首行 hash 标记判定漂移，用户手改后跳过覆盖。
 3. **笔记语义检索**：笔记库目前只有 FTS/LIKE；把 RAG 的 embedding 基础设施扩展到笔记 chunk，支撑"按主题找散摘录"的召回质量（聚合管线的检索底座）。
-4. **体检 → 修复闭环**：`noteHealth` 已能发现孤立/断链/无标签/陈旧，下一步让 Agent 据报告生成修复计划走审批——痛点 1 的 P1 项"笔记体检"原本就设计为"产出修复计划"，目前只做了"发现"那一半。
+4. ✅ **已落地，体检 → 修复闭环**：体检报告可通过“让 Agent 修复”载入 Agent，生成 `write_notes` 修复计划并等待审批；删除类操作默认只列清单，断链修复优先按既有 `noteId` 重挂。
 5. **提炼预览与多模态重识别**：提炼结果并排预览（原始识别 vs 提炼稿）确认再入库；公式/表格选区送区域截图给多模态模型重建 LaTeX/三线表（`agentVision.ts` 基础设施可复用）。

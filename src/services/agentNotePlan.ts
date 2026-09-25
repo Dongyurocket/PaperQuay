@@ -1,11 +1,21 @@
 import type { Note, NotePageKind, NoteType } from '../types/notes';
+import { parseMarkdownToTiptap } from '../shared/markdownToTiptap.cjs';
+import {
+  prepareSystemPageContent,
+  shouldRefreshNavigationPages,
+} from './noteSystemPages.ts';
 
 // 运行时才加载 notes 服务：测试环境没有 Electron invoke 通道，
 // 动态导入让纯计划构建逻辑保持可测，调用失败时按操作降级而非崩溃。
 type NotesService = typeof import('./notes');
+type LibraryService = typeof import('./library');
 
 async function loadNotesService(): Promise<NotesService> {
   return import('./notes');
+}
+
+async function loadLibraryService(): Promise<LibraryService> {
+  return import('./library');
 }
 
 export interface AgentNoteWriteOperation {
@@ -146,11 +156,28 @@ export async function createAgentNoteWritePlan(input: {
 /** 用户批准计划后执行实际写入。逐操作独立执行，失败不中断其余操作。 */
 export async function applyAgentNoteWritePlan(plan: AgentNoteWritePlan): Promise<ApplyAgentNoteWritePlanResult> {
   const result: ApplyAgentNoteWritePlanResult = { applied: 0, failed: 0, errors: [], noteIds: [] };
-  const { createNote, updateNote, deleteNote } = await loadNotesService();
+  const { createNote, updateNote, deleteNote, listNotes } = await loadNotesService();
+  let knownPapers: Array<{ id: string; title: string; doi?: string }> = [];
+  try {
+    const { listLibraryPapers } = await loadLibraryService();
+    knownPapers = (await listLibraryPapers()).map((paper) => ({
+      id: paper.id,
+      title: paper.title,
+      doi: paper.doi || undefined,
+    }));
+  } catch {
+    // Note writes remain usable when the library bridge is unavailable; unknown [n] stays text.
+  }
 
   for (const operation of plan.operations) {
     try {
       if (operation.kind === 'create') {
+        const notes = await listNotes({ includeDeleted: false });
+        const parserOptions = {
+          notes,
+          papers: knownPapers,
+          anchors: notes.flatMap((note) => note.anchors ?? []),
+        };
         const note = await createNote(
           {
             paperId: operation.paperId || 'global-notes',
@@ -159,6 +186,7 @@ export async function applyAgentNoteWritePlan(plan: AgentNoteWritePlan): Promise
             title: operation.title || 'Untitled Note',
             content: operation.content ?? '',
             contentText: operation.content ?? '',
+            contentJson: parseMarkdownToTiptap(operation.content ?? '', parserOptions),
             tags: operation.tags ?? [],
             linkedPaperId: operation.paperId ?? null,
           },
@@ -175,8 +203,12 @@ export async function applyAgentNoteWritePlan(plan: AgentNoteWritePlan): Promise
         if (operation.content !== undefined) {
           patch.content = operation.content;
           patch.contentText = operation.content;
-          // 正文被替换时清空结构化 JSON，让编辑器从新文本重建，避免旧内容残留。
-          patch.contentJson = null;
+          const notes = await listNotes({ includeDeleted: false });
+          patch.contentJson = parseMarkdownToTiptap(operation.content, {
+            notes,
+            papers: knownPapers,
+            anchors: notes.flatMap((note) => note.anchors ?? []),
+          });
           patch.contentHtml = null;
         }
         if (operation.tags) patch.tags = operation.tags;
@@ -199,6 +231,63 @@ export async function applyAgentNoteWritePlan(plan: AgentNoteWritePlan): Promise
     } catch (error) {
       result.failed += 1;
       result.errors.push(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  if (result.applied > 0) {
+    try {
+      const notes = await listNotes({ includeDeleted: false });
+      const refreshNavigation = shouldRefreshNavigationPages(result.applied);
+      const pageKinds: NotePageKind[] = ['log'];
+      if (refreshNavigation) pageKinds.push('index', 'overview');
+      const operationCounts = plan.operations.reduce<Record<string, number>>((counts, operation) => {
+        counts[operation.kind] = (counts[operation.kind] ?? 0) + 1;
+        return counts;
+      }, {});
+      const operationSummary = Object.entries(operationCounts)
+        .map(([kind, count]) => `${kind}×${count}`)
+        .join('、') || '批量写入';
+
+      for (const pageKind of pageKinds) {
+        const existing = notes.find((note) => note.pageKind === pageKind) ?? null;
+        const prepared = prepareSystemPageContent(
+          pageKind,
+          existing,
+          notes,
+          result.noteIds,
+          Date.now(),
+          operationSummary,
+        );
+        if (prepared.action === 'skip' || !prepared.content) continue;
+        const contentJson = parseMarkdownToTiptap(prepared.content, {
+          notes,
+          papers: knownPapers,
+          anchors: notes.flatMap((note) => note.anchors ?? []),
+        });
+        if (prepared.action === 'create') {
+          await createNote(
+            {
+              paperId: 'global-notes',
+              type: 'standalone',
+              pageKind,
+              title: pageKind === 'log' ? '研究日志' : pageKind === 'index' ? '笔记索引' : '研究总览',
+              content: prepared.content,
+              contentText: prepared.content,
+              contentJson,
+            },
+            { sourceId: 'agent-system-pages', silent: true },
+          );
+        } else if (existing) {
+          await updateNote(
+            existing.id,
+            { content: prepared.content, contentText: prepared.content, contentJson, contentHtml: null },
+            { sourceId: 'agent-system-pages', silent: true },
+          );
+        }
+      }
+    } catch (error) {
+      result.failed += 1;
+      result.errors.push(`系统页维护失败：${error instanceof Error ? error.message : String(error)}`);
     }
   }
 

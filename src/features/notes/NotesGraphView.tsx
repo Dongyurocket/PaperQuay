@@ -2,6 +2,8 @@ import { useMemo, useState } from 'react';
 import { GLOBAL_NOTES_PAPER_ID } from '../../stores/useNotesStore';
 import type { Note, NoteFolder } from '../../types/notes';
 import { buildNoteHealthReport, noteHealthBadges, noteHealthCategoryIds, type NoteHealthCategory } from './noteHealth';
+import { buildNoteHealthRepairInstruction } from '../../services/noteAggregation';
+import { emitOpenAgentWithInstruction } from '../../app/appEvents';
 
 const TYPE_COLORS: Record<string, string> = {
   highlight: '#60a5fa',
@@ -134,6 +136,14 @@ export function NotesGraphView({
             {badge.label} {badge.count}
           </button>
         ))}
+        <button
+          type="button"
+          onClick={() => emitOpenAgentWithInstruction(buildNoteHealthRepairInstruction(report))}
+          className="pq-button ml-auto h-7 px-2 text-xs"
+          title="把体检报告交给 Agent，生成待审批修复计划"
+        >
+          让 Agent 修复
+        </button>
       </div>
 
       <svg

@@ -25,6 +25,7 @@ import {
   emitOpenStandalonePdf,
   JUMP_TO_NOTE_ANCHOR_EVENT,
   OPEN_LIBRARY_PAPER_EVENT,
+  OPEN_AGENT_WITH_INSTRUCTION_EVENT,
   UI_LANGUAGE_CHANGED_EVENT,
 } from './appEvents';
 import { PAPERQUAY_ICON_URL } from './appIcon';
@@ -191,6 +192,17 @@ function App() {
       openGraphTab();
     }
   }, [openAgentTab, openGraphTab, openNotesTab, openReviewTab]);
+
+  useEffect(() => {
+    const handleOpenAgent = () => {
+      openAgentTab();
+    };
+
+    window.addEventListener(OPEN_AGENT_WITH_INSTRUCTION_EVENT, handleOpenAgent);
+    return () => {
+      window.removeEventListener(OPEN_AGENT_WITH_INSTRUCTION_EVENT, handleOpenAgent);
+    };
+  }, [openAgentTab]);
 
   useEffect(() => {
     const handleLanguageChanged = (event: Event) => {
