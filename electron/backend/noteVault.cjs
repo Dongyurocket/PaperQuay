@@ -1,13 +1,15 @@
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { cleanString, now } = require('./utils.cjs');
+const { parseMarkdownToTiptap } = require('../../src/shared/markdownToTiptap.cjs');
 
 // PaperQuay 笔记 Markdown vault 双向同步。
 //
 // 设计约束（见 docs/notes-charter.md）：
 // - Tiptap JSON 是唯一事实源；vault 里的 .md 是外部可编辑的镜像，不是存储格式。
 // - frontmatter 的 id 是同步锚；Obsidian 侧禁止改 id，无 id 的文件视为新笔记。
-// - 锚点（anchors）以 JSON 原样写入 frontmatter，导入时不解析、不改写，保证往返保真。
+// - 锚点（anchors）以 JSON 原样写入 frontmatter；正文中的已知锚点链接由共享解析器恢复。
 // - 只管理 manifest 记录过的文件：用户自己的 Obsidian 文件（无 id 且未被导入过）不会被删除。
 
 const VAULT_MANIFEST_NAME = '.paperquay-vault.json';
@@ -79,19 +81,48 @@ function decodeFrontmatter(text) {
 function loadManifest(vaultDir) {
   try {
     const raw = JSON.parse(fs.readFileSync(path.join(vaultDir, VAULT_MANIFEST_NAME), 'utf8'));
+    const files = raw && typeof raw.files === 'object' && raw.files ? raw.files : {};
+    const normalizedFiles = {};
+    const metadata = {};
+    for (const [noteId, value] of Object.entries(files)) {
+      if (typeof value === 'string') {
+        normalizedFiles[noteId] = value;
+      } else if (value && typeof value === 'object') {
+        normalizedFiles[noteId] = cleanString(value.path);
+        metadata[noteId] = {
+          exportedUpdatedAt: Number(value.exportedUpdatedAt) || 0,
+          contentHash: cleanString(value.contentHash),
+        };
+      }
+    }
     return {
-      files: raw && typeof raw.files === 'object' && raw.files ? raw.files : {},
+      files: normalizedFiles,
+      metadata: raw && typeof raw.metadata === 'object' && raw.metadata ? raw.metadata : metadata,
     };
   } catch {
-    return { files: {} };
+    return { files: {}, metadata: {} };
   }
 }
 
 function saveManifest(vaultDir, manifest) {
   fs.writeFileSync(
     path.join(vaultDir, VAULT_MANIFEST_NAME),
-    JSON.stringify({ version: 1, files: manifest.files, updatedAt: now() }, null, 2),
+    JSON.stringify({ version: 2, files: manifest.files, metadata: manifest.metadata, updatedAt: now() }, null, 2),
   );
+}
+
+function contentHash(value) {
+  return crypto.createHash('sha256').update(String(value), 'utf8').digest('hex');
+}
+
+function conflictPath(rel, timestamp) {
+  const extension = path.extname(rel);
+  const base = rel.slice(0, -extension.length);
+  const stamp = new Date(timestamp).toISOString()
+    .replace(/[-:]/g, '')
+    .replace('T', '-')
+    .slice(0, 15);
+  return `${base}--conflict-${stamp}${extension || '.md'}`;
 }
 
 function listMarkdownFiles(rootDir) {
@@ -126,7 +157,7 @@ function noteBody(note) {
 // ---- Tiptap JSON → Markdown 序列化（痛点 7 导出约定）----
 // 内联 paperReference 渲染为顺序编码 [n]（按首次出现编号、同 paperId 同号），文末追加
 // GB/T 7714 参考文献列表；锚点块序列化为 paperquay://anchor/<id> 链接，锚点 ID 不丢。
-// Tiptap JSON 是唯一事实源，本序列化只用于 vault 导出，不反向解析。
+// Tiptap JSON 是唯一事实源；Markdown 导出和共享解析器只负责交换格式。
 
 function escapeMarkdownText(text) {
   return String(text).replace(/([\\`*_[\]])/g, '\\$1');
@@ -405,8 +436,10 @@ function createNoteVault(context) {
       updated: 0,
       removed: 0,
       skipped: 0,
+      conflicts: 0,
     };
     const createdFolders = [];
+    const conflictNotes = new Set();
     const libraryPapers = store.load()?.papers;
     const papersById = new Map(
       (Array.isArray(libraryPapers) ? libraryPapers : []).map((paper) => [paper.id, paper]),
@@ -415,6 +448,7 @@ function createNoteVault(context) {
     // ---- 阶段 1：导入（vault → DB）----
     const files = listMarkdownFiles(vaultDir);
     let folders = noteStore.listFolders();
+    let notes = noteStore.listNotes({ includeDeleted: false });
     for (const rel of files) {
       const abs = path.join(vaultDir, rel);
       let raw;
@@ -450,8 +484,27 @@ function createNoteVault(context) {
         const contentChanged =
           serializeNoteMarkdown(existing, papersById) !== contentText ||
           cleanString(existing.title) !== titleFromFile;
-        // 文件比 DB 新（mtime 领先 updatedAt 1s 以上，容忍文件系统精度）才导入，避免导出-导入乒乓。
-        if (contentChanged && stat.mtimeMs > Number(existing.updatedAt) + 1000) {
+        const meta = manifest.metadata[noteId] || {};
+        const fileHash = contentHash(raw);
+        const fileChangedSinceExport = meta.contentHash
+          ? meta.contentHash !== fileHash
+          : contentChanged;
+        const fileUpdatedAt = Number(fields.updatedAt) || stat.mtimeMs;
+        const exportedUpdatedAt = Number(meta.exportedUpdatedAt) || Number(fields.updatedAt) || 0;
+        const dbChangedSinceExport = Boolean(meta.exportedUpdatedAt) &&
+          Number(existing.updatedAt) > exportedUpdatedAt;
+        const fileIsNewer = fileUpdatedAt > Number(existing.updatedAt) + 1000 ||
+          (!meta.exportedUpdatedAt && stat.mtimeMs > Number(existing.updatedAt) + 1000);
+
+        if (contentChanged && fileChangedSinceExport && dbChangedSinceExport) {
+          const conflictRel = conflictPath(rel, Date.now());
+          const conflictAbs = path.join(vaultDir, conflictRel);
+          fs.mkdirSync(path.dirname(conflictAbs), { recursive: true });
+          fs.writeFileSync(conflictAbs, raw);
+          stats.conflicts += 1;
+          stats.skipped += 1;
+          conflictNotes.add(noteId);
+        } else if (contentChanged && (fileIsNewer || fileChangedSinceExport)) {
           const folderId = resolveFolderByPath(dirSegments, folders, createdFolders);
           noteStore.updateNote({
             id: noteId,
@@ -459,7 +512,11 @@ function createNoteVault(context) {
               title: titleFromFile || existing.title,
               content: contentText,
               contentText,
-              contentJson: null,
+              contentJson: parseMarkdownToTiptap(contentText, {
+                anchors: Array.isArray(fields.anchors) ? fields.anchors : existing.anchors,
+                papers: Array.isArray(libraryPapers) ? libraryPapers : [],
+                notes,
+              }),
               contentHtml: null,
               tags: Array.isArray(fields.tags) ? tags : existing.tags,
               folderId,
@@ -467,6 +524,7 @@ function createNoteVault(context) {
           });
           stats.imported += 1;
           stats.updated += 1;
+          notes = noteStore.listNotes({ includeDeleted: false });
         } else {
           stats.skipped += 1;
         }
@@ -479,7 +537,11 @@ function createNoteVault(context) {
           title: titleFromFile || '未命名笔记',
           content: contentText,
           contentText,
-          contentJson: null,
+          contentJson: parseMarkdownToTiptap(contentText, {
+            anchors: Array.isArray(fields.anchors) ? fields.anchors : [],
+            papers: Array.isArray(libraryPapers) ? libraryPapers : [],
+            notes,
+          }),
           contentHtml: null,
           tags,
           folderId,
@@ -487,15 +549,17 @@ function createNoteVault(context) {
         stats.imported += 1;
         stats.created += 1;
         manifest.files[created.id] = rel;
+        notes = noteStore.listNotes({ includeDeleted: false });
       }
     }
 
     // ---- 阶段 2：导出（DB → vault）----
     folders = noteStore.listFolders();
     const foldersById = new Map(folders.map((folder) => [folder.id, folder]));
-    const notes = noteStore.listNotes({ includeDeleted: false });
+    notes = noteStore.listNotes({ includeDeleted: false });
 
     for (const note of notes) {
+      if (conflictNotes.has(note.id)) continue;
       const folderPath = buildFolderPath(note.folderId, foldersById);
       const baseName = sanitizeFileName(note.title);
       const expectedPrefix = folderPath ? `${folderPath}/` : '';
@@ -544,6 +608,10 @@ function createNoteVault(context) {
       }
 
       manifest.files[note.id] = rel;
+      manifest.metadata[note.id] = {
+        exportedUpdatedAt: Number(note.updatedAt) || now(),
+        contentHash: contentHash(content),
+      };
     }
 
     // ---- 阶段 3：清理 manifest 里已不存在笔记对应的文件 ----
@@ -556,6 +624,7 @@ function createNoteVault(context) {
           // 忽略清理失败。
         }
         delete manifest.files[noteId];
+        delete manifest.metadata[noteId];
       }
     }
 

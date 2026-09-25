@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, utimesSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, utimesSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -25,13 +25,13 @@ function setup() {
     notesDatabasePath: path.join(dir, 'paperquay-notes.sqlite'),
   });
   // 最小 library store 替身：只需要 load/save settings。
-  const library = { settings: { notesVaultDir: vaultDir } };
+  const library = { settings: { notesVaultDir: vaultDir }, papers: [] as any[] };
   const store = {
     load: () => library,
     save: async () => undefined,
   };
   const vault = createNoteVault({ noteStore, store } as any);
-  return { dir, vaultDir, noteStore, vault };
+  return { dir, vaultDir, noteStore, vault, library };
 }
 
 test('frontmatter 编解码往返保真', () => {
@@ -255,4 +255,123 @@ test('serializeNoteMarkdown：paperReference 渲染为 [n] 且同文献同号，
 test('serializeNoteMarkdown：无 contentJson 时退化为纯文本', () => {
   assert.equal(serializeNoteMarkdown({ contentText: '纯文本内容' }, new Map()), '纯文本内容');
   assert.equal(serializeNoteMarkdown({ content: '兜底字段' }, new Map()), '兜底字段');
+});
+
+test('vault 往返保留标题、列表、双链、标签、锚点和文献引用', () => {
+  const { dir, vaultDir, noteStore, vault, library } = setup();
+  try {
+    library.papers.push({
+      id: 'p1',
+      title: 'Known Paper',
+      authors: [{ name: 'Author' }],
+      year: '2024',
+      publication: 'Journal',
+    });
+    const note = noteStore.createNote({
+      paperId: 'global-notes',
+      type: 'standalone',
+      title: '往返',
+      contentJson: {
+        type: 'doc',
+        content: [
+          { type: 'heading', attrs: { level: 2 }, content: [{ type: 'text', text: '标题' }] },
+          {
+            type: 'paragraph',
+            content: [
+              { type: 'text', text: '正文 ' },
+              { type: 'paperReference', attrs: { paperId: 'p1', label: 'Known Paper' } },
+              { type: 'text', text: ' ' },
+              { type: 'noteAnchorLink', attrs: { anchorId: 'a1', label: 'P3' } },
+              { type: 'text', text: ' ' },
+              { type: 'wikiLink', attrs: { id: 'note-target', label: '双链' } },
+              { type: 'text', text: ' ' },
+              { type: 'hashTag', attrs: { tag: '标签' } },
+            ],
+          },
+          {
+            type: 'bulletList',
+            content: [{ type: 'listItem', content: [{ type: 'paragraph', content: [{ type: 'text', text: '列表项' }] }] }],
+          },
+        ],
+      },
+      content: '',
+      anchors: [{ id: 'a1', paperId: 'p1', label: 'P3', excerpt: '摘录', source: 'pdf', createdAt: 1 }],
+    });
+    vault.syncNow();
+    const filePath = path.join(vaultDir, '往返.md');
+    const original = readFileSync(filePath, 'utf8');
+    writeFileSync(filePath, original.replace('标题', '修改后的标题'));
+    const future = new Date(Date.now() + 60_000);
+    utimesSync(filePath, future, future);
+
+    assert.equal(vault.syncNow().updated, 1);
+    const reloaded = noteStore.getNote({ id: note.id });
+    assert.equal(reloaded.contentJson.content[0].type, 'heading');
+    assert.equal(reloaded.contentJson.content[1].content.find((n: any) => n.type === 'noteAnchorLink').attrs.anchorId, 'a1');
+    assert.equal(reloaded.contentJson.content[1].content.find((n: any) => n.type === 'paperReference').attrs.paperId, 'p1');
+    assert.ok(reloaded.contentJson.content[1].content.some((n: any) => n.type === 'wikiLink' && n.attrs.label === '双链'));
+    assert.ok(reloaded.contentJson.content[1].content.some((n: any) => n.type === 'hashTag' && n.attrs.tag === '标签'));
+    const exported = readFileSync(filePath, 'utf8');
+    assert.match(exported, /\[1\]/);
+    assert.match(exported, /paperquay:\/\/anchor\/a1/);
+    assert.match(exported, /\[\[双链\]\]/);
+    assert.match(exported, /#标签/);
+  } finally {
+    noteStore.close();
+    cleanupDir(dir);
+  }
+});
+
+test('vault 双侧修改生成冲突副本且 DB 保持应用侧内容', () => {
+  const { dir, vaultDir, noteStore, vault } = setup();
+  try {
+    const note = noteStore.createNote({ title: '冲突', content: '初始' });
+    vault.syncNow();
+    const filePath = path.join(vaultDir, '冲突.md');
+    const exported = readFileSync(filePath, 'utf8');
+    writeFileSync(filePath, exported.replace('初始', '文件侧修改'));
+    noteStore.updateNote({ id: note.id, patch: { content: '应用侧修改', contentText: '应用侧修改' } });
+
+    const stats = vault.syncNow();
+    assert.equal(stats.conflicts, 1);
+    assert.equal(noteStore.getNote({ id: note.id }).contentText, '应用侧修改');
+    assert.ok(readdirSync(vaultDir).some((name) => name.startsWith('冲突--conflict-') && name.endsWith('.md')));
+    assert.match(readFileSync(filePath, 'utf8'), /文件侧修改/);
+  } finally {
+    noteStore.close();
+    cleanupDir(dir);
+  }
+});
+
+test('vault 仅文件侧修改导入，旧 manifest 字符串格式仍兼容，DB 侧修改正常导出', () => {
+  const { dir, vaultDir, noteStore, vault } = setup();
+  try {
+    const note = noteStore.createNote({ title: '时钟', content: '初始' });
+    vault.syncNow();
+    const filePath = path.join(vaultDir, '时钟.md');
+    const manifestPath = path.join(vaultDir, '.paperquay-vault.json');
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    manifest.files = { [note.id]: manifest.files[note.id] };
+    delete manifest.metadata;
+    writeFileSync(manifestPath, JSON.stringify(manifest));
+    writeFileSync(filePath, readFileSync(filePath, 'utf8').replace('初始', '文件改'));
+    const imported = vault.syncNow();
+    assert.equal(imported.updated, 1);
+    assert.equal(noteStore.getNote({ id: note.id }).contentText, '文件改');
+
+    noteStore.updateNote({
+      id: note.id,
+      patch: {
+        content: 'DB 改',
+        contentText: 'DB 改',
+        contentJson: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'DB 改' }] }] },
+      },
+    });
+    const exported = vault.syncNow();
+    assert.equal(exported.exported, 1);
+    assert.match(readFileSync(filePath, 'utf8'), /DB 改/);
+  } finally {
+    noteStore.close();
+    cleanupDir(dir);
+  }
 });

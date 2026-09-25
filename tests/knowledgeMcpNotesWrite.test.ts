@@ -39,6 +39,10 @@ test('create_note 创建笔记并自动抽取标签与 wiki 双链', () => {
     assert.equal(created.note.paperId, 'global-notes');
     assert.deepEqual([...created.note.tags].sort(), ['inference', 'llm']);
     assert.deepEqual(created.note.linkedNoteIds, [target.noteId]);
+    const stored = service.withWritableNoteStore((store: any) => store.getNote({ id: created.noteId }));
+    assert.equal(stored.contentJson.type, 'doc');
+    assert.ok(stored.contentJson.content[0].content.some((node: any) => node.type === 'hashTag'));
+    assert.ok(stored.contentJson.content[0].content.some((node: any) => node.type === 'wikiLink'));
 
     // search_notes 只读路径能立刻查到
     const found = service.searchNotes({ query: '键值缓存' });
@@ -59,7 +63,7 @@ test('create_note 拒绝空内容与非法类型', () => {
   }
 });
 
-test('update_note 局部更新并清空富文本 JSON', () => {
+test('update_note 局部更新并重建富文本 JSON', () => {
   const { dir, service } = setup();
   try {
     const created = service.createNote({ title: '旧标题', content: '旧正文', tags: ['a'] });
@@ -73,6 +77,9 @@ test('update_note 局部更新并清空富文本 JSON', () => {
     assert.equal(updated.note.title, '新标题');
     assert.equal(updated.note.content, '新正文 #new');
     assert.deepEqual([...updated.note.tags].sort(), ['b', 'new']);
+    const stored = service.withWritableNoteStore((store: any) => store.getNote({ id: created.noteId }));
+    assert.equal(stored.contentJson.type, 'doc');
+    assert.equal(stored.contentJson.content[0].content[1].attrs.tag, 'new');
 
     // 未提供的字段保持不变——只传 title 不应动正文
     const retitled = service.updateNote({ noteId: created.noteId, title: '再改标题' });

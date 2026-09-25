@@ -872,7 +872,7 @@ export function NotesWorkspace() {
       }
       const stats = await syncNotesVaultNow();
       setVaultMessage(
-        `同步完成：导入 ${stats.imported}（新建 ${stats.created}）、导出 ${stats.exported}、清理 ${stats.removed}`,
+        `同步完成：导入 ${stats.imported}（新建 ${stats.created}）、导出 ${stats.exported}、清理 ${stats.removed}、冲突副本 ${stats.conflicts}`,
       );
       void loadNotes();
       void refreshFolders();

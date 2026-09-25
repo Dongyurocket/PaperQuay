@@ -16,6 +16,7 @@ const {
 const { execFileSync } = require('node:child_process');
 const { attachCategoryCounts, createLibraryStore, normalizeAuthor, normalizeTag } = require('../backend/libraryStore.cjs');
 const { createNoteStore } = require('../backend/noteStore.cjs');
+const { parseMarkdownToTiptap } = require('../../src/shared/markdownToTiptap.cjs');
 const { id, now, safeFileName, fileNameFromPath, hashBytes, isPdf } = require('../backend/utils.cjs');
 
 function cleanString(value) {
@@ -1502,13 +1503,18 @@ class PaperQuayKnowledgeService {
       throw new Error(`Unsupported note type: ${noteType}`);
     }
     return this.withWritableNoteStore((store) => {
+      const library = createLibraryStore(this.appPaths).load();
+      const notes = store.listNotes({ includeDeleted: false });
       const note = store.createNote({
         paperId: cleanString(paperId) || 'global-notes',
         type: noteType || 'standalone',
         title: cleanTitle || 'Untitled Note',
         content: cleanContent,
         contentText: cleanContent,
-        contentJson: null,
+        contentJson: parseMarkdownToTiptap(cleanContent, {
+          papers: Array.isArray(library?.papers) ? library.papers : [],
+          notes,
+        }),
         contentHtml: null,
         tags: cleanTags,
         folderId: cleanString(folderId) || null,
@@ -1525,8 +1531,7 @@ class PaperQuayKnowledgeService {
     if (typeof content === 'string') {
       patch.content = content;
       patch.contentText = content;
-      // 与内置 Agent 一致：正文被替换时清空结构化 JSON，让编辑器从新文本重建。
-      patch.contentJson = null;
+      // Markdown is parsed at the write boundary so the stored JSON remains authoritative.
       patch.contentHtml = null;
     }
     if (Array.isArray(tags)) {
@@ -1540,6 +1545,14 @@ class PaperQuayKnowledgeService {
       throw new Error('update_note requires at least one of title, content, tags, folderId');
     }
     return this.withWritableNoteStore((store) => {
+      const library = createLibraryStore(this.appPaths).load();
+      if (typeof content === 'string') {
+        patch.contentJson = parseMarkdownToTiptap(content, {
+          papers: Array.isArray(library?.papers) ? library.papers : [],
+          notes: store.listNotes({ includeDeleted: false }),
+          anchors: store.getNote({ id: idValue })?.anchors ?? [],
+        });
+      }
       const note = store.updateNote({ id: idValue, patch });
       return { note: slimNote(note), noteId: note.id };
     }, { allowWhileAppRunning });

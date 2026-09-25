@@ -1,5 +1,6 @@
 import type { JSONContent } from '@tiptap/core';
 import type { Note } from '../../types/notes';
+import { parseMarkdownToTiptap } from '../../shared/markdownToTiptap.cjs';
 
 export const EMPTY_TIPTAP_DOCUMENT: JSONContent = {
   type: 'doc',
@@ -144,13 +145,9 @@ export function noteContentToTiptap(note: Note | null): JSONContent {
   const text = note?.contentText || note?.content || '';
   if (!text.trim()) return EMPTY_TIPTAP_DOCUMENT;
 
-  return {
-    type: 'doc',
-    content: text.split(/\n{2,}/).map((paragraph) => ({
-      type: 'paragraph',
-      content: paragraph.trim() ? [{ type: 'text', text: paragraph.trim() }] : undefined,
-    })),
-  };
+  return parseMarkdownToTiptap(text, {
+    anchors: note?.anchors ?? [],
+  });
 }
 
 export function titleFromNoteContent(text: string, fallback = '未命名笔记') {

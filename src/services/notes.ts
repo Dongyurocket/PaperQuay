@@ -129,6 +129,7 @@ export interface NotesVaultSyncStats {
   updated: number;
   removed: number;
   skipped: number;
+  conflicts: number;
   total: number;
   createdFolders: number;
 }
