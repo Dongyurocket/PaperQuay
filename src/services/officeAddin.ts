@@ -57,6 +57,8 @@ export interface OfficeAddinSourceStatus {
     reason: string;
   };
   settings: OfficeAddinSourceSettings;
+  /** 最近一次 Word 加载项经同源 /api/v1 访问的记录（设置页显示「Word 已连接」）。 */
+  lastClient?: { method: string; path: string; client: string; at: string } | null;
   /** 运行中但有降级时（例如 HTTPS 启动失败回退 HTTP）的原因。 */
   note?: string;
   error?: string;

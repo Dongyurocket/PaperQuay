@@ -1,10 +1,11 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <!--
-  PaperQuay Word 加载项清单。
+  PaperQuay Word 加载项清单（v2 / 0.4.0）。
 
-  开发/侧载用清单：静态资源由本机 https://localhost:3000 提供
-  （见 scripts/office-addin-server.mjs）。发布到组织目录时把 SourceLocation、
-  IconUrl、AppDomains 换成对应的 HTTPS 地址即可。
+  静态资源与同源 API 均由运行中的 PaperQuay 本体托管（https://localhost:3000，见
+  electron/backend/officeAddinHost.cjs）；exe 安装器按实际端口改写本清单后侧载。
+  兼容底线 WordApi 1.1（Word 2016 批量授权版）；更高版本的能力由加载项运行时检测。
+  所有功能区按钮都打开任务窗格（ShowTaskpane + ?action=…），文档只由任务窗格一个运行时写入。
 -->
 <OfficeApp
   xmlns="http://schemas.microsoft.com/office/appforoffice/1.1"
@@ -14,11 +15,11 @@
   xsi:type="TaskPaneApp">
 
   <Id>d4f7a2c1-6b0e-4d9a-9f24-73c8e5b1a640</Id>
-  <Version>0.3.5.0</Version>
+  <Version>0.4.0.0</Version>
   <ProviderName>PaperQuay</ProviderName>
   <DefaultLocale>zh-CN</DefaultLocale>
   <DisplayName DefaultValue="PaperQuay 引用" />
-  <Description DefaultValue="在 Word 中检索 PaperQuay 本地文献库，插入国标（GB/T 7714）引用与参考文献表。" />
+  <Description DefaultValue="在 Word 中检索 PaperQuay 本地文献库，插入可跳转的国标（GB/T 7714）引用与参考文献表。" />
   <IconUrl DefaultValue="https://localhost:3000/assets/icon-32.png" />
   <HighResolutionIconUrl DefaultValue="https://localhost:3000/assets/icon-80.png" />
   <SupportUrl DefaultValue="https://github.com/Dongyurocket/PaperQuay" />
@@ -53,9 +54,9 @@
           </GetStarted>
           <FunctionFile resid="Commands.Url" />
           <ExtensionPoint xsi:type="PrimaryCommandSurface">
-            <OfficeTab id="TabHome">
-              <Group id="PaperQuay.Group">
-                <Label resid="Group.Label" />
+            <CustomTab id="PaperQuay.Tab">
+              <Group id="PaperQuay.Group.Cite">
+                <Label resid="Group.Cite.Label" />
                 <Icon>
                   <bt:Image size="16" resid="Icon.16x16" />
                   <bt:Image size="32" resid="Icon.32x32" />
@@ -74,11 +75,84 @@
                   </Icon>
                   <Action xsi:type="ShowTaskpane">
                     <TaskpaneId>PaperQuay.Taskpane</TaskpaneId>
+                    <SourceLocation resid="Taskpane.Cite.Url" />
+                  </Action>
+                </Control>
+                <Control xsi:type="Button" id="PaperQuay.BibButton">
+                  <Label resid="BibButton.Label" />
+                  <Supertip>
+                    <Title resid="BibButton.Label" />
+                    <Description resid="BibButton.Tooltip" />
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="Icon.16x16" />
+                    <bt:Image size="32" resid="Icon.32x32" />
+                    <bt:Image size="80" resid="Icon.80x80" />
+                  </Icon>
+                  <Action xsi:type="ShowTaskpane">
+                    <TaskpaneId>PaperQuay.Taskpane</TaskpaneId>
+                    <SourceLocation resid="Taskpane.Bib.Url" />
+                  </Action>
+                </Control>
+              </Group>
+              <Group id="PaperQuay.Group.Document">
+                <Label resid="Group.Document.Label" />
+                <Icon>
+                  <bt:Image size="16" resid="Icon.16x16" />
+                  <bt:Image size="32" resid="Icon.32x32" />
+                  <bt:Image size="80" resid="Icon.80x80" />
+                </Icon>
+                <Control xsi:type="Button" id="PaperQuay.RefreshButton">
+                  <Label resid="RefreshButton.Label" />
+                  <Supertip>
+                    <Title resid="RefreshButton.Label" />
+                    <Description resid="RefreshButton.Tooltip" />
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="Icon.16x16" />
+                    <bt:Image size="32" resid="Icon.32x32" />
+                    <bt:Image size="80" resid="Icon.80x80" />
+                  </Icon>
+                  <Action xsi:type="ShowTaskpane">
+                    <TaskpaneId>PaperQuay.Taskpane</TaskpaneId>
+                    <SourceLocation resid="Taskpane.Refresh.Url" />
+                  </Action>
+                </Control>
+                <Control xsi:type="Button" id="PaperQuay.PrefsButton">
+                  <Label resid="PrefsButton.Label" />
+                  <Supertip>
+                    <Title resid="PrefsButton.Label" />
+                    <Description resid="PrefsButton.Tooltip" />
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="Icon.16x16" />
+                    <bt:Image size="32" resid="Icon.32x32" />
+                    <bt:Image size="80" resid="Icon.80x80" />
+                  </Icon>
+                  <Action xsi:type="ShowTaskpane">
+                    <TaskpaneId>PaperQuay.Taskpane</TaskpaneId>
+                    <SourceLocation resid="Taskpane.Prefs.Url" />
+                  </Action>
+                </Control>
+                <Control xsi:type="Button" id="PaperQuay.PaneButton">
+                  <Label resid="PaneButton.Label" />
+                  <Supertip>
+                    <Title resid="PaneButton.Label" />
+                    <Description resid="PaneButton.Tooltip" />
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="Icon.16x16" />
+                    <bt:Image size="32" resid="Icon.32x32" />
+                    <bt:Image size="80" resid="Icon.80x80" />
+                  </Icon>
+                  <Action xsi:type="ShowTaskpane">
+                    <TaskpaneId>PaperQuay.Taskpane</TaskpaneId>
                     <SourceLocation resid="Taskpane.Url" />
                   </Action>
                 </Control>
               </Group>
-            </OfficeTab>
+              <Label resid="Tab.Label" />
+            </CustomTab>
           </ExtensionPoint>
         </DesktopFormFactor>
       </Host>
@@ -93,16 +167,30 @@
       <bt:Urls>
         <bt:Url id="Commands.Url" DefaultValue="https://localhost:3000/commands.html" />
         <bt:Url id="Taskpane.Url" DefaultValue="https://localhost:3000/taskpane.html" />
+        <bt:Url id="Taskpane.Cite.Url" DefaultValue="https://localhost:3000/taskpane.html?action=cite" />
+        <bt:Url id="Taskpane.Bib.Url" DefaultValue="https://localhost:3000/taskpane.html?action=bib" />
+        <bt:Url id="Taskpane.Refresh.Url" DefaultValue="https://localhost:3000/taskpane.html?action=refresh" />
+        <bt:Url id="Taskpane.Prefs.Url" DefaultValue="https://localhost:3000/taskpane.html?action=prefs" />
         <bt:Url id="GetStarted.LearnMoreUrl" DefaultValue="https://github.com/Dongyurocket/PaperQuay" />
       </bt:Urls>
       <bt:ShortStrings>
-        <bt:String id="Group.Label" DefaultValue="PaperQuay" />
-        <bt:String id="CiteButton.Label" DefaultValue="插入引用" />
+        <bt:String id="Tab.Label" DefaultValue="PaperQuay" />
+        <bt:String id="Group.Cite.Label" DefaultValue="引用" />
+        <bt:String id="Group.Document.Label" DefaultValue="文档" />
+        <bt:String id="CiteButton.Label" DefaultValue="添加/编辑引用" />
+        <bt:String id="BibButton.Label" DefaultValue="参考文献表" />
+        <bt:String id="RefreshButton.Label" DefaultValue="刷新" />
+        <bt:String id="PrefsButton.Label" DefaultValue="文档首选项" />
+        <bt:String id="PaneButton.Label" DefaultValue="打开面板" />
         <bt:String id="GetStarted.Title" DefaultValue="PaperQuay 引用已就绪" />
       </bt:ShortStrings>
       <bt:LongStrings>
-        <bt:String id="CiteButton.Tooltip" DefaultValue="打开 PaperQuay 任务窗格，检索文献库并插入引用。" />
-        <bt:String id="GetStarted.Description" DefaultValue="点击“插入引用”打开任务窗格，先用 PaperQuay 设置里的连接信息连接本地桥。" />
+        <bt:String id="CiteButton.Tooltip" DefaultValue="快速检索 PaperQuay 文献库并在光标处插入引用；光标在已有引用内时可编辑它。" />
+        <bt:String id="BibButton.Tooltip" DefaultValue="在光标处插入参考文献表（已有则原位更新）；正文引用会链接到表中条目，Ctrl+点击即可跳转。" />
+        <bt:String id="RefreshButton.Tooltip" DefaultValue="按文档顺序重排编号并更新参考文献表。" />
+        <bt:String id="PrefsButton.Tooltip" DefaultValue="切换引用样式（GB/T 7714-2015、GB 7714-87、APA 7、IEEE 等）、上标、跳转链接等文档首选项。" />
+        <bt:String id="PaneButton.Tooltip" DefaultValue="打开 PaperQuay 引用任务窗格。" />
+        <bt:String id="GetStarted.Description" DefaultValue="打开 PaperQuay 后加载项会自动连接，在「PaperQuay」选项卡点「添加/编辑引用」开始。" />
       </bt:LongStrings>
     </Resources>
   </VersionOverrides>

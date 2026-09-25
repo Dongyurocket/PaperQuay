@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PaperQuay 快速引用</title>
+    <link rel="stylesheet" href="taskpane.css" />
+    <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+    <script src="dist/dialog.js"></script>
+  </head>
+  <body>
+    <main class="pane quick">
+      <div class="quick__bar">
+        <div id="chosen" class="quick__chips"></div>
+        <input id="query" type="search" placeholder="检索 PaperQuay：标题 / 作者 / 年份" autocomplete="off" />
+      </div>
+      <div class="row">
+        <input id="locator" type="text" placeholder="页码（可选）" />
+        <button id="insert" type="button" class="button button--primary">插入</button>
+      </div>
+      <div id="hint" class="hint"></div>
+      <div id="results" class="results"></div>
+    </main>
+  </body>
+</html>

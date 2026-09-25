@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.3.5-2563eb?style=flat-square" alt="Version v0.3.5">
+  <img src="https://img.shields.io/badge/version-v0.4.0-2563eb?style=flat-square" alt="Version v0.4.0">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-4b5563?style=flat-square" alt="Windows macOS Linux">
   <img src="https://img.shields.io/badge/built%20with-Electron-47848f?style=flat-square" alt="Electron">
   <img src="https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-0f766e?style=flat-square" alt="React TypeScript">
@@ -56,6 +56,13 @@
 ---
 
 ## 近期更新
+
+### v0.4.0 - 加载项 v2：免配置连接与文档自包含模型
+
+- **不必再复制连接信息**：加载项页面由 PaperQuay 本体托管，与桥同源，应用运行即自动连接、断开自动重连；端口与令牌降级为「高级：外部工具的端口/令牌连接」。
+- **引用明细搬进文档的 Custom XML Part**（`urn:paperquay:word:v2`）：另存/转换不再丢模型，0.3.x 文档打开即自动迁移；模型内嵌被引文献的元数据快照，PaperQuay 没运行、换台机器、文献已移出库也能照常刷新。
+- **跳转链接取代 REF 域**：文献表条目包在隐藏书签里、正文编号是内部超链接——Ctrl+点击跳转、导出 PDF 保留链接、F9 更新域不再报「错误！未定义书签」。
+- **更少意外覆盖**：手改过的引用不会被静默覆盖，复制粘贴产生的重复引用刷新时自动拆成独立编号；功能区改为 PaperQuay 自定义选项卡（引用 / 文档两组），加载项源码迁移到 TypeScript 并降级为兼容 Word 2016 的 ES5 产物。
 
 ### v0.3.5 - 交叉引用与 GB 87 标点开关
 
@@ -286,7 +293,7 @@ Agent 工作区不是普通聊天框，而是面向文献库操作设计。它�
 | 软件更新 | 支持应用内检查更新、Windows 和 Linux 自动更新流程，以及 macOS 打开发布页手动下载 |
 | 知识图谱 | 支持文献、笔记、标签、分类和引用节点，语义相似边、Crossref 参考文献同步、共同作者关系、自定义与 AI 关系，fcose 力导向全局布局、局部同心圆视图和 PNG/JSON 导出 |
 | 综述写作 | 支持大纲蓝图、分段并发写作、RAG 检索上下文、失败任务独立上报与续跑，以及 Word 导出（OMML 公式、中英文标题、参考文献和正文插图） |
-| Word 加载项 | 通过 Office.js 任务窗格在 Word 正文插入引用域、在文末生成参考文献表域，默认 GB/T 7714-2015 顺序编码制（可切著者-出版年 / APA 7 / IEEE），引用增删后一键刷新重排编号，支持页码/前后缀/隐藏作者、取消链接与「本文引用过」回写；加载项经本机 `127.0.0.1` 只读桥（Bearer 令牌）访问文献库，数据不出本机；仅 Microsoft Word（不含 WPS / LibreOffice），详见 [docs/OFFICE_ADDIN.zh-CN.md](./docs/OFFICE_ADDIN.zh-CN.md) |
+| Word 加载项 | 通过 Office.js 任务窗格在 Word 正文插入引用域、在文末生成参考文献表域，默认 GB/T 7714-2015 顺序编码制（可切著者-出版年 / APA 7 / IEEE），引用增删后一键刷新重排编号，支持页码/前后缀/隐藏作者、取消链接与「本文引用过」回写；加载项经本机 `127.0.0.1` 只读桥（同源 `/api/v1`，免令牌）访问文献库，数据不出本机；仅 Microsoft Word（不含 WPS / LibreOffice），详见 [docs/OFFICE_ADDIN.zh-CN.md](./docs/OFFICE_ADDIN.zh-CN.md) |
 | 主题 | 支持浅色和深色主题，面向桌面端长时间阅读优化 |
 
 ---
@@ -296,8 +303,8 @@ Agent 工作区不是普通聊天框，而是面向文献库操作设计。它�
 写论文时不必再从笔记里手工抄参考文献：PaperQuay 提供一个 Microsoft Word 加载项（Office.js 任务窗格），在正文插入引用、在文末生成参考文献表，引用增删后一键刷新即可整篇重排编号。
 
 - **默认国标**：GB/T 7714-2015 顺序编码制（同一文献同号、连续编号折叠为 `[1-3]`），可切换 GB/T 7714-2015 著者-出版年、APA 7、IEEE；样式保存在文档里，换机器打开仍保持。
-- **引用是域不是死文本**：每条引用是一个 ContentControl 域（`pq:c|<citeId>`），文末表是单个 `pq:bib` 域，明细写在文档设置里；交付前可以用「取消链接」把域变成普通文字。
-- **本机只读桥**：加载项运行在浏览器环境，不能直接读数据库，因此 PaperQuay 主进程在 `127.0.0.1`（默认 23120，Zotero 用 23119）开一个只读 HTTP 桥，用每次启动随机生成的 Bearer token 鉴权，发现文件写在 `<userData>/PaperQuay/paperquay-office-bridge.json`。CORS 只回显白名单来源，绝不使用 `*`。唯一写入路径是把「本文引用过」记录回文献库，默认开启、可在设置里关闭。
+- **引用是域不是死文本**：每条引用是一个 ContentControl 域（`pq:c|<citeId>`），文末表是单个 `pq:bib` 域；引用明细与被引文献的快照存在文档自己的 Custom XML Part 里（命名空间 `urn:paperquay:word:v2`），文档另存或转换也不丢，0.3.x 的旧文档打开即自动迁移。交付前可以用「取消链接」把域变成普通文字。
+- **本机只读桥，同源自动连接**：加载项运行在浏览器环境，不能直接读数据库，因此 PaperQuay 主进程既托管加载项页面，也在 `127.0.0.1`（默认 23120，Zotero 用 23119）开一个只读 HTTP 桥。加载项请求的是同源 `/api/v1`，由源站在进程内转发给桥——不走网络、不用令牌，应用运行即自动连接。跨源请求一律被拒（必须带自定义请求头，且校验 `Host`/`Origin`，从不同意 CORS 预检）；发现文件写在 `<userData>/PaperQuay/paperquay-office-bridge.json`，端口与令牌只留给外部工具。唯一写入路径是把「本文引用过」记录回文献库，默认开启、可在设置里关闭。
 - **格式化真源唯一**：加载项不自己实现格式规则，而是复用 `src/shared/citation/`（笔记、vault 导出、MCP 与 Word 共用同一份实现），因此两侧的条目写法不会分叉。
 
 安装（Windows 桌面版，侧载，不需要商店账号），两条路径：
@@ -312,7 +319,7 @@ npm run office-addin:serve   # 起本地 HTTPS 服务（自签证书，--trust �
 npm run office-addin:install # 侧载进 Word
 ```
 
-然后在 Word 里打开「PaperQuay 引用」任务窗格，从 PaperQuay 设置 →「Word 加载项（Office 桥）」点「复制连接信息」，粘贴到加载项里连接即可。
+然后在 Word 里打开「PaperQuay 引用」任务窗格即可——保持 PaperQuay 运行，加载项会自动连接（顶部显示「已连接 PaperQuay <版本>」），断开后自动重连。设置 →「文库与 Zotero」→「Word 加载项（Office 桥）」里能看到桥状态与「Word 已连接」的最近访问记录。
 
 完整说明（安装细节、接口契约、文档模型、已知限制与排障）见 [docs/OFFICE_ADDIN.zh-CN.md](./docs/OFFICE_ADDIN.zh-CN.md)。
 

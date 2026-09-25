@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.3.5-2563eb?style=flat-square" alt="Version v0.3.5">
+  <img src="https://img.shields.io/badge/version-v0.4.0-2563eb?style=flat-square" alt="Version v0.4.0">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-4b5563?style=flat-square" alt="Windows macOS Linux">
   <img src="https://img.shields.io/badge/built%20with-Electron-47848f?style=flat-square" alt="Electron">
   <img src="https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-0f766e?style=flat-square" alt="React TypeScript">
@@ -55,6 +55,13 @@
 ---
 
 ## Latest Update
+
+### v0.4.0 - Add-in v2: zero-config connection and a self-contained document model
+
+- **No more copying connection info**: the add-in pages are served by PaperQuay itself, so it connects as soon as the app runs and reconnects after a drop; the port/token route is demoted to "advanced: port/token for external tools".
+- **Citation details move into a Custom XML Part** (`urn:paperquay:word:v2`): the model survives Save As and conversion, and 0.3.x documents migrate on open; it embeds a metadata snapshot of every cited paper, so refreshes work with PaperQuay closed, on another machine, or after a paper left the library.
+- **Jump links replace REF fields**: bibliography entries are wrapped in hidden bookmarks and in-text numbers are internal hyperlinks — Ctrl+click to jump, PDF export keeps the links, and "Update Field" (F9) no longer reports "Error! Bookmark not defined."
+- **Fewer surprises**: manually edited citations are no longer silently overwritten, duplicate citations from copy/paste split into independent numbers on refresh, and the ribbon is now a PaperQuay tab (Cite / Document groups) built from TypeScript sources downlevelled to ES5 for Word 2016.
 
 ### v0.3.5 - Cross-references and GB 87 punctuation toggle
 
@@ -275,7 +282,7 @@ These items are implemented in the current desktop app.
 | Updates           | In-app update checks, Windows and Linux automatic update flow, and macOS release-page handoff                                                    |
 | Knowledge graph   | Paper, note, tag, category, and reference nodes with semantic-similarity edges, Crossref reference syncing, co-author relations, custom and AI relations, fcose force-directed global layout, local concentric view, and PNG/JSON export |
 | Review writing    | Outline blueprints, concurrent section drafting, RAG retrieval context, per-task failure reporting with resume, and Word export with OMML equations, localized headings, references, and inline figures |
-| Word add-in       | Office.js task pane that inserts citation fields and a bibliography field in Word, defaults to GB/T 7714-2015 numeric (with GB/T author-date, APA 7, IEEE), refreshes and renumbers the whole document, supports locators/prefixes/suffixes/author suppression, unlinking, and "cited in this document" write-back; the add-in reaches the library through a local read-only bridge on `127.0.0.1` with a Bearer token, so data never leaves this machine; Microsoft Word only (no WPS / LibreOffice) — see [docs/OFFICE_ADDIN.zh-CN.md](./docs/OFFICE_ADDIN.zh-CN.md) |
+| Word add-in       | Office.js task pane that inserts citation fields and a bibliography field in Word, defaults to GB/T 7714-2015 numeric (with GB/T author-date, APA 7, IEEE), refreshes and renumbers the whole document, supports locators/prefixes/suffixes/author suppression, unlinking, and "cited in this document" write-back; the add-in reaches the library through a same-origin `/api/v1` endpoint forwarded in-process to a local read-only bridge on `127.0.0.1`, so data never leaves this machine; Microsoft Word only (no WPS / LibreOffice) — see [docs/OFFICE_ADDIN.zh-CN.md](./docs/OFFICE_ADDIN.zh-CN.md) |
 | Themes            | Light and dark UI modes optimized for long desktop reading sessions                                                                               |
 
 ---
@@ -285,8 +292,8 @@ These items are implemented in the current desktop app.
 No more copying a reference list out of your notes by hand: PaperQuay ships a Microsoft Word add-in (Office.js task pane) that inserts citations in the body and a bibliography at the end, and renumbers the whole document on refresh.
 
 - **GB/T by default**: GB/T 7714-2015 numeric (`[n]`, same paper same number, ranges collapsed to `[1-3]`), switchable to GB/T author-date, APA 7, or IEEE. The style is stored in the document itself.
-- **Citations are fields, not dead text**: each citation is a ContentControl (`pq:c|<citeId>`), the bibliography is a single `pq:bib` control, and the item details live in document settings. "Unlink" turns the fields into plain text before submission.
-- **Local read-only bridge**: the add-in runs in a browser sandbox and cannot read the database, so the PaperQuay main process serves a read-only HTTP bridge on `127.0.0.1` (default 23120; Zotero uses 23119) authenticated with a per-launch random Bearer token, advertised through `<userData>/PaperQuay/paperquay-office-bridge.json`. CORS echoes allowlisted origins only and never `*`. The single write path records "cited in this document" and can be disabled.
+- **Citations are fields, not dead text**: each citation is a ContentControl (`pq:c|<citeId>`) and the bibliography is a single `pq:bib` control; details and paper snapshots live in a Custom XML Part of the document itself (namespace `urn:paperquay:word:v2`), so they survive Save As and conversion, and 0.3.x documents migrate on open. "Unlink" turns the fields into plain text before submission.
+- **Local read-only bridge, same-origin**: the add-in runs in a browser sandbox and cannot read the database, so the PaperQuay main process both hosts the add-in pages and serves a read-only HTTP bridge on `127.0.0.1` (default 23120; Zotero uses 23119). The add-in talks to the same-origin `/api/v1`, which the host forwards to the bridge in-process — no network hop, no token, connected as soon as the app runs. Cross-origin requests are refused outright (a custom header is required, `Host`/`Origin` are checked, and preflights are never answered); the discovery file lives at `<userData>/PaperQuay/paperquay-office-bridge.json` and the port/token are for external tools only. The single write path records "cited in this document" and can be disabled.
 - **One formatting source of truth**: the add-in renders text produced by `src/shared/citation/`, the same module used by notes, vault export, and MCP.
 
 Install (Windows desktop, sideloaded, no store account needed) — two routes:
@@ -301,7 +308,7 @@ npm run office-addin:serve   # local HTTPS server (self-signed cert; --trust to 
 npm run office-addin:install # sideload into Word
 ```
 
-Then open the "PaperQuay 引用" task pane in Word and paste the connection info from PaperQuay settings → "Word add-in (Office bridge)".
+Then just open the "PaperQuay 引用" task pane in Word — keep PaperQuay running and the add-in connects automatically (the header shows "已连接 PaperQuay <version>") and reconnects after a drop. Settings → "Library & Zotero" → "Word add-in (Office bridge)" shows the bridge state and the most recent "Word connected" request.
 
 See [docs/OFFICE_ADDIN.zh-CN.md](./docs/OFFICE_ADDIN.zh-CN.md) for details (API contract, document model, limitations, troubleshooting).
 

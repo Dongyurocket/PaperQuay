@@ -12,28 +12,20 @@
 import { createServer as createHttpServer } from 'node:http';
 import { createServer as createHttpsServer } from 'node:https';
 import { execFileSync } from 'node:child_process';
-import { createHash, randomBytes } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
+import { createRequire } from 'node:module';
 import path from 'node:path';
+
+const require = createRequire(import.meta.url);
+const { createRequestHandler: createHostRequestHandler } = require('../electron/backend/officeAddinHost.cjs');
+const { createOfficeBridge } = require('../electron/backend/officeBridge.cjs');
 
 const ROOT = path.join(process.cwd(), 'office-addin');
 const CERT_DIR = path.join(ROOT, '.certs');
 const PFX_PATH = path.join(CERT_DIR, 'paperquay-addin.pfx');
 const CER_PATH = path.join(CERT_DIR, 'paperquay-addin.cer');
 const PASSPHRASE_PATH = path.join(CERT_DIR, 'passphrase.txt');
-
-const MIME_TYPES = {
-  '.html': 'text/html; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',
-  '.mjs': 'text/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.xml': 'application/xml; charset=utf-8',
-  '.png': 'image/png',
-  '.svg': 'image/svg+xml',
-  '.ico': 'image/x-icon',
-  '.map': 'application/json; charset=utf-8',
-};
 
 function parseArgs(argv) {
   const options = { port: 3000, http: false, trust: false, regenerate: false, quiet: false };
@@ -105,15 +97,6 @@ function ensureCertificate(options) {
   return { ok: true, passphrase };
 }
 
-function resolveFile(urlPath) {
-  const decoded = decodeURIComponent(urlPath.split('?')[0]);
-  let relative = decoded === '/' ? '/taskpane.html' : decoded;
-  const target = path.normalize(path.join(ROOT, relative));
-  if (!target.startsWith(ROOT)) return null;
-  if (!fs.existsSync(target) || !fs.statSync(target).isFile()) return null;
-  return target;
-}
-
 const MANIFEST_SOURCE = path.join(ROOT, 'manifest.xml');
 const MANIFEST_LOCAL = path.join(ROOT, 'manifest.local.xml');
 
@@ -128,32 +111,33 @@ function writeLocalManifest(scheme, port) {
   return { path: MANIFEST_LOCAL, base };
 }
 
-function createRequestHandler() {
-  return (request, response) => {
-    const file = resolveFile(request.url || '/');
-    if (!file) {
-      response.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
-      response.end('404 Not Found');
-      return;
-    }
-    const body = fs.readFileSync(file);
-    const etag = `"${createHash('sha1').update(body).digest('hex').slice(0, 16)}"`;
-    if (request.headers['if-none-match'] === etag) {
-      response.writeHead(304, { ETag: etag });
-      response.end();
-      return;
-    }
-    response.writeHead(200, {
-      'Content-Type': MIME_TYPES[path.extname(file).toLowerCase()] || 'application/octet-stream',
-      'Cache-Control': 'no-cache',
-      ETag: etag,
-    });
-    if (request.method === 'HEAD') {
-      response.end();
-      return;
-    }
-    response.end(body);
+/**
+ * 开发桥：用内存里的几篇示例文献模拟 PaperQuay 文献库，让独立开发服务也能提供同源 /api/v1
+ * （与本体一样经 officeAddinHost 的同源校验转发给 officeBridge.handleInternal）。
+ */
+function createDevBridge() {
+  const papers = [
+    { id: 'demo-1', title: '深度学习综述', year: '2021', itemType: 'journalArticle', publication: '计算机学报', volume: '44', issue: '3', pages: '1-25', authors: [{ name: '张三' }, { name: '李四' }] },
+    { id: 'demo-2', title: 'Attention Is All You Need', year: '2017', itemType: 'conferencePaper', publication: 'Advances in Neural Information Processing Systems', authors: [{ name: 'Ashish Vaswani', familyName: 'Vaswani', givenName: 'Ashish' }] },
+    { id: 'demo-3', title: '统计学习方法', year: '2019', itemType: 'book', publisher: '清华大学出版社', publisherPlace: '北京', authors: [{ name: '李航' }] },
+  ];
+  const store = {
+    queryPapers: ({ search = '', limit = 50 } = {}) => {
+      const needle = String(search).toLowerCase();
+      const matched = papers.filter((paper) => !needle || JSON.stringify(paper).toLowerCase().includes(needle));
+      return { papers: matched.slice(0, limit), total: matched.length, offset: 0, limit };
+    },
+    getPaper: (id) => papers.find((paper) => paper.id === id) ?? null,
+    listCategoriesWithCounts: () => [],
+    recordPaperCitations: ({ paperIds }) => ({ updated: paperIds.length }),
   };
+  return createOfficeBridge({ appPaths: { dataDir: CERT_DIR }, store, appVersion: 'dev', settings: {}, logger: { log() {}, warn() {}, error() {} } });
+}
+
+function createRequestHandler(getPort) {
+  // 复用本体源站的请求处理：静态资源 + 同源 /api/v1 校验与转发，开发与生产行为一致。
+  const bridge = createDevBridge();
+  return createHostRequestHandler(ROOT, { getBridge: () => bridge, getPort });
 }
 
 function start(options) {
@@ -162,7 +146,7 @@ function start(options) {
     process.exitCode = 1;
     return;
   }
-  const handler = createRequestHandler();
+  const handler = createRequestHandler(() => options.port);
   const certificate = options.http ? { ok: false, reason: '已指定 --http。' } : ensureCertificate(options);
 
   if (certificate.ok) {

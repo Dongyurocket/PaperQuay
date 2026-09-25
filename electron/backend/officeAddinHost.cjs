@@ -265,8 +265,109 @@ function resolveFile(root, urlPath) {
   return target;
 }
 
-function createRequestHandler(root) {
+/** 加载项同源 API 的前缀与必需的自定义请求头（见 isTrustedApiRequest）。 */
+const API_PREFIX = '/api/v1';
+const CLIENT_HEADER = 'x-paperquay-client';
+
+function sendApiError(response, status, code, message) {
+  const body = Buffer.from(`${JSON.stringify({ error: { code, message } })}\n`, 'utf8');
+  response.writeHead(status, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Content-Length': String(body.length),
+    'Cache-Control': 'no-store',
+    'X-Content-Type-Options': 'nosniff',
+  });
+  response.end(body);
+}
+
+/**
+ * 同源 API 的信任校验（取代手动复制的 Bearer token）：
+ *  1. 必须带自定义请求头 `X-PaperQuay-Client`——跨站页面要带自定义头必须先发 CORS 预检，
+ *     而这里从不响应预检（OPTIONS 一律 403、从不回 Access-Control-Allow-*），浏览器因此拒发；
+ *     `<img>`/`<form>`/`<script>` 这类无预检请求带不了自定义头。
+ *  2. Host 必须是 localhost / 127.0.0.1 + 本源站端口：挡 DNS rebinding（恶意域名解析到 127.0.0.1 时 Host 是恶意域名）。
+ *  3. 带了 Origin 就必须等于本源站；带了 Sec-Fetch-Site 就必须是 same-origin/none（WebView2 会带，
+ *     IE11/EdgeHTML 不带——所以只作纵深防御）。
+ * 通过校验的请求在进程内转发给 officeBridge.handleInternal，不走网络、不需要 token。
+ */
+function isTrustedApiRequest(request, localPort) {
+  const headers = request.headers || {};
+  if (!cleanString(headers[CLIENT_HEADER])) return { ok: false, reason: '缺少 X-PaperQuay-Client 请求头。' };
+  const host = cleanString(headers.host).toLowerCase();
+  const allowedHosts = new Set([`localhost:${localPort}`, `127.0.0.1:${localPort}`]);
+  if (!allowedHosts.has(host)) return { ok: false, reason: `Host ${host || '(空)'} 不是本机源站。` };
+  const origin = cleanString(headers.origin).toLowerCase();
+  if (origin && origin !== 'null') {
+    let parsed = null;
+    try {
+      parsed = new URL(origin);
+    } catch {
+      parsed = null;
+    }
+    if (!parsed || !allowedHosts.has(`${parsed.hostname}:${parsed.port || (parsed.protocol === 'https:' ? '443' : '80')}`)) {
+      return { ok: false, reason: `来源 ${origin} 不是本机源站。` };
+    }
+  } else if (origin === 'null') {
+    return { ok: false, reason: '来源为 null（沙箱/文件页面）不被信任。' };
+  }
+  const fetchSite = cleanString(headers['sec-fetch-site']).toLowerCase();
+  if (fetchSite && fetchSite !== 'same-origin' && fetchSite !== 'none') {
+    return { ok: false, reason: `Sec-Fetch-Site=${fetchSite} 不是同源请求。` };
+  }
+  return { ok: true };
+}
+
+/**
+ * @param {string} root office-addin 目录
+ * @param {object} [options]
+ * @param {() => ({handleInternal: Function} | null)} [options.getBridge] 同进程的 Office 桥（用于 /api/v1 转发）
+ * @param {() => number | null} [options.getPort] 源站实际端口（Host 校验用）
+ * @param {(info: object) => void} [options.onApiRequest] 每次通过校验的 API 请求回调（记录「Word 已连接」心跳）
+ */
+function createRequestHandler(root, options = {}) {
+  const getBridge = typeof options.getBridge === 'function' ? options.getBridge : () => null;
+  const getPort = typeof options.getPort === 'function' ? options.getPort : () => null;
+  const onApiRequest = typeof options.onApiRequest === 'function' ? options.onApiRequest : null;
+
+  function handleApi(request, response, rawUrl) {
+    const method = String(request.method || 'GET').toUpperCase();
+    if (method === 'OPTIONS') {
+      // 永不放行预检：跨站页面因此无法携带自定义头（校验 1 的前提）。
+      sendApiError(response, 403, 'FORBIDDEN_ORIGIN', '本机源站 API 不接受跨源预检请求。');
+      return;
+    }
+    const localPort = getPort() ?? request.socket?.localPort;
+    const trust = isTrustedApiRequest(request, localPort);
+    if (!trust.ok) {
+      sendApiError(response, 403, 'FORBIDDEN_ORIGIN', trust.reason);
+      return;
+    }
+    const bridge = getBridge();
+    if (!bridge || typeof bridge.handleInternal !== 'function') {
+      sendApiError(response, 503, 'BRIDGE_UNAVAILABLE', 'PaperQuay 的文献库连接尚未就绪。');
+      return;
+    }
+    const pathWithQuery = rawUrl.slice(API_PREFIX.length) || '/';
+    if (onApiRequest) {
+      try {
+        onApiRequest({ method, path: pathWithQuery.split('?')[0], client: cleanString(request.headers[CLIENT_HEADER]), at: new Date().toISOString() });
+      } catch {
+        // 心跳记录失败不影响请求。
+      }
+    }
+    response.setHeader('X-Content-Type-Options', 'nosniff');
+    response.setHeader('Cache-Control', 'no-store');
+    Promise.resolve(bridge.handleInternal(request, response, pathWithQuery)).catch((error) => {
+      if (!response.headersSent) sendApiError(response, 500, 'INTERNAL', String(error?.message ?? error));
+    });
+  }
+
   return (request, response) => {
+    const rawUrl = String(request.url || '/');
+    if (rawUrl === API_PREFIX || rawUrl.startsWith(`${API_PREFIX}/`) || rawUrl.startsWith(`${API_PREFIX}?`)) {
+      handleApi(request, response, rawUrl);
+      return;
+    }
     const method = String(request.method || 'GET').toUpperCase();
     if (method !== 'GET' && method !== 'HEAD') {
       response.writeHead(405, { 'Content-Type': 'text/plain; charset=utf-8', Allow: 'GET, HEAD' });
@@ -294,11 +395,15 @@ function createRequestHandler(root) {
       return;
     }
 
-    response.writeHead(200, {
+    const headers = {
       'Content-Type': MIME_TYPES[path.extname(file).toLowerCase()] || 'application/octet-stream',
       'Cache-Control': 'no-cache',
+      'X-Content-Type-Options': 'nosniff',
       ETag: etag,
-    });
+    };
+    // Service Worker 脚本放在站点根目录，作用域即整个源站。
+    if (path.basename(file) === 'sw.js') headers['Service-Worker-Allowed'] = '/';
+    response.writeHead(200, headers);
     if (method === 'HEAD') {
       response.end();
       return;
@@ -354,9 +459,13 @@ function closeServer(server) {
  * @param {'auto'|'disabled'} [options.certificate] disabled 时只用已有证书、不生成（测试用）
  * @param {NodeJS.ProcessEnv} [options.env]
  * @param {string} [options.installDir] 覆盖安装器目录（测试用）
+ * @param {() => object | null} [options.getBridge] 同进程的 Office 桥（/api/v1 同源转发，免 token 自动连接）
  */
 function createOfficeAddinHost(options = {}) {
   const getSettings = typeof options.getSettings === 'function' ? options.getSettings : () => null;
+  const getBridge = typeof options.getBridge === 'function' ? options.getBridge : () => null;
+  /** 最近一次加载项 API 请求（设置页显示「Word 已连接」）。 */
+  let lastClient = null;
   const logger = options.logger ?? {};
   const certificateMode = options.certificate === 'disabled' ? 'disabled' : 'auto';
   const env = options.env ?? process.env;
@@ -409,6 +518,7 @@ function createOfficeAddinHost(options = {}) {
         reason: certificate.reason ?? '',
       },
       settings,
+      lastClient,
       ...(note ? { note } : {}),
       ...(error ? { error } : {}),
     };
@@ -459,7 +569,13 @@ function createOfficeAddinHost(options = {}) {
       return getStatus();
     }
 
-    const handler = createRequestHandler(root);
+    const handler = createRequestHandler(root, {
+      getBridge,
+      getPort: () => port,
+      onApiRequest: (info) => {
+        lastClient = info;
+      },
+    });
     const prepared = prepareCertificate();
 
     if (prepared.ok) {
@@ -535,6 +651,8 @@ module.exports = {
   trustCertificate,
   resolveFile,
   createRequestHandler,
+  isTrustedApiRequest,
+  API_PREFIX,
   DEFAULT_HTTPS_PORT,
   DEFAULT_HTTP_PORT,
   PFX_FILE_NAME,

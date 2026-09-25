@@ -23,33 +23,51 @@ var index_exports = {};
 __export(index_exports, {
   BIBLIOGRAPHY_CONTROL_TAG: () => BIBLIOGRAPHY_CONTROL_TAG,
   BIBLIOGRAPHY_CONTROL_TITLE: () => BIBLIOGRAPHY_CONTROL_TITLE,
+  BIBLIOGRAPHY_PARAGRAPH_STYLE_ID: () => BIBLIOGRAPHY_PARAGRAPH_STYLE_ID,
+  BIBLIOGRAPHY_PARAGRAPH_STYLE_NAME: () => BIBLIOGRAPHY_PARAGRAPH_STYLE_NAME,
+  BOOKMARK_PREFIX: () => BOOKMARK_PREFIX,
   CITATION_CONTROL_TAG_PREFIX: () => CITATION_CONTROL_TAG_PREFIX,
   CITATION_CONTROL_TITLE: () => CITATION_CONTROL_TITLE,
   CITATION_STYLES: () => CITATION_STYLES,
   CITATION_STYLE_IDS: () => CITATION_STYLE_IDS,
   DEFAULT_BIBLIOGRAPHY_TITLE: () => DEFAULT_BIBLIOGRAPHY_TITLE,
   DEFAULT_CITATION_STYLE: () => DEFAULT_CITATION_STYLE,
+  DEFAULT_PREFS: () => DEFAULT_PREFS,
+  DOCUMENT_MODEL_NAMESPACE: () => DOCUMENT_MODEL_NAMESPACE,
+  DOCUMENT_MODEL_SCHEMA_VERSION: () => DOCUMENT_MODEL_SCHEMA_VERSION,
   DOCUMENT_SCHEMA_VERSION: () => DOCUMENT_SCHEMA_VERSION,
   DOCUMENT_SETTINGS_KEYS: () => DOCUMENT_SETTINGS_KEYS,
+  MODEL_FALLBACK_SETTING_KEY: () => MODEL_FALLBACK_SETTING_KEY,
+  SCHEMA_VERSION_SETTING_KEY: () => SCHEMA_VERSION_SETTING_KEY,
+  V1_SETTING_KEYS: () => V1_SETTING_KEYS,
   apaAuthorName: () => apaAuthorName,
+  applyDuplicateSplit: () => applyDuplicateSplit,
+  assignBookmarkNames: () => assignBookmarkNames,
   assignCitationNumbers: () => assignCitationNumbers,
   authorDateLabel: () => authorDateLabel,
   bookmarkIdBase: () => bookmarkIdBase,
-  buildBibliographyEntryParagraph: () => buildBibliographyEntryParagraph,
-  buildBibliographyTitleParagraph: () => buildBibliographyTitleParagraph,
-  buildNumericCitationOoxml: () => buildNumericCitationOoxml,
-  citationBookmarkName: () => citationBookmarkName,
+  bookmarkNameFor: () => bookmarkNameFor,
+  buildBibliographyPackage: () => buildBibliographyPackage,
+  buildBibliographyParagraphs: () => buildBibliographyParagraphs,
+  buildInlineCitationPackage: () => buildInlineCitationPackage,
+  buildInlineCitationRuns: () => buildInlineCitationRuns,
   citationStyleKind: () => citationStyleKind,
+  citedPaperIds: () => citedPaperIds,
   cleanPart: () => cleanPart,
-  collapseSeqRanges: () => collapseSeqRanges,
   createCitationId: () => createCitationId,
+  createDocumentId: () => createDocumentId,
+  createEmptyModel: () => createEmptyModel,
   deriveNameParts: () => deriveNameParts,
+  diffRender: () => diffRender,
   encodeCitationControlTag: () => encodeCitationControlTag,
   escapeXmlText: () => escapeXmlText,
   extractBibliographyTagCount: () => extractBibliographyTagCount,
   extractCitationControlTagsFromOoxml: () => extractCitationControlTagsFromOoxml,
+  findCitation: () => findCitation,
   findStoredCitation: () => findStoredCitation,
+  fnv1aBase36: () => fnv1aBase36,
   formatApa7: () => formatApa7,
+  formatAuthorDateSegments: () => formatAuthorDateSegments,
   formatAuthorsApa: () => formatAuthorsApa,
   formatAuthorsGbt: () => formatAuthorsGbt,
   formatAuthorsGbt87: () => formatAuthorsGbt87,
@@ -61,6 +79,7 @@ __export(index_exports, {
   formatIeee: () => formatIeee,
   formatInlineApaCitation: () => formatInlineApaCitation,
   formatNumberRanges: () => formatNumberRanges,
+  formatNumericSegments: () => formatNumericSegments,
   gbt87AuthorName: () => gbt87AuthorName,
   gbt87DocumentMark: () => gbt87DocumentMark,
   gbtAuthorName: () => gbtAuthorName,
@@ -76,22 +95,42 @@ __export(index_exports, {
   isCjkName: () => isCjkName,
   isCjkText: () => isCjkText,
   isNumericCitationStyle: () => isNumericCitationStyle,
+  isPaperQuayBookmarkName: () => isPaperQuayBookmarkName,
   joinParts: () => joinParts,
+  keepManualEdit: () => keepManualEdit,
+  migrateV1Settings: () => migrateV1Settings,
   normalizeCitationItem: () => normalizeCitationItem,
   normalizeCitationItems: () => normalizeCitationItems,
   normalizeCitationStyle: () => normalizeCitationStyle,
+  normalizeControlText: () => normalizeControlText,
   normalizeGbt87Punctuation: () => normalizeGbt87Punctuation,
+  normalizeModel: () => normalizeModel,
+  normalizePrefs: () => normalizePrefs,
   normalizeRenderGroups: () => normalizeRenderGroups,
   normalizeStoredCitations: () => normalizeStoredCitations,
+  numberRanges: () => numberRanges,
   paperAuthorParts: () => paperAuthorParts,
   parseCitationControlTag: () => parseCitationControlTag,
+  parseModelXml: () => parseModelXml,
+  pickLatestModel: () => pickLatestModel,
+  planDuplicateSplit: () => planDuplicateSplit,
+  planRender: () => planRender,
+  pruneModel: () => pruneModel,
+  recordRendered: () => recordRendered,
+  removeCitation: () => removeCitation,
   removeStoredCitation: () => removeStoredCitation,
   renderCitations: () => renderCitations,
+  segmentsToText: () => segmentsToText,
+  serializeModelXml: () => serializeModelXml,
   serializeStoredCitations: () => serializeStoredCitations,
+  snapshotResolver: () => snapshotResolver,
   toAuthorParts: () => toAuthorParts,
   trimTrailingPeriod: () => trimTrailingPeriod,
+  upsertCitation: () => upsertCitation,
+  upsertSnapshots: () => upsertSnapshots,
   upsertStoredCitation: () => upsertStoredCitation,
-  wrapAffixes: () => wrapAffixes
+  wrapAffixes: () => wrapAffixes,
+  wrapPackage: () => wrapPackage
 });
 module.exports = __toCommonJS(index_exports);
 
@@ -639,41 +678,66 @@ function wrapAffixes(core, prefix, suffix) {
   if (tail) text = /^[,.;:，。；：)\]）]/.test(tail) ? `${text}${tail}` : `${text} ${tail}`;
   return text;
 }
-function formatNumericInline(items, seqs) {
-  const numbers = [...new Set(seqs.filter((value) => value > 0))].sort((left, right) => left - right);
-  if (numbers.length === 0) return "";
-  const ranges = numbers.map((value) => `${value}`).reduce((chunks, value, index, list) => {
-    if (index === 0) return [value];
-    const previous = list[index - 1];
-    const lastChunk = chunks[chunks.length - 1];
-    if (Number(value) === Number(previous) + 1) {
-      const [start] = lastChunk.split("-");
-      chunks[chunks.length - 1] = `${start}-${value}`;
-      return chunks;
-    }
-    chunks.push(value);
-    return chunks;
-  }, []);
-  const core = items.length === 1 ? `[${ranges.join(",")}]${cleanPart(items[0].locator)}` : `[${ranges.join(",")}]`;
-  const prefix = items[0]?.prefix ?? null;
-  const suffix = items[items.length - 1]?.suffix ?? null;
-  return wrapAffixes(core, prefix, suffix);
+function segmentsToText(segments) {
+  return segments.map((segment) => segment.text).join("");
 }
-function formatAuthorDateInline(items, style, resolvePaper) {
-  const segments = items.map((item) => {
+function wrapAffixSegments(core, prefix, suffix) {
+  const head = typeof prefix === "string" ? prefix.trim() : "";
+  const tail = typeof suffix === "string" ? suffix.trim() : "";
+  const result = [...core];
+  if (head) result.unshift({ text: /[(（[]$/.test(head) ? head : `${head} ` });
+  if (tail) result.push({ text: /^[,.;:，。；：)\]）]/.test(tail) ? tail : ` ${tail}` });
+  return result;
+}
+function numberRanges(numbers) {
+  const sorted = [...new Set(numbers.filter((value) => Number.isFinite(value) && value > 0))].sort(
+    (left, right) => left - right
+  );
+  const ranges = [];
+  for (const current of sorted) {
+    const last = ranges[ranges.length - 1];
+    if (last && current === last[1] + 1) last[1] = current;
+    else ranges.push([current, current]);
+  }
+  return ranges;
+}
+function formatNumericSegments(items, seqs) {
+  const paperIdBySeq = /* @__PURE__ */ new Map();
+  items.forEach((item, index) => {
+    const seq = seqs[index] ?? 0;
+    if (seq > 0 && !paperIdBySeq.has(seq)) paperIdBySeq.set(seq, item.paperId);
+  });
+  const ranges = numberRanges(seqs);
+  if (ranges.length === 0) return [];
+  const core = [{ text: "[" }];
+  ranges.forEach(([start, end], index) => {
+    if (index > 0) core.push({ text: "," });
+    core.push({ text: `${start}`, paperId: paperIdBySeq.get(start) });
+    if (end > start) {
+      core.push({ text: "-" });
+      core.push({ text: `${end}`, paperId: paperIdBySeq.get(end) });
+    }
+  });
+  core.push({ text: "]" });
+  if (items.length === 1) {
+    const locator = cleanPart(items[0].locator);
+    if (locator) core.push({ text: locator });
+  }
+  return wrapAffixSegments(core, items[0]?.prefix ?? null, items[items.length - 1]?.suffix ?? null);
+}
+function formatAuthorDateSegments(items, style, resolvePaper) {
+  const core = [{ text: "(" }];
+  items.forEach((item, index) => {
+    if (index > 0) core.push({ text: "; " });
     const paper = resolvePaper(item.paperId);
     const year = cleanPart(paper?.year) || "n.d.";
     const locator = cleanPart(item.locator);
     const locatorText = locator ? `, ${locator}` : "";
-    if (item.suppressAuthor) return `${year}${locatorText}`;
-    const label = authorDateLabel(paperAuthorParts(paper), style, cleanPart(item.label) || item.paperId);
-    return `${label}, ${year}${locatorText}`;
+    const text = item.suppressAuthor ? `${year}${locatorText}` : `${authorDateLabel(paperAuthorParts(paper), style, cleanPart(item.label) || item.paperId)}, ${year}${locatorText}`;
+    core.push({ text, paperId: item.paperId });
   });
-  return wrapAffixes(
-    `(${segments.join("; ")})`,
-    items[0]?.prefix ?? null,
-    items[items.length - 1]?.suffix ?? null
-  );
+  core.push({ text: ")" });
+  return wrapAffixSegments(core, items[0]?.prefix ?? null, items[items.length - 1]?.suffix ?? null);
 }
 function normalizeRenderGroups(request) {
   const rawGroups = Array.isArray(request?.groups) ? request.groups : null;
@@ -710,9 +774,11 @@ function renderCitations(request, resolvePaper) {
   };
   const renderedGroups = groups.map((group) => {
     const seqs = group.items.map((item) => seqByPaperId.get(item.paperId) ?? 0);
+    const segments = kind === "numeric" ? formatNumericSegments(group.items, seqs) : formatAuthorDateSegments(group.items, style, lookup);
     return {
       citeId: group.citeId ?? null,
-      inline: kind === "numeric" ? formatNumericInline(group.items, seqs) : formatAuthorDateInline(group.items, style, lookup)
+      inline: segmentsToText(segments),
+      segments
     };
   });
   const labelByPaperId = /* @__PURE__ */ new Map();
@@ -759,118 +825,472 @@ function renderCitations(request, resolvePaper) {
   };
 }
 
-// src/shared/citation/wordCrossRef.ts
-function citationBookmarkName(paperId) {
-  const cleaned = cleanPart(paperId).replace(/[^A-Za-z0-9]/g, "_");
-  return `r_${cleaned}`.slice(0, 40);
-}
+// src/shared/citation/wordOoxml.ts
+var BIBLIOGRAPHY_PARAGRAPH_STYLE_ID = "PaperQuayBibliography";
+var BIBLIOGRAPHY_PARAGRAPH_STYLE_NAME = "PaperQuay \u53C2\u8003\u6587\u732E";
+var BOOKMARK_PREFIX = "_PQ_";
+var BOOKMARK_MAX_LENGTH = 40;
+var W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+var R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 function escapeXmlText(value) {
   return String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
 }
-function collapseSeqRanges(seqs) {
-  const sorted = [...new Set(seqs.filter((value) => Number.isFinite(value) && value > 0))].sort(
-    (left, right) => left - right
-  );
-  if (sorted.length === 0) return [];
-  const ranges = [];
-  let start = sorted[0];
-  let previous = sorted[0];
-  for (const current of sorted.slice(1)) {
-    if (current === previous + 1) {
-      previous = current;
-      continue;
+function fnv1aBase36(value) {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619) >>> 0;
+  }
+  return hash.toString(36);
+}
+function bookmarkNameFor(paperId, taken) {
+  const base = `${BOOKMARK_PREFIX}${fnv1aBase36(cleanPart(paperId) || "x")}`;
+  let candidate = base;
+  let counter = 2;
+  while (taken.has(candidate)) {
+    candidate = `${base}_${counter}`.slice(0, BOOKMARK_MAX_LENGTH);
+    counter += 1;
+  }
+  taken.add(candidate);
+  return candidate;
+}
+function assignBookmarkNames(paperIds) {
+  const taken = /* @__PURE__ */ new Set();
+  const names = /* @__PURE__ */ new Map();
+  for (const paperId of paperIds) {
+    if (!names.has(paperId)) names.set(paperId, bookmarkNameFor(paperId, taken));
+  }
+  return names;
+}
+function isPaperQuayBookmarkName(name) {
+  return typeof name === "string" && name.startsWith(BOOKMARK_PREFIX);
+}
+function runProperties(options) {
+  const parts = [];
+  if (options.plainLink) parts.push('<w:color w:val="auto"/><w:u w:val="none"/>');
+  if (options.superscript) parts.push('<w:vertAlign w:val="superscript"/>');
+  return parts.length > 0 ? `<w:rPr>${parts.join("")}</w:rPr>` : "";
+}
+function textRun(text, options = {}) {
+  if (!text) return "";
+  return `<w:r>${runProperties(options)}<w:t xml:space="preserve">${escapeXmlText(text)}</w:t></w:r>`;
+}
+function buildInlineCitationRuns(segments, options = {}) {
+  const superscript = Boolean(options.superscript);
+  return segments.map((segment) => {
+    const anchor = segment.paperId ? options.bookmarks?.get(segment.paperId) : void 0;
+    if (!anchor) return textRun(segment.text, { superscript });
+    return `<w:hyperlink w:anchor="${escapeXmlText(anchor)}" w:history="1">` + textRun(segment.text, { superscript, plainLink: true }) + `</w:hyperlink>`;
+  }).join("");
+}
+function paragraph(inner, styleId) {
+  const pPr = styleId ? `<w:pPr><w:pStyle w:val="${styleId}"/></w:pPr>` : "";
+  return `<w:p>${pPr}${inner}</w:p>`;
+}
+function buildBibliographyParagraphs(entries, options) {
+  const parts = [];
+  if (options.heading) parts.push(paragraph(textRun(cleanPart(options.title))));
+  let bookmarkId = options.bookmarkIdBase ?? 1e3;
+  for (const entry of entries) {
+    const label = options.kind === "numeric" ? `[${entry.seq}]` : "";
+    const body = (label ? `${textRun(label)}<w:r><w:tab/></w:r>` : "") + textRun(String(entry.text ?? "").trim());
+    const name = options.bookmarks?.get(entry.paperId);
+    if (name) {
+      const id = bookmarkId;
+      bookmarkId += 1;
+      parts.push(
+        paragraph(
+          `<w:bookmarkStart w:id="${id}" w:name="${escapeXmlText(name)}"/>${body}<w:bookmarkEnd w:id="${id}"/>`,
+          BIBLIOGRAPHY_PARAGRAPH_STYLE_ID
+        )
+      );
+    } else {
+      parts.push(paragraph(body, BIBLIOGRAPHY_PARAGRAPH_STYLE_ID));
     }
-    ranges.push([start, previous]);
-    start = current;
-    previous = current;
   }
-  ranges.push([start, previous]);
-  return ranges;
-}
-function textRun(text) {
-  return `<w:r><w:t xml:space="preserve">${escapeXmlText(text)}</w:t></w:r>`;
-}
-function refField(bookmark, display) {
-  return `<w:fldSimple w:instr=" REF ${bookmark} \\h ">${textRun(String(display))}</w:fldSimple>`;
-}
-function buildNumericCitationOoxml(items, seqByPaperId) {
-  if (items.length === 0) return null;
-  const seqs = [];
-  const bookmarkBySeq = /* @__PURE__ */ new Map();
-  for (const item of items) {
-    const seq = seqByPaperId.get(item.paperId) ?? 0;
-    if (seq <= 0) return null;
-    seqs.push(seq);
-    bookmarkBySeq.set(seq, citationBookmarkName(item.paperId));
-  }
-  const ranges = collapseSeqRanges(seqs);
-  if (ranges.length === 0) return null;
-  const parts = [textRun("[")];
-  ranges.forEach(([start, end], index) => {
-    if (index > 0) parts.push(textRun(","));
-    parts.push(refField(bookmarkBySeq.get(start) ?? "", start));
-    if (end > start) {
-      parts.push(textRun("-"));
-      parts.push(refField(bookmarkBySeq.get(end) ?? "", end));
-    }
-  });
-  parts.push(textRun("]"));
-  if (items.length === 1) {
-    const locator = cleanPart(items[0].locator);
-    if (locator) parts.push(textRun(locator));
-  }
-  const prefix = typeof items[0]?.prefix === "string" ? items[0].prefix.trim() : "";
-  const lastItem = items[items.length - 1];
-  const suffix = typeof lastItem?.suffix === "string" ? lastItem.suffix.trim() : "";
-  if (prefix) parts.unshift(textRun(/[(（[]$/.test(prefix) ? prefix : `${prefix} `));
-  if (suffix) parts.push(textRun(/^[,.;:，。；：)\]）]/.test(suffix) ? suffix : ` ${suffix}`));
   return parts.join("");
 }
-function buildBibliographyEntryParagraph(seq, text, paperId, bookmarkId) {
-  const body = escapeXmlText(cleanPart(text));
-  if (typeof seq !== "number" || seq <= 0) {
-    return `<w:p>${textRun(cleanPart(text))}</w:p>`;
-  }
-  const name = citationBookmarkName(paperId);
-  return `<w:p>` + textRun("[") + `<w:bookmarkStart w:id="${bookmarkId}" w:name="${name}"/>` + textRun(String(seq)) + `<w:bookmarkEnd w:id="${bookmarkId}"/>` + textRun("] ") + `<w:r><w:t xml:space="preserve">${body}</w:t></w:r></w:p>`;
+function stylesPart(kind) {
+  const indent = kind === "numeric" ? '<w:ind w:left="425" w:hanging="425"/>' : '<w:ind w:left="420" w:hanging="420"/>';
+  const tabs = kind === "numeric" ? '<w:tabs><w:tab w:val="left" w:pos="425"/></w:tabs>' : "";
+  return `<w:styles xmlns:w="${W_NS}"><w:style w:type="paragraph" w:customStyle="1" w:styleId="${BIBLIOGRAPHY_PARAGRAPH_STYLE_ID}"><w:name w:val="${BIBLIOGRAPHY_PARAGRAPH_STYLE_NAME}"/><w:basedOn w:val="Normal"/><w:qFormat/><w:pPr>${tabs}${indent}</w:pPr></w:style></w:styles>`;
 }
-function buildBibliographyTitleParagraph(title) {
-  return `<w:p>${textRun(cleanPart(title))}</w:p>`;
+function wrapPackage(bodyXml, withStyles = null) {
+  const documentRels = withStyles ? `<pkg:part pkg:name="/word/_rels/document.xml.rels" pkg:contentType="application/vnd.openxmlformats-package.relationships+xml"><pkg:xmlData><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="${R_NS}/styles" Target="styles.xml"/></Relationships></pkg:xmlData></pkg:part>` : "";
+  const styles = withStyles ? `<pkg:part pkg:name="/word/styles.xml" pkg:contentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"><pkg:xmlData>${stylesPart(withStyles)}</pkg:xmlData></pkg:part>` : "";
+  return `<pkg:package xmlns:pkg="http://schemas.microsoft.com/office/2006/xmlPackage"><pkg:part pkg:name="/_rels/.rels" pkg:contentType="application/vnd.openxmlformats-package.relationships+xml"><pkg:xmlData><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="${R_NS}/officeDocument" Target="word/document.xml"/></Relationships></pkg:xmlData></pkg:part>` + documentRels + `<pkg:part pkg:name="/word/document.xml" pkg:contentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"><pkg:xmlData><w:document xmlns:w="${W_NS}" xmlns:r="${R_NS}"><w:body>${bodyXml}</w:body></w:document></pkg:xmlData></pkg:part>` + styles + `</pkg:package>`;
+}
+function buildInlineCitationPackage(segments, options = {}) {
+  return wrapPackage(`<w:p>${buildInlineCitationRuns(segments, options)}</w:p>`);
+}
+function buildBibliographyPackage(entries, options) {
+  return wrapPackage(buildBibliographyParagraphs(entries, options), options.kind);
 }
 function bookmarkIdBase(random = Math.random) {
-  return 1e3 + Math.floor(random() * 1e5);
+  return 1e5 + Math.floor(random() * 8e5);
+}
+
+// src/shared/citation/documentModel.ts
+var DOCUMENT_MODEL_NAMESPACE = "urn:paperquay:word:v2";
+var DOCUMENT_MODEL_SCHEMA_VERSION = 2;
+var SCHEMA_VERSION_SETTING_KEY = "pq:schemaVersion";
+var MODEL_FALLBACK_SETTING_KEY = "pq:model";
+var DEFAULT_PREFS = {
+  style: "gbt7714",
+  bibliographyTitle: "\u53C2\u8003\u6587\u732E",
+  bibHeading: true,
+  superscript: false,
+  punctuation: "full",
+  links: true,
+  bibliographyOrder: "alpha"
+};
+function createDocumentId(random = Math.random) {
+  return `doc-${random().toString(16).slice(2, 10)}${Date.now().toString(16)}`;
+}
+function createEmptyModel(documentId = createDocumentId()) {
+  return { schemaVersion: 2, documentId, rev: 0, prefs: { ...DEFAULT_PREFS }, citations: [], items: {} };
+}
+function asRecord(value) {
+  return value && typeof value === "object" ? value : {};
+}
+function normalizePrefs(value) {
+  const record = asRecord(value);
+  return {
+    style: normalizeCitationStyle(record.style),
+    bibliographyTitle: cleanPart(record.bibliographyTitle) || DEFAULT_PREFS.bibliographyTitle,
+    bibHeading: record.bibHeading !== false,
+    superscript: record.superscript === true,
+    punctuation: record.punctuation === "half" ? "half" : "full",
+    links: record.links !== false,
+    bibliographyOrder: record.bibliographyOrder === "appearance" ? "appearance" : "alpha"
+  };
+}
+var CITE_ID_PATTERN = /^[0-9a-z]{4,32}$/;
+function normalizeModel(value) {
+  const record = asRecord(value);
+  const citations = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const raw of Array.isArray(record.citations) ? record.citations : []) {
+    const entry = asRecord(raw);
+    const citeId = cleanPart(entry.citeId).toLowerCase();
+    if (!CITE_ID_PATTERN.test(citeId) || seen.has(citeId)) continue;
+    const items2 = normalizeCitationItems(entry.items);
+    if (items2.length === 0) continue;
+    seen.add(citeId);
+    citations.push({
+      citeId,
+      items: items2,
+      lastText: typeof entry.lastText === "string" ? entry.lastText : void 0,
+      lastSignature: typeof entry.lastSignature === "string" ? entry.lastSignature : void 0,
+      manualText: typeof entry.manualText === "string" ? entry.manualText : void 0,
+      updatedAt: Number(entry.updatedAt) || 0
+    });
+  }
+  const items = {};
+  for (const [paperId, raw] of Object.entries(asRecord(record.items))) {
+    const snapshot = asRecord(raw);
+    if (!paperId || !snapshot.paper || typeof snapshot.paper !== "object") continue;
+    items[paperId] = {
+      paper: snapshot.paper,
+      fetchedAt: Number(snapshot.fetchedAt) || 0,
+      ...snapshot.missing === true ? { missing: true } : {}
+    };
+  }
+  return {
+    schemaVersion: 2,
+    documentId: cleanPart(record.documentId) || createDocumentId(),
+    rev: Math.max(0, Math.floor(Number(record.rev) || 0)),
+    prefs: normalizePrefs(record.prefs),
+    citations,
+    items
+  };
+}
+function serializeModelXml(model) {
+  const json = JSON.stringify(model).replace(/</g, "\\u003c").replace(/>/g, "\\u003e").replace(/&/g, "\\u0026");
+  return `<?xml version="1.0" encoding="UTF-8"?><pq:model xmlns:pq="${DOCUMENT_MODEL_NAMESPACE}" rev="${model.rev}"><![CDATA[${json}]]></pq:model>`;
+}
+function parseModelXml(xml) {
+  if (typeof xml !== "string" || !xml.includes(DOCUMENT_MODEL_NAMESPACE)) return null;
+  const match = /<!\[CDATA\[([\s\S]*?)\]\]>/.exec(xml);
+  if (!match) return null;
+  try {
+    return normalizeModel(JSON.parse(match[1]));
+  } catch {
+    return null;
+  }
+}
+function pickLatestModel(xmls) {
+  let best = null;
+  let index = -1;
+  xmls.forEach((xml, position) => {
+    const model = parseModelXml(xml);
+    if (model && (!best || model.rev >= best.rev)) {
+      best = model;
+      index = position;
+    }
+  });
+  return { model: best, index };
+}
+function migrateV1Settings(getSetting) {
+  const model = createEmptyModel(cleanPart(getSetting("pq:documentId")) || createDocumentId());
+  const stored = normalizeStoredCitations(getSetting("pq:citations"));
+  model.citations = stored.map((citation) => ({
+    citeId: citation.citeId,
+    items: citation.items,
+    updatedAt: citation.updatedAt
+  }));
+  const title = cleanPart(getSetting("pq:bibliographyTitle"));
+  model.prefs = normalizePrefs({
+    style: getSetting("pq:style"),
+    bibliographyTitle: title || DEFAULT_PREFS.bibliographyTitle,
+    bibHeading: getSetting("pq:bibHeading") !== "0",
+    superscript: getSetting("pq:superscript") === "1",
+    punctuation: getSetting("pq:punctuation"),
+    links: getSetting("pq:crossref") !== "0"
+  });
+  return model;
+}
+var V1_SETTING_KEYS = [
+  "pq:style",
+  "pq:locale",
+  "pq:citations",
+  "pq:citedPaperIds",
+  "pq:bibControlId",
+  "pq:documentTitle",
+  "pq:bibliographyTitle",
+  "pq:bibHeading",
+  "pq:superscript",
+  "pq:punctuation",
+  "pq:crossref"
+];
+function findCitation(model, citeId) {
+  return model.citations.find((citation) => citation.citeId === citeId);
+}
+function upsertCitation(model, citation) {
+  const citations = model.citations.filter((item) => item.citeId !== citation.citeId);
+  citations.push(citation);
+  return { ...model, citations };
+}
+function removeCitation(model, citeId) {
+  return { ...model, citations: model.citations.filter((item) => item.citeId !== citeId) };
+}
+function upsertSnapshots(model, papers, missingIds = [], now = Date.now()) {
+  const items = { ...model.items };
+  for (const paper of papers) {
+    const paperId = cleanPart(paper?.id);
+    if (paperId) items[paperId] = { paper, fetchedAt: now };
+  }
+  for (const paperId of missingIds) {
+    const existing = items[paperId];
+    if (existing) items[paperId] = { ...existing, missing: true };
+  }
+  return { ...model, items };
+}
+function citedPaperIds(model, orderedCiteIds) {
+  const order = orderedCiteIds ?? model.citations.map((citation) => citation.citeId);
+  const ids = [];
+  for (const citeId of order) {
+    for (const item of findCitation(model, citeId)?.items ?? []) {
+      if (!ids.includes(item.paperId)) ids.push(item.paperId);
+    }
+  }
+  return ids;
+}
+function pruneModel(model, presentCiteIds) {
+  const present = new Set(presentCiteIds);
+  const citations = model.citations.filter((citation) => present.has(citation.citeId));
+  const used = /* @__PURE__ */ new Set();
+  for (const citation of citations) {
+    for (const item of citation.items) used.add(item.paperId);
+  }
+  const items = {};
+  for (const [paperId, snapshot] of Object.entries(model.items)) {
+    if (used.has(paperId)) items[paperId] = snapshot;
+  }
+  return { ...model, citations, items };
+}
+function planDuplicateSplit(ordered, createId) {
+  const counts = /* @__PURE__ */ new Map();
+  const taken = new Set(ordered);
+  const plan = [];
+  for (const citeId of ordered) {
+    const occurrence = counts.get(citeId) ?? 0;
+    counts.set(citeId, occurrence + 1);
+    if (occurrence === 0) continue;
+    let newCiteId = createId();
+    while (taken.has(newCiteId)) newCiteId = createId();
+    taken.add(newCiteId);
+    plan.push({ citeId, occurrence, newCiteId });
+  }
+  return plan;
+}
+function applyDuplicateSplit(model, ordered, plan) {
+  if (plan.length === 0) return { model, ordered };
+  const counts = /* @__PURE__ */ new Map();
+  const nextOrdered = ordered.map((citeId) => {
+    const occurrence = counts.get(citeId) ?? 0;
+    counts.set(citeId, occurrence + 1);
+    const hit = plan.find((entry) => entry.citeId === citeId && entry.occurrence === occurrence);
+    return hit ? hit.newCiteId : citeId;
+  });
+  let nextModel = model;
+  for (const entry of plan) {
+    const source = findCitation(model, entry.citeId);
+    if (!source) continue;
+    nextModel = upsertCitation(nextModel, {
+      citeId: entry.newCiteId,
+      items: source.items.map((item) => ({ ...item })),
+      updatedAt: Date.now()
+    });
+  }
+  return { model: nextModel, ordered: nextOrdered };
+}
+function snapshotResolver(model) {
+  return (paperId) => model.items[paperId]?.paper;
+}
+function planRender(model, ordered, options) {
+  const groups = [];
+  for (const citeId of ordered) {
+    const citation = findCitation(model, citeId);
+    if (citation) groups.push({ citeId, items: citation.items });
+  }
+  const prefs = model.prefs;
+  const render = renderCitations(
+    {
+      style: prefs.style,
+      groups,
+      bibliographyTitle: prefs.bibliographyTitle,
+      bibliographyOrder: prefs.bibliographyOrder,
+      punctuation: prefs.punctuation
+    },
+    snapshotResolver(model)
+  );
+  const linked = prefs.links && options.hasBibliography && render.entries.length > 0;
+  const bookmarks = linked ? assignBookmarkNames(render.entries.map((entry) => entry.paperId)) : /* @__PURE__ */ new Map();
+  const superscript = prefs.superscript && render.kind === "numeric";
+  const citations = [];
+  for (const group of render.groups) {
+    if (!group.citeId) continue;
+    const ooxml = buildInlineCitationPackage(group.segments, { bookmarks, superscript });
+    citations.push({ citeId: group.citeId, text: group.inline, ooxml, signature: fnv1aBase36(ooxml) });
+  }
+  const bibliographyOoxml = buildBibliographyPackage(render.entries, {
+    kind: render.kind,
+    heading: prefs.bibHeading,
+    title: prefs.bibliographyTitle,
+    bookmarks,
+    bookmarkIdBase: options.bookmarkIdBase
+  });
+  const lines = render.entries.map(
+    (entry) => render.kind === "numeric" ? `[${entry.seq}] ${entry.text}` : entry.text
+  );
+  const bibliographyText = [...prefs.bibHeading ? [prefs.bibliographyTitle] : [], ...lines].join("\n");
+  return { render, citations, bibliographyOoxml, bibliographyText, linked, bookmarks };
+}
+var INVISIBLE_SPACES = new RegExp(`[${String.fromCharCode(8203, 160, 12288)}]`, "g");
+function normalizeControlText(value) {
+  return String(value ?? "").replace(INVISIBLE_SPACES, " ").replace(/\s+/g, " ").trim();
+}
+function diffRender(model, currentTexts, outputs) {
+  const diff = { rewrite: [], manualEdits: [], kept: [], unchanged: [] };
+  for (const output of outputs) {
+    const citation = findCitation(model, output.citeId);
+    const current = normalizeControlText(currentTexts.get(output.citeId));
+    const expected = normalizeControlText(output.text);
+    const last = citation?.lastText !== void 0 ? normalizeControlText(citation.lastText) : void 0;
+    if (citation?.manualText !== void 0 && current === normalizeControlText(citation.manualText)) {
+      diff.kept.push(output.citeId);
+      continue;
+    }
+    if (last !== void 0 && current && current !== last && current !== expected) {
+      diff.manualEdits.push({
+        citeId: output.citeId,
+        currentText: currentTexts.get(output.citeId) ?? "",
+        expectedText: output.text
+      });
+      continue;
+    }
+    if (citation?.lastSignature !== output.signature || current !== expected) diff.rewrite.push(output.citeId);
+    else diff.unchanged.push(output.citeId);
+  }
+  return diff;
+}
+function recordRendered(model, outputs, written) {
+  const writtenSet = new Set(written);
+  const byId = /* @__PURE__ */ new Map();
+  for (const output of outputs) byId.set(output.citeId, output);
+  return {
+    ...model,
+    citations: model.citations.map((citation) => {
+      const output = byId.get(citation.citeId);
+      if (!output || !writtenSet.has(citation.citeId)) return citation;
+      return {
+        citeId: citation.citeId,
+        items: citation.items,
+        updatedAt: citation.updatedAt,
+        lastText: output.text,
+        lastSignature: output.signature
+      };
+    })
+  };
+}
+function keepManualEdit(model, citeId, currentText) {
+  return {
+    ...model,
+    citations: model.citations.map(
+      (citation) => citation.citeId === citeId ? { ...citation, manualText: currentText } : citation
+    )
+  };
 }
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
   BIBLIOGRAPHY_CONTROL_TAG,
   BIBLIOGRAPHY_CONTROL_TITLE,
+  BIBLIOGRAPHY_PARAGRAPH_STYLE_ID,
+  BIBLIOGRAPHY_PARAGRAPH_STYLE_NAME,
+  BOOKMARK_PREFIX,
   CITATION_CONTROL_TAG_PREFIX,
   CITATION_CONTROL_TITLE,
   CITATION_STYLES,
   CITATION_STYLE_IDS,
   DEFAULT_BIBLIOGRAPHY_TITLE,
   DEFAULT_CITATION_STYLE,
+  DEFAULT_PREFS,
+  DOCUMENT_MODEL_NAMESPACE,
+  DOCUMENT_MODEL_SCHEMA_VERSION,
   DOCUMENT_SCHEMA_VERSION,
   DOCUMENT_SETTINGS_KEYS,
+  MODEL_FALLBACK_SETTING_KEY,
+  SCHEMA_VERSION_SETTING_KEY,
+  V1_SETTING_KEYS,
   apaAuthorName,
+  applyDuplicateSplit,
+  assignBookmarkNames,
   assignCitationNumbers,
   authorDateLabel,
   bookmarkIdBase,
-  buildBibliographyEntryParagraph,
-  buildBibliographyTitleParagraph,
-  buildNumericCitationOoxml,
-  citationBookmarkName,
+  bookmarkNameFor,
+  buildBibliographyPackage,
+  buildBibliographyParagraphs,
+  buildInlineCitationPackage,
+  buildInlineCitationRuns,
   citationStyleKind,
+  citedPaperIds,
   cleanPart,
-  collapseSeqRanges,
   createCitationId,
+  createDocumentId,
+  createEmptyModel,
   deriveNameParts,
+  diffRender,
   encodeCitationControlTag,
   escapeXmlText,
   extractBibliographyTagCount,
   extractCitationControlTagsFromOoxml,
+  findCitation,
   findStoredCitation,
+  fnv1aBase36,
   formatApa7,
+  formatAuthorDateSegments,
   formatAuthorsApa,
   formatAuthorsGbt,
   formatAuthorsGbt87,
@@ -882,6 +1302,7 @@ function bookmarkIdBase(random = Math.random) {
   formatIeee,
   formatInlineApaCitation,
   formatNumberRanges,
+  formatNumericSegments,
   gbt87AuthorName,
   gbt87DocumentMark,
   gbtAuthorName,
@@ -897,20 +1318,40 @@ function bookmarkIdBase(random = Math.random) {
   isCjkName,
   isCjkText,
   isNumericCitationStyle,
+  isPaperQuayBookmarkName,
   joinParts,
+  keepManualEdit,
+  migrateV1Settings,
   normalizeCitationItem,
   normalizeCitationItems,
   normalizeCitationStyle,
+  normalizeControlText,
   normalizeGbt87Punctuation,
+  normalizeModel,
+  normalizePrefs,
   normalizeRenderGroups,
   normalizeStoredCitations,
+  numberRanges,
   paperAuthorParts,
   parseCitationControlTag,
+  parseModelXml,
+  pickLatestModel,
+  planDuplicateSplit,
+  planRender,
+  pruneModel,
+  recordRendered,
+  removeCitation,
   removeStoredCitation,
   renderCitations,
+  segmentsToText,
+  serializeModelXml,
   serializeStoredCitations,
+  snapshotResolver,
   toAuthorParts,
   trimTrailingPeriod,
+  upsertCitation,
+  upsertSnapshots,
   upsertStoredCitation,
-  wrapAffixes
+  wrapAffixes,
+  wrapPackage
 });

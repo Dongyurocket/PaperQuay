@@ -11,13 +11,10 @@ import {
   CITATION_STYLE_IDS,
   DEFAULT_CITATION_STYLE,
   assignCitationNumbers,
-  buildBibliographyEntryParagraph,
-  buildNumericCitationOoxml,
-  citationBookmarkName,
   citationStyleKind,
-  collapseSeqRanges,
   encodeCitationControlTag,
-  escapeXmlText,
+  numberRanges,
+  segmentsToText,
   extractBibliographyTagCount,
   extractCitationControlTagsFromOoxml,
   findStoredCitation,
@@ -265,54 +262,43 @@ test('GB 7714-87 标点开关：half 输出半角标点带空格', () => {
   assert.equal(renderOther.entries[0]?.text, '张三, 李四, 王五, 等. 深度学习综述[J]. 计算机学报, 2021, 44(3): 1-25.');
 });
 
-test('交叉引用 OOXML：书签名、区间折叠、XML 转义', () => {
-  assert.equal(citationBookmarkName('p-abc_123'), 'r_p_abc_123');
-  assert.ok(citationBookmarkName('x').startsWith('r_'));
-  assert.deepEqual(collapseSeqRanges([3, 1, 2, 5]), [
+test('区间折叠 numberRanges 与 formatNumberRanges 同语义', () => {
+  assert.deepEqual(numberRanges([3, 1, 2, 5]), [
     [1, 3],
     [5, 5],
   ]);
-  assert.deepEqual(collapseSeqRanges([2, 2, 0, -1]), [[2, 2]]);
-  assert.equal(escapeXmlText('a<b>&"c"'), 'a&lt;b&gt;&amp;&quot;c&quot;');
+  assert.deepEqual(numberRanges([2, 2, 0, -1]), [[2, 2]]);
+  assert.equal(formatNumberRanges([3, 1, 2, 5]), '1-3,5');
 });
 
-test('交叉引用 OOXML：正文引用域与文献表书签段落', () => {
-  const seqByPaperId = new Map([
-    ['p-a', 1],
-    ['p-b', 2],
-    ['p-c', 3],
-    ['p-e', 5],
-  ]);
-  // 多篇连续折叠：[1-3] 只建首尾两个 REF 域，分别指向序号 1 和 3 的书签
-  const multi = buildNumericCitationOoxml(
-    [{ paperId: 'p-a' }, { paperId: 'p-b' }, { paperId: 'p-c' }],
-    seqByPaperId,
+test('正文引用分段：拼接结果与 inline 逐字一致，编号/著者-年段带 paperId', () => {
+  const papers = [journalPaper, conferencePaper, bookPaper, structuredPaper];
+  const groups = [
+    { citeId: 'aaaa0001', items: [{ paperId: 'p-journal', prefix: '参见', suffix: '。', locator: '25' }] },
+    { citeId: 'aaaa0002', items: [{ paperId: 'p-conf' }, { paperId: 'p-book' }, { paperId: 'p-journal' }] },
+    { citeId: 'aaaa0003', items: [{ paperId: 'p-struct' }, { paperId: 'p-book', suppressAuthor: true, locator: 'p. 7' }] },
+  ];
+  for (const style of CITATION_STYLE_IDS) {
+    const render = renderCitations({ style, groups }, resolver(papers));
+    for (const group of render.groups) {
+      assert.equal(segmentsToText(group.segments), group.inline, `${style} 分段拼接应等于 inline`);
+      assert.ok(group.segments.some((segment) => segment.paperId), `${style} 至少一个可链接段`);
+    }
+  }
+  // 顺序编码制 [1-3]：首尾两个编号段分别指向序号 1 与 3 的文献
+  const numeric = renderCitations({ style: 'gbt7714', groups }, resolver(papers));
+  const linked = numeric.groups[1].segments.filter((segment) => segment.paperId);
+  assert.equal(numeric.groups[1].inline, '[1-3]');
+  assert.deepEqual(
+    linked.map((segment) => [segment.text, segment.paperId]),
+    [
+      ['1', 'p-journal'],
+      ['3', 'p-book'],
+    ],
   );
-  assert.ok(multi);
-  assert.ok(multi!.startsWith('<w:r><w:t xml:space="preserve">[</w:t></w:r>'));
-  assert.equal((multi!.match(/<w:fldSimple/g) || []).length, 2);
-  assert.match(multi!, /w:instr=" REF r_p_a \\h "/);
-  assert.match(multi!, /w:instr=" REF r_p_c \\h "/);
-  // 单篇带页码与前后缀：间距规则与 formatNumericInline 一致
-  const single = buildNumericCitationOoxml(
-    [{ paperId: 'p-e', locator: '25', prefix: '参见', suffix: '。' }],
-    seqByPaperId,
-  );
-  assert.ok(single);
-  assert.ok(single!.includes('>参见 </w:t>'));
-  assert.ok(single!.includes('REF r_p_e'));
-  assert.ok(single!.includes('>25</w:t>'));
-  assert.ok(single!.endsWith('<w:r><w:t xml:space="preserve">。</w:t></w:r>'));
-  // 缺序号的文献返回 null（调用方退化纯文本）
-  assert.equal(buildNumericCitationOoxml([{ paperId: 'missing' }], seqByPaperId), null);
-  // 文献表段落：序号包书签、文本转义
-  const paragraph = buildBibliographyEntryParagraph(1, '张三. 标题 <含>&特殊字符', 'p-a', 42);
-  assert.match(paragraph, /<w:bookmarkStart w:id="42" w:name="r_p_a"\/>/);
-  assert.match(paragraph, /<w:bookmarkEnd w:id="42"\/>/);
-  assert.match(paragraph, /&lt;含&gt;&amp;特殊字符/);
-  // author-date 无序号：不建书签
-  const plain = buildBibliographyEntryParagraph(null, '某某条目', 'p-a', 43);
-  assert.doesNotMatch(plain, /bookmarkStart/);
+  // 著者-出版年：每篇文献一个链接段
+  const authorDate = renderCitations({ style: 'apa7', groups }, resolver(papers));
+  assert.equal(authorDate.groups[2].segments.filter((segment) => segment.paperId).length, 2);
 });
 
 test('数字年份/卷期不再被丢弃（导入链路可能给数字）', () => {

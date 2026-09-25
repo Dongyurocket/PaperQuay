@@ -115,9 +115,17 @@ export default function OfficeAddinSection({ settings, onChange }: OfficeAddinSe
           </div>
           <div className="mt-1 text-xs leading-5 text-[var(--pq-text-muted)]">
             {l(
-              '在 Word 里插入引用与参考文献表。PaperQuay 会在本机 127.0.0.1 上开一个只读桥，加载项凭端口和令牌访问，文献库数据不出本机。',
-              'Insert citations and a bibliography in Word. PaperQuay serves a read-only bridge on 127.0.0.1; the add-in authenticates with a port and token, and library data never leaves this machine.',
+              '在 Word 里插入可跳转的引用与参考文献表。PaperQuay 运行时加载项自动连接（同源、只在本机），无需复制任何连接信息；文献库数据不出本机。',
+              'Insert clickable citations and a bibliography in Word. While PaperQuay is running the add-in connects automatically (same-origin, loopback only) — nothing to copy. Library data never leaves this machine.',
             )}
+          </div>
+          <div className="mt-2 text-xs text-[var(--pq-text-muted)]">
+            {source?.lastClient
+              ? l(
+                  `Word 已连接 · 最近一次请求 ${new Date(source.lastClient.at).toLocaleString()}`,
+                  `Word connected · last request ${new Date(source.lastClient.at).toLocaleString()}`,
+                )
+              : l('尚未有 Word 加载项连接（在 Word 的「PaperQuay」选项卡打开面板即可）。', 'No Word add-in has connected yet (open the pane from the “PaperQuay” tab in Word).')}
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
@@ -423,36 +431,44 @@ export default function OfficeAddinSection({ settings, onChange }: OfficeAddinSe
             <RefreshCw className="h-3.5 w-3.5" />
             {l('重启桥', 'Restart bridge')}
           </button>
-          <button
-            type="button"
-            disabled={!connectionInfo}
-            onClick={() => {
-              void copyText(connectionInfo).then((done) =>
-                setNotice(done ? l('连接信息已复制：粘贴到加载项连接框', 'Connection info copied — paste it into the add-in') : l('复制失败，请手动记录端口与令牌', 'Copy failed; note the port and token manually')),
-              );
-            }}
-            className="pq-button h-8 px-3 text-xs disabled:opacity-60"
-          >
-            {l('复制连接信息', 'Copy connection info')}
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              void revealOfficeDiscoveryFile().catch((error) => setNotice(error instanceof Error ? error.message : String(error)));
-            }}
-            className="pq-button h-8 gap-1.5 px-3 text-xs"
-          >
-            <FolderOpen className="h-3.5 w-3.5" />
-            {l('打开发现文件', 'Open discovery file')}
-          </button>
         </div>
 
-        {connectionInfo ? (
-          <div className="rounded-[var(--pq-radius-sm)] border border-[var(--pq-border)] bg-[var(--pq-surface-2)] px-3 py-2 text-xs text-[var(--pq-text-muted)]">
-            {l('连接信息（粘贴到 Word 加载项）', 'Connection info (paste into the Word add-in)')}
-            <div className="mt-1 select-all font-mono text-[var(--pq-text)]">{connectionInfo}</div>
+        <details className="rounded-[var(--pq-radius-sm)] border border-[var(--pq-border)] bg-[var(--pq-surface-2)] px-3 py-2 text-xs text-[var(--pq-text-muted)]">
+          <summary className="cursor-pointer select-none">
+            {l('高级：外部工具的端口/令牌连接', 'Advanced: port/token access for external tools')}
+          </summary>
+          <div className="mt-2 leading-5">
+            {l(
+              'Word 加载项不需要这些信息。端口直连通道（127.0.0.1:23120 起，Bearer 令牌）只供冒烟脚本与外部工具使用，令牌每次启动都会变化。',
+              'The Word add-in does not need this. The direct port channel (127.0.0.1:23120+, Bearer token) is only for the smoke script and external tools; the token changes on every start.',
+            )}
           </div>
-        ) : null}
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              disabled={!connectionInfo}
+              onClick={() => {
+                void copyText(connectionInfo).then((done) =>
+                  setNotice(done ? l('连接信息已复制', 'Connection info copied') : l('复制失败，请手动记录端口与令牌', 'Copy failed; note the port and token manually')),
+                );
+              }}
+              className="pq-button h-8 px-3 text-xs disabled:opacity-60"
+            >
+              {l('复制连接信息', 'Copy connection info')}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                void revealOfficeDiscoveryFile().catch((error) => setNotice(error instanceof Error ? error.message : String(error)));
+              }}
+              className="pq-button h-8 gap-1.5 px-3 text-xs"
+            >
+              <FolderOpen className="h-3.5 w-3.5" />
+              {l('打开发现文件', 'Open discovery file')}
+            </button>
+          </div>
+          {connectionInfo ? <div className="mt-2 select-all font-mono text-[var(--pq-text)]">{connectionInfo}</div> : null}
+        </details>
 
         {notice ? (
           <div className="text-xs leading-5 text-[var(--pq-text-muted)]">{notice}</div>

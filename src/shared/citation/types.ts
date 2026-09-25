@@ -5,7 +5,8 @@
  *   1. 渲染层：`src/features/notes/bibliography.ts` 再导出（保持笔记侧既有 API）；
  *   2. Electron 主进程：经 esbuild 产物 `electron/generated/citationFormatters.cjs`
  *      供 `electron/backend/officeBridge.cjs`、`electron/backend/noteVault.cjs` 使用；
- *   3. Word 加载项：经 esbuild 产物 `office-addin/dist/citation-shared.js`。
+ *   3. Word 加载项：直接 import 本目录源码，由 `scripts/build-office-addin.mjs`
+ *      内联进 `office-addin/dist/*.js`（ES5，兼容 Word 2016 IE11 内核）。
  *
  * 因此这里**不得**依赖 DOM、Node 或应用层模块，只允许纯函数与纯类型。
  * `src/types/library.ts` 的 `LiteraturePaper` / `LiteratureAuthor` 在结构上可赋值给下面的

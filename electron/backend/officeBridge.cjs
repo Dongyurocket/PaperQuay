@@ -25,6 +25,8 @@ const DISCOVERY_FILE_NAME = 'paperquay-office-bridge.json';
 const MAX_BODY_BYTES = 1024 * 1024;
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
+/** POST /papers/batch 单次最多查询的文献数（加载项刷新文档内快照用）。 */
+const MAX_BATCH_IDS = 500;
 const DEFAULT_ALLOWED_ORIGINS = [
   // 加载项页面的来源：https://localhost:3000 为默认源站，http://localhost:3007 是证书不可用时的回退源站
   // （见 electron/backend/officeAddinHost.cjs），两者都必须放行，否则任务窗格请求会被 403。
@@ -38,6 +40,7 @@ const SORT_FIELDS = new Set(['title', 'year', 'importedAt', 'updatedAt', 'lastRe
 const KNOWN_PATHS = new Set([
   '/health',
   '/papers',
+  '/papers/batch',
   '/categories',
   '/styles',
   '/citations/render',
@@ -81,6 +84,7 @@ const ERROR_STATUS = {
   UNKNOWN_PAPER: 404,
   LIBRARY_NOT_READY: 503,
   WRITE_DISABLED: 403,
+  BRIDGE_DISABLED: 503,
   PAYLOAD_TOO_LARGE: 413,
   INTERNAL: 500,
 };
@@ -340,6 +344,27 @@ function createOfficeBridge(options = {}) {
       void url;
     },
 
+    /** 批量取文献（加载项用库里最新数据刷新文档内嵌的条目快照）；库里没有的 id 列进 missing。 */
+    'POST /papers/batch': async (req, res) => {
+      const body = await readJsonBody(req);
+      const rawIds = Array.isArray(body.ids) ? body.ids : null;
+      if (!rawIds) throw bridgeError('BAD_REQUEST', '请求需包含 ids 数组。');
+      const ids = [...new Set(rawIds.map((id) => cleanString(id)).filter(Boolean))];
+      if (ids.length > MAX_BATCH_IDS) {
+        throw bridgeError('BAD_REQUEST', `ids 最多 ${MAX_BATCH_IDS} 个（收到 ${ids.length} 个）。`);
+      }
+      const papers = [];
+      const missing = [];
+      wrapLibraryCall(() => {
+        for (const id of ids) {
+          const paper = store.getPaper(id);
+          if (paper) papers.push(toWirePaper(paper));
+          else missing.push(id);
+        }
+      });
+      sendJson(res, 200, { papers, missing });
+    },
+
     'GET /categories': (req, res) => {
       const categories = wrapLibraryCall(() => store.listCategoriesWithCounts());
       sendJson(res, 200, {
@@ -416,12 +441,28 @@ function createOfficeBridge(options = {}) {
   function matchRoute(method, pathname) {
     if (method === 'GET' && pathname === '/papers') return { key: 'GET /papers', params: {} };
     const paperMatch = /^\/papers\/([^/]+)$/.exec(pathname);
-    if (method === 'GET' && paperMatch) {
+    // /papers/batch 是保留路径（仅 POST），不能被 GET /papers/:id 吞掉。
+    if (method === 'GET' && paperMatch && pathname !== '/papers/batch') {
       return { key: 'GET /papers/:id', params: { id: paperMatch[1] } };
     }
     const key = `${method} ${pathname}`;
     if (Object.prototype.hasOwnProperty.call(routes, key)) return { key, params: {} };
     return null;
+  }
+
+  async function dispatch(req, res, url, { internal }) {
+    const pathname = url.pathname.replace(/\/+$/, '') || '/';
+    const route = matchRoute(req.method, pathname);
+    if (!route) {
+      if (KNOWN_PATHS.has(pathname)) {
+        throw bridgeError('METHOD_NOT_ALLOWED', `${req.method} 不被 ${pathname} 支持。`);
+      }
+      throw bridgeError('NOT_FOUND', `未知端点：${req.method} ${pathname}`);
+    }
+    // /health 允许匿名探活，但带上了无效 token 时按 401 处理（便于加载项区分「桥没起来」与「token 过期」）。
+    // 进程内调用（加载项源站的同源 /api/v1 转发）不走 token：转发层已做 Host/Origin/自定义头校验。
+    if (!internal && route.key !== 'GET /health') requireAuth(req);
+    await routes[route.key](req, res, url, route.params);
   }
 
   async function handleRequest(req, res) {
@@ -446,20 +487,30 @@ function createOfficeBridge(options = {}) {
         res.end();
         return;
       }
+      await dispatch(req, res, url, { internal: false });
+    } catch (error) {
+      sendError(res, error);
+    }
+  }
 
-      const pathname = url.pathname.replace(/\/+$/, '') || '/';
-      const route = matchRoute(req.method, pathname);
-      if (!route) {
-        if (KNOWN_PATHS.has(pathname)) {
-          throw bridgeError('METHOD_NOT_ALLOWED', `${req.method} 不被 ${pathname} 支持。`);
-        }
-        throw bridgeError('NOT_FOUND', `未知端点：${req.method} ${pathname}`);
+  /**
+   * 进程内调用入口（officeAddinHost 的 /api/v1/* 转发）：`pathWithQuery` 是去掉 `/api/v1` 前缀后的路径。
+   * 不做 token 与 CORS 校验——调用方必须先完成同源校验（见 officeAddinHost.cjs isTrustedApiRequest）。
+   * 桥被关闭时仍可服务（数据只读、同进程），但 enabled=false 时拒绝，尊重用户的开关。
+   */
+  async function handleInternal(req, res, pathWithQuery) {
+    let url;
+    try {
+      url = new URL(pathWithQuery || '/', 'http://paperquay.internal');
+    } catch {
+      sendError(res, bridgeError('BAD_REQUEST', '请求路径无法解析。'));
+      return;
+    }
+    try {
+      if (!settings().enabled) {
+        throw bridgeError('BRIDGE_DISABLED', 'PaperQuay 的 Word 加载项连接已在设置中关闭。');
       }
-
-      // /health 允许匿名探活，但带上了无效 token 时按 401 处理（便于加载项区分「桥没起来」与「token 过期」）。
-      if (route.key !== 'GET /health') requireAuth(req);
-
-      await routes[route.key](req, res, url, route.params);
+      await dispatch(req, res, url, { internal: true });
     } catch (error) {
       sendError(res, error);
     }
@@ -595,7 +646,7 @@ function createOfficeBridge(options = {}) {
     };
   }
 
-  return { start, stop, getStatus, handleRequest, port: () => port, token: () => token };
+  return { start, stop, getStatus, handleRequest, handleInternal, port: () => port, token: () => token };
 }
 
 module.exports = {

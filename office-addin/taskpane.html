@@ -2,105 +2,118 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>PaperQuay 引用</title>
     <link rel="stylesheet" href="taskpane.css" />
     <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
-    <script src="dist/citation-shared.js"></script>
+    <script src="dist/taskpane.js"></script>
   </head>
   <body>
     <main class="pane">
       <header class="pane__header">
-        <div class="pane__brand">PaperQuay 引用</div>
-        <div id="bridge-status" class="status status--idle">未连接</div>
+        <span class="pane__brand">PaperQuay 引用</span>
+        <span id="bridge-status" class="status status--idle">正在连接…</span>
       </header>
 
-      <section class="card">
-        <div class="card__title">连接 PaperQuay</div>
-        <p class="hint">
-          在 PaperQuay 的「设置 → 文库与 Zotero → Word 加载项（Office 桥）」里点击“复制连接信息”，粘贴到下面（形如
-          <code>23120:3f9c…</code>）。
-        </p>
-        <div class="row">
-          <input id="connection-input" type="text" placeholder="端口:令牌" autocomplete="off" />
-          <button id="connect-button" type="button" class="button button--primary">连接</button>
+      <div id="offline-banner" class="banner" hidden>
+        <div>
+          <strong>等待 PaperQuay 启动…</strong>
+          <p class="hint">打开 PaperQuay 后会自动连接，无需任何设置。未连接时仍可刷新引用、切换样式（使用文档内保存的条目信息）。</p>
         </div>
-        <div id="connection-note" class="note" hidden></div>
-      </section>
+        <button id="retry-button" type="button" class="button">立即重试</button>
+      </div>
 
-      <section class="card">
-        <div class="card__title">引用样式</div>
-        <div class="row">
-          <select id="style-select"></select>
-          <button id="apply-style-button" type="button" class="button">应用样式</button>
-        </div>
-        <label class="checkbox">
-          <input id="superscript-input" type="checkbox" />
-          正文引用以上标形式插入（仅顺序编码制，如 [1] 的右上角小标）
-        </label>
-        <div class="row" id="punctuation-row" hidden>
-          <select id="punctuation-select">
-            <option value="full">全角紧凑（，：（））</option>
-            <option value="half">半角空格（, ( ): ）</option>
-          </select>
-          <span class="hint">标点风格（仅 GB 7714-87 生效）</span>
-        </div>
-        <p class="hint" id="style-hint">默认 GB/T 7714-2015 顺序编码制（正文 [1]，文献表按引用顺序）。</p>
-      </section>
+      <div id="busy-bar" class="busy" hidden></div>
+      <div id="notice" class="notice" hidden></div>
 
       <section class="card">
         <div class="card__title">检索文献库</div>
         <div class="row">
-          <input id="search-input" type="search" placeholder="标题 / 作者 / 期刊 / DOI" />
-          <button id="search-button" type="button" class="button">检索</button>
+          <input id="search-input" type="search" placeholder="标题 / 作者 / 年份 / 关键词" autocomplete="off" />
+          <button id="quick-cite-button" type="button" class="button" title="快速引用对话框（Zotero 式）">快速引用</button>
         </div>
-        <div id="search-results" class="results"></div>
-        <div id="selection" class="selection"></div>
+        <div id="search-results" class="results" role="listbox" aria-label="检索结果"></div>
+        <div id="selection" class="selection">未选择文献</div>
+        <details class="options">
+          <summary>页码 / 前缀 / 后缀</summary>
+          <div class="grid">
+            <label>页码/定位<input id="locator-input" type="text" placeholder="如 12 或 12-15" /></label>
+            <label>前缀<input id="prefix-input" type="text" placeholder="如：参见" /></label>
+            <label>后缀<input id="suffix-input" type="text" placeholder="如：等" /></label>
+            <label class="checkbox"><input id="suppress-author-input" type="checkbox" />隐藏作者（著者-出版年制只显示年份）</label>
+          </div>
+        </details>
+        <div class="actions row--tight">
+          <button id="insert-citation-button" type="button" class="button button--primary" disabled>插入引用</button>
+        </div>
+      </section>
+
+      <section id="editor-card" class="card card--editor" hidden>
+        <div class="card__title">编辑光标处的引用 <span id="editor-text" class="muted"></span></div>
+        <div id="editor-items" class="citations"></div>
+        <p class="hint">在上方检索并勾选文献后，可点「加入此引用」把它合并到当前引用。</p>
+        <div class="actions row--tight">
+          <button id="editor-add-button" type="button" class="button" disabled>加入此引用</button>
+          <button id="editor-save-button" type="button" class="button button--primary">保存修改</button>
+          <button id="editor-cancel-button" type="button" class="button">取消</button>
+        </div>
       </section>
 
       <section class="card">
-        <div class="card__title">引用选项</div>
-        <div class="grid">
-          <label>页码/定位<input id="locator-input" type="text" placeholder="如 25 或 p. 25" /></label>
-          <label>前缀<input id="prefix-input" type="text" placeholder="如 参见" /></label>
-          <label>后缀<input id="suffix-input" type="text" placeholder="如 。" /></label>
-          <label class="checkbox">
-            <input id="suppress-author-input" type="checkbox" />
-            著者-出版年制下只显示年份
-          </label>
-        </div>
-      </section>
-
-      <section class="card">
-        <div class="card__title">操作</div>
+        <div class="card__title">文档</div>
         <div class="actions">
-          <button id="insert-citation-button" type="button" class="button button--primary">插入引用</button>
-          <button id="insert-bibliography-button" type="button" class="button">插入参考文献表</button>
-          <button id="refresh-button" type="button" class="button">刷新编号</button>
-          <button id="unlink-button" type="button" class="button button--danger">取消链接</button>
+          <button id="insert-bibliography-button" type="button" class="button">插入/更新参考文献表</button>
+          <button id="refresh-button" type="button" class="button">刷新</button>
+          <button id="update-items-button" type="button" class="button" title="用 PaperQuay 文献库里的最新元数据更新文档内的条目">从文献库更新条目</button>
         </div>
-        <div class="row row--tight">
-          <input id="bibliography-title-input" type="text" value="参考文献" />
-          <label class="checkbox">
-            <input id="bib-heading-input" type="checkbox" checked />
-            含标题行
-          </label>
-        </div>
-        <p class="hint">参考文献表插入在光标处；光标落在段落中间时会自动另起新段。已存在表时光标位置无关，原位刷新。不勾「含标题行」则只插入条目列表。</p>
-        <label class="checkbox">
-          <input id="crossref-input" type="checkbox" checked />
-          与文献表建立交叉引用（顺序编码制：正文 [1] 可 Ctrl+点击跳到文献表条目，且随 Word「更新域」重算）
-        </label>
       </section>
 
       <section class="card">
-        <div class="card__title">本文引用</div>
+        <div class="card__title">文档首选项</div>
+        <div class="grid">
+          <label>引用样式<select id="style-select"></select></label>
+          <label id="punctuation-row" hidden>GB 7714-87 标点
+            <select id="punctuation-select">
+              <option value="full">全角紧凑（默认）</option>
+              <option value="half">半角带空格</option>
+            </select>
+          </label>
+          <label id="bib-order-row" hidden>文献表排序（著者-出版年制）
+            <select id="bib-order-select">
+              <option value="alpha">按首作者</option>
+              <option value="appearance">按引用出现顺序</option>
+            </select>
+          </label>
+          <label>参考文献表标题<input id="bibliography-title-input" type="text" /></label>
+          <label class="checkbox"><input id="bib-heading-input" type="checkbox" />参考文献表包含标题行</label>
+          <label class="checkbox"><input id="superscript-input" type="checkbox" />正文引用上标（顺序编码制）</label>
+          <label class="checkbox"><input id="links-input" type="checkbox" />正文引用可点击跳转到参考文献条目</label>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card__title">本文引用 <span id="citation-count" class="muted"></span></div>
         <div id="document-citations" class="citations"></div>
       </section>
 
-      <div id="log" class="log" hidden></div>
+      <section class="card">
+        <div class="card__title">完成稿</div>
+        <p class="hint">「取消链接」把全部引用与参考文献表变成普通文字（此后不能再刷新）。默认保留跳转链接。</p>
+        <label class="checkbox"><input id="strip-links-input" type="checkbox" />同时去掉跳转链接</label>
+        <div class="actions row--tight">
+          <button id="unlink-button" type="button" class="button button--danger">取消链接…</button>
+          <button id="unlink-confirm-button" type="button" class="button button--danger" hidden>确认取消链接</button>
+        </div>
+      </section>
+
+      <details class="card">
+        <summary class="card__title">诊断</summary>
+        <pre id="diagnostics" class="log"></pre>
+        <button id="copy-diagnostics-button" type="button" class="button">复制诊断信息</button>
+      </details>
+
+      <pre id="log" class="log" hidden></pre>
     </main>
-    <script src="taskpane.js"></script>
   </body>
 </html>

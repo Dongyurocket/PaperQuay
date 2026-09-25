@@ -417,48 +417,91 @@ export function wrapAffixes(core: string, prefix?: string | null, suffix?: strin
   return text;
 }
 
-function formatNumericInline(items: CitationItemInput[], seqs: number[]): string {
-  const numbers = [...new Set(seqs.filter((value) => value > 0))].sort((left, right) => left - right);
-  if (numbers.length === 0) return '';
-  const ranges = numbers
-    .map((value) => `${value}`)
-    .reduce<string[]>((chunks, value, index, list) => {
-      if (index === 0) return [value];
-      const previous = list[index - 1];
-      const lastChunk = chunks[chunks.length - 1];
-      if (Number(value) === Number(previous) + 1) {
-        const [start] = lastChunk.split('-');
-        chunks[chunks.length - 1] = `${start}-${value}`;
-        return chunks;
-      }
-      chunks.push(value);
-      return chunks;
-    }, []);
-  const core = items.length === 1 ? `[${ranges.join(',')}]${cleanPart(items[0].locator)}` : `[${ranges.join(',')}]`;
-  const prefix = items[0]?.prefix ?? null;
-  const suffix = items[items.length - 1]?.suffix ?? null;
-  return wrapAffixes(core, prefix, suffix);
+/**
+ * 正文引用的分段结构：带 paperId 的段是可跳转到文献表条目的链接（Word 交叉引用），
+ * 其余是标点/前后缀。所有段的 text 顺序拼接 === 该组的 inline 文本（逐字一致）。
+ */
+export interface CitationSegment {
+  text: string;
+  paperId?: string;
 }
 
-function formatAuthorDateInline(
+export function segmentsToText(segments: CitationSegment[]): string {
+  return segments.map((segment) => segment.text).join('');
+}
+
+/** 与 wrapAffixes 同规则，但作用在分段序列上（前后缀是普通文本段）。 */
+function wrapAffixSegments(
+  core: CitationSegment[],
+  prefix?: string | null,
+  suffix?: string | null,
+): CitationSegment[] {
+  const head = typeof prefix === 'string' ? prefix.trim() : '';
+  const tail = typeof suffix === 'string' ? suffix.trim() : '';
+  const result = [...core];
+  if (head) result.unshift({ text: /[(（[]$/.test(head) ? head : `${head} ` });
+  if (tail) result.push({ text: /^[,.;:，。；：)\]）]/.test(tail) ? tail : ` ${tail}` });
+  return result;
+}
+
+/** 数字序号 → 连续区间对：[1,2,3,5] → [[1,3],[5,5]]（与 formatNumberRanges 同语义）。 */
+export function numberRanges(numbers: number[]): Array<[number, number]> {
+  const sorted = [...new Set(numbers.filter((value) => Number.isFinite(value) && value > 0))].sort(
+    (left, right) => left - right,
+  );
+  const ranges: Array<[number, number]> = [];
+  for (const current of sorted) {
+    const last = ranges[ranges.length - 1];
+    if (last && current === last[1] + 1) last[1] = current;
+    else ranges.push([current, current]);
+  }
+  return ranges;
+}
+
+export function formatNumericSegments(items: CitationItemInput[], seqs: number[]): CitationSegment[] {
+  const paperIdBySeq = new Map<number, string>();
+  items.forEach((item, index) => {
+    const seq = seqs[index] ?? 0;
+    if (seq > 0 && !paperIdBySeq.has(seq)) paperIdBySeq.set(seq, item.paperId);
+  });
+  const ranges = numberRanges(seqs);
+  if (ranges.length === 0) return [];
+  const core: CitationSegment[] = [{ text: '[' }];
+  ranges.forEach(([start, end], index) => {
+    if (index > 0) core.push({ text: ',' });
+    core.push({ text: `${start}`, paperId: paperIdBySeq.get(start) });
+    if (end > start) {
+      core.push({ text: '-' });
+      core.push({ text: `${end}`, paperId: paperIdBySeq.get(end) });
+    }
+  });
+  core.push({ text: ']' });
+  if (items.length === 1) {
+    const locator = cleanPart(items[0].locator);
+    if (locator) core.push({ text: locator });
+  }
+  return wrapAffixSegments(core, items[0]?.prefix ?? null, items[items.length - 1]?.suffix ?? null);
+}
+
+export function formatAuthorDateSegments(
   items: CitationItemInput[],
   style: CitationStyleId,
   resolvePaper: (paperId: string) => CitationPaperLike | undefined,
-): string {
-  const segments = items.map((item) => {
+): CitationSegment[] {
+  const core: CitationSegment[] = [{ text: '(' }];
+  items.forEach((item, index) => {
+    if (index > 0) core.push({ text: '; ' });
     const paper = resolvePaper(item.paperId);
     const year = cleanPart(paper?.year) || 'n.d.';
     const locator = cleanPart(item.locator);
     const locatorText = locator ? `, ${locator}` : '';
-    if (item.suppressAuthor) return `${year}${locatorText}`;
-    const label = authorDateLabel(paperAuthorParts(paper), style, cleanPart(item.label) || item.paperId);
-    return `${label}, ${year}${locatorText}`;
+    const text = item.suppressAuthor
+      ? `${year}${locatorText}`
+      : `${authorDateLabel(paperAuthorParts(paper), style, cleanPart(item.label) || item.paperId)}, ${year}${locatorText}`;
+    core.push({ text, paperId: item.paperId });
   });
-  return wrapAffixes(
-    `(${segments.join('; ')})`,
-    items[0]?.prefix ?? null,
-    items[items.length - 1]?.suffix ?? null,
-  );
+  core.push({ text: ')' });
+  return wrapAffixSegments(core, items[0]?.prefix ?? null, items[items.length - 1]?.suffix ?? null);
 }
 
 export interface CitationRenderGroup {
@@ -492,7 +535,8 @@ export interface CitationRenderResult {
   kind: 'numeric' | 'author-date';
   /** 单组请求时的内联文本；多组请求时等于第一组的文本。 */
   inline: string;
-  groups: Array<{ citeId: string | null; inline: string }>;
+  /** segments：inline 的分段结构（带 paperId 的段可做成跳转链接），拼接后与 inline 逐字一致。 */
+  groups: Array<{ citeId: string | null; inline: string; segments: CitationSegment[] }>;
   entries: CitationRenderEntry[];
   bibliography: string;
   bibliographyTitle: string;
@@ -553,12 +597,14 @@ export function renderCitations(
 
   const renderedGroups = groups.map((group) => {
     const seqs = group.items.map((item) => seqByPaperId.get(item.paperId) ?? 0);
+    const segments =
+      kind === 'numeric'
+        ? formatNumericSegments(group.items, seqs)
+        : formatAuthorDateSegments(group.items, style, lookup);
     return {
       citeId: group.citeId ?? null,
-      inline:
-        kind === 'numeric'
-          ? formatNumericInline(group.items, seqs)
-          : formatAuthorDateInline(group.items, style, lookup),
+      inline: segmentsToText(segments),
+      segments,
     };
   });
 

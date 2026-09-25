@@ -4,7 +4,7 @@
 
 .DESCRIPTION
   只构建 office-addin 需要的产物，不触发主应用构建：
-    1. scripts/build-citation.mjs --addin-only  → office-addin/dist/citation-shared.js
+    1. scripts/build-office-addin.mjs           → office-addin/dist/{taskpane,dialog,core}.js（ES5）+ office-addin/sw.js
     2. scripts/generate-office-addin-icons.mjs  → office-addin/assets/icon-{16,32,64,80}.png
     3. 校验必需文件存在且 manifest.xml 可解析
 
@@ -21,9 +21,9 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 Push-Location $root
 try {
-  Write-Host '[1/3] 构建共享引用模块 → office-addin/dist/citation-shared.js'
-  node scripts/build-citation.mjs --addin-only
-  if ($LASTEXITCODE -ne 0) { throw 'build-citation.mjs 执行失败' }
+  Write-Host '[1/3] 构建加载项脚本 → office-addin/dist/*.js（ES5，兼容 Word 2016）'
+  node scripts/build-office-addin.mjs
+  if ($LASTEXITCODE -ne 0) { throw 'build-office-addin.mjs 执行失败' }
 
   if (-not $SkipIcons) {
     Write-Host '[2/3] 生成清单图标 → office-addin/assets/icon-*.png'
@@ -38,9 +38,12 @@ try {
     'manifest.xml',
     'taskpane.html',
     'taskpane.css',
-    'taskpane.js',
+    'dialog.html',
     'commands.html',
-    'dist/citation-shared.js',
+    'sw.js',
+    'dist/taskpane.js',
+    'dist/dialog.js',
+    'dist/core.js',
     'assets/icon-16.png',
     'assets/icon-32.png',
     'assets/icon-80.png'

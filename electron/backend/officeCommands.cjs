@@ -69,6 +69,8 @@ function createOfficeCommands(context) {
         appPaths,
         appRoot: typeof app?.getAppPath === 'function' ? app.getAppPath() : undefined,
         getSettings: readSourceSettings,
+        // 同源 /api/v1 转发到同进程的桥：加载项无需 token，PaperQuay 运行即自动连接。
+        getBridge: () => ensureBridge(),
         logger: { log: (message) => log('log', message), warn: (message) => log('warn', message), error: (message) => log('error', message) },
       });
     }
