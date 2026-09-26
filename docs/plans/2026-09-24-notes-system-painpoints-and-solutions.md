@@ -3,7 +3,7 @@
 > 相关文档：[笔记宪章（Notes Charter）](../notes-charter.md) —— 页面类型、命名链接规范、摘录卡证据红线。
 
 - 日期：2026-09-24
-- 状态：**主体已落地，存在偏差项**（v0.2.0，2026-09-26 复审后，P3-1～P3-8 已落地；深入方向 1/2/4 已落地，P0-1～P0-3、P1-1～P1-5、P2-1～P2-3 主干功能均已上线，`npm run check` 全绿；其余路线图偏差逐项核对见「落地状态核对」、修正与后续方向见文末「复审结论与后续路线」。方案设计层面的评审（不合理处/可优化处/可深入处）见「方案设计评审」）
+- 状态：**主体已落地，存在偏差项**（v0.2.0，2026-09-26 复审后，P3-1～P3-8 已落地；深入方向 1/2/3/4 已落地，P0-1～P0-3、P1-1～P1-5、P2-1～P2-3 主干功能均已上线，`npm run check` 全绿；其余路线图偏差逐项核对见「落地状态核对」、修正与后续方向见文末「复审结论与后续路线」。方案设计层面的评审（不合理处/可优化处/可深入处）见「方案设计评审」）
 - 范围：笔记子系统（`src/features/notes/`、`electron/backend/noteStore.cjs` / `noteCommands.cjs`）、内置 Agent（`src/services/agentTools.ts` / `libraryAgent.ts` / `agentLoop.ts`）、MCP 知识库服务（`electron/mcp/knowledgeMcpService.cjs`、`bin/paperquay-mcp.cjs`）
 - 参考项目：[nashsu/llm_wiki](https://github.com/nashsu/llm_wiki)（Karpathy LLM Wiki 模式的桌面应用实现）
 
@@ -116,6 +116,8 @@ v0.2.0 落地后对照本文档逐项代码复核的结果。**主干功能全�
 - 同步更新 `docs/MCP_AGENT_INTEGRATION.md` 工具表与写入安全章节，补 `tests/knowledgeMcp*.test.ts` 回归。
 
 > 📝 **复审注记（2026-09-26）**：写工具、文件夹管理、护栏与检索升级已按本节落地，集成文档与测试同步齐全；MCP `search_notes` 使用 `notes_fts` 的 trigram FTS5 查询，缺表、异常和少于 3 个字符的短查询回退四字段 LIKE，以兼容旧数据库与中文短词。
+
+> **深入方向 3 落地（2026-09-26）**：保留上述关键词行为；配置阅读器 Embedding 后，MCP 与内置 Agent 同步升级为向量 + FTS5 + RRF。笔记向量复用 RAG 库与 Worker，保存/导入/vault 回导异步增量索引，工具栏可手动重建；软删除与正文签名即时过滤旧向量。无配置或索引不可用时降级并返回 `retrievalMode` / `channels` / `warning`。选址、查询分层、证据排除和未执行手工验证详见 `docs/changes/2026-09-26-notes-semantic-search.md`。
 
 **P1：Markdown 镜像层（让文件型 Agent 直接上手）**
 
@@ -467,6 +469,6 @@ legacy 路径的全部残留点（已逐一定位）：
 
 1. ✅ **已落地，聚合管线（痛点 8 的终点）**："这篇文献的散摘录→精读卡""主题 X 的跨文献摘录→概念页"通过 Agent 配方实现——使用 `pageKind='excerpt'` 与文献/标签/关键词召回，产出走既有 `write_notes` 审批，回链 `[[摘录卡]]`；`[n]` 与唯一参考文献条目由 P3-1 解析为 `paperReference`。
 2. ✅ **已落地，系统页自动维护**：批准的 Agent 笔记写入成功后追加 `log`，每累计 5 个成功写操作刷新 `index`/`overview`；系统页使用 `pageKind` 与首行 hash 标记判定漂移，用户手改后跳过覆盖。
-3. **笔记语义检索**：笔记库目前只有 FTS/LIKE；把 RAG 的 embedding 基础设施扩展到笔记 chunk，支撑"按主题找散摘录"的召回质量（聚合管线的检索底座）。
+3. ✅ **已落地，笔记语义检索**：复用阅读器 Embedding 配置和 RAG Worker，将笔记正文 chunk 存入现有 RAG 库，以向量 + FTS5 + RRF 同时支持内置 Agent 与 MCP；保存/导入/vault 回导异步索引，支持手动重建与软删除即时失效，未配置时保留 FTS/LIKE 降级。锚点与原文快照不进入向量语料。详见 `docs/changes/2026-09-26-notes-semantic-search.md`。
 4. ✅ **已落地，体检 → 修复闭环**：体检报告可通过“让 Agent 修复”载入 Agent，生成 `write_notes` 修复计划并等待审批；删除类操作默认只列清单，断链修复优先按既有 `noteId` 重挂。
 5. **提炼预览与多模态重识别**：提炼结果并排预览（原始识别 vs 提炼稿）确认再入库；公式/表格选区送区域截图给多模态模型重建 LaTeX/三线表（`agentVision.ts` 基础设施可复用）。

@@ -35,6 +35,26 @@ export async function listNotes(request: ListNotesRequest = {}): Promise<Note[]>
   }
 }
 
+export interface NoteSearchResponse {
+  notes: Array<Note & { channels: Array<'vector' | 'fts' | 'like'>; score?: number }>;
+  total: number;
+  retrievalMode: 'keyword' | 'hybrid';
+  embeddingModel?: string;
+  warning?: string;
+}
+
+export async function searchNotes(request: Omit<ListNotesRequest, 'search'> & { query?: string; mode?: 'auto' | 'keyword' | 'hybrid' } = {}): Promise<NoteSearchResponse> {
+  return invoke<NoteSearchResponse>('notes_search', { request });
+}
+
+export async function rebuildNotesIndex(): Promise<{ queued: number; warning?: string }> {
+  return invoke('notes_rebuild_index');
+}
+
+export async function getNotesIndexStatus(): Promise<{ pending: number; running: boolean; completed: number; failed: number; lastError: string | null }> {
+  return invoke('notes_index_status');
+}
+
 export async function getNote(id: string): Promise<Note | null> {
   try {
     return await invoke<Note | null>('notes_get', { id });

@@ -2,6 +2,30 @@ function createNoteCommands(context) {
   const { noteStore, noteVault } = context;
 
   return {
+    async notes_search({ request = {} }) {
+      const { resolveNoteEmbedding } = require('./noteEmbedding.cjs');
+      const { hybridNotes } = require('./noteHybridSearch.cjs');
+      const { embedTexts } = require('./utils.cjs');
+      const query = String(request.query ?? '').trim();
+      const limit = Math.max(1, Math.min(50, Number(request.limit) || 10));
+      const scope = { ...request, paperIdOnly: true };
+      const keyword = noteStore.searchNotes({ ...scope, query, limit: Math.min(100, limit * 2) });
+      const result = query && request.mode !== 'keyword'
+        ? await hybridNotes({
+          query, limit, keyword,
+          eligible: () => noteStore.eligibleSearchNotes(scope),
+          embedding: resolveNoteEmbedding(context.appPaths),
+          embed: async (text, config) => (await embedTexts([text], config))[0],
+          retrieve: (args) => context.ragStore.retrieveNoteVectors(args),
+        })
+        : { notes: keyword.rows.slice(0, limit).map((row) => ({ ...row, channels: [keyword.channel] })), retrievalMode: 'keyword' };
+      const notes = result.notes.map((row) => ({
+        ...noteStore.getNote({ id: row.id }), channels: row.channels, score: row.score,
+      })).filter((note) => note.id && !note.deletedAt);
+      return { ...result, notes, total: notes.length };
+    },
+    notes_rebuild_index() { return context.noteIndexer.rebuild(); },
+    notes_index_status() { return context.noteIndexer.status(); },
     notes_list({ request = {} }) {
       return noteStore.listNotes(request);
     },

@@ -697,6 +697,7 @@ class PaperQuayKnowledgeService {
        AND i.embedding_dimension = ?
       WHERE v.embedding MATCH ?
         AND k = ?
+        AND v.source_type IN ('mineru-markdown', 'pdf-text')
       ORDER BY v.distance
     `);
 
@@ -778,7 +779,7 @@ class PaperQuayKnowledgeService {
       let ftsRows = [];
       if (ftsQuery) {
         try {
-          const conditions = ['rag_chunks_fts MATCH ?'];
+          const conditions = ['rag_chunks_fts MATCH ?', "c.source_type != 'note'"];
           const params = [ftsQuery];
 
           if (targetPaperId) {
@@ -894,7 +895,7 @@ class PaperQuayKnowledgeService {
       let likeFallbackUsed = false;
       if (results.length === 0) {
         likeFallbackUsed = true;
-        const likeConditions = ['lower(c.text) LIKE ?'];
+        const likeConditions = ['lower(c.text) LIKE ?', "c.source_type != 'note'"];
         const likeParams = [`%${cleanQuery.toLowerCase()}%`];
 
         if (targetPaperId) {
@@ -991,7 +992,65 @@ class PaperQuayKnowledgeService {
     }
   }
 
-  searchNotes({ query = '', paperId = '', pageKind = '', limit = 10 } = {}) {
+  searchNotes(request = {}) {
+    const { resolveNoteEmbedding } = require('../backend/noteEmbedding.cjs');
+    const { keywordNotes, eligibleNoteRows } = require('../backend/noteSearch.cjs');
+    const { hybridNotes } = require('../backend/noteHybridSearch.cjs');
+    const query = cleanString(request.query);
+    const limit = Math.max(1, Math.min(50, Number(request.limit) || 10));
+    // Keep unconfigured/keyword calls synchronous for existing local integrations.
+    const legacy = this.searchNotesKeyword({ ...request, limit });
+    const embedding = request.mode === 'keyword' || process.env.PAPERQUAY_MCP_EMBEDDING === 'off'
+      ? null : resolveNoteEmbedding(this.appPaths);
+    const db = this.getNotesDb();
+    if (!db) return {
+      ...legacy, retrievalMode: 'keyword',
+      ...(query && request.mode !== 'keyword' ? { warning: '笔记库不可用，已降级为关键词检索。' } : {}),
+    };
+    let keyword;
+    try {
+      keyword = keywordNotes(db, { ...request, query, limit: embedding ? Math.min(100, limit * 2) : limit });
+    } catch (error) {
+      db.close();
+      throw error;
+    }
+    if (!query || !embedding) {
+      db.close();
+      return {
+        ...legacy, retrievalMode: 'keyword',
+        notes: legacy.notes.map((note) => ({ ...note, channels: [keyword.channel] })),
+        ...(query && request.mode !== 'keyword'
+          ? { warning: 'Embedding 未配置或已禁用，已降级为关键词检索。' } : {}),
+      };
+    }
+    const run = async () => {
+      let ragDb;
+      try {
+        const result = await hybridNotes({
+          query, limit, keyword, embedding,
+          eligible: () => eligibleNoteRows(db, request),
+          embed: (text, config) => this.embedQuery(text, config),
+          retrieve: (args) => {
+            ragDb = this.getRagDb({ withVec: true });
+            if (!ragDb) return [];
+            return require('../backend/noteVectors.cjs').retrieveNoteVectors(ragDb, args);
+          },
+        });
+        // Recheck after network/worker awaits: a concurrent delete must invalidate the hit.
+        const notes = result.notes.filter((row) => db.prepare('SELECT 1 FROM notes WHERE id = ? AND deleted_at IS NULL').get(row.id))
+          .map((row) => ({
+            id: row.id, paperId: row.paper_id, type: row.type, pageKind: row.page_kind ?? null,
+            title: row.title, content: row.content_text || row.content, excerpt: row.excerpt || null,
+            pageNumber: row.pdf_page_number || null, highlightColor: row.highlight_color || null,
+            isFavorite: Boolean(row.is_favorite), updatedAt: row.updated_at, channels: row.channels, score: row.score,
+          }));
+        return { ...result, notes, total: notes.length };
+      } finally { ragDb?.close(); db.close(); }
+    };
+    return run();
+  }
+
+  searchNotesKeyword({ query = '', paperId = '', pageKind = '', limit = 10 } = {}) {
     const db = this.getNotesDb();
     if (!db) {
       return {
@@ -1513,6 +1572,9 @@ class PaperQuayKnowledgeService {
   withWritableNoteStore(mutator, { allowWhileAppRunning = false } = {}) {
     const guard = this.assertWritable(allowWhileAppRunning);
     const store = createNoteStore(this.appPaths);
+    store.setMutationListener((note) => {
+      require('../backend/noteEmbedding.cjs').enqueueExternalNote(this.appPaths, note);
+    });
     try {
       const result = mutator(store);
       if (guard.warning && result && typeof result === 'object' && !Array.isArray(result)) {

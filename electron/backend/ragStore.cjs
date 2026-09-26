@@ -5,7 +5,7 @@ const sqliteVec = require('sqlite-vec');
 const { DatabaseSync, sqlStringLiteral, withTransaction } = require('./nodeSqlite.cjs');
 const { cleanString, toError } = require('./utils.cjs');
 
-const RAG_SOURCE_TYPES = new Set(['mineru-markdown', 'pdf-text']);
+const RAG_SOURCE_TYPES = new Set(['mineru-markdown', 'pdf-text', 'note']);
 const MAX_VECTOR_DIMENSION = 32768;
 const MAX_RAG_RETRIEVAL_TOP_K = 100;
 const MAX_CONTEXT_NEIGHBORS = 8;
@@ -1465,6 +1465,8 @@ function createRagStore(appPaths, options = {}) {
     if (sourceType) {
       filterClause += ' AND v.source_type = ?';
       params.push(sourceType);
+    } else {
+      filterClause += " AND v.source_type IN ('mineru-markdown', 'pdf-text')";
     }
 
     if (targetKeys && targetKeys.length > 0) {
@@ -1588,6 +1590,8 @@ function createRagStore(appPaths, options = {}) {
     if (sourceType) {
       filterClause += ' AND c.source_type = ?';
       params.push(sourceType);
+    } else {
+      filterClause += " AND c.source_type != 'note'";
     }
 
     if (targetKeys && targetKeys.length > 0) {
@@ -2002,6 +2006,9 @@ function createRagStore(appPaths, options = {}) {
         embedding,
         source_types_json AS sourceTypesJson
       FROM rag_document_vectors
+      WHERE NOT EXISTS (
+        SELECT 1 FROM json_each(rag_document_vectors.source_types_json) WHERE value = 'note'
+      )
       ORDER BY document_key, dimension
     `).all()
       .map((row) => {
@@ -2155,6 +2162,15 @@ function createRagStore(appPaths, options = {}) {
     migrateFromLibraryRagIndexes,
     reportFailure,
     retrieveDocumentChunks,
+    retrieveNoteVectors(request) {
+      return require('./noteVectors.cjs').retrieveNoteVectors(db, request);
+    },
+    removeNoteIndex({ id }) {
+      return withTransaction(db, () => {
+        deleteDocumentSourceData(db, `note:${id}`, 'note');
+        rebuildDocumentVectors(db, `note:${id}`);
+      });
+    },
     snapshotTo(targetPath) {
       fs.mkdirSync(path.dirname(targetPath), { recursive: true });
       fs.rmSync(targetPath, { force: true });

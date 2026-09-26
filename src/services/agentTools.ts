@@ -1,6 +1,6 @@
 import type { LiteraturePaper } from '../types/library';
 import type { Note, NotePageKind, NoteType } from '../types/notes';
-import { getNote, listNotes } from './notes';
+import { getNote, searchNotes } from './notes';
 import { createAgentNoteWritePlan } from './agentNotePlan';
 import type { AgentMemoryFile, AgentMemoryWritePlan } from './agentMemory';
 import type {
@@ -413,7 +413,7 @@ export function createLibraryAgentTools(options: CreateLibraryAgentToolsOptions)
     },
     {
       name: 'search_notes',
-      description: 'Search PaperQuay notes by keyword, paper, tag, or note type. Returns note summaries (id, title, type, tags, excerpt); use read_note for the full content of a specific note.',
+      description: 'Search PaperQuay notes semantically and by keyword using the reader Embedding configuration (vector + FTS5 + RRF), with keyword fallback when unavailable. Filter by paper, tag, or note type. Returns summaries, retrievalMode, channels and warning; use read_note for full content.',
       kind: 'read',
       available: (ctx: AgentToolMountContext) => ctx.localLibraryMode,
       parameters: {
@@ -430,8 +430,8 @@ export function createLibraryAgentTools(options: CreateLibraryAgentToolsOptions)
       },
       async execute(args): Promise<AgentToolResult> {
         const limit = boundedInteger(args.limit, 20, 50);
-        const notes = await listNotes({
-          search: stringValue(args.query) || null,
+        const result = await searchNotes({
+          query: stringValue(args.query),
           paperId: stringValue(args.paperId) || null,
           linkedPaperId: stringValue(args.linkedPaperId) || null,
           tag: stringValue(args.tag) || null,
@@ -439,11 +439,15 @@ export function createLibraryAgentTools(options: CreateLibraryAgentToolsOptions)
           pageKind: notePageKindValue(args.pageKind) ?? null,
           limit,
         });
+        const notes = result.notes;
 
         return {
           content: JSON.stringify({
             count: notes.length,
-            matches: notes.map(noteSummary),
+            retrievalMode: result.retrievalMode,
+            warning: result.warning,
+            embeddingModel: result.embeddingModel,
+            matches: notes.map((note) => ({ ...noteSummary(note), channels: note.channels, score: note.score })),
           }),
           cards: [{ kind: 'text', title: `${notes.length} note match(es)` }],
         };

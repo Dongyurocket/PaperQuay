@@ -18,7 +18,9 @@ parentPort.on('message', async (message) => {
       return;
     }
 
-    const fn = store[method];
+    const fn = method === 'indexNote'
+      ? (request) => require('./noteEmbedding.cjs').indexNote(store, request)
+      : store[method];
     if (typeof fn !== 'function') {
       throw new Error(`Unknown RAG worker method: ${method}`);
     }

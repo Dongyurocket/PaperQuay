@@ -149,13 +149,22 @@ const TOOLS = [
   {
     name: 'search_notes',
     description:
-      'Search reading notes, excerpt highlights, and thoughts saved in PaperQuay.',
+      'Search PaperQuay notes using vector + FTS5 + RRF when the reader Embedding API is configured; otherwise use keyword retrieval. Returns retrievalMode, channels and degradation warning.',
     inputSchema: {
       type: 'object',
       properties: {
         query: {
           type: 'string',
-          description: 'Keywords to search in note titles and contents.',
+          description: 'Natural-language question or keywords to search in note titles and editable contents.',
+        },
+        mode: {
+          type: 'string', enum: ['auto', 'hybrid', 'keyword'], default: 'auto',
+          description: 'Retrieval mode; keyword never calls the Embedding API.',
+        },
+        pageKind: {
+          type: 'string',
+          enum: ['paper-card', 'concept', 'synthesis', 'qa', 'excerpt', 'index', 'log', 'overview'],
+          description: 'Filter notes by page kind in both retrieval channels.',
         },
         paperId: {
           type: 'string',

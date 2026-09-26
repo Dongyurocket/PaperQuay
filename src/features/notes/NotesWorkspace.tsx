@@ -17,6 +17,7 @@ import {
   Pin,
   Plus,
   Search,
+  RefreshCw,
   Star,
   Trash2,
   X,
@@ -40,6 +41,8 @@ import {
   getNotesVaultSettings,
   syncNotesVaultNow,
   updateNotesVaultSettings,
+  rebuildNotesIndex,
+  getNotesIndexStatus,
 } from '../../services/notes';
 import { selectDirectory } from '../../services/desktop';
 import { loadSettings } from '../reader/readerShared';
@@ -770,6 +773,48 @@ export function NotesWorkspace() {
   const [folders, setFolders] = useState<NoteFolder[]>([]);
   const [vaultSyncing, setVaultSyncing] = useState(false);
   const [vaultMessage, setVaultMessage] = useState<string | null>(null);
+  const [indexRebuilding, setIndexRebuilding] = useState(false);
+  const indexPollingRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const indexMountedRef = useRef(false);
+  useEffect(() => {
+    indexMountedRef.current = true;
+    return () => {
+      indexMountedRef.current = false;
+      if (indexPollingRef.current) clearTimeout(indexPollingRef.current);
+    };
+  }, []);
+
+  async function handleIndexRebuild() {
+    setIndexRebuilding(true);
+    try {
+      const result = await rebuildNotesIndex();
+      if (!indexMountedRef.current) return;
+      setVaultMessage(result.warning || `笔记索引已排队：${result.queued} 篇`);
+      if (result.warning || !result.queued) { setIndexRebuilding(false); return; }
+      const poll = async () => {
+        try {
+          const status = await getNotesIndexStatus();
+          if (!indexMountedRef.current) return;
+          if (status.running) {
+            setVaultMessage(`笔记索引：完成 ${status.completed}，失败 ${status.failed}，待处理 ${status.pending}`);
+            indexPollingRef.current = setTimeout(() => void poll(), 1000);
+          } else {
+            setIndexRebuilding(false);
+            setVaultMessage(`笔记索引完成：${status.completed} 篇，失败 ${status.failed}${status.lastError ? `；${status.lastError}` : ''}`);
+          }
+        } catch (error) {
+          if (!indexMountedRef.current) return;
+          setIndexRebuilding(false);
+          setVaultMessage(error instanceof Error ? error.message : '读取笔记索引状态失败');
+        }
+      };
+      indexPollingRef.current = setTimeout(() => void poll(), 1000);
+    } catch (error) {
+      if (!indexMountedRef.current) return;
+      setIndexRebuilding(false);
+      setVaultMessage(error instanceof Error ? error.message : '笔记索引启动失败');
+    }
+  }
   const [activeFolderId, setActiveFolderId] = useState<string | null>(null);
   const [expandedFolderIds, setExpandedFolderIds] = useState<Set<string>>(() => new Set());
   const [draggingNoteId, setDraggingNoteId] = useState<string | null>(null);
@@ -1433,6 +1478,16 @@ export function NotesWorkspace() {
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => void handleIndexRebuild()}
+                disabled={indexRebuilding}
+                className="pq-icon-button flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--pq-bg-secondary)] text-[var(--pq-text-muted)] hover:text-[var(--pq-accent)] disabled:opacity-50"
+                title="重建笔记语义索引"
+                aria-label="重建笔记语义索引"
+              >
+                <RefreshCw className={cn('h-4 w-4', indexRebuilding && 'animate-spin')} strokeWidth={1.8} />
+              </button>
               <button
                 type="button"
                 onClick={() => void handleVaultSync()}

@@ -125,6 +125,12 @@ function createBackend({ app }) {
     store,
   };
   context.noteVault = createNoteVault(context);
+  const { createNoteIndexer } = require('./backend/noteEmbedding.cjs');
+  if (!ragStore.indexNote) {
+    ragStore.indexNote = (request) => require('./backend/noteEmbedding.cjs').indexNote(ragStore, request);
+  }
+  context.noteIndexer = createNoteIndexer(context);
+  noteStore.setMutationListener(context.noteIndexer.enqueue);
   const fileCommands = createFileCommands(context);
   context.fileCommands = fileCommands;
 
@@ -143,6 +149,7 @@ function createBackend({ app }) {
 
   return {
     close() {
+      context.noteIndexer.close();
       noteStore.close();
       void Promise.resolve(ragStore.close()).catch((error) => {
         console.warn('[paperquay] RAG store close failed.', error);

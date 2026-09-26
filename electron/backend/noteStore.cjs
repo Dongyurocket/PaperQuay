@@ -934,6 +934,10 @@ function createNoteStore(appPaths) {
   }
 
   let db = openDatabase(appPaths.notesDatabasePath);
+  let onMutation = null;
+  const notifyMutation = (note) => {
+    try { onMutation?.(note); } catch { /* Indexing must never make a committed save fail. */ }
+  };
 
   function listNotes(request = {}) {
     const paperId = cleanString(request.paperId);
@@ -1011,18 +1015,20 @@ function createNoteStore(appPaths) {
   }
 
   function createNote(request) {
-    return withTransaction(db, () => {
+    const saved = withTransaction(db, () => {
       const note = normalizeNoteInput(request);
       upsertNote(db, note);
       return getNoteById(db, note.id);
     });
+    notifyMutation(saved);
+    return saved;
   }
 
   function updateNote(request) {
     const noteId = cleanString(request?.id);
     if (!noteId) throw new Error('note id is required');
 
-    return withTransaction(db, () => {
+    const saved = withTransaction(db, () => {
       const existing = getNoteById(db, noteId, { includeDeleted: true });
       if (!existing) throw new Error(`Note does not exist: ${noteId}`);
 
@@ -1030,6 +1036,8 @@ function createNoteStore(appPaths) {
       upsertNote(db, note);
       return getNoteById(db, note.id, { includeDeleted: true });
     });
+    notifyMutation(saved);
+    return saved;
   }
 
   function deleteNote(request) {
@@ -1040,6 +1048,7 @@ function createNoteStore(appPaths) {
     db.prepare('UPDATE notes SET deleted_at = ?, updated_at = ? WHERE id = ?')
       .run(timestamp, timestamp, noteId);
     deleteFtsRow(db, noteId);
+    notifyMutation({ id: noteId, deletedAt: timestamp });
   }
 
   function listFolders() {
@@ -1111,6 +1120,13 @@ function createNoteStore(appPaths) {
   }
 
   return {
+    setMutationListener(listener) { onMutation = listener; },
+    searchNotes(request) {
+      return require('./noteSearch.cjs').keywordNotes(db, request);
+    },
+    eligibleSearchNotes(request) {
+      return require('./noteSearch.cjs').eligibleNoteRows(db, request);
+    },
     close,
     createFolder,
     createNote,
