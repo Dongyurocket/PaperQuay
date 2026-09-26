@@ -159,8 +159,7 @@
     },
     "win": {
       "target": [
-        "nsis",
-        "msi"
+        "nsis"
       ],
       "icon": "icon.ico",
       "signAndEditExecutable": false
@@ -171,7 +170,8 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "PaperQuay"
+      "shortcutName": "PaperQuay",
+      "include": "installer.nsh"
     },
     "linux": {
       "target": [

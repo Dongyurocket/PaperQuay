@@ -172,4 +172,7 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   backend?.close();
+  // 兜底：后端资源（如 RAG worker 线程卡在同步 SQLite 调用里）关闭耗时过长时，
+  // 3 秒后强制退出，避免留下无窗口的驻留进程，导致覆盖安装被误判为"正在运行"。
+  setTimeout(() => app.exit(0), 3000).unref();
 });
