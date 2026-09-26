@@ -6,6 +6,12 @@
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-09-27
+
+### 修复
+
+- **安装版启动崩溃（打包漏掉共享解析器）**：electron-builder 的 `build.files` 未包含 `src/shared`，0.3.0 安装包的 `app.asar` 内缺少 `src/shared/markdownToTiptap.cjs`，主进程启动时 `electron/backend/noteVault.cjs` require 失败并抛出未捕获异常，窗口无法打开。白名单补入 `src/shared/**/*` 后重新打包，`app.asar` 内已包含该解析器；开发模式不受影响。
+
 ## [0.3.0] - 2026-09-26
 
 ### 新增
