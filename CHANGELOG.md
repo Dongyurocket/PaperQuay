@@ -6,6 +6,13 @@
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-09-27
+
+### 修复
+
+- **覆盖安装被误判「正在运行」**：electron-builder NSIS 安装器的 `CHECK_APP_RUNNING` 会检测安装目录下的所有进程，上次异常退出残留的无窗口子进程（renderer / gpu / utility / crashpad-handler，均为 PaperQuay.exe）会让安装器反复提示「正在运行」且无法自动关闭，只能借助第三方卸载工具。新增 `installer.nsh` 自定义 `customCheckAppRunning` 宏：检测到残留进程时自动强制结束并重试，均失败才提示手动处理；同时移除 `msi` 构建目标（与 NSIS 双体系混装会导致覆盖安装异常），Windows 仅发布 NSIS 安装包。
+- **退出兜底加固**：`before-quit` 增加 3 秒强制退出兜底，避免后端资源（如 RAG worker 线程）关闭卡住时留下无窗口驻留进程。
+
 ## [0.3.1] - 2026-09-27
 
 ### 修复
