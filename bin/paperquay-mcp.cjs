@@ -34,7 +34,7 @@ const options = parseArgs();
 const service = new PaperQuayKnowledgeService({ dataDir: options.dataDir });
 
 const SERVER_NAME = 'paperquay-knowledge-mcp';
-const SERVER_VERSION = '0.2.1';
+const SERVER_VERSION = '0.3.0';
 
 const ALLOW_WHILE_APP_RUNNING_SCHEMA = {
   type: 'boolean',

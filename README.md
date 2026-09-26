@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.2.1-2563eb?style=flat-square" alt="Version v0.2.1">
+  <img src="https://img.shields.io/badge/version-v0.3.0-2563eb?style=flat-square" alt="Version v0.3.0">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-4b5563?style=flat-square" alt="Windows macOS Linux">
   <img src="https://img.shields.io/badge/built%20with-Electron-47848f?style=flat-square" alt="Electron">
   <img src="https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-0f766e?style=flat-square" alt="React TypeScript">
@@ -55,6 +55,14 @@
 ---
 
 ## 近期更新
+
+### v0.3.0 - 笔记语义检索、提炼预览与 vault 冲突保护
+
+- **笔记也能语义检索**：内置 Agent 与外部 MCP 的笔记检索升级为向量 + FTS5 混合（RRF 融合），用词不同也能稳定召回；未配置 Embedding 时自动降级关键词检索并提示。笔记在保存、导入、vault 回导后自动增量索引，删除立即失效，工具栏新增「重建笔记语义索引」入口。
+- **摘录提炼先预览后写入**：并排对照原始识别文本与提炼结果，确认才落库；预览内可用视觉模型重识别公式 / 表格区域，模型不支持或调用失败时回退纯文本，采用重识别结果的锚点标注「AI 重识别」。
+- **聚合配方与系统页自动维护**：Agent 可按配方把摘录卡聚合为精读卡 / 概念页并逐条回链来源；每次成功写入追加 log，每 5 次刷新 index / overview 导航页，手工改过的系统页不会被自动覆盖。体检卡新增「让 Agent 修复」入口，一键预填修复指令。
+- **八种页面类型与稳定双链**：`page_kind` 入库并贯通编辑器模板、侧栏过滤、内置 Agent、MCP 与 vault；双链按 `noteId` 解析，目标笔记改名不再丢链。
+- **vault 往返保真与冲突保护**：共享 Markdown → Tiptap 解析器让标题、列表、双链、标签、引用与锚点在往返中保留；双侧同时修改不再静默覆盖，冲突内容写成 `--conflict-*.md` 副本。同版本还带来 vault 打开自动同步与 15–60 分钟定时同步、笔记列表排序与批量整理、引用样式进入阅读器设置。
 
 ### v0.2.1 - 表格行内公式修复与中文用户手册
 

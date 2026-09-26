@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.2.1-2563eb?style=flat-square" alt="Version v0.2.1">
+  <img src="https://img.shields.io/badge/version-v0.3.0-2563eb?style=flat-square" alt="Version v0.3.0">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-4b5563?style=flat-square" alt="Windows macOS Linux">
   <img src="https://img.shields.io/badge/built%20with-Electron-47848f?style=flat-square" alt="Electron">
   <img src="https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-0f766e?style=flat-square" alt="React TypeScript">
@@ -54,6 +54,14 @@
 ---
 
 ## Latest Update
+
+### v0.3.0 - Semantic note search, distill preview, and vault conflict protection
+
+- **Semantic note search**: the built-in Agent and the external MCP server now run hybrid vector + FTS5 note retrieval fused with RRF, so notes worded differently are still found; without an Embedding API it degrades to keyword search with a notice. Notes are indexed incrementally after save, import and vault round-trip, deletes invalidate immediately, and the toolbar gains a "Rebuild note semantic index" action.
+- **Distill preview before writing**: "AI distill to excerpt card" opens a side-by-side panel comparing the original recognized text with the distilled result, and stores nothing until you confirm; a vision model can re-recognize formula/table regions inside the preview, falling back to plain text on failure and marking accepted results as "AI 重识别".
+- **Aggregation recipes and self-maintaining system pages**: the Agent aggregates excerpt cards into paper cards / concept pages with every bullet linking back to its source; each successful write appends a log entry and every five writes refresh the index / overview pages, while hand-edited system pages are never overwritten. The health report gains a "Let the Agent fix" action with a pre-filled repair brief.
+- **Eight page kinds and stable wikilinks**: `page_kind` is stored in the database and flows through editor templates, sidebar filtering, the built-in Agent, MCP and the vault; wikilinks resolve by `noteId`, so renaming a target note no longer breaks links.
+- **Markdown round-trip fidelity and vault conflict copies**: a shared Markdown→Tiptap parser keeps headings, lists, wikilinks, tags, citations and anchors across round trips; edits on both sides are no longer silently overwritten — conflicting content is written to a `--conflict-*.md` copy. The same release adds vault auto-sync with an optional 15–60 minute timer, note-list sorting and batch tidy-up, and citation styles in reader settings.
 
 ### v0.2.1 - Table inline-math fix and a Chinese user manual
 
