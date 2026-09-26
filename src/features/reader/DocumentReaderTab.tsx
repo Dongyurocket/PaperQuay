@@ -149,8 +149,20 @@ import {
   createNoteAnchorFromSelection,
   titleFromText,
 } from '../notes/noteUtils';
-import { buildDistilledExcerptAppendPatch, buildDistilledExcerptNoteCreateRequest, isExcerptCard } from '../notes/noteDistill';
-import { distillExcerpt } from '../../services/noteDistill';
+import { isExcerptCard } from '../notes/noteDistill';
+import { distillExcerpt, reidentifyExcerptImage } from '../../services/noteDistill';
+import {
+  buildDistillPreviewCommit,
+  cancelDistillPreview,
+  confirmDistillPreview,
+  createDistillPreviewState,
+  markDistillPreviewProcessing,
+  markDistillPreviewReady,
+  type DistillPreviewState,
+} from '../notes/noteDistillPreview';
+import { NoteDistillPreviewPanel } from '../notes/NoteDistillPreviewPanel';
+import { getPdfBlockCropDataUrl } from '../pdf/pdfBlockCrop';
+import { loadLibraryAgentModelPreset } from '../../services/libraryAgent';
 import {
   chunkItems,
   getModelRuntimeConfig,
@@ -448,6 +460,10 @@ function DocumentReaderTab({
   const [capturingScreenshot, setCapturingScreenshot] = useState(false);
   const [selectedExcerpt, setSelectedExcerpt] = useState<SelectedExcerpt | null>(null);
   const [selectionDistilling, setSelectionDistilling] = useState(false);
+  const [distillPreview, setDistillPreview] = useState<DistillPreviewState | null>(null);
+  const [distillPreviewAppendTarget, setDistillPreviewAppendTarget] = useState<Note | null>(null);
+  const [distillVisionBusy, setDistillVisionBusy] = useState(false);
+  const [distillVisionAvailable, setDistillVisionAvailable] = useState(false);
   const [pendingNoteAnchorInsert, setPendingNoteAnchorInsert] = useState<NoteAnchorInsertRequest | null>(null);
   const [pendingBlockAnchorJump, setPendingBlockAnchorJump] =
     useState<JumpToNoteAnchorEventDetail | null>(null);
@@ -2872,57 +2888,20 @@ function DocumentReaderTab({
       setStatusMessage(lRef.current('请先在 PDF 或正文中划词', 'Select text in the PDF or document first'));
       return;
     }
-    if (selectionDistilling) return;
-
     const appendTarget = options?.appendToActiveCard
       ? (() => {
           const target = resolveReaderNoteAnchorTarget(notes, activeNoteId);
           return isExcerptCard(target) ? target : null;
         })()
       : null;
-
-    setSelectionDistilling(true);
-    setStatusMessage(lRef.current('正在提炼摘录…', 'Distilling excerpt…'));
+    if (selectionDistilling || distillPreview) return;
+    setDistillPreviewAppendTarget(appendTarget);
+    setDistillPreview(createDistillPreviewState({ selectedExcerpt: excerpt, appendTarget }));
     try {
-      const anchor = createNoteAnchorFromSelection(excerpt, currentDocument.workspaceId, currentDocument.title);
-      const distilled = await distillExcerpt({
-        text: excerpt.text,
-        paperTitle: currentDocument.title,
-        pageLabel: anchor.label,
-      });
-      if (appendTarget) {
-        // 多段累加：新锚点 + 提炼正文追加到当前摘录卡，已有锚点只增不改。
-        const { patch } = buildDistilledExcerptAppendPatch({
-          note: appendTarget,
-          paperId: currentDocument.workspaceId,
-          selectedExcerpt: excerpt,
-          sourceTitle: currentDocument.title,
-          distilledText: distilled.text,
-        });
-        await handleUpdateNote(appendTarget.id, patch);
-        setStatusMessage(lRef.current('已追加提炼到当前摘录卡', 'Appended the distilled excerpt to the current card'));
-      } else {
-        const created = await handleCreateNote(
-          buildDistilledExcerptNoteCreateRequest({
-            paperId: currentDocument.workspaceId,
-            selectedExcerpt: excerpt,
-            sourceTitle: currentDocument.title,
-            distilledTitle: distilled.title,
-            distilledText: distilled.text,
-          }),
-        );
-        if (created) {
-          setStatusMessage(lRef.current('已生成提炼式摘录卡', 'Created a distilled excerpt card'));
-        }
-      }
-    } catch (error) {
-      setStatusMessage(
-        error instanceof Error
-          ? error.message
-          : lRef.current('提炼摘录失败', 'Failed to distill the excerpt'),
-      );
-    } finally {
-      setSelectionDistilling(false);
+      const model = await loadLibraryAgentModelPreset();
+      setDistillVisionAvailable(model?.supportsVision === true);
+    } catch {
+      setDistillVisionAvailable(false);
     }
   }, [
     activeNoteId,
@@ -2933,7 +2912,167 @@ function DocumentReaderTab({
     notes,
     selectedExcerpt,
     selectionDistilling,
+    distillPreview,
   ]);
+
+  const distillPreviewBlock = useMemo(
+    () => (distillPreview?.selectedExcerpt.blockId ? blockById.get(distillPreview.selectedExcerpt.blockId) ?? null : null),
+    [blockById, distillPreview],
+  );
+
+  const canReidentifyDistillPreview = Boolean(
+    distillPreview &&
+      distillVisionAvailable &&
+      pdfSource &&
+      distillPreviewBlock?.bbox &&
+      distillPreviewBlock.bbox.length >= 4,
+  );
+
+  const handleGenerateDistillPreview = useCallback(async () => {
+    if (!distillPreview || selectionDistilling) return;
+    setSelectionDistilling(true);
+    setDistillPreview(markDistillPreviewProcessing(distillPreview));
+    try {
+      const sourceText = distillPreview.aiEnhanced
+        ? distillPreview.sourceText
+        : distillPreview.originalText;
+      const anchor = createNoteAnchorFromSelection(
+        { ...distillPreview.selectedExcerpt, text: sourceText },
+        currentDocument.workspaceId,
+        currentDocument.title,
+      );
+      const distilled = await distillExcerpt({
+        text: sourceText,
+        paperTitle: currentDocument.title,
+        pageLabel: anchor.label,
+      });
+      setDistillPreview((current) =>
+        current
+          ? markDistillPreviewReady(current, {
+              title: distilled.title,
+              text: distilled.text,
+              sourceText,
+              aiEnhanced: current.aiEnhanced,
+            })
+          : current,
+      );
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : lRef.current('提炼摘录失败', 'Failed to distill the excerpt'));
+      setDistillPreview((current) => (current ? { ...current, phase: 'ready' } : current));
+    } finally {
+      setSelectionDistilling(false);
+    }
+  }, [currentDocument.title, currentDocument.workspaceId, distillPreview, selectionDistilling]);
+
+  const handleReidentifyDistillPreview = useCallback(async () => {
+    if (!distillPreview || !canReidentifyDistillPreview || !pdfSource || !distillPreviewBlock) return;
+    setDistillVisionBusy(true);
+    try {
+      const imageDataUrl = await getPdfBlockCropDataUrl(pdfSource, distillPreviewBlock);
+      if (!imageDataUrl) throw new Error('无法生成选区 PDF 切片。');
+      const result = await reidentifyExcerptImage({
+        text: distillPreview.originalText,
+        imageDataUrl,
+      });
+      if (!result.reparsedText.trim()) throw new Error('视觉模型未返回可用的重识别内容。');
+      setDistillPreview((current) => (current
+        ? {
+            ...current,
+            sourceText: result.reparsedText,
+            reidentifyRequested: true,
+            aiEnhanced: true,
+            fallbackNotice: null,
+          }
+        : current));
+      setStatusMessage(lRef.current('已完成重识别，请生成提炼稿预览', 'Re-recognition finished. Generate the draft preview.'));
+    } catch (error) {
+      setDistillPreview((current) => (current
+        ? {
+            ...current,
+            sourceText: current.originalText,
+            reidentifyRequested: false,
+            aiEnhanced: false,
+            fallbackNotice: lRef.current(
+              `重识别失败，已回退纯文本提炼：${error instanceof Error ? error.message : '未知错误'}`,
+              `Re-recognition failed; fell back to text-only distillation: ${error instanceof Error ? error.message : 'Unknown error'}`,
+            ),
+          }
+        : current));
+      setSelectionDistilling(true);
+      try {
+        const fallbackAnchor = createNoteAnchorFromSelection(
+          { ...distillPreview.selectedExcerpt, text: distillPreview.originalText },
+          currentDocument.workspaceId,
+          currentDocument.title,
+        );
+        const fallback = await distillExcerpt({
+          text: distillPreview.originalText,
+          paperTitle: currentDocument.title,
+          pageLabel: fallbackAnchor.label,
+        });
+        setDistillPreview((current) =>
+          current
+            ? markDistillPreviewReady(current, {
+                title: fallback.title,
+                text: fallback.text,
+                sourceText: current.originalText,
+                aiEnhanced: false,
+                fallbackNotice: lRef.current(
+                  '重识别失败，已自动回退纯文本提炼。',
+                  'Re-recognition failed; automatically fell back to text-only distillation.',
+                ),
+              })
+            : current,
+        );
+      } catch (fallbackError) {
+        setStatusMessage(
+          fallbackError instanceof Error
+            ? fallbackError.message
+            : lRef.current('提炼摘录失败', 'Failed to distill the excerpt'),
+        );
+      } finally {
+        setSelectionDistilling(false);
+      }
+    } finally {
+      setDistillVisionBusy(false);
+    }
+  }, [
+    canReidentifyDistillPreview,
+    currentDocument.title,
+    currentDocument.workspaceId,
+    distillPreview,
+    distillPreviewBlock,
+    pdfSource,
+  ]);
+
+  const commitDistillPreview = useCallback(async (direct = false) => {
+    if (!distillPreview || !distillPreview.distilledText.trim()) return;
+    const committed = buildDistillPreviewCommit({
+      state: distillPreview,
+      paperId: currentDocument.workspaceId,
+      sourceTitle: currentDocument.title,
+      appendTarget: distillPreviewAppendTarget,
+    });
+    if (!committed) return;
+
+    if (committed.kind === 'append') {
+      await handleUpdateNote(committed.noteId, committed.patch);
+      setStatusMessage(lRef.current('已追加提炼到当前摘录卡', 'Appended the distilled excerpt to the current card'));
+    } else {
+      const created = await handleCreateNote(committed.request);
+      if (created) setStatusMessage(lRef.current('已生成提炼式摘录卡', 'Created a distilled excerpt card'));
+    }
+    setDistillPreview((current) => (current ? (direct ? confirmDistillPreview(current) : confirmDistillPreview(current)) : current));
+    setDistillPreview(null);
+    setDistillPreviewAppendTarget(null);
+  }, [currentDocument.title, currentDocument.workspaceId, distillPreview, distillPreviewAppendTarget, handleCreateNote, handleUpdateNote]);
+
+  const handleCancelDistillPreview = useCallback(() => {
+    setDistillPreview((current) => (current ? cancelDistillPreview(current) : current));
+    setDistillPreview(null);
+    setDistillPreviewAppendTarget(null);
+    setStatusMessage(lRef.current('已取消提炼，未写入笔记', 'Distillation cancelled; no note was written'));
+  }, []);
 
   const handleAddBlockToNote = useCallback(
     (block: PositionedMineruBlock, selection: TextSelectionPayload) => {
@@ -4274,6 +4413,21 @@ function DocumentReaderTab({
         onAttachAssistant={handleAttachAssistant}
         showLibraryToggle={false}
       />
+      {distillPreview ? (
+        <NoteDistillPreviewPanel
+          state={distillPreview}
+          appendTargetTitle={distillPreviewAppendTarget?.title ?? null}
+          supportsVision={distillVisionAvailable}
+          canReidentify={canReidentifyDistillPreview}
+          reidentifying={distillVisionBusy}
+          onStateChange={(patch) => setDistillPreview((current) => (current ? { ...current, ...patch } : current))}
+          onGenerate={() => void handleGenerateDistillPreview()}
+          onReidentify={() => void handleReidentifyDistillPreview()}
+          onConfirm={() => void commitDistillPreview()}
+          onDirectSave={() => void commitDistillPreview(true)}
+          onCancel={handleCancelDistillPreview}
+        />
+      ) : null}
       {ragContextCitation ? (
         <RagChunkContextPreview
           documentKey={currentDocument.workspaceId}

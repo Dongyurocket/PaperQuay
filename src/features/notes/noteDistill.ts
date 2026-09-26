@@ -7,6 +7,23 @@ import { createNoteAnchorFromSelection, noteAnchorBlockFromAnchor, titleFromText
 
 const MY_THOUGHTS_HEADING = '💭 我的想法：';
 
+export interface DistilledExcerptSource {
+  text: string;
+  aiEnhanced?: boolean;
+}
+
+export function buildDistilledExcerptSource(
+  selectedExcerpt: SelectedExcerpt,
+  source?: DistilledExcerptSource,
+): SelectedExcerpt & { aiEnhanced?: boolean } {
+  const text = source?.text?.trim() || selectedExcerpt.text;
+  return {
+    ...selectedExcerpt,
+    text,
+    ...(source?.aiEnhanced ? { aiEnhanced: true } : {}),
+  };
+}
+
 /**
  * 提炼式摘录卡（痛点 8）：锚点块在前（原文快照保真、不可手改），AI 提炼正文在后（可编辑），
  * 尾部固定「我的想法」区——提炼是忠实浓缩，想法是独立观点，二者结构分离。
@@ -18,14 +35,25 @@ export function buildDistilledExcerptNoteCreateRequest({
   sourceTitle,
   distilledTitle,
   distilledText,
+  sourceText,
+  aiEnhanced = false,
 }: {
   paperId: string;
   selectedExcerpt: SelectedExcerpt;
   sourceTitle?: string;
   distilledTitle: string;
   distilledText: string;
+  sourceText?: string;
+  aiEnhanced?: boolean;
 }): CreateNoteRequest {
-  const anchor = createNoteAnchorFromSelection(selectedExcerpt, paperId, sourceTitle);
+  const sourceExcerpt = buildDistilledExcerptSource(selectedExcerpt, {
+    text: sourceText ?? selectedExcerpt.text,
+    aiEnhanced,
+  });
+  const anchor = {
+    ...createNoteAnchorFromSelection(sourceExcerpt, paperId, sourceTitle),
+    ...(aiEnhanced ? { aiEnhanced: true } : {}),
+  };
   const contentJson: JSONContent = {
     type: 'doc',
     content: [
@@ -66,14 +94,25 @@ export function buildDistilledExcerptAppendPatch({
   selectedExcerpt,
   sourceTitle,
   distilledText,
+  sourceText,
+  aiEnhanced = false,
 }: {
   note: Note;
   paperId: string;
   selectedExcerpt: SelectedExcerpt;
   sourceTitle?: string;
   distilledText: string;
+  sourceText?: string;
+  aiEnhanced?: boolean;
 }): { patch: UpdateNoteRequest; anchor: NoteAnchor } {
-  const anchor = createNoteAnchorFromSelection(selectedExcerpt, paperId, sourceTitle);
+  const sourceExcerpt = buildDistilledExcerptSource(selectedExcerpt, {
+    text: sourceText ?? selectedExcerpt.text,
+    aiEnhanced,
+  });
+  const anchor = {
+    ...createNoteAnchorFromSelection(sourceExcerpt, paperId, sourceTitle),
+    ...(aiEnhanced ? { aiEnhanced: true } : {}),
+  };
   const existing = note.contentJson && typeof note.contentJson === 'object'
     ? (note.contentJson as JSONContent)
     : { type: 'doc', content: [] };
@@ -106,4 +145,3 @@ export function buildDistilledExcerptAppendPatch({
     },
   };
 }
-

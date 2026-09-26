@@ -135,8 +135,17 @@ export function noteAnchorBlockFromAnchor(anchor: NoteAnchor): JSONContent {
       sourceLabel: anchor.source === 'blocks' ? '正文摘录' : '摘录',
       sourceTitle,
       excerpt: anchor.excerpt,
+      aiEnhanced: anchor.aiEnhanced === true,
     },
   };
+}
+
+export function isAiEnhancedAnchor(anchor: Pick<NoteAnchor, 'aiEnhanced'> | null | undefined): boolean {
+  return anchor?.aiEnhanced === true;
+}
+
+export function noteAnchorProvenanceLabel(anchor: Pick<NoteAnchor, 'aiEnhanced'> | null | undefined): string {
+  return isAiEnhancedAnchor(anchor) ? 'AI 重识别' : '';
 }
 
 export function appendAnchorToNoteContent(note: Note | null, anchor: NoteAnchor): JSONContent {

@@ -308,6 +308,7 @@ function normalizeAnchors(value) {
     const source = ['pdf', 'blocks', 'ai-chat', 'manual'].includes(item.source)
       ? item.source
       : undefined;
+    const aiEnhanced = item.aiEnhanced === true;
     const pdfLocation = normalizePdfLocation(item.pdfLocation);
     // 位置字段必须原样保留：润色锚点只带 blockId/pageIndex，丢了就再也跳不回原文。
     const blockId = cleanString(item.blockId) || undefined;
@@ -328,6 +329,7 @@ function normalizeAnchors(value) {
       sourceTitle: sourceTitle || undefined,
       excerpt,
       source,
+      ...(aiEnhanced ? { aiEnhanced: true } : {}),
       blockId,
       pageIndex,
       pdfLocation: pdfLocation ?? undefined,

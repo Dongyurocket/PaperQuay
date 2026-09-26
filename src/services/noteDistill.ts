@@ -1,9 +1,27 @@
 import { invoke } from '../platform/electron/core';
 import { loadLibraryAgentModelPreset } from './libraryAgent';
+import { reparseBlockWithAi } from './blockReparse';
 
 export interface NoteDistillResult {
   title: string;
   text: string;
+}
+
+export interface NoteDistillReidentifyResult {
+  reparsedText: string;
+  modelName: string;
+}
+
+export async function reidentifyExcerptImage(request: {
+  text: string;
+  imageDataUrl: string;
+}): Promise<NoteDistillReidentifyResult> {
+  return reparseBlockWithAi({
+    text: request.text,
+    imageDataUrl: request.imageDataUrl,
+    blockType: 'formula/table',
+    customPrompt: 'Reconstruct the selected formula as precise LaTeX or the selected table as a clean Markdown table. Return only the reconstructed content.',
+  });
 }
 
 function toErrorMessage(error: unknown, fallback: string) {

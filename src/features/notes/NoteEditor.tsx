@@ -118,7 +118,12 @@ import {
   insertParagraphBelowBlock,
   type NoteEditorContextMenuState,
 } from './noteEditorBlockUtils.ts';
-import { normalizeTagInput, noteAnchorBlockFromAnchor } from './noteUtils';
+import {
+  isAiEnhancedAnchor,
+  normalizeTagInput,
+  noteAnchorBlockFromAnchor,
+  noteAnchorProvenanceLabel,
+} from './noteUtils';
 import {
   componentBlockNode,
   clearNoteEditorDraft,
@@ -374,6 +379,8 @@ function NoteAnchorBlockView({ node, selected, extension }: NodeViewProps) {
   const sourceLabel = String(node.attrs.sourceLabel || '摘录');
   const sourceTitle = normalizeAnchorSourceTitle(String(node.attrs.sourceTitle || ''), sourceLabel);
   const excerpt = String(node.attrs.excerpt || '');
+  const aiEnhanced = isAiEnhancedAnchor({ aiEnhanced: node.attrs.aiEnhanced === true });
+  const provenanceLabel = noteAnchorProvenanceLabel({ aiEnhanced });
   const onClick = (extension.options as NoteAnchorBlockOptions).onClick;
 
   return (
@@ -390,6 +397,11 @@ function NoteAnchorBlockView({ node, selected, extension }: NodeViewProps) {
       </blockquote>
       <figcaption className="pq-note-anchor-card-meta" contentEditable={false}>
         <span className="pq-note-anchor-card-source" title={sourceTitle}>{sourceTitle}</span>
+        {provenanceLabel ? (
+          <span className="pq-note-anchor-card-provenance" title="原文快照经用户确认的 AI 重识别">
+            {provenanceLabel}
+          </span>
+        ) : null}
         <button
           type="button"
           className="pq-note-anchor-card-page"
@@ -461,6 +473,12 @@ const NoteAnchorBlock = TiptapNode.create<NoteAnchorBlockOptions>({
         renderHTML: (attributes) =>
           attributes.excerpt ? { 'data-note-anchor-excerpt': attributes.excerpt } : {},
       },
+      aiEnhanced: {
+        default: false,
+        parseHTML: (element) => element.getAttribute('data-note-anchor-ai-enhanced') === 'true',
+        renderHTML: (attributes) =>
+          attributes.aiEnhanced ? { 'data-note-anchor-ai-enhanced': 'true' } : {},
+      },
     };
   },
 
@@ -473,6 +491,7 @@ const NoteAnchorBlock = TiptapNode.create<NoteAnchorBlockOptions>({
     const sourceLabel = String(node.attrs.sourceLabel || '摘录');
     const sourceTitle = normalizeAnchorSourceTitle(String(node.attrs.sourceTitle || ''), sourceLabel);
     const excerpt = String(node.attrs.excerpt || '');
+    const provenanceLabel = noteAnchorProvenanceLabel({ aiEnhanced: node.attrs.aiEnhanced === true });
 
     return [
       'figure',
@@ -498,6 +517,12 @@ const NoteAnchorBlock = TiptapNode.create<NoteAnchorBlockOptions>({
           class: 'pq-note-anchor-card-source',
           title: sourceTitle,
         }, sourceTitle],
+        ...(provenanceLabel
+          ? [['span', {
+              class: 'pq-note-anchor-card-provenance',
+              title: '原文快照经用户确认的 AI 重识别',
+            }, provenanceLabel]]
+          : []),
         [
           'span',
           {

@@ -46,6 +46,8 @@ export interface NoteAnchor {
   sourceTitle?: string;
   excerpt: string;
   source?: 'pdf' | 'blocks' | 'ai-chat' | 'manual';
+  /** The immutable snapshot was produced by an explicit user-confirmed AI re-identification. */
+  aiEnhanced?: boolean;
   blockId?: string | null;
   pageIndex?: number | null;
   pdfLocation?: NotePdfLocation;

@@ -101,6 +101,7 @@ function noteAnchorBlockFromLegacy(
       sourceLabel,
       sourceTitle: normalizeAnchorSourceTitle(anchor?.sourceTitle || '', sourceLabel),
       excerpt,
+      aiEnhanced: anchor?.aiEnhanced === true,
     },
   };
 }
