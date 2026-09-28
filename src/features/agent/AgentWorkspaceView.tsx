@@ -9,12 +9,13 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  Brain,
-  BrainCog,
+  Archive,
   Camera,
   BookOpen,
   Check,
+  ChevronDown,
   Database,
+  Gauge,
   ImagePlus,
   Loader2,
   Paperclip,
@@ -259,13 +260,19 @@ function AgentReasoningPicker({
         aria-label={l('选择思考强度', 'Choose reasoning effort')}
         aria-expanded={open}
         className={[
-          'pq-icon-button h-10 w-10 border bg-white/60',
+          'flex h-10 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-xl border px-2.5 text-xs font-semibold transition',
           value === 'auto'
-            ? 'border-[var(--pq-border)] text-slate-400 dark:bg-white/5 dark:text-[var(--pq-text-faint)]'
+            ? 'border-[var(--pq-border)] bg-white/60 text-[var(--pq-text-muted)] hover:border-[var(--pq-border-strong)] hover:bg-[var(--pq-accent-soft)] dark:bg-white/5'
             : 'border-[var(--pq-accent)] bg-[var(--pq-accent-soft)] text-[var(--pq-accent)]',
         ].join(' ')}
       >
-        <Brain className="h-4 w-4" strokeWidth={1.8} />
+        <Gauge className="h-3.5 w-3.5 shrink-0" strokeWidth={1.8} />
+        <span className="font-medium opacity-70">{l('思考', 'Think')}</span>
+        <span>{l(selectedOption.labelZh, selectedOption.labelEn)}</span>
+        <ChevronDown
+          className={['h-3.5 w-3.5 shrink-0 opacity-70 transition-transform', open ? 'rotate-180' : ''].join(' ')}
+          strokeWidth={1.9}
+        />
       </button>
 
       {typeof document === 'undefined' || !menu ? null : createPortal(menu, document.body)}
@@ -927,9 +934,10 @@ export default function AgentWorkspaceView({
                         disabled={activeSessionRunning}
                         title={l('整理 Agent 记忆', 'Organize Agent memory')}
                         aria-label={l('整理 Agent 记忆', 'Organize Agent memory')}
-                        className={agentComposerIconButtonClass}
+                        className="pq-button h-10 shrink-0 gap-1.5 whitespace-nowrap px-2.5 text-xs text-[var(--pq-text-muted)] disabled:cursor-not-allowed"
                       >
-                        <BrainCog className="h-4 w-4" strokeWidth={1.8} />
+                        <Archive className="h-4 w-4" strokeWidth={1.8} />
+                        {l('整理记忆', 'Memory')}
                       </button>
                       <button
                         type="button"
