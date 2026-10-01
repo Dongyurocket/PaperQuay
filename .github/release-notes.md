@@ -1,6 +1,6 @@
 # PaperQuay v{{VERSION}}
 
-This release fixes two note workspace issues: note block controls no longer appear over other workspaces during startup or navigation, and Markdown tables plus inline and display math now render as editable Tiptap content. Existing notes that stored these constructs as plain text are upgraded when opened.
+This release fixes note workspace rendering issues: block formulas now use KaTeX display mode so `\\tag{}` equation numbers render correctly instead of falling back to red raw LaTeX. Inline formulas remain inline.
 
 ## Downloads
 
@@ -10,7 +10,7 @@ Choose the installer for your system from Assets: Windows `.exe`, macOS `.dmg`, 
 
 # PaperQuay v{{VERSION}} 中文说明
 
-本版修复两项笔记问题：启动或切换到其他工作区时，笔记块操作选项不再残留在左上角；Markdown 表格、行内公式和块级公式现在会转换为可编辑的 Tiptap 内容。打开旧笔记时，也会兼容升级仍以普通文本保存的相关内容。
+本版修复笔记块公式渲染问题：块级公式启用 KaTeX display mode，带有 `\\tag{}` 的公式不再显示为红色 LaTeX 原文；行内公式保持行内布局。
 
 ## 下载
 

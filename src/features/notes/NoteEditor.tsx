@@ -30,7 +30,7 @@ import TaskItem from '@tiptap/extension-task-item';
 import Placeholder from '@tiptap/extension-placeholder';
 import CharacterCount from '@tiptap/extension-character-count';
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
-import Mathematics from '@tiptap/extension-mathematics';
+import { BlockMath, InlineMath } from '@tiptap/extension-mathematics';
 import type { ResolvedPos } from '@tiptap/pm/model';
 import { TextSelection } from '@tiptap/pm/state';
 import { cellAround, cellNear, tableEditingKey } from '@tiptap/pm/tables';
@@ -799,7 +799,10 @@ export function NoteEditor({
     }),
     CharacterCount,
     CodeBlockLowlight.configure({ lowlight }),
-    Mathematics.configure({ katexOptions: { throwOnError: false } }),
+    // Block formulas need display mode for constructs such as `\tag{4.24}`.
+    // Keep inline formulas in the default inline mode so their layout is not changed.
+    BlockMath.configure({ katexOptions: { displayMode: true, throwOnError: false } }),
+    InlineMath.configure({ katexOptions: { displayMode: false, throwOnError: false } }),
     NoteComponentBlock,
     NoteAnchorBlock.configure({
       onClick: jumpToAnchorId,
