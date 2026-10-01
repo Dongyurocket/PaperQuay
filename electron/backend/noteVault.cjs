@@ -177,6 +177,10 @@ function serializeInline(node, ctx) {
     return text;
   }
   if (node.type === 'hardBreak') return '  \n';
+  if (node.type === 'inlineMath') {
+    const latex = String(node.attrs?.latex ?? '').trim();
+    return latex ? `$${latex}$` : '';
+  }
   if (node.type === 'paperReference') {
     const paperId = cleanString(node.attrs?.paperId);
     const label = cleanString(node.attrs?.label) || paperId;
@@ -234,6 +238,12 @@ function serializeBlock(node, ctx, indent = '') {
     }
     case 'horizontalRule':
       return `${indent}---`;
+    case 'blockMath': {
+      const latex = String(node.attrs?.latex ?? '').trim();
+      if (!latex) return '';
+      const lines = latex.split('\n').map((line) => `${indent}${line}`);
+      return [`${indent}$$`, ...lines, `${indent}$$`].join('\n');
+    }
     case 'bulletList':
     case 'orderedList': {
       const ordered = node.type === 'orderedList';

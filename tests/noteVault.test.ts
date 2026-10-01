@@ -252,6 +252,27 @@ test('serializeNoteMarkdown：paperReference 渲染为 [n] 且同文献同号，
   assert.match(markdown, /2\. Jacob Devlin\. BERT\[J\]\. NAACL, 2019\./);
 });
 
+test('serializeNoteMarkdown：保留行内和块级公式的 LaTeX', () => {
+  const markdown = serializeNoteMarkdown({
+    contentJson: {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [
+            { type: 'text', text: '能量关系 ' },
+            { type: 'inlineMath', attrs: { latex: 'E=mc^2' } },
+          ],
+        },
+        { type: 'blockMath', attrs: { latex: '\\frac{a}{b} = c\\tag{1}' } },
+      ],
+    },
+  }, new Map());
+
+  assert.match(markdown, /能量关系 \$E=mc\^2\$/);
+  assert.match(markdown, /\$\$\n\\frac\{a\}\{b\} = c\\tag\{1\}\n\$\$/);
+});
+
 test('serializeNoteMarkdown：无 contentJson 时退化为纯文本', () => {
   assert.equal(serializeNoteMarkdown({ contentText: '纯文本内容' }, new Map()), '纯文本内容');
   assert.equal(serializeNoteMarkdown({ content: '兜底字段' }, new Map()), '兜底字段');

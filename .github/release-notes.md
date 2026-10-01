@@ -1,6 +1,6 @@
 # PaperQuay v{{VERSION}}
 
-This release fixes note workspace formula rendering in excerpt cards and legacy nested content. Excerpt cards render inline and display math with KaTeX, while formulas inside lists, quotes, and components are upgraded to Tiptap math nodes. OCR excerpts with a missing closing `$` are handled as math when their content is clearly LaTeX. Block formulas continue to use KaTeX display mode so `\\tag{}` equation numbers render correctly instead of falling back to red raw LaTeX.
+This release fixes note Markdown vault export dropping formulas. Inline and display Tiptap math nodes are now serialized as `$...$` and `$$...$$`, preserving multiline LaTeX and equation tags during synchronization.
 
 ## Downloads
 
@@ -10,7 +10,7 @@ Choose the installer for your system from Assets: Windows `.exe`, macOS `.dmg`, 
 
 # PaperQuay v{{VERSION}} 中文说明
 
-本版修复笔记摘录卡和旧笔记嵌套内容中的公式渲染问题：摘录卡支持行内、块级及常见括号公式，列表、引用块和组件内的旧公式会自动升级；部分 OCR 缺少结束 `$` 的公式也会按 LaTeX 识别。块级公式继续启用 KaTeX display mode，带有 `\\tag{}` 的公式不再显示为红色 LaTeX 原文。
+本版修复笔记同步 Markdown 文档丢失公式的问题：行内和块级 Tiptap 公式现在分别以 `$...$` 与 `$$...$$` 写入 vault，保留多行 LaTeX 及 `\\tag{}` 等公式内容。
 
 ## 下载
 
