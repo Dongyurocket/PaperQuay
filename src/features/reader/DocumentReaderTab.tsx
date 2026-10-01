@@ -956,7 +956,6 @@ function DocumentReaderTab({
       setMineruPath(nextMineruPath);
       setActiveBlockId(null);
       setHoveredBlockId(null);
-      setActivePdfHighlight(null);
       setBlockScrollSignal((current) => current + 1);
 
       if (!options?.item) {
@@ -3852,7 +3851,7 @@ function DocumentReaderTab({
       return;
     }
 
-    if (!pdfSource && !pendingNoteAnchorJump.blockId && typeof pendingNoteAnchorJump.pageIndex !== 'number') {
+    if (!pdfSource) {
       return;
     }
 

@@ -50,6 +50,38 @@ test('Agent memory store writes fixed L2/L3 files and appends redacted L1 traces
   }
 });
 
+test('Agent memory store enforces the 4,000-character working-memory limit on L2/L3 only', () => {
+  const { dataDir, store } = createStore();
+
+  try {
+    // L2/L3：4_000 字符硬上限
+    const withinLimit = store.writeMemory({ file: 'topics', content: 'x'.repeat(4_000) });
+    assert.equal(withinLimit.content.length, 4_000);
+    assert.throws(
+      () => store.writeMemory({ file: 'topics', content: 'x'.repeat(4_001) }),
+      /exceeds the 4000 character limit/,
+    );
+    assert.throws(
+      () => store.writeMemory({ file: 'synthesis', content: 'x'.repeat(4_001) }),
+      /exceeds the 4000 character limit/,
+    );
+
+    // trace 保持 8MB 上限：总量不受 4_000 工作记忆上限约束
+    for (let index = 0; index < 3; index += 1) {
+      store.appendTrace({
+        ts: Date.UTC(2026, 8, 30),
+        runId: 'run-limit',
+        kind: 'note',
+        payload: { blob: 'y'.repeat(10_000) },
+      });
+    }
+    const traceContent = store.readMemory({ file: 'trace', date: '2026-09-30' }).content;
+    assert.ok(traceContent.length > 4_000);
+  } finally {
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
 test('Agent memory store rejects arbitrary file names', () => {
   const { dataDir, store } = createStore();
 

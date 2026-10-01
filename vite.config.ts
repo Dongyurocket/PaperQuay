@@ -58,7 +58,26 @@ function manualChunks(id: string) {
 export default defineConfig(() => ({
   base: './',
   clearScreen: false,
-  plugins: [react()],
+  plugins: [
+    react(),
+    {
+      name: 'shared-markdown-parser-dev-export',
+      apply: 'serve',
+      // Vite serves local CJS sources directly in dev; Electron still needs CJS.
+      transform(code, id) {
+        if (!id.split('?')[0].replace(/\\/g, '/').endsWith('/src/shared/markdownToTiptap.cjs')) {
+          return null;
+        }
+        return {
+          code: code.replace(
+            'module.exports = { parseMarkdownToTiptap };',
+            'export { parseMarkdownToTiptap };',
+          ),
+          map: null,
+        };
+      },
+    },
+  ],
   server: {
     host: '127.0.0.1',
     port: 1420,

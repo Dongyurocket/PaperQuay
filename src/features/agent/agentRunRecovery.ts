@@ -67,6 +67,26 @@ function sanitizeRecoveredLoopMessages(messages: AgentLoopMessage[]): AgentLoopM
   });
 }
 
+export interface GenericCapabilityCheckpoint {
+  capabilityId: string;
+  artifacts: unknown;
+}
+
+export function latestCapabilityCheckpoint(
+  events: AgentRunEventRecord[],
+): GenericCapabilityCheckpoint | null {
+  for (const event of [...events].reverse()) {
+    if (event.kind === 'checkpoint' && isRecord(event.payload) && isRecord(event.payload.artifacts)) {
+      const capabilityId = typeof event.payload.capabilityId === 'string' ? event.payload.capabilityId : 'comparative-survey';
+      return {
+        capabilityId,
+        artifacts: event.payload.artifacts,
+      };
+    }
+  }
+  return null;
+}
+
 export function latestComparativeSurveyCheckpoint(
   events: AgentRunEventRecord[],
 ): Partial<ComparativeSurveyArtifacts> | null {
@@ -74,7 +94,7 @@ export function latestComparativeSurveyCheckpoint(
     if (
       event.kind === 'checkpoint' &&
       isRecord(event.payload) &&
-      event.payload.capabilityId === 'comparative-survey' &&
+      (!event.payload.capabilityId || event.payload.capabilityId === 'comparative-survey') &&
       isRecord(event.payload.artifacts)
     ) {
       const artifacts = event.payload.artifacts;

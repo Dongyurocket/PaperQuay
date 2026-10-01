@@ -27,6 +27,8 @@ const AGENT_RUN_EVENT_KINDS = new Set([
   'memory',
   'context_compacted',
   'checkpoint',
+  'capability_route',
+  'capability_route_failed',
 ]);
 const AGENT_LOG_SENSITIVE_KEY = /(?:api[_-]?key|authorization|token|password|secret|dataurl|attachment)/i;
 

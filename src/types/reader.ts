@@ -319,6 +319,8 @@ export interface QaModelPreset {
   labelCustomized?: boolean;
   /** Optional provider-advertised context limit; P3 falls back to 128k. */
   contextWindow?: number;
+  /** Optional provider-advertised max output tokens limit. */
+  maxOutputTokens?: number;
   /** Opt-in because OpenAI-compatible providers do not expose a reliable capability probe. */
   supportsVision?: boolean;
 }

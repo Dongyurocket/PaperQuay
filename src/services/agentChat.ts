@@ -15,6 +15,7 @@ export interface AgentChatTurnModelOptions {
   apiMode?: OpenAICompatibleApiMode;
   temperature?: number;
   reasoningEffort?: ModelReasoningEffort;
+  maxOutputTokens?: number;
 }
 
 function toErrorMessage(error: unknown, fallback: string): string {

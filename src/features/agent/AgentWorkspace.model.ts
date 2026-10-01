@@ -124,6 +124,9 @@ function sessionStatusFromMessages(messages: AgentChatMessage[]): AgentStepStatu
   }
 
   const latestTraceStatus = trace.length > 0 ? trace[trace.length - 1]?.status : undefined;
+  if (latestTraceStatus === 'warning') {
+    return 'warning';
+  }
   return latestTraceStatus === 'waiting' ? 'waiting' : 'success';
 }
 
@@ -388,6 +391,20 @@ export function buildRunningTrace(
   ];
 }
 
+/** 直接能力流水线没有 ReAct 工具计划时，收敛通用轨迹，避免遗留 RUNNING/WAITING。 */
+export function completeDirectAgentTrace(trace: AgentTraceStep[] | undefined, source: 'capability' | 'answer' = 'capability'): AgentTraceStep[] {
+  return (trace ?? []).map((step) => ({
+    ...step,
+    status: step.id === 'final' ? 'success' :
+      (step.id === 'plan' || step.id === 'tool-call' || step.id === 'tool-result') ? 'skipped' :
+        step.status === 'running' || step.status === 'waiting' ? 'success' : step.status,
+    summary: step.id === 'final' ? '最终回答已生成。' :
+      (step.id === 'plan' || step.id === 'tool-call' || step.id === 'tool-result')
+        ? source === 'capability' ? '本次由能力流水线直接完成。' : '具体轮次与工具结果见下方轨迹。'
+        : step.summary,
+  }));
+}
+
 export function applyAgentLoopEventToTrace(
   trace: AgentTraceStep[] | undefined,
   event: AgentLoopEvent,
@@ -488,21 +505,32 @@ export function applyAgentLoopEventToTrace(
   }
 
   if (event.kind === 'turn_end') {
+    const isTruncated = event.finishReason === 'length';
     update(`turn-${event.turn}`, {
-      status: 'success',
-      summary: pickLocaleText(
-        locale,
-        `第 ${event.turn} 轮完成：${event.finishReason}。`,
-        `Turn ${event.turn} completed: ${event.finishReason}.`,
-      ),
+      status: isTruncated ? 'warning' : 'success',
+      summary: isTruncated
+        ? pickLocaleText(
+            locale,
+            `第 ${event.turn} 轮输出被长度上限截断（finish_reason=length）。`,
+            `Turn ${event.turn} truncated by length limit (finish_reason=length).`,
+          )
+        : pickLocaleText(
+            locale,
+            `第 ${event.turn} 轮完成：${event.finishReason}。`,
+            `Turn ${event.turn} completed: ${event.finishReason}.`,
+          ),
     });
-    if (event.finishReason !== 'tool_calls') {
-      update('react-final', { status: 'success' });
+    if (event.finishReason !== 'tool_calls' && !isTruncated) {
+      update('react-final', {
+        status: 'success',
+        summary: pickLocaleText(locale, '最终回答已生成。', 'Final answer generated.'),
+      });
     }
     return next;
   }
 
   if (event.kind === 'error') {
+    update('react-final', { status: 'error' });
     add({
       id: `error-${event.turn ?? 'run'}-${next.length}`,
       type: 'final',

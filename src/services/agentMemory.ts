@@ -1,4 +1,5 @@
 import { invoke } from '../platform/electron/core';
+import type { RejectedClaimLine } from './agentMemoryContract.ts';
 
 export type AgentMemoryFile = 'trace' | 'topics' | 'synthesis';
 
@@ -19,6 +20,13 @@ export interface AgentMemoryWritePlan {
   content: string;
   summary: string;
   createdAt: number;
+  /**
+   * 缺省 replace（整文件覆盖，与既有行为一致）；
+   * merge-rejected-claims 在用户批准时才读当前 L2 并合并否定项，不覆盖 Current task 等段落。
+   */
+  mode?: 'replace' | 'merge-rejected-claims';
+  /** merge-rejected-claims 模式下待合并的被否定主张。 */
+  rejectedClaims?: RejectedClaimLine[];
 }
 
 function toErrorMessage(error: unknown, fallback: string): string {
@@ -81,6 +89,8 @@ export function createAgentMemoryWritePlan(input: {
   file: Exclude<AgentMemoryFile, 'trace'>;
   content: string;
   summary?: string;
+  mode?: 'replace' | 'merge-rejected-claims';
+  rejectedClaims?: RejectedClaimLine[];
 }): AgentMemoryWritePlan {
   return {
     id: `agent-memory:${input.file}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`,
@@ -88,5 +98,7 @@ export function createAgentMemoryWritePlan(input: {
     content: input.content.slice(0, 200_000),
     summary: input.summary?.trim() || `Update ${input.file} memory.`,
     createdAt: Date.now(),
+    ...(input.mode ? { mode: input.mode } : {}),
+    ...(input.rejectedClaims ? { rejectedClaims: input.rejectedClaims } : {}),
   };
 }

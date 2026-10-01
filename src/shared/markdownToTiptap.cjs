@@ -9,15 +9,15 @@ function parseMarkdownToTiptap(markdown, options = {}) {
   if (refHeading >= 0) {
     for (const line of lines.slice(refHeading + 1)) {
       if (!line.trim()) continue;
-      const match = line.match(/^(\d+)\.\s+(.+)$/);
+      const match = line.match(/^\s*(?:(\d+)\.|[-*+]\s+\[(\d+)\])\s+(.+)$/);
       if (!match) continue;
-      const entry = match[2].trim();
+      const number = Number(match[1] || match[2]);
+      const entry = match[3].trim();
       const matching = papers.filter((paper) =>
         (paper.doi && entry.toLowerCase().includes(`doi: ${paper.doi}`.toLowerCase())) ||
         (paper.title && entry.includes(paper.title)));
-      if (matching.length === 1) refs.set(Number(match[1]), matching[0]);
+      if (matching.length === 1) refs.set(number, matching[0]);
     }
-    lines.splice(refHeading);
   }
 
   function inline(source) {
@@ -80,7 +80,14 @@ function parseMarkdownToTiptap(markdown, options = {}) {
       }
       const marked = [
         ['**', 'bold'], ['~~', 'strike'], ['*', 'italic'], ['_', 'italic'], ['`', 'code'],
-      ].find(([delimiter]) => rest.startsWith(delimiter) && rest.indexOf(delimiter, delimiter.length) > delimiter.length);
+      ].find(([delimiter]) => {
+        if (!rest.startsWith(delimiter)) return false;
+        const end = rest.indexOf(delimiter, delimiter.length);
+        if (end <= delimiter.length) return false;
+        if (delimiter === '_' && (/[\p{L}\p{N}]/u.test(source[i - 1] || '') ||
+          /[\p{L}\p{N}]/u.test(rest[end + 1] || ''))) return false;
+        return true;
+      });
       if (marked) {
         const [delimiter, type] = marked;
         const end = rest.indexOf(delimiter, delimiter.length);

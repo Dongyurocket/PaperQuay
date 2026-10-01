@@ -33,6 +33,7 @@ import { isImeComposing, useImeSafeTextareaValue } from '../../hooks/useImeSafeT
 import type { LibraryAgentPlan, LibraryAgentRagCitation } from '../../services/libraryAgent';
 import type { AgentMemoryWritePlan } from '../../services/agentMemory';
 import type { AgentNoteWritePlan } from '../../services/agentNotePlan';
+import { listAgentCapabilities, type AgentCapabilityId } from '../../services/agentCapabilityRegistry';
 import type { LiteraturePaper } from '../../types/library';
 import type { DocumentChatAttachment, ModelReasoningEffort, QaModelPreset, UiLanguage } from '../../types/reader';
 import type {
@@ -83,10 +84,14 @@ interface AgentWorkspaceViewProps {
   onApplyPlan: () => void;
   onApplyMemoryPlan: (memoryPlan: AgentMemoryWritePlan) => void;
   onRejectMemoryPlan: (memoryPlan: AgentMemoryWritePlan) => void;
+  /** 引用核对结果上的「写入工作记忆」入口：点击后生成 merge-rejected-claims 审批卡。 */
+  onWriteRejectedClaims: (message: AgentChatMessage) => void;
   onApplyNotePlan: (notePlan: AgentNoteWritePlan) => void;
   onRejectNotePlan: (notePlan: AgentNoteWritePlan) => void;
   onAgentPresetChange: (presetId: string) => void;
   onAgentReasoningEffortChange: (reasoningEffort: ModelReasoningEffort) => void;
+  pinnedCapabilityId: AgentCapabilityId | 'auto';
+  onPinnedCapabilityChange: (capabilityId: AgentCapabilityId | 'auto') => void;
   onCancelAgentRun: () => void;
   onCancelPlan: () => void;
   onCaptureScreenshot: () => void;
@@ -320,10 +325,13 @@ export default function AgentWorkspaceView({
   onApplyPlan,
   onApplyMemoryPlan,
   onRejectMemoryPlan,
+  onWriteRejectedClaims,
   onApplyNotePlan,
   onRejectNotePlan,
   onAgentPresetChange,
   onAgentReasoningEffortChange,
+  pinnedCapabilityId,
+  onPinnedCapabilityChange,
   onCancelAgentRun,
   onCancelPlan,
   onCaptureScreenshot,
@@ -594,6 +602,7 @@ export default function AgentWorkspaceView({
                       onApplyPlan={onApplyPlan}
                       onApplyMemoryPlan={onApplyMemoryPlan}
                       onRejectMemoryPlan={onRejectMemoryPlan}
+                      onWriteRejectedClaims={onWriteRejectedClaims}
                       onApplyNotePlan={onApplyNotePlan}
                       onRejectNotePlan={onRejectNotePlan}
                       onCancelPlan={onCancelPlan}
@@ -871,6 +880,23 @@ export default function AgentWorkspaceView({
                       : 'pq-chat-composer p-3'
                   }
                 >
+                  <label className="mb-2 flex items-center gap-2 text-xs text-[var(--pq-text-muted)]">
+                    {l('能力', 'Capability')}
+                    <select
+                      aria-label={l('选择 Agent 能力', 'Choose Agent capability')}
+                      value={pinnedCapabilityId}
+                      disabled={activeSessionRunning}
+                      onChange={(event) => onPinnedCapabilityChange(event.target.value as AgentCapabilityId | 'auto')}
+                      className="pq-input w-auto py-1 text-xs"
+                    >
+                      <option value="auto">{l('自动路由', 'Automatic routing')}</option>
+                      {listAgentCapabilities().map((capability) => (
+                        <option key={capability.id} value={capability.id}>
+                          {capability.title[locale]}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                   <textarea
                     value={composerInput.value}
                     onChange={composerInput.onChange}

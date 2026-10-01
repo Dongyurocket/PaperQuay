@@ -1755,6 +1755,7 @@ export function NotesWorkspace() {
 
         {mainView === 'editor' ? (
           <NoteEditor
+            key={activeNote?.id ?? 'no-note'}
             note={activeNote}
           saving={saving}
           notes={notes}

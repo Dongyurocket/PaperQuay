@@ -117,3 +117,19 @@ test('recovery extracts the newest comparative-survey stage checkpoint', () => {
     completedStages: ['rephrase', 'decompose'],
   });
 });
+
+test('recovery backward compatibility: checkpoint without capabilityId defaults to comparative-survey', () => {
+  const checkpoint = latestComparativeSurveyCheckpoint([
+    event(1, 'checkpoint', {
+      // 旧版 checkpoint 没有 capabilityId 字段
+      artifacts: {
+        rephrasedQuestion: 'Old legacy question',
+        completedStages: ['rephrase'],
+      },
+    }),
+  ]);
+
+  assert.ok(checkpoint);
+  assert.equal(checkpoint.rephrasedQuestion, 'Old legacy question');
+  assert.deepEqual(checkpoint.completedStages, ['rephrase']);
+});

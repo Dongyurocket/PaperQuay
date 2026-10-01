@@ -1,3 +1,5 @@
+import { bindAnswerEvidence, type AnswerEvidenceStatus } from './agentAnswerEvidence.ts';
+
 export type ComparativeSurveyStage = 'rephrase' | 'decompose' | 'research' | 'report';
 
 export interface ComparativeSurveyArtifacts {
@@ -22,6 +24,7 @@ export interface ComparativeSurveyResult {
   citations: ComparativeSurveyCitation[];
   tokenUsage: { promptTokens: number; completionTokens: number };
   artifacts: ComparativeSurveyArtifacts;
+  evidenceStats?: Record<AnswerEvidenceStatus, number>;
 }
 
 export type ComparativeSurveyEvent =
@@ -198,10 +201,24 @@ export async function runComparativeSurveyCapability(options: ComparativeSurveyO
   addUsage(tokenUsage, report.usage);
   saveCheckpoint();
 
+  const markdown = report.markdown.trim() || 'No comparative survey report was generated.';
+  const evidence = bindAnswerEvidence({
+    answer: markdown,
+    citations: citations.map((c, index) => ({
+      label: String(index + 1),
+      paperId: c.paperId,
+      paperTitle: c.paperTitle,
+      pageIndex: c.pageIndex,
+      blockId: c.blockId,
+      previewText: c.previewText,
+    })),
+  });
+
   return {
-    markdown: report.markdown.trim() || 'No comparative survey report was generated.',
+    markdown,
     citations,
     tokenUsage,
     artifacts,
+    evidenceStats: evidence.counts,
   };
 }

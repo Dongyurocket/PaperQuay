@@ -5,6 +5,14 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const { parseMarkdownToTiptap } = require('../src/shared/markdownToTiptap.cjs');
 
+test('paperId 中的下划线保留为文本', () => {
+  const paperId = 'paper_mufwwou2_5a014354';
+  const doc = parseMarkdownToTiptap(`- [1] paperId: ${paperId}, page: 5`);
+  const text = JSON.stringify(doc);
+  assert.match(text, /paper_mufwwou2_5a014354/);
+  assert.ok(!text.includes('"type":"italic"'));
+});
+
 test('Markdown 解析器重建基础 Tiptap 块和内联节点', () => {
   const doc = parseMarkdownToTiptap(
     '# 标题\n\n段落 **粗体** *斜体* ~~删除~~ `代码` [[双链]] #标签\n\n- 一\n- 二\n\n1. 甲\n2. 乙\n\n> 引用\n\n```js\nconst x = 1;\n```',
@@ -53,5 +61,19 @@ test('Markdown 解析器只为已知锚点和文献重建专用节点', () => {
   assert.deepEqual(reference.attrs, { paperId: 'p1', label: 'Known Paper' });
   assert.ok(paragraph.content.some((node: any) => node.type === 'text' && node.text.includes('paperquay://anchor/nope')));
   assert.ok(paragraph.content.some((node: any) => node.type === 'text' && node.text.includes('[2]')));
-  assert.equal(doc.content.length, 1);
+  assert.deepEqual(doc.content.map((node: any) => node.type), ['paragraph', 'heading', 'orderedList']);
+});
+
+test('综述的短横线参考文献保留在富文本并解析正文引用', () => {
+  const doc = parseMarkdownToTiptap(
+    '第一篇事实 [1]。第二篇事实 [6]。\n\n## 参考文献\n- [1] Known Paper\n- [6] Second Paper',
+    { papers: [{ id: 'p1', title: 'Known Paper' }, { id: 'p6', title: 'Second Paper' }] },
+  );
+  assert.deepEqual(doc.content.map((node: any) => node.type), ['paragraph', 'heading', 'bulletList']);
+  assert.deepEqual(
+    doc.content[0].content.filter((node: any) => node.type === 'paperReference').map((node: any) => node.attrs.paperId),
+    ['p1', 'p6'],
+  );
+  assert.match(JSON.stringify(doc.content[2]), /Known Paper/);
+  assert.match(JSON.stringify(doc.content[2]), /Second Paper/);
 });

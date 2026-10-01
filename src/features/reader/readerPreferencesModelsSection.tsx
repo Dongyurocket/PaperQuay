@@ -431,6 +431,22 @@ export function ReaderPreferencesModelsSection({
                   />
                 </div>
                 <div className="space-y-2">
+                  <div className="text-xs font-medium text-slate-500">
+                    {l('最大输出', 'Max Output Tokens')}
+                  </div>
+                  <SettingsInput
+                    type="number"
+                    min={256}
+                    max={200000}
+                    step={256}
+                    value={preset.maxOutputTokens ?? ''}
+                    onChange={(event) => onQaModelPresetChange(preset.id, {
+                      maxOutputTokens: event.target.value ? Number(event.target.value) : undefined,
+                    })}
+                    placeholder="8192"
+                  />
+                </div>
+                <div className="space-y-2">
                   <div className="text-xs font-medium text-slate-500">{l('视觉能力', 'Vision Capability')}</div>
                   <label className="flex min-h-11 cursor-pointer items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-700 dark:border-white/10 dark:bg-[var(--pq-surface-2)] dark:text-[var(--pq-text-muted)]">
                     <span>{l('支持图片输入', 'Supports image input')}</span>

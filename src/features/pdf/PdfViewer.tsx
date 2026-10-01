@@ -367,7 +367,7 @@ function PdfViewer({
   const onOutlineNavigateBlockRef = useRef(onOutlineNavigateBlock);
   const outlineRequestTokenRef = useRef(0);
   const outlineBackStackRef = useRef<number[]>([]);
-  const lastHandledHighlightSignalRef = useRef(highlightScrollSignal);
+  const lastHandledHighlightSignalRef = useRef(0);
   const hoveredBlockIdRef = useRef<string | null>(hoveredBlockId);
   const currentPageRef = useRef(1);
   const firstPageRenderLoggedRef = useRef(false);
@@ -2402,7 +2402,8 @@ function PdfViewer({
   }, [active, documentInit, pageCount, thumbnailFocusPage, thumbnailsCollapsed]);
 
   useEffect(() => {
-    if (!active || !activeHighlight || highlightScrollSignal === lastHandledHighlightSignalRef.current) {
+    if (!active || !activeHighlight || pageCount === 0 || loading ||
+      highlightScrollSignal === lastHandledHighlightSignalRef.current) {
       return;
     }
 
@@ -2411,7 +2412,7 @@ function PdfViewer({
     window.requestAnimationFrame(() => {
       scrollToHighlight(activeHighlight);
     });
-  }, [active, activeHighlight, highlightScrollSignal, scrollToHighlight]);
+  }, [active, activeHighlight, highlightScrollSignal, loading, pageCount, scrollToHighlight]);
 
   useEffect(() => {
     if (!active) {

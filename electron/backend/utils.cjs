@@ -475,6 +475,16 @@ function buildChatRequestBody(options, messages, extra = {}) {
     body.reasoning_effort = options.reasoningEffort;
   }
 
+  const maxOutputTokens = Number.isFinite(options.maxOutputTokens) && options.maxOutputTokens > 0
+    ? Math.trunc(options.maxOutputTokens)
+    : Number.isFinite(extra.maxOutputTokens) && extra.maxOutputTokens > 0
+      ? Math.trunc(extra.maxOutputTokens)
+      : undefined;
+
+  if (maxOutputTokens !== undefined) {
+    body.max_tokens = maxOutputTokens;
+  }
+
   return body;
 }
 
@@ -714,6 +724,16 @@ function buildResponsesRequestBody(options, messages, extra = {}) {
 
   if (Object.keys(reasoning).length > 0) {
     body.reasoning = reasoning;
+  }
+
+  const maxOutputTokens = Number.isFinite(options.maxOutputTokens) && options.maxOutputTokens > 0
+    ? Math.trunc(options.maxOutputTokens)
+    : Number.isFinite(extra.maxOutputTokens) && extra.maxOutputTokens > 0
+      ? Math.trunc(extra.maxOutputTokens)
+      : undefined;
+
+  if (maxOutputTokens !== undefined) {
+    body.max_output_tokens = maxOutputTokens;
   }
 
   return body;

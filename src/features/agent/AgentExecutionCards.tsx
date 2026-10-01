@@ -23,8 +23,12 @@ function statusTone(status: AgentStepStatus): string {
       return 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-300/20 dark:bg-emerald-300/10 dark:text-emerald-200';
     case 'running':
       return 'border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-300/20 dark:bg-sky-300/10 dark:text-sky-200';
+    case 'warning':
+      return 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-300/20 dark:bg-amber-300/10 dark:text-amber-200';
     case 'error':
       return 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-300/20 dark:bg-rose-400/10 dark:text-rose-200';
+    case 'skipped':
+      return 'border-slate-200 bg-slate-100 text-slate-400 dark:border-white/10 dark:bg-chrome-900 dark:text-chrome-500';
     default:
       return 'border-slate-200 bg-slate-50 text-slate-500 dark:border-white/10 dark:bg-chrome-900 dark:text-chrome-400';
   }
@@ -36,8 +40,12 @@ function statusLabel(status: AgentStepStatus): string {
       return 'success';
     case 'running':
       return 'running';
+    case 'warning':
+      return 'warning';
     case 'error':
       return 'error';
+    case 'skipped':
+      return 'skipped';
     default:
       return 'waiting';
   }
@@ -50,6 +58,10 @@ function StepStatusIcon({ status }: { status: AgentStepStatus }) {
 
   if (status === 'success') {
     return <CheckCircle2 className="h-3.5 w-3.5" strokeWidth={2.2} />;
+  }
+
+  if (status === 'warning') {
+    return <AlertTriangle className="h-3.5 w-3.5" strokeWidth={2.2} />;
   }
 
   if (status === 'error') {
@@ -163,7 +175,7 @@ export function TraceTimeline({
           </div>
         </div>
         <div className="rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-bold text-slate-500 dark:border-white/10 dark:bg-chrome-900 dark:text-chrome-400">
-          {steps.filter((step) => step.status === 'success').length}/{steps.length} {l('已完成', 'completed')}
+          {steps.filter((step) => step.status === 'success' || step.status === 'skipped').length}/{steps.length} {l('已完成', 'completed')}
         </div>
       </div>
 

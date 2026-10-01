@@ -2,7 +2,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const MEMORY_FILE_KEYS = new Set(['trace', 'topics', 'synthesis']);
-const MAX_MEMORY_CONTENT_CHARS = 2_000_000;
+// L2/L3 是工作记忆（当前任务、未决问题、被否定的主张），上限 4_000 字符；
+// trace 保持 8MB 上限不变。
+const MAX_WORKING_MEMORY_CHARS = 4_000;
 const MAX_TRACE_BYTES = 8 * 1024 * 1024;
 const SENSITIVE_KEY = /(?:api[_-]?key|authorization|token|password|secret|dataurl|attachment)/i;
 
@@ -98,7 +100,7 @@ function createAgentMemoryStore(appPaths) {
     const file = normalizeFileKey(request.file);
     const date = file === 'trace' ? normalizeDate(request.date) : null;
     const content = typeof request.content === 'string' ? request.content : String(request.content ?? '');
-    const maxChars = file === 'trace' ? MAX_TRACE_BYTES : MAX_MEMORY_CONTENT_CHARS;
+    const maxChars = file === 'trace' ? MAX_TRACE_BYTES : MAX_WORKING_MEMORY_CHARS;
     const contentSize = file === 'trace' ? Buffer.byteLength(content) : content.length;
 
     if (contentSize > maxChars) {

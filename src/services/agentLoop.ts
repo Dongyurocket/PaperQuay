@@ -14,6 +14,7 @@ import type {
   LibraryAgentRagCitation,
   LibraryAgentRunResult,
 } from './libraryAgent';
+import { bindAnswerEvidence } from './agentAnswerEvidence.ts';
 
 export const DEFAULT_AGENT_LOOP_MAX_TURNS = 8;
 export const MAX_TOOL_RESULT_CHARS = 4000;
@@ -56,6 +57,7 @@ export interface AgentToolMountContext {
 
 export interface AgentToolRuntimeContext {
   signal?: AbortSignal;
+  citations?: LibraryAgentRagCitation[];
   [key: string]: unknown;
 }
 
@@ -254,6 +256,8 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<LibraryAg
   const tools = options.tools.filter((tool) => tool.available?.(options.mountContext) !== false);
   const toolByName = new Map(tools.map((tool) => [tool.name, tool]));
   const messages = [...options.messages];
+  const liveCitations: LibraryAgentRagCitation[] = options.citations ??
+    (Array.isArray(options.runtimeContext.citations) ? (options.runtimeContext.citations as LibraryAgentRagCitation[]) : []);
   const emit = (event: AgentLoopEvent) => options.onEvent?.(event);
   const checkpoint = (turn: number) => options.onCheckpoint?.({
     turn,
@@ -304,14 +308,17 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<LibraryAg
     });
   };
 
+  let emptyAnswerRecoveryAttempted = false;
+  let forceNextFinalAnswer = false;
+
   for (let turn = 1; turn <= maxTurns; turn += 1) {
     throwIfAborted(options.signal);
     await compactContextAtTurnBoundary();
     throwIfAborted(options.signal);
-    const forceFinalAnswer = turn === maxTurns;
+    const forceFinalAnswer = turn === maxTurns || forceNextFinalAnswer;
     const turnTools = forceFinalAnswer ? [] : tools;
 
-    if (forceFinalAnswer) {
+    if (forceFinalAnswer && !forceNextFinalAnswer && turn === maxTurns) {
       messages.push({
         role: 'system',
         content: 'This is the final allowed turn. Do not call tools. Use the information already gathered and answer the user directly.',
@@ -475,7 +482,11 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<LibraryAg
           emit({ kind: 'tool_call', turn, callId: call.id, name: call.name, args });
 
           try {
-            const toolContext: AgentToolRuntimeContext = { ...options.runtimeContext, signal: options.signal };
+            const toolContext: AgentToolRuntimeContext = {
+              ...options.runtimeContext,
+              citations: liveCitations,
+              signal: options.signal,
+            };
             const result = await tool.execute(args, toolContext);
             const content = truncateToolContent(result.content);
             emit({ kind: 'tool_result', turn, callId: call.id, name: call.name, ok: true, preview: content.slice(0, 500) });
@@ -576,7 +587,11 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<LibraryAg
         }
 
         try {
-          const toolContext: AgentToolRuntimeContext = { ...options.runtimeContext, signal: options.signal };
+          const toolContext: AgentToolRuntimeContext = {
+            ...options.runtimeContext,
+            citations: liveCitations,
+            signal: options.signal,
+          };
           const result = await tool.execute(args, toolContext);
           const content = truncateToolContent(result.content);
           emit({ kind: 'tool_result', turn, callId: call.id, name: call.name, ok: true, preview: content.slice(0, 500) });
@@ -647,7 +662,43 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<LibraryAg
       continue;
     }
 
-    const answer = response.content.trim() || 'The model did not return a final answer.';
+    const answer = response.content.trim();
+
+    if (!answer) {
+      const isLengthFinish = response.finishReason === 'length';
+      const finishReason = isLengthFinish ? 'length' : (response.finishReason || 'empty_response');
+
+      emit({
+        kind: 'turn_end',
+        turn,
+        finishReason,
+        ...usage,
+      });
+      checkpoint(turn);
+
+      if (!emptyAnswerRecoveryAttempted && turn < maxTurns) {
+        emptyAnswerRecoveryAttempted = true;
+        forceNextFinalAnswer = true;
+
+        messages.push({
+          role: 'assistant',
+          content: response.content || '',
+        });
+        messages.push({
+          role: 'system',
+          content: '上一次输出被长度限制截断，没有产生最终回答。请直接给出简洁最终回答，不要继续推理，不要输出 think 标签。 The previous output was truncated by the length limit and produced no final answer. Provide a concise final answer directly without additional reasoning or <think> tags.',
+        });
+
+        continue;
+      }
+
+      const truncatedErrorMessage = emptyAnswerRecoveryAttempted
+        ? '模型输出被长度上限截断（finish_reason=length），没有产生最终回答（已尝试自动恢复）。请重试，或在设置里调低思考强度 / 调大最大输出。 Model output was truncated by the length limit (finish_reason=length) and did not produce a final answer (auto-recovery attempted). Please retry, or lower the reasoning effort / increase the maximum output tokens in Settings.'
+        : '模型输出被长度上限截断（finish_reason=length），没有产生最终回答。请重试，或在设置里调低思考强度 / 调大最大输出。 Model output was truncated by the length limit (finish_reason=length) and did not produce a final answer. Please retry, or lower the reasoning effort / increase the maximum output tokens in Settings.';
+
+      emit({ kind: 'error', turn, message: truncatedErrorMessage });
+      throw new Error(truncatedErrorMessage);
+    }
 
     if (!emittedAnswerDelta) {
       emit({ kind: 'answer_delta', text: answer });
@@ -657,18 +708,25 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<LibraryAg
     emit({
       kind: 'turn_end',
       turn,
-      finishReason: forceFinalAnswer ? 'max_turns' : response.finishReason || 'answer',
+      // 恢复轮（forceNextFinalAnswer）报告真实 finishReason；只有真正顶到 maxTurns 的强制回答才标 max_turns。
+      finishReason: forceFinalAnswer && !forceNextFinalAnswer ? 'max_turns' : response.finishReason || 'answer',
       ...usage,
     });
     checkpoint(turn);
+
+    const evidence = bindAnswerEvidence({
+      answer,
+      citations: liveCitations,
+    });
 
     return {
       kind: 'answer',
       answer,
       contextLabel: options.contextLabel,
       thinking: response.thinking?.trim() || null,
-      citations: options.citations,
+      citations: liveCitations,
       ragNotice: options.ragNotice,
+      evidenceStats: evidence.counts,
     };
   }
 

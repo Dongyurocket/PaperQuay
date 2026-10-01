@@ -1,5 +1,5 @@
-import { invoke } from '../platform/electron/core';
-import { emitNoteChanged } from '../app/appEvents';
+import { invoke } from '../platform/electron/core.ts';
+import { emitNoteChanged } from '../app/appEvents.ts';
 import type {
   CreateNoteRequest,
   ListNotesRequest,

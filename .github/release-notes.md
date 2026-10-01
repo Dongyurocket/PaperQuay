@@ -1,30 +1,20 @@
 # PaperQuay v{{VERSION}}
 
-This release fixes the Agent model menu being cut off once a conversation starts, and makes the memory and reasoning controls distinguishable.
+This release adds routed Agent capabilities for citation audits, evidence-backed note drafts, and read-only graph exploration. Citation audits now show four stages and distinguish supported, contradicted, and missing evidence. Note and working-memory writes remain subject to approval.
 
-## Fixes
-
-- **Agent model menu stays visible after a reply starts**: once the composer docks to the bottom of the window, the model menu still opened downward and only its title remained on screen. It now opens upward when there is not enough room below, and its height stays within the available space.
-- **Organize-memory and reasoning effort no longer look the same**: both were square brain icons. Organize memory is now a labeled action ("整理记忆" / Memory). Reasoning effort is a gauge-style selector that shows the current level, such as "思考 自动".
-
-Switching the model during a running reply applies to the next message. The in-flight reply keeps the model it started with.
+It also fixes citation grouping and paper-title links, run completion states, note editor state across tabs, and evidence and memory limits. The current development build passed 638 tests and desktop checks for the main approval and persistence flows. Zero-result retrieval and citation expansion beyond six papers have automated coverage but have not been exercised in the desktop UI.
 
 ## Downloads
 
-Select the installer matching your system and architecture from Assets: Windows `.exe`, macOS `.dmg`, or Linux `.AppImage` / `.deb` / `.tar.gz`.
+Choose the installer for your system from Assets: Windows `.exe`, macOS `.dmg`, or Linux `.AppImage` / `.deb` / `.tar.gz`.
 
 ---
 
 # PaperQuay v{{VERSION}} 中文说明
 
-本次修复 Agent 开始回答后模型下拉被窗口裁掉的问题，并区分整理记忆与思考强度两个控件。
+本版新增 Agent 能力路由、四阶段引用核对、基于证据的笔记蒸馏和图谱只读探索。笔记与工作记忆写入仍需审批。
 
-## 修复
-
-- **回答开始后模型菜单不再被裁切**：输入框贴底后，模型下拉仍向下展开，只剩标题露在窗口里。现在下方空间不足时改为向上展开，高度不超过该侧可用空间。
-- **整理记忆和思考强度不再长得一样**：两者原先都是大脑方形图标。整理记忆改为带文字的操作按钮；思考强度改为仪表式选择器，直接显示当前档位，例如「思考 自动」。
-
-回答进行中切换模型，会从下一条消息起生效；当前这一轮仍使用开始时的模型。
+同时修复引用分组和文献标题跳转、运行轨迹终态、笔记切页状态及证据与记忆上限。当前开发版通过 638 项测试，并完成主要审批与落库流程的桌面走查。真正零检索片段及超过六篇文献的引用展开有自动化测试覆盖，尚未在桌面 UI 实测。
 
 ## 下载
 

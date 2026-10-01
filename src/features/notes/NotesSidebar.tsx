@@ -519,6 +519,7 @@ export function NotesSidebar({
 
       <div className="flex min-h-0 flex-1 p-2">
         <NoteEditor
+          key={activeNote?.id ?? 'no-note'}
           note={activeNote}
           saving={saving}
           onUpdate={onUpdateNote}

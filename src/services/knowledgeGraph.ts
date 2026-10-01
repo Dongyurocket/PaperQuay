@@ -1,4 +1,4 @@
-import { invoke } from '../platform/electron/core';
+import { invoke } from '../platform/electron/core.ts';
 import type {
   KnowledgeGraphAiOptions,
   KnowledgeGraphAiRelationSuggestion,

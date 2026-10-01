@@ -679,10 +679,11 @@ export function NoteEditor({
   onJumpToNoteAnchor,
   onPageKindChange,
 }: NoteEditorProps) {
-  const [title, setTitle] = useState('');
-  const [tagText, setTagText] = useState('');
+  const [title, setTitle] = useState(note?.title ?? '');
+  const [loadedStateNoteId, setLoadedStateNoteId] = useState<string | null>(note?.id ?? null);
+  const [tagText, setTagText] = useState(note?.tags.join(', ') ?? '');
   const [tagEditorOpen, setTagEditorOpen] = useState(false);
-  const [color, setColor] = useState('#fef3c7');
+  const [color, setColor] = useState(note?.color ?? '#fef3c7');
   const [pageKind, setPageKind] = useState<NotePageKind | null>(note?.pageKind ?? null);
   const [revision, setRevision] = useState(0);
   const [externalUpdateAvailable, setExternalUpdateAvailable] = useState(false);
@@ -694,21 +695,21 @@ export function NoteEditor({
   const [polishResult, setPolishResult] = useState<NotePolishResult | null>(null);
   const [referencePickerOpen, setReferencePickerOpen] = useState(false);
   const [editorContextMenu, setEditorContextMenu] = useState<NoteEditorContextMenuState | null>(null);
-  const snapshotRef = useRef<EditorSnapshot>({
-    contentJson: noteContentToTiptap(null),
-    contentHtml: '',
-    contentText: '',
-    wordCount: 0,
-  });
+  const snapshotRef = useRef<EditorSnapshot>(snapshotFromNote(note));
   const editorSourceIdRef = useRef(editorSourceId ?? createNoteEditorSourceId());
-  const lastSavedSignatureRef = useRef('');
+  const lastSavedSignatureRef = useRef(signature({
+    title: note?.title ?? '',
+    tagText: note?.tags.join(', ') ?? '',
+    color: note?.color ?? '#fef3c7',
+    snapshot: snapshotRef.current,
+  }));
   const latestCandidatesRef = useRef({ notes, tags, papers });
   const latestAnchorsRef = useRef<NoteAnchor[]>(note?.anchors ?? []);
   const latestNoteRef = useRef<Note | null>(note);
   const externalNoteRef = useRef<Note | null>(null);
   const tagEditorRef = useRef<HTMLDivElement | null>(null);
   const editorBodyRef = useRef<HTMLDivElement | null>(null);
-  const loadedNoteIdRef = useRef<string | null>(null);
+  const loadedNoteIdRef = useRef<string | null>(note?.id ?? null);
   const appliedUpdatedAtRef = useRef<number | null>(note?.updatedAt ?? null);
   const dirtyRef = useRef(false);
   const externalUpdateAvailableRef = useRef(false);
@@ -1450,6 +1451,7 @@ export function NoteEditor({
       snapshotRef.current = draft.snapshot;
       pendingAnchorsRef.current = new Map(draft.pendingAnchors.map((anchor) => [anchor.id, anchor]));
       loadedNoteIdRef.current = noteId;
+      setLoadedStateNoteId(noteId);
       appliedUpdatedAtRef.current = note?.updatedAt ?? null;
       lastSavedSignatureRef.current = incomingSignature;
       externalNoteRef.current = null;
@@ -1506,6 +1508,7 @@ export function NoteEditor({
     }
 
     loadedNoteIdRef.current = noteId;
+    setLoadedStateNoteId(noteId);
     appliedUpdatedAtRef.current = note?.updatedAt ?? null;
     lastSavedSignatureRef.current = incomingSignature;
     if (forceApplyIncoming || !sameNote) {
@@ -1516,7 +1519,7 @@ export function NoteEditor({
   }, [color, editor, note, note?.id, note?.updatedAt, setExternalUpdateState, tagText, title]);
 
   useEffect(() => {
-    if (!note || loadedNoteIdRef.current !== note.id || !lastSavedSignatureRef.current) {
+    if (!note || loadedStateNoteId !== note.id || loadedNoteIdRef.current !== note.id || !lastSavedSignatureRef.current) {
       return;
     }
 
@@ -1537,7 +1540,7 @@ export function NoteEditor({
       pendingAnchors: Array.from(pendingAnchorsRef.current.values()),
       updatedAt: Date.now(),
     });
-  }, [color, currentSignature, dirty, note, note?.id, note?.updatedAt, revision, tagText, title]);
+  }, [color, currentSignature, dirty, loadedStateNoteId, note, note?.id, note?.updatedAt, revision, tagText, title]);
 
   useEffect(() => {
     if (!editor || editor.isDestroyed || !note || !pendingAnchorInsert) return;

@@ -2,6 +2,20 @@ import type { LiteraturePaper } from '../types/library';
 import type { Note, NotePageKind, NoteType } from '../types/notes';
 import { getNote, searchNotes } from './notes';
 import { createAgentNoteWritePlan } from './agentNotePlan';
+import { assertEvidenceForNoteDraft } from './agentAnswerEvidence.ts';
+import {
+  normalizeGraphPaperId,
+  GRAPH_MISSING_EDGE_MAX_PAPERS,
+} from './agentGraphQuery.ts';
+import {
+  loadConceptTopics,
+  loadGraphNeighbors,
+  loadMissingPaperEdges,
+  type GraphExplorePaperInput,
+} from './agentGraphExplore.ts';
+import {
+  WORKING_MEMORY_MAX_CHARS,
+} from './agentMemoryContract.ts';
 import type { AgentMemoryFile, AgentMemoryWritePlan } from './agentMemory';
 import type {
   AgentToolDefinition,
@@ -30,7 +44,8 @@ function boundedInteger(value: unknown, fallback: number, max: number): number {
   return Number.isFinite(number) ? Math.max(1, Math.min(max, Math.trunc(number))) : fallback;
 }
 
-function paperSearchText(paper: LiteraturePaper): string {
+/** search_library 与 graph-explore 共用的文献检索文本（保持同一匹配逻辑，不分叉）。 */
+export function paperSearchText(paper: LiteraturePaper): string {
   return [
     paper.title,
     paper.authors.map((author) => author.name).join(' '),
@@ -483,6 +498,119 @@ export function createLibraryAgentTools(options: CreateLibraryAgentToolsOptions)
       },
     },
     {
+      name: 'graph_neighbors',
+      description: 'Read one paper\'s local knowledge-graph neighborhood: connected papers, notes, tags, and categories. Read-only; co-author and embedding-similarity edges are excluded by default.',
+      kind: 'read',
+      available: (ctx: AgentToolMountContext) => ctx.localLibraryMode,
+      parameters: {
+        type: 'object',
+        properties: {
+          paperId: { type: 'string' },
+          depth: { type: 'integer', minimum: 1, maximum: 2 },
+          includeNotes: { type: 'boolean' },
+        },
+        required: ['paperId'],
+      },
+      async execute(args): Promise<AgentToolResult> {
+        const paperId = normalizeGraphPaperId(args.paperId);
+
+        if (!paperId) {
+          throw new Error('graph_neighbors requires a paperId.');
+        }
+
+        const result = await loadGraphNeighbors(paperId, {
+          depth: Number(args.depth) === 2 ? 2 : 1,
+          includeNotes: args.includeNotes !== false,
+        });
+
+        return {
+          content: JSON.stringify(result),
+          cards: [{
+            kind: 'text',
+            title: result.focusLabel || paperId,
+            detail: `Graph neighbors: ${result.nodes.length} nodes · ${result.edges.length} edges${result.truncated ? ' (truncated)' : ''}`,
+          }],
+        };
+      },
+    },
+    {
+      name: 'graph_missing_edges',
+      description: 'Find library paper pairs that share tags or categories but are not yet connected by citations, notes, or custom relations. Read-only; reports at most 24 candidate pairs.',
+      kind: 'read',
+      available: (ctx: AgentToolMountContext) => ctx.localLibraryMode,
+      parameters: {
+        type: 'object',
+        properties: {
+          paperIds: { type: 'array', items: { type: 'string' } },
+        },
+      },
+      async execute(args, ctx): Promise<AgentToolResult> {
+        const requestedIds = stringArray(args.paperIds).map(normalizeGraphPaperId).filter(Boolean);
+        const scopeIds = requestedIds.length > 0
+          ? requestedIds
+          : (options.currentPaperScopeIds ?? []).map(normalizeGraphPaperId).filter(Boolean);
+        const seen = new Set<string>();
+        const targetPapers: GraphExplorePaperInput[] = [];
+
+        for (const paperId of scopeIds) {
+          const paper = paperById.get(paperId);
+
+          if (!paper || seen.has(paper.id)) {
+            continue;
+          }
+
+          seen.add(paper.id);
+          targetPapers.push({
+            id: paper.id,
+            title: paper.title,
+            tagNames: paper.tags.map((tag) => tag.name),
+            categoryIds: paper.categoryIds,
+          });
+
+          if (targetPapers.length >= GRAPH_MISSING_EDGE_MAX_PAPERS) {
+            break;
+          }
+        }
+
+        if (targetPapers.length < 2) {
+          return {
+            content: JSON.stringify({
+              missingEdges: [],
+              note: 'Need at least two known library papers to compare; pass paperIds or select papers first.',
+            }),
+            cards: [{ kind: 'text', title: 'Graph missing edges', detail: 'need ≥ 2 papers' }],
+          };
+        }
+
+        const missingEdges = await loadMissingPaperEdges(targetPapers, { signal: ctx.signal });
+
+        return {
+          content: JSON.stringify({ missingEdges }),
+          cards: [{ kind: 'text', title: 'Graph missing edges', detail: `${missingEdges.length} candidate pair(s)` }],
+        };
+      },
+    },
+    {
+      name: 'graph_concept_topics',
+      description: 'List concept notes (pageKind="concept") with a short definition snippet and the papers each concept links to. Read-only.',
+      kind: 'read',
+      available: (ctx: AgentToolMountContext) => ctx.localLibraryMode,
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string' },
+        },
+      },
+      async execute(args): Promise<AgentToolResult> {
+        const topics = await loadConceptTopics(stringValue(args.query));
+
+        return {
+          content: JSON.stringify({ topics }),
+          cards: [{ kind: 'text', title: `${topics.length} concept topic(s)` }],
+        };
+      },
+    },
+    {
       name: 'write_notes',
       description:
         'Create or update PaperQuay notes, or propose deletion only when the user explicitly approves it. Produces a reviewable plan only — nothing is written until the user approves. Each operation: {kind:"create",title,content,tags?,paperId?,pageKind?,reason?} | {kind:"update",noteId,title?,content?,tags?,pageKind?,reason?} | {kind:"delete",noteId,reason?}. Content is Markdown/plain text and is rebuilt through the shared parser, including stable wikiLink noteId resolution and paperReference reconstruction from [n] plus a unique ## 参考文献 list. Preserve anchors, source snapshots, and excerpt-card evidence.',
@@ -512,7 +640,23 @@ export function createLibraryAgentTools(options: CreateLibraryAgentToolsOptions)
         },
         required: ['operations'],
       },
-      async execute(args): Promise<AgentToolResult> {
+      async execute(args, ctx): Promise<AgentToolResult> {
+        const operations = Array.isArray(args.operations) ? args.operations : [];
+        const liveCitations = Array.isArray(ctx.citations) ? (ctx.citations as LibraryAgentRagCitation[]) : [];
+
+        for (const op of operations) {
+          if (op && typeof op === 'object' && typeof (op as any).content === 'string') {
+            assertEvidenceForNoteDraft(
+              {
+                title: typeof (op as any).title === 'string' ? (op as any).title : undefined,
+                content: (op as any).content,
+                pageKind: typeof (op as any).pageKind === 'string' ? (op as any).pageKind : undefined,
+              },
+              liveCitations,
+            );
+          }
+        }
+
         const notePlan = await createAgentNoteWritePlan({
           summary: args.summary,
           operations: args.operations,
@@ -608,7 +752,8 @@ export function createLibraryAgentTools(options: CreateLibraryAgentToolsOptions)
       },
       {
         name: 'write_memory',
-        description: 'Create a reviewable update to local Agent L2 topics or L3 synthesis memory. Never writes directly.',
+        description:
+          `Propose a reviewable full replacement of the Agent working memory file (L2 topics / L3 synthesis). Working memory only records the current task, open questions, and rejected claims — never save literature conclusions, concept definitions, or cross-paper reviews here (use write_notes for those). content must be the COMPLETE working memory document, not a patch; content longer than ${WORKING_MEMORY_MAX_CHARS} characters is rejected. Never writes directly; the user must approve before application.`,
         kind: 'write',
         parameters: {
           type: 'object',
@@ -625,6 +770,14 @@ export function createLibraryAgentTools(options: CreateLibraryAgentToolsOptions)
 
           if (!content) {
             throw new Error('write_memory requires non-empty content for review.');
+          }
+
+          if (content.length > WORKING_MEMORY_MAX_CHARS) {
+            throw new Error(
+              `write_memory content is ${content.length} characters, exceeding the ${WORKING_MEMORY_MAX_CHARS}-character working-memory limit. ` +
+              'Rewrite within the limit as a complete working-memory document (current task, open questions, rejected claims only), ' +
+              'or save literature conclusions and reviews with write_notes instead.',
+            );
           }
 
           const memoryPlan = options.memory?.createWritePlan({

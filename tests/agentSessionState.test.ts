@@ -126,6 +126,20 @@ test('Agent tool traces resolve the same call from running to a terminal result'
   assert.equal(completed[0]?.detail, 'Found one result.');
 });
 
+test('Agent final trace summary reflects a completed answer', () => {
+  const running = applyAgentLoopEventToTrace([], { kind: 'answer_delta', text: 'Answer' });
+  const completed = applyAgentLoopEventToTrace(running, {
+    kind: 'turn_end',
+    turn: 1,
+    finishReason: 'stop',
+    promptTokens: 10,
+    completionTokens: 5,
+  });
+
+  assert.equal(completed.find((step) => step.id === 'react-final')?.status, 'success');
+  assert.equal(completed.find((step) => step.id === 'react-final')?.summary, '最终回答已生成。');
+});
+
 test('forkAgentHistorySession copies a message prefix without sharing mutable message arrays', () => {
   const source = session('source', [
     message('m1', 'user', 'first'),

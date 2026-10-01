@@ -414,8 +414,20 @@ export function createQaPreset(partial?: Partial<QaModelPreset>): QaModelPreset 
       typeof partial?.contextWindow === 'number' && Number.isFinite(partial.contextWindow)
         ? Math.max(4096, Math.min(2_000_000, Math.trunc(partial.contextWindow)))
         : undefined,
+    maxOutputTokens:
+      typeof partial?.maxOutputTokens === 'number' && Number.isFinite(partial.maxOutputTokens)
+        ? Math.max(256, Math.min(200_000, Math.trunc(partial.maxOutputTokens)))
+        : undefined,
     supportsVision: partial?.supportsVision === true,
   };
+}
+
+/**
+ * 归一化单个 QA 模型预设（含可选 maxOutputTokens，范围 256–200_000）。
+ * 与 createQaPreset 同一实现；为测试与调用方提供语义化命名。
+ */
+export function normalizeQaModelPreset(partial?: Partial<QaModelPreset>): QaModelPreset {
+  return createQaPreset(partial);
 }
 
 function getQaModelPresetKey(preset: QaModelPreset) {

@@ -19,17 +19,27 @@ import {
   startAgentRun,
 } from '../../services/agentRuns';
 import {
+  createAgentMemoryWritePlan,
+  readAgentMemory,
   writeAgentMemory,
   type AgentMemoryWritePlan,
 } from '../../services/agentMemory';
+import { mergeRejectedClaims, type RejectedClaimLine } from '../../services/agentMemoryContract';
 import {
   applyAgentNoteWritePlan,
   type AgentNoteWritePlan,
 } from '../../services/agentNotePlan';
 import type { AgentLoopEvent, AgentLoopMessage } from '../../services/agentLoop';
 import { isComparativeSurveyInstruction } from '../../services/agentCapabilityTrigger';
-import type { ComparativeSurveyArtifacts, ComparativeSurveyEvent } from '../../services/agentCapability';
+import type { ComparativeSurveyArtifacts } from '../../services/agentCapability';
+import {
+  type AgentCapabilityEvent,
+  type AgentCapabilityId,
+  getAgentCapability,
+} from '../../services/agentCapabilityRegistry';
+import { resolveAgentCapabilityRoute } from '../../services/agentCapabilityRoute';
 import { listLibraryCategories, listLibraryPapers } from '../../services/library';
+import { paperPdfPath } from '../../utils/libraryPaper';
 import type { LiteratureCategory, LiteraturePaper } from '../../types/library';
 import type { DocumentChatAttachment, ModelReasoningEffort, QaModelPreset } from '../../types/reader';
 import {
@@ -49,6 +59,7 @@ import {
 import {
   applyAgentLoopEventToTrace,
   buildRunningTrace,
+  completeDirectAgentTrace,
   buildAgentHistorySession,
   buildToolCallView,
   durationLabel,
@@ -65,7 +76,7 @@ import {
   toolLabel,
   uniqueTagNames,
 } from './AgentWorkspace.model';
-import type { AgentChatMessage, AgentHistorySession, AgentToolCallView } from './AgentWorkspace.types';
+import type { AgentCapabilityView, AgentChatMessage, AgentHistorySession, AgentToolCallView } from './AgentWorkspace.types';
 import { useAppLocale, useLocaleText } from '../../i18n/uiLanguage';
 import {
   emitJumpToNoteAnchor,
@@ -98,13 +109,14 @@ function createAgentRagCitationJumpRequestId(): string {
   return `agent-rag-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
 }
 
-function createCapabilityView() {
+function createCapabilityView(id: AgentCapabilityId = 'comparative-survey'): AgentCapabilityView {
+  const definition = getAgentCapability(id) ?? getAgentCapability('comparative-survey')!;
   return {
-    id: 'comparative-survey' as const,
+    id: definition.id,
     status: 'running' as const,
     activeStage: undefined,
-    stages: (['rephrase', 'decompose', 'research', 'report'] as const).map((id) => ({
-      id,
+    stages: definition.stages.map((stageId) => ({
+      id: stageId,
       status: 'waiting' as const,
     })),
   };
@@ -170,6 +182,7 @@ function AgentWorkspace() {
   const [selectedAgentReasoningEffort, setSelectedAgentReasoningEffort] =
     useState<ModelReasoningEffort>('auto');
   const [capturingScreenshot, setCapturingScreenshot] = useState(false);
+  const [pinnedCapabilityId, setPinnedCapabilityId] = useState<AgentCapabilityId | 'auto'>('auto');
   const [messages, setMessages] = useState<AgentChatMessage[]>(() => [
     {
       id: newMessageId(),
@@ -206,6 +219,7 @@ function AgentWorkspace() {
   const [currentRunTokens, setCurrentRunTokens] = useState({ promptTokens: 0, completionTokens: 0 });
   const [sessionTokenUsage, setSessionTokenUsage] = useState<Record<string, number>>({});
   const abortControllersRef = useRef(new Map<string, AbortController>());
+  const memoryPlanInFlightRef = useRef(new Set<string>());
   const pendingCapabilityResumeRef = useRef(new Map<string, {
     instruction: string;
     artifacts: Partial<ComparativeSurveyArtifacts>;
@@ -609,7 +623,7 @@ function AgentWorkspace() {
   const markMemoryPlanTerminalStatus = (
     sessionId: string,
     memoryPlanId: string,
-    status: 'applied' | 'cancelled',
+    status: 'applied' | 'cancelled' | 'unchanged',
   ) => {
     const applyStatus = (message: AgentChatMessage): AgentChatMessage =>
       message.memoryPlan?.id === memoryPlanId && !message.memoryPlanStatus
@@ -939,8 +953,19 @@ function AgentWorkspace() {
     const startedAt = performance.now();
     const assistantMessageId = newMessageId();
     const paperCount = selectedPapersSnapshot.length;
-    // 触发判定与服务层共用同一函数，进度卡展示与实际执行路径不再分叉。
-    const capabilityRequested = isComparativeSurveyInstruction(instruction, modelPapersSnapshot.length);
+    // 触发判定与服务层共用同一路由解析，进度卡展示与实际执行路径保持一致。
+    const capabilityRoute = resolveAgentCapabilityRoute({
+      instruction,
+      paperCount: modelPapersSnapshot.length,
+      pinnedCapabilityId,
+      mountContext: {
+        papersCount: modelPapersSnapshot.length,
+        hasOpenDocument: modelPapersSnapshot.some((paper) => Boolean(paperPdfPath(paper))),
+        ragReady: Boolean(agentRagEnabled),
+        localLibraryMode: true,
+      },
+    });
+    const capabilityRequested = capabilityRoute.capabilityId !== null;
     const historyMessages = buildConversationHistory();
     const attachmentsSnapshot = [...agentAttachments];
     const userMessage: AgentChatMessage = {
@@ -971,7 +996,7 @@ function AgentWorkspace() {
       meta: l('执行中', 'Running'),
       createdAt: Date.now(),
       trace: buildRunningTrace(instruction, paperCount, locale),
-      capability: capabilityRequested ? createCapabilityView() : undefined,
+      capability: capabilityRequested && capabilityRoute.capabilityId ? createCapabilityView(capabilityRoute.capabilityId) : undefined,
     };
     const nextMessages = [...messages, userMessage, pendingAssistantMessage];
     const isTargetSessionActive = () => activeSessionIdRef.current === sessionId;
@@ -1111,7 +1136,7 @@ function AgentWorkspace() {
         streamCommitTimer = window.setTimeout(commitStreamedAgentMessage, 120 - elapsedMs);
       }
     };
-    const handleCapabilityEvent = (event: ComparativeSurveyEvent) => {
+    const handleCapabilityEvent = (event: AgentCapabilityEvent) => {
       if (runId) {
         const targetRunId = runId;
         const kind = event.kind === 'stage_start'
@@ -1126,7 +1151,8 @@ function AgentWorkspace() {
       }
 
       updateSessionMessage(sessionId, assistantMessageId, (message) => {
-        const capability = message.capability ?? createCapabilityView();
+        // 分类器路由命中的能力在发送前无法预知，首个阶段事件到达时按事件携带的 capabilityId 建卡。
+        const capability = message.capability ?? createCapabilityView(event.capabilityId ?? 'comparative-survey');
         const stages = capability.stages.map((stage) => {
           if (stage.id !== event.stage) return stage;
           if (event.kind === 'stage_start') return { ...stage, status: 'running' as const };
@@ -1149,7 +1175,7 @@ function AgentWorkspace() {
         setStatusMessage(
           event.kind === 'stage_retry'
             ? l(`阶段 ${event.stage} 正在重试。`, `Retrying ${event.stage}.`)
-            : l(`对比调研：${event.stage}`, `Comparative survey: ${event.stage}`),
+            : l(`能力阶段：${event.stage}`, `Capability stage: ${event.stage}`),
         );
       }
     };
@@ -1164,6 +1190,20 @@ function AgentWorkspace() {
       },
       onLoopEvent: handleAgentLoopEvent,
       onCapabilityEvent: handleCapabilityEvent,
+      onCapabilityRoute: (event) => {
+        // 路由事件只记 capabilityId/source/reason；分类器原始输出（含思维链）不进 trace（方案第 9 节）。
+        if (!runId) {
+          return;
+        }
+        const targetRunId = runId;
+        const payload: Record<string, unknown> = event.kind === 'capability_route'
+          ? { capabilityId: event.capabilityId, source: event.source, reason: event.reason }
+          : { reason: event.reason };
+        runEventQueue = runEventQueue
+          .then(() => appendAgentRunEvent({ runId: targetRunId, kind: event.kind, payload }))
+          .then(() => undefined)
+          .catch(() => undefined);
+      },
       onCapabilityUsage: (usage) => {
         runTokens.promptTokens += usage.promptTokens;
         runTokens.completionTokens += usage.completionTokens;
@@ -1175,7 +1215,7 @@ function AgentWorkspace() {
               kind: 'capability',
               promptTokens: usage.promptTokens,
               completionTokens: usage.completionTokens,
-              payload: { capabilityId: 'comparative-survey', usage },
+              payload: { capabilityId: usage.capabilityId, usage },
             }))
             .then(() => undefined)
             .catch(() => undefined);
@@ -1292,34 +1332,56 @@ function AgentWorkspace() {
         signal: abortController.signal,
         capabilityResume: effectiveCapabilityResume,
         loopResumeMessages: effectiveLoopResumeMessages,
+        pinnedCapabilityId,
       });
       const durationMs = Math.round(performance.now() - startedAt);
 
       if (result.kind === 'capability') {
+        const content = result.result.kind === 'survey'
+          ? result.result.survey.markdown
+          : result.result.kind === 'audit'
+            ? result.result.audit.markdown
+            : result.result.kind === 'note-plan'
+              ? result.result.answer
+              : result.result.kind === 'graph-report'
+                ? result.result.report.markdown
+                : '';
+        const artifacts = result.result.kind === 'survey' ? result.result.survey.artifacts : undefined;
+        // 引用核对产物挂到消息上，rejectedClaimLines 非空时渲染「写入工作记忆」入口；
+        // 笔记蒸馏走现有笔记审批卡，不新做卡片（方案第 9 节）。
+        const citationAudit = result.result.kind === 'audit' ? result.result.audit : undefined;
+        const notePlan = result.result.kind === 'note-plan' && result.result.notePlan
+          ? result.result.notePlan
+          : undefined;
+
         updateSessionMessage(sessionId, assistantMessageId, (message) => ({
           ...message,
-          content: result.result.markdown,
-          meta: `comparative-survey · ${durationLabel(durationMs, locale)}`,
+          content,
+          meta: `${result.capabilityId} · ${durationLabel(durationMs, locale)}`,
           ragCitations: result.citations,
           ragFigures: result.figures,
           visionNotice: result.visionNotice,
           ragNotice: result.ragNotice,
+          evidenceStats: result.evidenceStats,
+          citationAudit,
+          notePlan,
           capability: {
-            ...(message.capability ?? createCapabilityView()),
+            ...(message.capability ?? createCapabilityView(result.capabilityId)),
             status: 'done',
-            activeStage: 'report',
-            stages: (message.capability ?? createCapabilityView()).stages.map((stage) => ({
+            activeStage: undefined,
+            stages: (message.capability ?? createCapabilityView(result.capabilityId)).stages.map((stage) => ({
               ...stage,
               status: 'success',
             })),
-            artifacts: result.result.artifacts,
+            artifacts,
           },
           error: undefined,
+          trace: completeDirectAgentTrace(message.trace),
         }));
         runTurns = 4;
         if (isTargetSessionActive()) {
           setCurrentRunTokens({ ...runTokens });
-          setStatusMessage(l('对比调研报告已完成。', 'Comparative survey report completed.'));
+          setStatusMessage(l('能力执行已完成。', 'Capability execution completed.'));
         }
         return;
       }
@@ -1334,18 +1396,19 @@ function AgentWorkspace() {
           ragFigures: result.figures,
           visionNotice: result.visionNotice,
           ragNotice: result.ragNotice,
-          trace: message.trace,
+          evidenceStats: result.evidenceStats,
           toolCall: undefined,
           plan: undefined,
           choices: undefined,
           paperSelectionRequest: undefined,
           error: undefined,
+          trace: completeDirectAgentTrace(message.trace, 'answer'),
         }));
         if (isTargetSessionActive()) {
           setStatusMessage(
             l(
-              `已直接回答，无需工具调用。${durationLabel(durationMs, locale)}`,
-              `Answered directly without tool calls. ${durationLabel(durationMs, locale)}`,
+              `回答已完成。${durationLabel(durationMs, locale)}`,
+              `Answer completed. ${durationLabel(durationMs, locale)}`,
             ),
           );
         }
@@ -1661,10 +1724,32 @@ function AgentWorkspace() {
   };
 
   const applyMemoryPlan = async (memoryPlan: AgentMemoryWritePlan) => {
+    if (memoryPlanInFlightRef.current.has(memoryPlan.id)) return;
+    memoryPlanInFlightRef.current.add(memoryPlan.id);
     const sessionId = activeSessionId;
 
     try {
-      await writeAgentMemory(memoryPlan.file, memoryPlan.content);
+      // merge-rejected-claims：批准时才读当前 L2 并合并否定项，不覆盖 Current task 等段落（方案第 6.4 节）。
+      let contentToWrite = memoryPlan.content;
+      let mergeResult: ReturnType<typeof mergeRejectedClaims> | null = null;
+
+      if (memoryPlan.mode === 'merge-rejected-claims' && memoryPlan.rejectedClaims?.length) {
+        const existing = await readAgentMemory(memoryPlan.file);
+        mergeResult = mergeRejectedClaims(existing.content, memoryPlan.rejectedClaims);
+        contentToWrite = mergeResult.content;
+      }
+
+      if (mergeResult && mergeResult.added === 0) {
+        markMemoryPlanTerminalStatus(sessionId, memoryPlan.id, 'unchanged');
+        const message = mergeResult.droppedBecauseFull > 0
+          ? l('工作记忆已达到 4,000 字符上限，本次没有新增条目。', 'Working memory is at the 4,000-character limit; no new entry was added.')
+          : l('这些否定主张已存在于工作记忆中，没有新增条目。', 'These rejected claims are already in working memory; no new entry was added.');
+        appendAssistantMessageToSession(sessionId, message, memoryPlan.summary);
+        setStatusMessage(message);
+        return;
+      }
+
+      await writeAgentMemory(memoryPlan.file, contentToWrite);
       markMemoryPlanTerminalStatus(sessionId, memoryPlan.id, 'applied');
       appendAssistantMessageToSession(
         sessionId,
@@ -1676,12 +1761,58 @@ function AgentWorkspace() {
       const message = nextError instanceof Error ? nextError.message : l('写入 Agent 记忆失败', 'Failed to update Agent memory');
       setError(message);
       setStatusMessage(message);
+    } finally {
+      memoryPlanInFlightRef.current.delete(memoryPlan.id);
     }
   };
 
   const rejectMemoryPlan = (memoryPlan: AgentMemoryWritePlan) => {
     markMemoryPlanTerminalStatus(activeSessionId, memoryPlan.id, 'cancelled');
     setStatusMessage(l('已拒绝本次 Agent 记忆写入。', 'The Agent memory update was rejected.'));
+  };
+
+  // 引用核对「写入工作记忆」入口（方案第 5.2/6.4 节）：
+  // 点击只生成 merge-rejected-claims 审批卡；批准路径仍是 applyMemoryPlan -> writeAgentMemory('topics', merged)。
+  const handleWriteRejectedClaimsToMemory = (message: AgentChatMessage) => {
+    const audit = message.citationAudit;
+
+    if (!audit || audit.rejectedClaimLines.length === 0) {
+      return;
+    }
+
+    const rejectedClaims: RejectedClaimLine[] = audit.claims
+      .filter((claim) => claim.status === 'not-in-library' || claim.status === 'contradicted')
+      .map((claim) => ({
+        text: claim.text,
+        status: claim.status as RejectedClaimLine['status'],
+        reason: claim.reason,
+        source: 'citation-audit',
+      }));
+
+    if (rejectedClaims.length === 0) {
+      return;
+    }
+
+    const memoryPlan = createAgentMemoryWritePlan({
+      file: 'topics',
+      // content 仅作审批卡预览；合并发生在用户批准时（读当前 L2 + mergeRejectedClaims）。
+      content: audit.rejectedClaimLines.join('\n'),
+      summary: l(
+        `引用核对：合并 ${rejectedClaims.length} 条被否定主张到 L2 工作记忆（不覆盖当前任务段）。`,
+        `Citation audit: merge ${rejectedClaims.length} rejected claim(s) into L2 working memory (current task is preserved).`,
+      ),
+      mode: 'merge-rejected-claims',
+      rejectedClaims,
+    });
+
+    updateSessionMessage(activeSessionId, message.id, (current) => ({
+      ...current,
+      memoryPlan,
+    }));
+    setStatusMessage(l(
+      '已生成工作记忆写入审批卡，确认后才会合并进 L2。',
+      'A working-memory approval card was created. Merging into L2 happens only after confirmation.',
+    ));
   };
 
   const applyNotePlan = async (notePlan: AgentNoteWritePlan) => {
@@ -2230,6 +2361,7 @@ function AgentWorkspace() {
         void applyMemoryPlan(memoryPlan);
       }}
       onRejectMemoryPlan={rejectMemoryPlan}
+      onWriteRejectedClaims={handleWriteRejectedClaimsToMemory}
       onApplyNotePlan={(notePlan) => {
         void applyNotePlan(notePlan);
       }}
@@ -2245,6 +2377,8 @@ function AgentWorkspace() {
       onOrganizeMemory={handleOrganizeAgentMemory}
       onAgentPresetChange={handleAgentPresetChange}
       onAgentReasoningEffortChange={setSelectedAgentReasoningEffort}
+      pinnedCapabilityId={pinnedCapabilityId}
+      onPinnedCapabilityChange={setPinnedCapabilityId}
       onCaptureScreenshot={() => {
         void handleCaptureAgentScreenshot();
       }}

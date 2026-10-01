@@ -17,13 +17,25 @@ import {
   type ComparativeSurveyEvent,
   type ComparativeSurveyResult,
 } from './agentCapability';
+import {
+  type AgentCapabilityCallModel,
+  type AgentCapabilityEvent,
+  type AgentCapabilityId,
+  type AgentCapabilityResult,
+  getAgentCapability,
+} from './agentCapabilityRegistry';
+import { resolveAgentCapabilityRoute } from './agentCapabilityRoute';
+import { classifyAgentCapabilityRoute } from './agentCapabilityClassifier';
+import { bindAnswerEvidence, type AnswerEvidenceStatus } from './agentAnswerEvidence.ts';
+import { buildWorkingMemoryInjection } from './agentMemoryContract.ts';
 import { isComparativeSurveyInstruction } from './agentCapabilityTrigger';
 import {
   runAgentLoop,
   type AgentLoopEvent,
   type AgentLoopMessage,
+  type AgentToolMountContext,
 } from './agentLoop';
-import { createLibraryAgentTools, type AgentPaperContextResult } from './agentTools';
+import { createLibraryAgentTools, paperSearchText, type AgentPaperContextResult } from './agentTools';
 import {
   readLocalBinaryFile,
   readLocalTextFileIfExists,
@@ -274,6 +286,7 @@ export type LibraryAgentRunResult =
     visionNotice?: string | null;
     /** RAG 检索失败时的用户可见提示（已回退到全文/摘要上下文）。 */
     ragNotice?: string | null;
+    evidenceStats?: Record<AnswerEvidenceStatus, number>;
   }
   | {
     kind: 'choice';
@@ -284,6 +297,7 @@ export type LibraryAgentRunResult =
     figures?: LibraryAgentFigureReference[];
     visionNotice?: string | null;
     ragNotice?: string | null;
+    evidenceStats?: Record<AnswerEvidenceStatus, number>;
   }
   | {
     kind: 'paper-selection';
@@ -293,12 +307,13 @@ export type LibraryAgentRunResult =
   }
   | {
     kind: 'capability';
-    capabilityId: 'comparative-survey';
-    result: ComparativeSurveyResult;
+    capabilityId: AgentCapabilityId;
+    result: AgentCapabilityResult;
     citations?: LibraryAgentRagCitation[];
     figures?: LibraryAgentFigureReference[];
     visionNotice?: string | null;
     ragNotice?: string | null;
+    evidenceStats?: Record<AnswerEvidenceStatus, number>;
   }
   | {
     kind: 'memory-plan';
@@ -440,15 +455,22 @@ export {
 const SETTINGS_STORAGE_KEY = 'paper-reader-settings-v3';
 const SECRETS_STORAGE_KEY = 'paper-reader-secrets-v1';
 const AUTO_CLASSIFY_PARENT_NAME = 'Agent 自动归类';
-const MAX_REACT_INITIAL_PAPERS = 80;
+const MAX_REACT_INITIAL_PAPERS = 20;
 const MAX_REACT_INITIAL_CONTEXT_CHARS = 48_000;
 
 export interface LibraryAgentStreamHandlers {
   onDelta?: (text: string, fullText: string) => void;
   onThinkingDelta?: (text: string, fullText: string) => void;
   onLoopEvent?: (event: AgentLoopEvent) => void;
-  onCapabilityEvent?: (event: ComparativeSurveyEvent) => void;
-  onCapabilityUsage?: (usage: { promptTokens: number; completionTokens: number }) => void;
+  onCapabilityEvent?: (event: AgentCapabilityEvent) => void;
+  /**
+   * 能力路由事件（方案第 9 节）：每次运行解析后记 capability_route；
+   * 分类器失败另记 capability_route_failed。payload 不含分类器原始输出。
+   */
+  onCapabilityRoute?: (event:
+    | { kind: 'capability_route'; capabilityId: AgentCapabilityId | null; source: string; reason: string }
+    | { kind: 'capability_route_failed'; reason: string }) => void;
+  onCapabilityUsage?: (usage: { promptTokens: number; completionTokens: number; capabilityId: AgentCapabilityId | 'classifier' }) => void;
   onCapabilityCheckpoint?: (artifacts: ComparativeSurveyArtifacts) => void;
   onRecoveryCheckpoint?: (messages: AgentLoopMessage[], turn: number) => void;
   onDone?: () => void;
@@ -725,16 +747,19 @@ function buildReActAgentMessages({
     {
       role: 'system',
       content: [
-        'Use the PaperQuay tools as needed. Prefer evidence from paper context and preserve page citations.',
+        'Use the PaperQuay tools as needed. 证据与引用硬性约束：实质陈述句末尾必须附带本次工具结果中的 [n] 引用编号；引用文献只用 [n] 编号或『标题，第 X 页』，不要在正文写 paper_ / category_ 开头的内部 ID (cite papers only with [n] numbers or "Title, p.X"; never write raw paper_ or category_ internal IDs in answer text)；若当前库内未查到对应片段，必须明确写明「当前库内没有查到」，严禁凭参数知识把句子补完；若包含模型推断，必须明确写成「我的推断」，并且推断内容绝不能放入 excerpt 或 synthesis 笔记。',
         'For write requests, call exactly one matching write tool with reviewable items. The user must approve before application.',
         'Notebook workflows: to turn scattered excerpts into a close-reading card, first use search_notes with pageKind="excerpt" and the target paperId; to turn cross-paper excerpts into a concept page, use pageKind="excerpt" plus the topic keyword or tag. Create the result with write_notes using pageKind="paper-card" or "concept". Every substantive point must link back to the exact excerpt title with [[title]].',
         'Notebook citation rule: paper citations in generated notes must be paperReference nodes reconstructed by the shared Markdown parser from [n] plus a unique ## 参考文献 entry containing the real paper title or DOI. Never hand-write citation prose or citation numbers as a substitute for paperReference. Do not alter source excerpt anchors, snapshots, or “我的想法”; aggregation is additive and reviewable through write_notes.',
         'Notebook health repair: when given a health report, create a write_notes repair plan and wait for approval. Prefer reconnecting broken links by existing noteId, and never guess a replacement title. Delete-like cleanup is report-only by default: list candidates and do not emit delete operations unless the user explicitly approves deletion.',
         'System pages are maintained after approved note writes: log is appended, while index and overview refresh every five successful note operations. Do not overwrite a system page that has been manually edited.',
         'When writing LaTeX math, every backslash command must be separated from a following letter by a space: write "\\pi r^2", "\\Omega r", "\\sigma C_{d_0}", "\\sum T_{z,i}", "\\times a_z", "\\int V_x\\,dt" — never "\\pir", "\\Omegar", "\\sigmaC_{d_0}", "\\sumT_{z,i}", "\\timesa_z" (glued commands are undefined and render in red). Wrap multi-character sub/superscripts in braces (x_{cg}, C_T^{2}) and use \\mathrm{} for word-like subscripts (P_{\\mathrm{induced}}).',
-        memoryContext?.topics || memoryContext?.synthesis
-          ? `[Local Agent memory]\nL2 topics:\n${memoryContext.topics.slice(0, 2000)}\n\nL3 synthesis:\n${memoryContext.synthesis.slice(0, 2000)}`
-          : '',
+        // 工作记忆注入（方案第 6.3 节）：政策句始终在；L2/L3 正文仅在非空时附加、各截 1_200 字符；
+        // 本地文件超长时不落盘截断，只截断注入并追加提示行。
+        buildWorkingMemoryInjection({
+          topics: memoryContext?.topics ?? '',
+          synthesis: memoryContext?.synthesis ?? '',
+        }),
         `[PaperQuay library payload]\n${JSON.stringify(context)}`,
       ].join('\n\n'),
     },
@@ -1994,6 +2019,7 @@ export async function runConversationalLibraryAgent({
   signal,
   capabilityResume,
   loopResumeMessages,
+  pinnedCapabilityId,
 }: {
   papers: LiteraturePaper[];
   categories?: LiteratureCategory[];
@@ -2009,6 +2035,7 @@ export async function runConversationalLibraryAgent({
   signal?: AbortSignal;
   capabilityResume?: Partial<ComparativeSurveyArtifacts>;
   loopResumeMessages?: AgentLoopMessage[];
+  pinnedCapabilityId?: AgentCapabilityId | 'auto' | null;
 }): Promise<LibraryAgentRunResult> {
   if (!preset.baseUrl.trim() || !preset.apiKey.trim() || !preset.model.trim()) {
     throw new Error('请先在设置里配置支持 tool/function calling 的 OpenAI-compatible 模型。');
@@ -2022,7 +2049,209 @@ export async function runConversationalLibraryAgent({
 
   const persisted = await loadAgentSettingsAndSecrets();
 
-  if (isComparativeSurveyInstruction(normalizedInstruction, papers.length)) {
+  const mountContext: AgentToolMountContext = {
+    papersCount: papers.length,
+    hasOpenDocument: papers.some((paper) => Boolean(paperPdfPath(paper))),
+    ragReady: persisted.settings.localRagEnabled !== false,
+    localLibraryMode: true,
+  };
+
+  // 当次运行累积的引用活数组：ReAct 的 rag_search/request_paper_context、
+  // citation-audit 的 retrieve、note-distill 的 RAG 兜底都向同一个数组追加（方案第 3.3 节）。
+  const citations: LibraryAgentRagCitation[] = [];
+  const ragErrors: string[] = [];
+  const ragSettings = normalizeStoredReaderSettings(persisted.settings);
+  const ragReady = Boolean(
+    ragEnabled &&
+    persisted.secrets.embeddingApiKey?.trim() &&
+    ragSettings.embeddingBaseUrl.trim() &&
+    ragSettings.embeddingModel.trim(),
+  );
+
+  // 与 rag_search 工具完全相同的检索实现：citation-audit 的 retrieve 与
+  // note-distill 的 RAG 兜底直接复用它，不新写检索器（方案第 5.2/5.3 节）。
+  const searchRag = async (
+    input: { query: string; paperIds?: string[]; topK?: number },
+    searchOptions?: { signal?: AbortSignal },
+  ) => {
+    const effectiveSignal = searchOptions?.signal ?? signal;
+    if (effectiveSignal?.aborted) {
+      const error = new Error('RAG search aborted');
+      error.name = 'AbortError';
+      throw error;
+    }
+
+    const embeddingApiKey = persisted.secrets.embeddingApiKey?.trim() || '';
+    if (!ragReady || !embeddingApiKey) {
+      return { chunks: [], ragErrors: ['Local RAG is not configured or ready.'] };
+    }
+
+    try {
+      const queryEmbedding = await embedRagText(
+        input.query,
+        {
+          baseUrl: ragSettings.embeddingBaseUrl,
+          apiKey: embeddingApiKey,
+          model: ragSettings.embeddingModel,
+          dimensions: ragSettings.embeddingDimensions,
+          timeoutSeconds: ragSettings.embeddingRequestTimeoutSeconds,
+        },
+      );
+
+      if (effectiveSignal?.aborted) {
+        const error = new Error('RAG search aborted');
+        error.name = 'AbortError';
+        throw error;
+      }
+
+      const topK = Math.max(1, Math.min(30, input.topK ?? 12));
+      const targetKeys = Array.isArray(input.paperIds) && input.paperIds.length > 0
+        ? input.paperIds.filter(Boolean)
+        : undefined;
+
+      const rawResults = await ragRetrieveDocumentChunks({
+        documentKeys: targetKeys,
+        queryEmbedding,
+        queryText: input.query,
+        topK,
+      });
+
+      const paperById = new Map(papers.map((p) => [p.id, p]));
+      const chunks = rawResults.map((chunk) => {
+        const paper = chunk.documentKey ? paperById.get(chunk.documentKey) : undefined;
+        return {
+          paperId: chunk.documentKey || '',
+          paperTitle: paper?.title,
+          page: chunk.pageIndex === null || chunk.pageIndex === undefined ? null : chunk.pageIndex + 1,
+          blockId: chunk.blockId ?? null,
+          snippet: chunk.text ?? '',
+          hasImage: false,
+        };
+      });
+
+      for (const chunk of rawResults) {
+        if (!chunk.documentKey) continue;
+        const paper = paperById.get(chunk.documentKey);
+        if (!paper) continue;
+        const citationId = `agent-rag:${paper.id}:${chunk.pageIndex ?? 'na'}:${chunk.blockId ?? 'na'}`;
+        if (!citations.some((c) => c.id === citationId)) {
+          citations.push({
+            id: citationId,
+            label: String(citations.length + 1),
+            sourceType: chunk.sourceType ?? 'pdf-text',
+            pageIndex: chunk.pageIndex ?? null,
+            blockId: chunk.blockId ?? null,
+            previewText: chunk.text?.slice(0, 300) ?? '',
+            paperId: paper.id,
+            paperTitle: paper.title,
+          });
+        }
+      }
+
+      return { chunks, ragErrors: [] };
+    } catch (error) {
+      if (effectiveSignal?.aborted || (error instanceof Error && error.name === 'AbortError')) {
+        throw error;
+      }
+      return { chunks: [], ragErrors: [error instanceof Error ? error.message : String(error)] };
+    }
+  };
+
+  // 能力子调用（分类器/引用核对/笔记蒸馏）共用的模型通道：temperature 0、不流式、toolChoice none。
+  let usageCapabilityId: AgentCapabilityId | 'classifier' = 'classifier';
+  const callCapabilityModel: AgentCapabilityCallModel = async (input) => {
+    const controller = new AbortController();
+    const abortFromParent = () => controller.abort();
+    const abortFromCall = () => controller.abort();
+    signal?.addEventListener('abort', abortFromParent, { once: true });
+    input.signal?.addEventListener('abort', abortFromCall, { once: true });
+    try {
+      const response = await runOpenAiCompatibleAgentChatTurn({
+        options: {
+          baseUrl: preset.baseUrl,
+          apiKey: preset.apiKey.trim(),
+          model: preset.model,
+          apiMode: preset.apiMode,
+          temperature: 0,
+          reasoningEffort: preset.reasoningEffort,
+          maxOutputTokens: preset.maxOutputTokens,
+        },
+        messages: [
+          { role: 'system', content: input.system },
+          { role: 'user', content: input.user },
+        ],
+        toolChoice: 'none',
+        stream: false,
+        signal: controller.signal,
+      });
+      streamHandlers?.onCapabilityUsage?.({
+        promptTokens: response.usage?.promptTokens ?? 0,
+        completionTokens: response.usage?.completionTokens ?? 0,
+        capabilityId: usageCapabilityId,
+      });
+      return { content: response.content };
+    } finally {
+      signal?.removeEventListener('abort', abortFromParent);
+      input.signal?.removeEventListener('abort', abortFromCall);
+    }
+  };
+
+  // 只有明确请求专门能力时才调用分类器；普通问答直接进入原有 Agent 循环。
+  // 分类器未配置、超时、报错、解析失败都在 classifyAgentCapabilityRoute 内降级为 null
+  // 并 emit capability_route_failed，随后进入普通 ReAct，绝不中断问答。
+  const pinnedIsAutoOrUnset = !pinnedCapabilityId || pinnedCapabilityId === 'auto';
+  const classifierResult = pinnedIsAutoOrUnset &&
+      normalizedInstruction.length >= 12 &&
+      /引用核对|核查(?:主张|引用|证据)|核对(?:主张|引用|证据)|笔记蒸馏|提炼.*笔记|生成.*笔记|概念笔记|论文卡片|图谱探索|知识图谱|citation audit|note distill|graph explor/i.test(normalizedInstruction) &&
+      !isComparativeSurveyInstruction(normalizedInstruction, papers.length)
+    ? await classifyAgentCapabilityRoute({
+      instruction: normalizedInstruction,
+      callModel: callCapabilityModel,
+      signal,
+      onEvent: (event) => streamHandlers?.onCapabilityRoute?.(event),
+    })
+    : null;
+
+  const route = resolveAgentCapabilityRoute({
+    instruction: normalizedInstruction,
+    paperCount: papers.length,
+    pinnedCapabilityId,
+    mountContext,
+    classifierResult,
+  });
+  usageCapabilityId = route.capabilityId ?? 'classifier';
+  streamHandlers?.onCapabilityRoute?.({
+    kind: 'capability_route',
+    capabilityId: route.capabilityId,
+    source: route.source,
+    reason: route.reason,
+  });
+
+  if (route.capabilityId === 'comparative-survey') {
+    if (papers.length < 2) {
+      const noticeMarkdown = '库内综述（对比调研）需要至少选择或提供 2 篇文献才能进行对比分析。请选择至少两篇文献后再试。';
+      streamHandlers?.onDelta?.(noticeMarkdown, noticeMarkdown);
+      streamHandlers?.onDone?.();
+      return {
+        kind: 'capability',
+        capabilityId: 'comparative-survey',
+        result: {
+          kind: 'survey',
+          survey: {
+            markdown: noticeMarkdown,
+            citations: [],
+            tokenUsage: { promptTokens: 0, completionTokens: 0 },
+            artifacts: { completedStages: [] },
+          },
+        },
+        citations: [],
+        figures: [],
+        visionNotice: null,
+        ragNotice: null,
+        evidenceStats: { supported: 0, partial: 0, 'not-in-library': 0 },
+      };
+    }
+
     const citationAccumulator: LibraryAgentRagCitation[] = [];
     const ragErrors: string[] = [];
     const callModel = async (system: string, user: string) => {
@@ -2038,6 +2267,7 @@ export async function runConversationalLibraryAgent({
             apiMode: preset.apiMode,
             temperature: preset.temperature,
             reasoningEffort: preset.reasoningEffort,
+            maxOutputTokens: preset.maxOutputTokens,
           },
           messages: [
             { role: 'system', content: system },
@@ -2050,6 +2280,7 @@ export async function runConversationalLibraryAgent({
         streamHandlers?.onCapabilityUsage?.({
           promptTokens: response.usage?.promptTokens ?? 0,
           completionTokens: response.usage?.completionTokens ?? 0,
+          capabilityId: 'comparative-survey',
         });
         return response;
       } finally {
@@ -2060,7 +2291,9 @@ export async function runConversationalLibraryAgent({
       question: normalizedInstruction,
       resume: capabilityResume,
       signal,
-      onEvent: streamHandlers?.onCapabilityEvent,
+      onEvent: streamHandlers?.onCapabilityEvent
+        ? (event) => streamHandlers.onCapabilityEvent?.({ ...event, capabilityId: 'comparative-survey' })
+        : undefined,
       onCheckpoint(artifacts) {
         streamHandlers?.onCapabilityCheckpoint?.(artifacts);
       },
@@ -2192,81 +2425,171 @@ export async function runConversationalLibraryAgent({
     }
     streamHandlers?.onDelta?.(survey.markdown, survey.markdown);
     streamHandlers?.onDone?.();
+
+    const evidenceStats = survey.evidenceStats ?? bindAnswerEvidence({
+      answer: survey.markdown,
+      citations: citationAccumulator,
+    }).counts;
+
     return {
       kind: 'capability',
       capabilityId: 'comparative-survey',
-      result: survey,
+      result: {
+        kind: 'survey',
+        survey,
+      },
       citations: citationAccumulator,
       figures: [],
       visionNotice: preset.supportsVision === true ? null : '当前模型未标记为支持视觉，调研阶段未发送论文图片。',
       ragNotice: buildAgentRagNotice(ragErrors),
+      evidenceStats,
     };
+  } else if (route.capabilityId) {
+    const definition = getAgentCapability(route.capabilityId);
+    if (definition) {
+      const routedCapabilityId = route.capabilityId;
+      let capabilityResult: AgentCapabilityResult | null = null;
+      try {
+        capabilityResult = await definition.runner({
+          instruction: normalizedInstruction,
+          priorAssistantAnswer: [...historyMessages].reverse().find((message) => message.role === 'assistant')?.content,
+          papers: papers.map((paper) => ({
+            id: paper.id,
+            title: paper.title,
+            tagNames: paper.tags.map((tag) => tag.name),
+            categoryIds: paper.categoryIds,
+            searchText: paperSearchText(paper),
+          })),
+          currentPaperScopeIds,
+          signal,
+          onEvent: streamHandlers?.onCapabilityEvent
+            ? (event) => streamHandlers.onCapabilityEvent?.({ ...event, capabilityId: routedCapabilityId })
+            : undefined,
+          callModel: callCapabilityModel,
+          searchRag,
+        });
+      } catch (capabilityError) {
+        // 不变量 2：分类器选中的能力失败时降级回 ReAct，不阻断普通问答；
+        // 钉选/关键词命中的能力失败仍按错误上抛——用户明确选择了该能力，需要看到失败。
+        if (
+          route.source === 'model' &&
+          !(capabilityError instanceof Error && capabilityError.name === 'AbortError')
+        ) {
+          streamHandlers?.onError?.(
+            `能力「${routedCapabilityId}」执行失败，已回退到普通问答：${toErrorMessage(capabilityError, 'capability failed')}`,
+          );
+          capabilityResult = null;
+        } else {
+          throw capabilityError;
+        }
+      }
+
+      if (capabilityResult) {
+        const answerMarkdown = capabilityResult.kind === 'audit'
+          ? capabilityResult.audit.markdown
+          : capabilityResult.kind === 'note-plan'
+            ? capabilityResult.answer
+            : capabilityResult.kind === 'graph-report'
+              ? capabilityResult.report.markdown
+              : '';
+        streamHandlers?.onDelta?.(answerMarkdown, answerMarkdown);
+        streamHandlers?.onDone?.();
+
+        if (capabilityResult.kind === 'graph-report') {
+          // 图谱报告没有检索引用：由 graph-explore 把报告所用论文补进绑定输入（方案第 3.3 节）。
+          const graphCitations: LibraryAgentRagCitation[] = (capabilityResult.citations ?? []).map((citation) => ({
+            id: `graph-explore:${citation.paperId}:${citation.label}`,
+            label: citation.label,
+            sourceType: 'pdf-text',
+            pageIndex: citation.pageIndex,
+            blockId: citation.blockId,
+            previewText: citation.previewText,
+            paperId: citation.paperId,
+            paperTitle: citation.paperTitle,
+          }));
+          const evidenceStats = bindAnswerEvidence({
+            answer: answerMarkdown,
+            citations: graphCitations,
+          }).counts;
+
+          return {
+            kind: 'capability',
+            capabilityId: routedCapabilityId,
+            result: capabilityResult,
+            citations: graphCitations,
+            figures: [],
+            visionNotice: null,
+            ragNotice: null,
+            evidenceStats,
+          };
+        }
+
+        if (capabilityResult.kind === 'note-plan') {
+          // 笔记蒸馏的 collect 证据（收集到的笔记 + RAG 兜底片段）挂到消息引用区；
+          // 证据门禁已在 plan 阶段通过 assertEvidenceForNoteDraft，这里不再重复判定。
+          const distillCitations: LibraryAgentRagCitation[] = (capabilityResult.citations ?? [])
+            .filter((citation) => citation.paperId && !citation.paperId.startsWith('note:'))
+            .map((citation, index) => ({
+              id: `note-distill:${citation.paperId}:${citation.label || index + 1}`,
+              label: citation.label || String(index + 1),
+              sourceType: 'pdf-text' as const,
+              pageIndex: citation.pageIndex ?? null,
+              blockId: citation.blockId ?? null,
+              previewText: citation.previewText ?? '',
+              paperId: citation.paperId,
+              paperTitle: citation.paperTitle,
+            }));
+
+          return {
+            kind: 'capability',
+            capabilityId: routedCapabilityId,
+            result: capabilityResult,
+            citations: distillCitations,
+            figures: [],
+            visionNotice: null,
+            ragNotice: null,
+            evidenceStats: { supported: 0, partial: 0, 'not-in-library': 0 },
+          };
+        }
+
+        // citation-audit：retrieve 复用 rag_search 检索，片段已累积进当次引用数组；
+        // 判定状态由审计结果表格承担，不再跑本地绑定（方案第 3.5 节分工）。
+        return {
+          kind: 'capability',
+          capabilityId: routedCapabilityId,
+          result: capabilityResult,
+          citations,
+          figures: [],
+          visionNotice: null,
+          ragNotice: null,
+          evidenceStats: { supported: 0, partial: 0, 'not-in-library': 0 },
+        };
+      }
+      // capabilityResult 为 null：分类器选中的能力失败，继续走下方 ReAct 主循环。
+    }
   }
 
   const categoryPayload = buildAgentCategoryPayload(categories);
-  const instructionForRouter = buildAgentInstructionWithHistory(normalizedInstruction, historyMessages);
   const metadataContextLabel = papers.length > 0 ? 'metadata only' : 'general chat';
   let contextLabel = metadataContextLabel;
-  let paperInputs = papers.map((paper) => paperToAgentInput(
+  const scopedPapers = currentPaperScopeIds.length > 0
+    ? currentScopePapers(papers, currentPaperScopeIds)
+    : papers;
+  let paperInputs = scopedPapers.map((paper) => paperToAgentInput(
     paper,
     undefined,
     categoryPayload.categoryPathById,
   ));
-  const citations: LibraryAgentRagCitation[] = [];
-  const ragErrors: string[] = [];
   const artifacts = emptyAgentSessionArtifacts();
   const contexts = new Map<string, PaperContextPayload>();
   const contextModes = new Map<string, LibraryAgentContextRequest['mode']>();
-  const paperContextDecision = await decideLibraryAgentPaperContextOpenAICompatible({
-    baseUrl: preset.baseUrl,
-    apiKey: preset.apiKey.trim(),
-    model: preset.model,
-    apiMode: preset.apiMode,
-    temperature: preset.temperature,
-    reasoningEffort: preset.reasoningEffort,
-    responseLanguage,
-    allowContextRequest: true,
-    tool: 'auto',
-    instruction: instructionForRouter,
-    messages: historyMessages,
-    currentPaperScopeIds,
-    paperScopes,
-    categories: categoryPayload.categories,
-    papers: paperInputs,
-  }, signal);
-
-  if (paperContextDecision?.action === 'ask-user-to-select-papers' && paperContextDecision.paperIds.length === 0) {
-    return paperSelectionResultFromContextRequest(
-      {
-        summary: paperContextDecision.summary,
-        mode: paperContextDecision.mode,
-        reason: paperContextDecision.reason,
-        paperIds: [],
-      },
-      normalizedInstruction,
-      normalizeModelThinking(paperContextDecision.thinking),
-    );
-  }
-
-  if (paperContextDecision?.action === 'load-context') {
-    const effectiveRequest = buildEffectiveContextRequest({
-      summary: paperContextDecision.summary,
-      mode: paperContextDecision.mode,
-      reason: paperContextDecision.reason,
-      paperIds: paperContextDecision.paperIds,
-    }, papers, currentPaperScopeIds);
-
-    if (!effectiveRequest) {
-      return paperSelectionResultFromContextRequest(null, normalizedInstruction, normalizeModelThinking(paperContextDecision.thinking));
-    }
-
-    const contextPapers = currentScopePapers(papers, effectiveRequest.paperIds ?? currentPaperScopeIds);
-
-    if (contextPapers.length === 0) {
-      return paperSelectionResultFromContextRequest(effectiveRequest, normalizedInstruction, normalizeModelThinking(paperContextDecision.thinking));
-    }
-
-    const enriched = await buildPapersWithRequestedContext(contextPapers, effectiveRequest, {
+  if (currentPaperScopeIds.length > 0) {
+    const enriched = await buildPapersWithRequestedContext(scopedPapers, {
+      summary: 'Use the papers selected for this turn.',
+      mode: 'summary',
+      reason: normalizedInstruction,
+      paperIds: currentPaperScopeIds,
+    }, {
       ragEnabled,
       categoryPathById: categoryPayload.categoryPathById,
     });
@@ -2277,7 +2600,7 @@ export async function runConversationalLibraryAgent({
     ragErrors.push(...enriched.ragErrors);
     for (const [paperId, context] of enriched.contexts) {
       contexts.set(paperId, context);
-      contextModes.set(paperId, effectiveRequest.mode);
+      contextModes.set(paperId, 'summary');
     }
   }
 
@@ -2319,101 +2642,6 @@ export async function runConversationalLibraryAgent({
     }
 
     return context;
-  };
-
-  const ragSettings = normalizeStoredReaderSettings(persisted.settings);
-  const ragReady = Boolean(
-    ragEnabled &&
-    persisted.secrets.embeddingApiKey?.trim() &&
-    ragSettings.embeddingBaseUrl.trim() &&
-    ragSettings.embeddingModel.trim(),
-  );
-
-  const searchRag = async (
-    input: { query: string; paperIds?: string[]; topK?: number },
-    searchOptions?: { signal?: AbortSignal },
-  ) => {
-    const effectiveSignal = searchOptions?.signal ?? signal;
-    if (effectiveSignal?.aborted) {
-      const error = new Error('RAG search aborted');
-      error.name = 'AbortError';
-      throw error;
-    }
-
-    const embeddingApiKey = persisted.secrets.embeddingApiKey?.trim() || '';
-    if (!ragReady || !embeddingApiKey) {
-      return { chunks: [], ragErrors: ['Local RAG is not configured or ready.'] };
-    }
-
-    try {
-      const queryEmbedding = await embedRagText(
-        input.query,
-        {
-          baseUrl: ragSettings.embeddingBaseUrl,
-          apiKey: embeddingApiKey,
-          model: ragSettings.embeddingModel,
-          dimensions: ragSettings.embeddingDimensions,
-          timeoutSeconds: ragSettings.embeddingRequestTimeoutSeconds,
-        },
-      );
-
-      if (effectiveSignal?.aborted) {
-        const error = new Error('RAG search aborted');
-        error.name = 'AbortError';
-        throw error;
-      }
-
-      const topK = Math.max(1, Math.min(30, input.topK ?? 12));
-      const targetKeys = Array.isArray(input.paperIds) && input.paperIds.length > 0
-        ? input.paperIds.filter(Boolean)
-        : undefined;
-
-      const rawResults = await ragRetrieveDocumentChunks({
-        documentKeys: targetKeys,
-        queryEmbedding,
-        queryText: input.query,
-        topK,
-      });
-
-      const paperById = new Map(papers.map((p) => [p.id, p]));
-      const chunks = rawResults.map((chunk) => {
-        const paper = chunk.documentKey ? paperById.get(chunk.documentKey) : undefined;
-        return {
-          paperId: chunk.documentKey || '',
-          paperTitle: paper?.title,
-          page: chunk.pageIndex === null || chunk.pageIndex === undefined ? null : chunk.pageIndex + 1,
-          blockId: chunk.blockId ?? null,
-          snippet: chunk.text ?? '',
-          hasImage: false,
-        };
-      });
-
-      for (const chunk of rawResults) {
-        if (!chunk.documentKey) continue;
-        const paper = paperById.get(chunk.documentKey);
-        if (!paper) continue;
-        const citationId = `agent-rag:${paper.id}:${chunk.pageIndex ?? 'na'}:${chunk.blockId ?? 'na'}`;
-        if (!citations.some((c) => c.id === citationId)) {
-          citations.push({
-            id: citationId,
-            label: String(citations.length + 1),
-            sourceType: chunk.sourceType ?? 'pdf-text',
-            pageIndex: chunk.pageIndex ?? null,
-            blockId: chunk.blockId ?? null,
-            previewText: chunk.text?.slice(0, 300) ?? '',
-            paperId: paper.id,
-            paperTitle: paper.title,
-          });
-        }
-      }
-
-      return { chunks, ragErrors: [] };
-    } catch (error) {
-      if (effectiveSignal?.aborted || (error instanceof Error && error.name === 'AbortError')) {
-        throw error;
-      }
-      return { chunks: [], ragErrors: [error instanceof Error ? error.message : String(error)] };
-    }
   };
 
   const tools = createLibraryAgentTools({
@@ -2512,7 +2740,9 @@ export async function runConversationalLibraryAgent({
       ragReady,
       localLibraryMode: true,
     },
-    runtimeContext: {},
+    runtimeContext: {
+      citations,
+    },
     messages: loopResumeMessages?.length
       ? [
         ...loopResumeMessages,
@@ -2588,6 +2818,7 @@ export async function runConversationalLibraryAgent({
         apiMode: preset.apiMode,
         temperature: preset.temperature,
         reasoningEffort: preset.reasoningEffort,
+        maxOutputTokens: preset.maxOutputTokens,
       },
       ...turnRequest,
     }),

@@ -10,9 +10,10 @@ import type {
 import type { AgentMemoryWritePlan } from '../../services/agentMemory';
 import type { AgentNoteWritePlan } from '../../services/agentNotePlan';
 import type { ComparativeSurveyArtifacts } from '../../services/agentCapability';
+import type { AgentCapabilityId, CitationAuditResult } from '../../services/agentCapabilityRegistry';
 import type { DocumentChatAttachment } from '../../types/reader';
 
-export type AgentStepStatus = 'waiting' | 'running' | 'success' | 'error';
+export type AgentStepStatus = 'waiting' | 'running' | 'success' | 'warning' | 'error' | 'skipped';
 
 export type AgentStepType =
   | 'intent'
@@ -54,15 +55,15 @@ export interface AgentToolCallView {
 }
 
 export interface AgentCapabilityView {
-  id: 'comparative-survey';
+  id: AgentCapabilityId;
   status: 'running' | 'done' | 'error' | 'aborted';
-  activeStage?: 'rephrase' | 'decompose' | 'research' | 'report';
+  activeStage?: string;
   stages: Array<{
-    id: 'rephrase' | 'decompose' | 'research' | 'report';
+    id: string;
     status: AgentStepStatus;
     detail?: string;
   }>;
-  artifacts?: ComparativeSurveyArtifacts;
+  artifacts?: unknown;
 }
 
 export interface AgentChatMessage {
@@ -80,16 +81,19 @@ export interface AgentChatMessage {
   visionNotice?: string | null;
   /** RAG 检索失败时的用户可见提示（Agent 已回退到全文/摘要上下文）。 */
   ragNotice?: string | null;
+  evidenceStats?: Record<string, number>;
   toolCall?: AgentToolCallView;
   plan?: LibraryAgentPlan;
   /** 审批计划生命周期终态；undefined 表示仍可审批。 */
   planStatus?: 'applied' | 'cancelled';
   memoryPlan?: AgentMemoryWritePlan;
   /** 记忆写入审批终态；undefined 表示仍可审批。 */
-  memoryPlanStatus?: 'applied' | 'cancelled';
+  memoryPlanStatus?: 'applied' | 'cancelled' | 'unchanged';
   notePlan?: AgentNoteWritePlan;
   /** 笔记写入审批终态；undefined 表示仍可审批。 */
   notePlanStatus?: 'applied' | 'cancelled';
+  /** 引用核对（citation-audit）能力产物；rejectedClaimLines 非空时渲染「写入工作记忆」入口。 */
+  citationAudit?: CitationAuditResult;
   capability?: AgentCapabilityView;
   choices?: LibraryAgentUserChoice[];
   paperSelectionRequest?: LibraryAgentPaperSelectionRequest;

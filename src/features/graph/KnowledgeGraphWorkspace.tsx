@@ -185,7 +185,7 @@ const graphStyles = [
       'font-family': 'Inter, ui-sans-serif, system-ui, sans-serif',
       'font-size': 9,
       'font-weight': 600,
-      color: 'var(--pq-text)',
+      color: '#1f2937',
       'text-valign': 'bottom',
       'text-halign': 'center',
       'text-margin-y': 6,
@@ -1070,15 +1070,24 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
   useEffect(() => {
     if (!containerRef.current) return;
 
+    const graphTextColor = () => getComputedStyle(containerRef.current!).getPropertyValue('--pq-text').trim() || '#1f2937';
+    const resolvedGraphStyles = (): StylesheetJson => {
+      const nodeStyle = graphStyles[0] as { selector: string; style: Record<string, unknown> };
+      return [
+        { ...nodeStyle, style: { ...nodeStyle.style, color: graphTextColor() } },
+        ...graphStyles.slice(1),
+      ] as StylesheetJson;
+    };
     const cy = cytoscape({
       container: containerRef.current,
       elements: [],
-      style: graphStyles,
-      wheelSensitivity: 0.18,
+      style: resolvedGraphStyles(),
       minZoom: 0.08,
       maxZoom: 2.8,
     });
     cyRef.current = cy;
+    const themeObserver = new MutationObserver(() => cy.style(resolvedGraphStyles()));
+    themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style'] });
 
     cy.on('tap', 'node', (event) => {
       const data = event.target.data() as KnowledgeGraphNode;
@@ -1129,6 +1138,7 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
     });
 
     return () => {
+      themeObserver.disconnect();
       cy.destroy();
       cyRef.current = null;
     };

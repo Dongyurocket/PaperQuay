@@ -4,6 +4,7 @@ import {
   Bot,
   Camera,
   BookOpen,
+  Archive,
   ChevronDown,
   Check,
   Clipboard,
@@ -18,9 +19,11 @@ import {
   X,
 } from 'lucide-react';
 import type { LibraryAgentFigureReference, LibraryAgentPlan, LibraryAgentRagCitation } from '../../services/libraryAgent';
+import { groupAgentCitations, formatGroupPageSummary } from './agentCitationGroups';
 import type { AgentMemoryWritePlan } from '../../services/agentMemory';
 import type { AgentNoteWritePlan } from '../../services/agentNotePlan';
 import type { AgentCapabilityView } from './AgentWorkspace.types';
+import { getAgentCapability } from '../../services/agentCapabilityRegistry';
 import type { LiteraturePaper } from '../../types/library';
 import type { UiLanguage } from '../../types/reader';
 import type { AgentChatMessage, AgentToolCallView } from './AgentWorkspace.types';
@@ -262,33 +265,100 @@ function AgentRagCitationChips({
   l: (zh: string, en: string) => string;
   onOpenCitation?: (citation: LibraryAgentRagCitation) => void;
 }) {
-  if (!citations?.length) {
+  const [expandedPaperIds, setExpandedPaperIds] = useState<Set<string>>(() => new Set());
+  const [showAllGroups, setShowAllGroups] = useState(false);
+
+  const groups = useMemo(() => groupAgentCitations(citations), [citations]);
+
+  if (!groups.length) {
     return null;
   }
 
-  return (
-    <div className="mt-4 flex flex-wrap gap-2">
-      {citations.map((citation) => {
-        const pageLabel =
-          citation.pageIndex !== null && citation.pageIndex !== undefined
-            ? l(`第 ${citation.pageIndex + 1} 页`, `Page ${citation.pageIndex + 1}`)
-            : citation.sourceType;
+  const toggleGroup = (paperId: string) => {
+    setExpandedPaperIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(paperId)) {
+        next.delete(paperId);
+      } else {
+        next.add(paperId);
+      }
+      return next;
+    });
+  };
 
-        return (
+  const visibleGroups = showAllGroups ? groups : groups.slice(0, 6);
+  const hasHiddenGroups = groups.length > 6;
+
+  return (
+    <div className="mt-4 space-y-2">
+      <div className="flex flex-wrap items-start gap-2">
+        {visibleGroups.map((group) => {
+          const isExpanded = expandedPaperIds.has(group.paperId);
+          const pageSummary = formatGroupPageSummary(group, l);
+
+          return (
+            <div key={group.paperId} className="flex flex-col gap-1.5">
+              <button
+                type="button"
+                onClick={() => toggleGroup(group.paperId)}
+                className={`inline-flex max-w-full items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] font-semibold transition ${
+                  isExpanded
+                    ? 'border-[var(--pq-accent)] bg-[var(--pq-accent-soft)] text-[var(--pq-accent)]'
+                    : 'border-[var(--pq-accent-border)] bg-[var(--pq-accent-soft)]/60 text-[var(--pq-accent)] hover:border-[var(--pq-accent)] hover:bg-[var(--pq-surface)]'
+                }`}
+                title={group.paperTitle}
+              >
+                <span className="max-w-[220px] truncate">{group.paperTitle}</span>
+                <span className="text-[var(--pq-text-faint)]">· {pageSummary}</span>
+                <ChevronDown
+                  className={`h-3 w-3 shrink-0 text-[var(--pq-text-faint)] transition-transform ${
+                    isExpanded ? 'rotate-180' : ''
+                  }`}
+                />
+              </button>
+
+              {isExpanded && (
+                <div className="flex flex-wrap gap-1.5 pl-2 py-0.5 border-l-2 border-[var(--pq-accent-border)]">
+                  {group.pages.map((page) => {
+                    const pageLabel =
+                      page.pageIndex !== null && page.pageIndex !== undefined
+                        ? l(`第 ${page.pageIndex + 1} 页`, `Page ${page.pageIndex + 1}`)
+                        : l('全文', 'Full text');
+
+                    return (
+                      <button
+                        key={`${group.paperId}:${page.label}:${page.pageIndex ?? 'full'}`}
+                        type="button"
+                        onClick={() => onOpenCitation?.(page.citation)}
+                        disabled={!onOpenCitation}
+                        className="inline-flex items-center gap-1 rounded-full border border-[var(--pq-accent-border)] bg-[var(--pq-surface)] px-2.5 py-0.5 text-[11px] font-medium text-[var(--pq-accent)] transition hover:border-[var(--pq-accent)] hover:bg-[var(--pq-accent-soft)] disabled:cursor-not-allowed disabled:opacity-60"
+                        title={page.citation.previewText || `${group.paperTitle} · ${pageLabel}`}
+                      >
+                        <span className="font-semibold">[{page.label}]</span>
+                        <span className="text-[var(--pq-text-muted)]">{pageLabel}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {hasHiddenGroups && (
+        <div>
           <button
-            key={`${citation.paperId}:${citation.id}`}
             type="button"
-            onClick={() => onOpenCitation?.(citation)}
-            disabled={!onOpenCitation}
-            className="inline-flex max-w-full items-center gap-2 rounded-full border border-[var(--pq-accent-border)] bg-[var(--pq-accent-soft)] px-3 py-1 text-[11px] font-semibold text-[var(--pq-accent)] transition hover:border-[var(--pq-accent)] hover:bg-[var(--pq-surface)] disabled:cursor-not-allowed disabled:opacity-60"
-            title={citation.previewText || citation.paperTitle}
+            onClick={() => setShowAllGroups((prev) => !prev)}
+            className="inline-flex items-center gap-1 rounded-full border border-[var(--pq-border)] bg-[var(--pq-surface-2)] px-2.5 py-1 text-[11px] font-medium text-[var(--pq-text-muted)] hover:border-[var(--pq-accent-border)] hover:text-[var(--pq-accent)] transition"
           >
-            <span>[{citation.label}]</span>
-            <span className="max-w-[220px] truncate">{citation.paperTitle}</span>
-            <span className="text-[var(--pq-text-faint)]">{pageLabel}</span>
+            {showAllGroups
+              ? l('收起文献', 'Show fewer papers')
+              : l(`展开全部（共 ${groups.length} 篇）`, `Show all (${groups.length} papers)`)}
           </button>
-        );
-      })}
+        </div>
+      )}
     </div>
   );
 }
@@ -369,18 +439,36 @@ function CapabilityProgress({
   capability: AgentCapabilityView;
   l: (zh: string, en: string) => string;
 }) {
-  const labels: Record<AgentCapabilityView['stages'][number]['id'], [string, string]> = {
+  const definition = getAgentCapability(capability.id);
+  const title = definition ? l(definition.title['zh-CN'], definition.title['en-US']) : l('对比调研', 'Comparative Survey');
+
+  const labels: Record<string, [string, string]> = {
     rephrase: ['改写问题', 'Rephrase'],
     decompose: ['分解子题', 'Decompose'],
     research: ['逐题调研', 'Research'],
     report: ['综合报告', 'Report'],
+    extract: ['抽取主张', 'Extract'],
+    retrieve: ['证据检索', 'Retrieve'],
+    judge: ['判定支持', 'Judge'],
+    collect: ['收集上下文', 'Collect'],
+    draft: ['提炼草稿', 'Draft'],
+    plan: ['生成计划', 'Plan'],
+    neighbors: ['邻域探索', 'Neighbors'],
+    gaps: ['发现缺边', 'Missing Edges'],
+    topics: ['概念主题', 'Topics'],
+  };
+
+  const getStageTitle = (stageId: string) => {
+    const pair = labels[stageId];
+    if (pair) return l(pair[0], pair[1]);
+    return stageId.charAt(0).toUpperCase() + stageId.slice(1);
   };
 
   return (
     <div className="mt-4 rounded-[20px] border border-slate-200 bg-slate-50/70 p-4 dark:border-white/10 dark:bg-chrome-950/60">
       <div className="flex items-center justify-between gap-3">
         <div className="text-sm font-bold text-slate-950 dark:text-white">
-          {l('对比调研', 'Comparative Survey')}
+          {title}
         </div>
         <span className="text-xs font-semibold text-slate-500 dark:text-chrome-400">{capability.status}</span>
       </div>
@@ -399,7 +487,7 @@ function CapabilityProgress({
                       : 'bg-slate-100 text-slate-500 dark:bg-white/10 dark:text-chrome-400',
               ].join(' ')}>{index + 1}</span>
               <span className="text-xs font-semibold text-slate-700 dark:text-chrome-200">
-                {l(labels[stage.id][0], labels[stage.id][1])}
+                {getStageTitle(stage.id)}
               </span>
             </div>
             {stage.detail ? <div className="mt-1 line-clamp-2 text-[10px] text-slate-400">{stage.detail}</div> : null}
@@ -470,6 +558,7 @@ export function AssistantMessageCard({
   onApplyPlan,
   onApplyMemoryPlan,
   onRejectMemoryPlan,
+  onWriteRejectedClaims,
   onApplyNotePlan,
   onRejectNotePlan,
   onCancelPlan,
@@ -504,6 +593,8 @@ export function AssistantMessageCard({
   onApplyPlan: () => void;
   onApplyMemoryPlan: (memoryPlan: AgentMemoryWritePlan) => void;
   onRejectMemoryPlan: (memoryPlan: AgentMemoryWritePlan) => void;
+  /** 引用核对「写入工作记忆」入口：点击后生成 merge-rejected-claims 记忆审批卡。 */
+  onWriteRejectedClaims?: (message: AgentChatMessage) => void;
   onApplyNotePlan: (notePlan: AgentNoteWritePlan) => void;
   onRejectNotePlan: (notePlan: AgentNoteWritePlan) => void;
   onCancelPlan: () => void;
@@ -548,9 +639,24 @@ export function AssistantMessageCard({
               <AgentMarkdown
                 content={message.content}
                 citations={message.ragCitations}
+                papers={papers}
                 onCitationClick={onOpenRagCitation}
               />
             </div>
+            {message.evidenceStats ? (
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] font-medium text-slate-500 dark:text-chrome-400">
+                <span className="text-slate-400 dark:text-chrome-500">{l('证据绑定：', 'Evidence:')}</span>
+                <span className="inline-flex items-center gap-1 rounded-md bg-emerald-50 px-2 py-0.5 text-emerald-700 dark:bg-emerald-300/10 dark:text-emerald-300">
+                  <span>✓</span> {message.evidenceStats.supported ?? 0} {l('支持', 'supported')}
+                </span>
+                <span className="inline-flex items-center gap-1 rounded-md bg-amber-50 px-2 py-0.5 text-amber-700 dark:bg-amber-300/10 dark:text-amber-300">
+                  <span>~</span> {message.evidenceStats.partial ?? 0} {l('部分支持', 'partial')}
+                </span>
+                <span className="inline-flex items-center gap-1 rounded-md bg-slate-100 px-2 py-0.5 text-slate-600 dark:bg-white/10 dark:text-chrome-300">
+                  <span>?</span> {message.evidenceStats['not-in-library'] ?? 0} {l('库内未查到', 'not in library')}
+                </span>
+              </div>
+            ) : null}
             <AgentRagCitationChips
               citations={message.ragCitations}
               l={l}
@@ -568,6 +674,30 @@ export function AssistantMessageCard({
               </div>
             ) : null}
             {message.capability ? <CapabilityProgress capability={message.capability} l={l} /> : null}
+            {message.citationAudit && message.citationAudit.rejectedClaimLines.length > 0 && !message.memoryPlan ? (
+              <div className="mt-4 rounded-[20px] border border-amber-200 bg-amber-50/70 p-4 dark:border-amber-300/25 dark:bg-amber-300/10">
+                <div className="text-sm font-bold text-slate-950 dark:text-white">
+                  {l('发现未被库内证据支持的主张', 'Claims without library evidence found')}
+                </div>
+                <div className="mt-1 text-xs leading-5 text-slate-600 dark:text-chrome-300">
+                  {l(
+                    `引用核对标记了 ${message.citationAudit.rejectedClaimLines.length} 条库内无证据或证据相反的主张。可以把它们合并进工作记忆的 Rejected claims（不影响当前任务段），避免后续回答再次引用。`,
+                    `Citation audit flagged ${message.citationAudit.rejectedClaimLines.length} claim(s) with no library evidence or with contradicting evidence. Merge them into the working memory's Rejected claims (your current task stays untouched) so later answers do not cite them again.`,
+                  )}
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => onWriteRejectedClaims?.(message)}
+                    disabled={activeSessionRunning}
+                    className={agentPlanSecondaryActionClass}
+                  >
+                    <Archive className="h-4 w-4" />
+                    {l('写入工作记忆', 'Save to Working Memory')}
+                  </button>
+                </div>
+              </div>
+            ) : null}
             {memoryPlan ? (
               <div className="mt-4 rounded-[20px] border border-sky-200 bg-sky-50/70 p-4 dark:border-sky-300/25 dark:bg-sky-300/10">
                 <div className="flex items-center justify-between gap-3">
@@ -576,7 +706,8 @@ export function AssistantMessageCard({
                   </div>
                   {message.memoryPlanStatus ? (
                     <span className="rounded-full border border-sky-200 bg-white px-2.5 py-0.5 text-[11px] font-semibold text-sky-700 dark:border-sky-300/30 dark:bg-sky-300/10 dark:text-sky-200">
-                      {message.memoryPlanStatus === 'applied' ? l('已写入', 'Applied') : l('已拒绝', 'Rejected')}
+                      {message.memoryPlanStatus === 'applied' ? l('已写入', 'Applied') :
+                        message.memoryPlanStatus === 'unchanged' ? l('未新增', 'No change') : l('已拒绝', 'Rejected')}
                     </span>
                   ) : null}
                 </div>
@@ -596,6 +727,8 @@ export function AssistantMessageCard({
                     <Check className="h-4 w-4" />
                     {message.memoryPlanStatus === 'applied'
                       ? l('已写入', 'Applied')
+                      : message.memoryPlanStatus === 'unchanged'
+                        ? l('未新增', 'No change')
                       : message.memoryPlanStatus === 'cancelled'
                         ? l('已拒绝', 'Rejected')
                         : l('确认写入', 'Apply Update')}
