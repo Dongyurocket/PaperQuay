@@ -96,6 +96,7 @@ import {
   titleFromNoteContent,
 } from './notesTiptap';
 import { NoteBlockControls } from './NoteBlockControls';
+import { NoteMathText } from './NoteMathText';
 import { NoteEditorToolbar } from './NoteEditorToolbar';
 import { extractNoteReferences, upsertNoteReferenceList } from './noteReferences';
 import {
@@ -392,7 +393,7 @@ function NoteAnchorBlockView({ node, selected, extension }: NodeViewProps) {
     >
       <blockquote className="pq-note-anchor-card-quote" contentEditable={false}>
         <span aria-hidden="true">“</span>
-        {excerpt || '无摘录文本'}
+        {excerpt ? <NoteMathText value={excerpt} /> : '无摘录文本'}
         <span aria-hidden="true">”</span>
       </blockquote>
       <figcaption className="pq-note-anchor-card-meta" contentEditable={false}>

@@ -38,10 +38,16 @@ function parseMarkdownToTiptap(markdown, options = {}) {
     let i = 0;
     while (i < source.length) {
       const rest = source.slice(i);
-      const inlineMath = rest.match(/^\$([^$\n]+)\$/);
-      if (inlineMath) {
-        result.push({ type: 'inlineMath', attrs: { latex: inlineMath[1].trim() } });
-        i += inlineMath[0].length;
+      const bracketMath = rest.match(/^\\\(([^\n]+?)\\\)/);
+      if (bracketMath) {
+        result.push({ type: 'inlineMath', attrs: { latex: bracketMath[1].trim() } });
+        i += bracketMath[0].length;
+        continue;
+      }
+      const dollarMath = rest.match(/^\$([^$\n]+)\$/);
+      if (dollarMath) {
+        result.push({ type: 'inlineMath', attrs: { latex: dollarMath[1].trim() } });
+        i += dollarMath[0].length;
         continue;
       }
       const escaped = rest.match(/^\\([\\`*_[\]#~])/);

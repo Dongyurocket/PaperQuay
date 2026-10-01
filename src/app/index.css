@@ -1368,6 +1368,18 @@ textarea,
   overflow-wrap: anywhere;
 }
 
+.pq-note-excerpt-math {
+  display: inline-block;
+  max-width: 100%;
+  vertical-align: middle;
+}
+
+.pq-note-excerpt-math-display {
+  display: block;
+  overflow-x: auto;
+  padding: 0.2rem 0;
+}
+
 .pq-note-editor-compact .pq-note-anchor-card {
   margin: 0.7rem 0;
   border-radius: var(--pq-radius-sm);

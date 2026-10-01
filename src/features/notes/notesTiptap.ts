@@ -13,28 +13,36 @@ function cloneContent(value: JSONContent): JSONContent {
 
 function upgradeLegacyMarkdownBlocks(contentJson: JSONContent): JSONContent {
   const next = cloneContent(contentJson);
+  const upgradeNodes = (nodes: JSONContent[]): JSONContent[] => {
+    const upgraded: JSONContent[] = [];
+    for (const node of nodes) {
+      const nested = Array.isArray(node.content)
+        ? { ...node, content: upgradeNodes(node.content) }
+        : node;
+      const candidate = nested;
+      const isPlainParagraph =
+        candidate.type === 'paragraph' &&
+        (candidate.content ?? []).every((child) => child.type === 'text');
+      const text = isPlainParagraph ? (candidate.content ?? []).map((child) => child.text ?? '').join('') : '';
+      const looksLikeMarkdownTable = /^\s*\|.*\|\s*\n\s*\|?\s*:?-{3,}/m.test(text);
+      const looksLikeMath = /\$\$|\$[^$\n]+\$/.test(text);
+
+      if (isPlainParagraph && text && (looksLikeMarkdownTable || looksLikeMath)) {
+        const parsed = parseMarkdownToTiptap(text);
+        if (parsed.content?.some((item) => item.type !== 'paragraph' || item.content?.some((child) =>
+          child.type === 'inlineMath' || child.type === 'blockMath'))) {
+          upgraded.push(...(parsed.content ?? []));
+          continue;
+        }
+      }
+      upgraded.push(candidate);
+    }
+    return upgraded;
+  };
+
   if (!Array.isArray(next.content)) return next;
 
-  const upgraded: JSONContent[] = [];
-  for (const node of next.content) {
-    const isPlainParagraph =
-      node.type === 'paragraph' &&
-      (node.content ?? []).every((child) => child.type === 'text');
-    const text = isPlainParagraph ? (node.content ?? []).map((child) => child.text ?? '').join('') : '';
-    const looksLikeMarkdownTable = /^\s*\|.*\|\s*\n\s*\|?\s*:?-{3,}/m.test(text);
-    const looksLikeMath = /\$\$|\$[^$\n]+\$/.test(text);
-
-    if (isPlainParagraph && text && (looksLikeMarkdownTable || looksLikeMath)) {
-      const parsed = parseMarkdownToTiptap(text);
-      if (parsed.content?.some((item) => item.type !== 'paragraph' || item.content?.some((child) => child.type === 'inlineMath'))) {
-        upgraded.push(...(parsed.content ?? []));
-        continue;
-      }
-    }
-    upgraded.push(node);
-  }
-
-  return { ...next, content: upgraded };
+  return { ...next, content: upgradeNodes(next.content) };
 }
 
 function plainTextFromContent(node: JSONContent | null | undefined): string {
