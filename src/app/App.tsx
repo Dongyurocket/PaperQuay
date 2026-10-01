@@ -465,7 +465,7 @@ function App() {
 
             <div className="h-full min-h-0 overflow-hidden rounded-[var(--pq-radius-md)]" hidden={activeWorkspace !== 'notes'}>
               <WorkspaceErrorBoundary name="Notes" resetKey={activeWorkspace}>
-                <NotesWorkspace />
+                <NotesWorkspace workspaceActive={activeWorkspace === 'notes'} />
               </WorkspaceErrorBoundary>
             </div>
 

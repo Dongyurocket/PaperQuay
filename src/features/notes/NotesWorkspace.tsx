@@ -747,7 +747,7 @@ function NotesRightPanel({
   );
 }
 
-export function NotesWorkspace() {
+export function NotesWorkspace({ workspaceActive = true }: { workspaceActive?: boolean }) {
   const {
     notes,
     tags,
@@ -1757,24 +1757,25 @@ export function NotesWorkspace() {
           <NoteEditor
             key={activeNote?.id ?? 'no-note'}
             note={activeNote}
-          saving={saving}
-          notes={notes}
-          tags={tags}
-          papers={papers}
-          onUpdate={async (noteId, patch, options) => {
-            const updated = await updateWorkspaceNote(noteId, patch, {
-              ...options,
-              sourceId: options?.sourceId ?? NOTES_WORKSPACE_EDITOR_SOURCE_ID,
-            });
-            updateNoteTabTitle(updated.id, updated.title || '未命名笔记');
-            setNoteTabExternalUpdate(updated.id, false);
-            return updated;
-          }}
-          editorSourceId={NOTES_WORKSPACE_EDITOR_SOURCE_ID}
-          onExternalUpdateChange={setNoteTabExternalUpdate}
-          onOpenNote={openNote}
-          onTagClick={setTag}
-          onPaperClick={handleOpenPaper}
+            workspaceActive={workspaceActive}
+            saving={saving}
+            notes={notes}
+            tags={tags}
+            papers={papers}
+            onUpdate={async (noteId, patch, options) => {
+              const updated = await updateWorkspaceNote(noteId, patch, {
+                ...options,
+                sourceId: options?.sourceId ?? NOTES_WORKSPACE_EDITOR_SOURCE_ID,
+              });
+              updateNoteTabTitle(updated.id, updated.title || '未命名笔记');
+              setNoteTabExternalUpdate(updated.id, false);
+              return updated;
+            }}
+            editorSourceId={NOTES_WORKSPACE_EDITOR_SOURCE_ID}
+            onExternalUpdateChange={setNoteTabExternalUpdate}
+            onOpenNote={openNote}
+            onTagClick={setTag}
+            onPaperClick={handleOpenPaper}
             onJumpToNoteAnchor={handleJumpToNoteAnchor}
           />
         ) : null}

@@ -11,6 +11,32 @@ function cloneContent(value: JSONContent): JSONContent {
   return JSON.parse(JSON.stringify(value)) as JSONContent;
 }
 
+function upgradeLegacyMarkdownBlocks(contentJson: JSONContent): JSONContent {
+  const next = cloneContent(contentJson);
+  if (!Array.isArray(next.content)) return next;
+
+  const upgraded: JSONContent[] = [];
+  for (const node of next.content) {
+    const isPlainParagraph =
+      node.type === 'paragraph' &&
+      (node.content ?? []).every((child) => child.type === 'text');
+    const text = isPlainParagraph ? (node.content ?? []).map((child) => child.text ?? '').join('') : '';
+    const looksLikeMarkdownTable = /^\s*\|.*\|\s*\n\s*\|?\s*:?-{3,}/m.test(text);
+    const looksLikeMath = /\$\$|\$[^$\n]+\$/.test(text);
+
+    if (isPlainParagraph && text && (looksLikeMarkdownTable || looksLikeMath)) {
+      const parsed = parseMarkdownToTiptap(text);
+      if (parsed.content?.some((item) => item.type !== 'paragraph' || item.content?.some((child) => child.type === 'inlineMath'))) {
+        upgraded.push(...(parsed.content ?? []));
+        continue;
+      }
+    }
+    upgraded.push(node);
+  }
+
+  return { ...next, content: upgraded };
+}
+
 function plainTextFromContent(node: JSONContent | null | undefined): string {
   if (!node) return '';
   const parts: string[] = [];
@@ -140,7 +166,7 @@ function upgradeLegacyNoteAnchors(contentJson: JSONContent, note: Note): JSONCon
 
 export function noteContentToTiptap(note: Note | null): JSONContent {
   if (note?.contentJson && typeof note.contentJson === 'object') {
-    return upgradeLegacyNoteAnchors(note.contentJson, note);
+    return upgradeLegacyMarkdownBlocks(upgradeLegacyNoteAnchors(note.contentJson, note));
   }
 
   const text = note?.contentText || note?.content || '';

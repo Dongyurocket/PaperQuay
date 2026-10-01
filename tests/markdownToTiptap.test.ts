@@ -77,3 +77,12 @@ test('综述的短横线参考文献保留在富文本并解析正文引用', ()
   assert.match(JSON.stringify(doc.content[2]), /Known Paper/);
   assert.match(JSON.stringify(doc.content[2]), /Second Paper/);
 });
+
+test('Markdown 解析器重建表格和块级公式', () => {
+  const doc = parseMarkdownToTiptap('| 符号 | 含义 |\n| --- | --- |\n| $P$ | 功率 |\n\n$$P = \\rho V^3$$');
+  assert.deepEqual(doc.content.map((node: any) => node.type), ['table', 'blockMath']);
+  assert.equal(doc.content[0].content[0].content[0].type, 'tableHeader');
+  assert.equal(doc.content[0].content[1].content[0].type, 'tableCell');
+  assert.equal(doc.content[0].content[1].content[0].content[0].content[0].type, 'inlineMath');
+  assert.equal(doc.content[1].attrs.latex, 'P = \\rho V^3');
+});

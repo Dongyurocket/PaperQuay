@@ -38,6 +38,12 @@ function parseMarkdownToTiptap(markdown, options = {}) {
     let i = 0;
     while (i < source.length) {
       const rest = source.slice(i);
+      const inlineMath = rest.match(/^\$([^$\n]+)\$/);
+      if (inlineMath) {
+        result.push({ type: 'inlineMath', attrs: { latex: inlineMath[1].trim() } });
+        i += inlineMath[0].length;
+        continue;
+      }
       const escaped = rest.match(/^\\([\\`*_[\]#~])/);
       if (escaped) { text(escaped[1]); i += escaped[0].length; continue; }
       const anchor = rest.match(/^\[([^\]\n]+)\]\(paperquay:\/\/anchor\/([^)]+)\)/);
@@ -114,6 +120,45 @@ function parseMarkdownToTiptap(markdown, options = {}) {
         while (i < input.length && !input[i].startsWith(fence[1])) code.push(input[i++]);
         if (i < input.length) i += 1;
         result.push({ type: 'codeBlock', attrs: { language: fence[2].trim() || null }, content: code.length ? [{ type: 'text', text: code.join('\n') }] : [] });
+        continue;
+      }
+      const blockMath = line.match(/^\$\$\s*(.*?)\s*\$\$\s*$/);
+      if (blockMath) {
+        result.push({ type: 'blockMath', attrs: { latex: blockMath[1].trim() } });
+        i += 1;
+        continue;
+      }
+      if (/^\$\$\s*$/.test(line)) {
+        const math = [];
+        i += 1;
+        while (i < input.length && !/^\s*\$\$\s*$/.test(input[i])) math.push(input[i++]);
+        if (i < input.length) i += 1;
+        result.push({ type: 'blockMath', attrs: { latex: math.join('\n').trim() } });
+        continue;
+      }
+      const splitTableRow = (value) => {
+        const trimmed = value.trim();
+        if (!trimmed.includes('|')) return null;
+        const body = trimmed.replace(/^\|/, '').replace(/\|$/, '');
+        const cells = body.split('|').map((cell) => cell.trim());
+        return cells.length > 0 ? cells : null;
+      };
+      const tableHeader = splitTableRow(line);
+      const tableDivider = i + 1 < input.length ? splitTableRow(input[i + 1]) : null;
+      const isTableDivider = tableDivider && tableDivider.length === tableHeader?.length &&
+        tableDivider.every((cell) => /^:?-{3,}:?$/.test(cell));
+      if (tableHeader && isTableDivider) {
+        const rows = [
+          { type: 'tableRow', content: tableHeader.map((cell) => ({ type: 'tableHeader', content: [{ type: 'paragraph', content: inline(cell) }] })) },
+        ];
+        i += 2;
+        while (i < input.length) {
+          const cells = splitTableRow(input[i]);
+          if (!cells || cells.length !== tableHeader.length) break;
+          rows.push({ type: 'tableRow', content: cells.map((cell) => ({ type: 'tableCell', content: [{ type: 'paragraph', content: inline(cell) }] })) });
+          i += 1;
+        }
+        result.push({ type: 'table', content: rows });
         continue;
       }
       const heading = line.match(/^(#{1,6})\s+(.*)$/);

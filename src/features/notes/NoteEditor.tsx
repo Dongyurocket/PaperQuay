@@ -632,6 +632,7 @@ interface NoteEditorProps {
   pendingAnchorInsert?: NoteAnchorInsertRequest | null;
   onPendingAnchorInsertHandled?: (requestId: string) => void;
   compact?: boolean;
+  workspaceActive?: boolean;
   editorSourceId?: string;
   externalUpdateNote?: Note | null;
   onExternalUpdateChange?: (noteId: string, externalUpdate: boolean) => void;
@@ -669,6 +670,7 @@ export function NoteEditor({
   pendingAnchorInsert = null,
   onPendingAnchorInsertHandled,
   compact = false,
+  workspaceActive = true,
   editorSourceId,
   externalUpdateNote = null,
   onExternalUpdateChange,
@@ -1956,7 +1958,7 @@ export function NoteEditor({
         onScroll={() => setEditorContextMenu(null)}
       >
         <EditorContent editor={editor} className={cn('pq-tiptap-editor', compact ? 'is-compact' : '')} />
-        <NoteBlockControls editor={editor} compact={compact} />
+        {workspaceActive ? <NoteBlockControls editor={editor} compact={compact} /> : null}
       </div>
 
       {editorContextMenu ? (
