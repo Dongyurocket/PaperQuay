@@ -11,6 +11,8 @@ export interface ComparativeSurveyArtifacts {
 }
 
 export interface ComparativeSurveyCitation {
+  id?: string;
+  label?: string;
   paperId: string;
   paperTitle: string;
   pageIndex?: number | null;
@@ -205,7 +207,8 @@ export async function runComparativeSurveyCapability(options: ComparativeSurveyO
   const evidence = bindAnswerEvidence({
     answer: markdown,
     citations: citations.map((c, index) => ({
-      label: String(index + 1),
+      id: c.id,
+      label: c.label ?? String(index + 1),
       paperId: c.paperId,
       paperTitle: c.paperTitle,
       pageIndex: c.pageIndex,

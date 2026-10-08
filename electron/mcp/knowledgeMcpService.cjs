@@ -17,6 +17,7 @@ const { execFileSync } = require('node:child_process');
 const { attachCategoryCounts, createLibraryStore, normalizeAuthor, normalizeTag } = require('../backend/libraryStore.cjs');
 const { createNoteStore } = require('../backend/noteStore.cjs');
 const { parseMarkdownToTiptap } = require('../../src/shared/markdownToTiptap.cjs');
+const { desktopRunMarkerState } = require('../backend/desktopRunMarker.cjs');
 const { id, now, safeFileName, fileNameFromPath, hashBytes, isPdf } = require('../backend/utils.cjs');
 
 function cleanString(value) {
@@ -328,10 +329,15 @@ class PaperQuayKnowledgeService {
     this.embedFn = typeof options.embedFn === 'function'
       ? options.embedFn
       : async (text, embedding) => (await embedTexts([text], embedding))[0];
-    // 测试可注入 isAppRunning() => true/false/null，默认检测已安装的桌面应用进程。
+    // 测试可注入 isAppRunning() => true/false/null。运行标记是 advisory
+    // state，不是互斥锁；损坏或不可读取时保守地返回 null。
     this.isAppRunning = typeof options.isAppRunning === 'function'
       ? options.isAppRunning
-      : detectDesktopAppRunning;
+      : () => {
+        const markerState = desktopRunMarkerState(this.appPaths.dataDir);
+        if (markerState !== false) return markerState;
+        return detectDesktopAppRunning();
+      };
   }
 
   getLibraryDb() {
@@ -1318,7 +1324,9 @@ class PaperQuayKnowledgeService {
     collectionKey = '',
     targetCategoryId = '',
     createCollectionCategory = true,
+    allowWhileAppRunning = false,
   } = {}) {
+    const guard = this.assertWritable(allowWhileAppRunning);
     const targetKeys = Array.isArray(itemKeys) ? itemKeys.map(cleanString).filter(Boolean) : [];
     const targetCollection = cleanString(collectionKey);
 
@@ -1344,6 +1352,7 @@ class PaperQuayKnowledgeService {
         duplicates: [],
         missingPdfs: [],
         errors: [],
+        ...(guard.warning ? { warning: guard.warning } : {}),
       };
     }
 
@@ -1522,6 +1531,7 @@ class PaperQuayKnowledgeService {
       missingPdfs,
       errors,
       categoryId: resolvedCategoryId,
+      ...(guard.warning ? { warning: guard.warning } : {}),
     };
   }
 
@@ -1529,13 +1539,24 @@ class PaperQuayKnowledgeService {
   // 写入语义与 electron/backend/libraryCommands.cjs 的对应命令保持一致，
   // 统一经 withWritableLibrary 走「护栏检查 → load → 变更 → save → close」。
 
-  // 写操作护栏：显式失败，绝不静默。返回 { warning } 供响应透传。
+  // 写操作护栏：运行状态未知时默认拒绝。allowWhileAppRunning 是显式风险覆盖，
+  // 不是由 marker 提供的锁语义。
   assertWritable(allowWhileAppRunning) {
     if (String(process.env.PAPERQUAY_MCP_WRITE || '').trim().toLowerCase() === 'off') {
       throw new Error('MCP write tools are disabled (PAPERQUAY_MCP_WRITE=off)');
     }
-    if (allowWhileAppRunning === true) return { warning: null };
+
     const running = this.isAppRunning();
+    if (allowWhileAppRunning === true) {
+      return {
+        warning: running === true
+          ? '已显式允许在 PaperQuay 运行期间写入；桌面应用后续保存可能覆盖本次修改。'
+          : running === null
+            ? '无法确认 PaperQuay 是否正在运行；已按 allowWhileAppRunning: true 显式覆盖保护。'
+            : null,
+      };
+    }
+
     if (running === true) {
       throw new Error(
         '检测到 PaperQuay 桌面应用正在运行，已拒绝写入。应用将文献库保存在内存中，'
@@ -1543,11 +1564,14 @@ class PaperQuayKnowledgeService {
         + '请关闭 PaperQuay 后重试；若确认需要并行写入，显式传入 allowWhileAppRunning: true。',
       );
     }
-    return {
-      warning: running === null
-        ? '未能检测 PaperQuay 桌面应用是否在运行；若应用处于打开状态，本次写入可能被其覆盖。'
-        : null,
-    };
+    if (running === null) {
+      throw new Error(
+        '无法确认 PaperQuay 桌面应用是否正在运行，已保守拒绝写入。'
+        + '请关闭可能运行的桌面实例后重试；若已确认风险，可显式传入 allowWhileAppRunning: true。',
+      );
+    }
+
+    return { warning: null };
   }
 
   withWritableLibrary(mutator, { allowWhileAppRunning = false } = {}) {

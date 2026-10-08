@@ -27,6 +27,7 @@ import {
 import { resolveAgentCapabilityRoute } from './agentCapabilityRoute';
 import { classifyAgentCapabilityRoute } from './agentCapabilityClassifier';
 import { bindAnswerEvidence, type AnswerEvidenceStatus } from './agentAnswerEvidence.ts';
+import { AgentCitationRegistry, rewriteAgentCitationSourceLabels } from './agentCitationRegistry.ts';
 import { buildWorkingMemoryInjection } from './agentMemoryContract.ts';
 import { isComparativeSurveyInstruction } from './agentCapabilityTrigger';
 import {
@@ -375,17 +376,13 @@ function buildAgentRagNotice(ragErrors: string[]): string | null {
   return `本次未命中本地 RAG：检索失败，已回退到全文/摘要上下文。错误：${detail}（Local RAG retrieval failed and fell back to full-text context: ${detail}）`;
 }
 
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
 function buildAgentRagCitations(
   paper: LiteraturePaper,
   citations: DocumentChatCitation[] = [],
 ): LibraryAgentRagCitation[] {
   return citations.map((citation) => ({
     ...citation,
-    id: `agent-rag:${paper.id}:${citation.id}`,
+    id: `agent-rag:${paper.id}:${citation.sourceType}:${citation.chunkId || citation.id}`,
     paperId: paper.id,
     paperTitle: paper.title,
   }));
@@ -399,24 +396,14 @@ function renumberPaperContextCitations(
     return context;
   }
 
-  let nextText = context.text;
-  const nextCitations = context.citations.map((citation, index) => {
-    const nextLabel = String(startIndex + index + 1);
-    nextText = nextText.replace(
-      new RegExp(`# Source \\[${escapeRegExp(citation.label)}\\]`, 'g'),
-      `# Source [${nextLabel}]`,
-    );
-
-    return {
-      ...citation,
-      id: `agent-rag:${citation.paperId}:${nextLabel}`,
-      label: nextLabel,
-    };
-  });
+  const nextCitations = context.citations.map((citation, index) => ({
+    ...citation,
+    label: String(startIndex + index + 1),
+  }));
 
   return {
     ...context,
-    text: nextText,
+    text: rewriteAgentCitationSourceLabels(context.text, context.citations, nextCitations),
     citations: nextCitations,
   };
 }
@@ -747,7 +734,7 @@ function buildReActAgentMessages({
     {
       role: 'system',
       content: [
-        'Use the PaperQuay tools as needed. 证据与引用硬性约束：实质陈述句末尾必须附带本次工具结果中的 [n] 引用编号；引用文献只用 [n] 编号或『标题，第 X 页』，不要在正文写 paper_ / category_ 开头的内部 ID (cite papers only with [n] numbers or "Title, p.X"; never write raw paper_ or category_ internal IDs in answer text)；若当前库内未查到对应片段，必须明确写明「当前库内没有查到」，严禁凭参数知识把句子补完；若包含模型推断，必须明确写成「我的推断」，并且推断内容绝不能放入 excerpt 或 synthesis 笔记。',
+        'Use the PaperQuay tools as needed. 证据与引用硬性约束：实质陈述句末尾必须附带本次工具结果中的 [n] 引用编号；正文只写 [n]，绝不手写、转述或猜测引用的论文标题、页码、block 或来源，因为 PaperQuay 会从 [n] 生成唯一的可点击来源；不要在正文写 paper_ / category_ 开头的内部 ID (cite papers only with [n] numbers; never hand-write a citation title/page/block or raw paper_ / category_ internal ID)；若当前库内未查到对应片段，必须明确写明「当前库内没有查到」，严禁凭参数知识把句子补完；若包含模型推断，必须明确写成「我的推断」，并且推断内容绝不能放入 excerpt 或 synthesis 笔记。',
         'For write requests, call exactly one matching write tool with reviewable items. The user must approve before application.',
         'Notebook workflows: to turn scattered excerpts into a close-reading card, first use search_notes with pageKind="excerpt" and the target paperId; to turn cross-paper excerpts into a concept page, use pageKind="excerpt" plus the topic keyword or tag. Create the result with write_notes using pageKind="paper-card" or "concept". Every substantive point must link back to the exact excerpt title with [[title]].',
         'Notebook citation rule: paper citations in generated notes must be paperReference nodes reconstructed by the shared Markdown parser from [n] plus a unique ## 参考文献 entry containing the real paper title or DOI. Never hand-write citation prose or citation numbers as a substitute for paperReference. Do not alter source excerpt anchors, snapshots, or “我的想法”; aggregation is additive and reviewable through write_notes.',
@@ -1962,20 +1949,6 @@ async function decideLibraryAgentPaperContextOpenAICompatible(
   }
 }
 
-function addUniqueAgentCitations(
-  target: LibraryAgentRagCitation[],
-  next: LibraryAgentRagCitation[] | undefined,
-) {
-  const known = new Set(target.map((citation) => citation.id));
-
-  for (const citation of next ?? []) {
-    if (!known.has(citation.id)) {
-      target.push(citation);
-      known.add(citation.id);
-    }
-  }
-}
-
 function recordAgentCitations(
   artifacts: AgentSessionArtifacts,
   citations: LibraryAgentRagCitation[] | undefined,
@@ -2059,6 +2032,7 @@ export async function runConversationalLibraryAgent({
   // 当次运行累积的引用活数组：ReAct 的 rag_search/request_paper_context、
   // citation-audit 的 retrieve、note-distill 的 RAG 兜底都向同一个数组追加（方案第 3.3 节）。
   const citations: LibraryAgentRagCitation[] = [];
+  const citationRegistry = new AgentCitationRegistry(citations);
   const ragErrors: string[] = [];
   const ragSettings = normalizeStoredReaderSettings(persisted.settings);
   const ragReady = Boolean(
@@ -2133,19 +2107,17 @@ export async function runConversationalLibraryAgent({
         if (!chunk.documentKey) continue;
         const paper = paperById.get(chunk.documentKey);
         if (!paper) continue;
-        const citationId = `agent-rag:${paper.id}:${chunk.pageIndex ?? 'na'}:${chunk.blockId ?? 'na'}`;
-        if (!citations.some((c) => c.id === citationId)) {
-          citations.push({
-            id: citationId,
-            label: String(citations.length + 1),
-            sourceType: chunk.sourceType ?? 'pdf-text',
-            pageIndex: chunk.pageIndex ?? null,
-            blockId: chunk.blockId ?? null,
-            previewText: chunk.text?.slice(0, 300) ?? '',
-            paperId: paper.id,
-            paperTitle: paper.title,
-          });
-        }
+        const citationId = `agent-rag:${paper.id}:${chunk.sourceType ?? 'pdf-text'}:${chunk.chunkId}`;
+        citationRegistry.register([{
+          id: citationId,
+          label: '',
+          sourceType: chunk.sourceType ?? 'pdf-text',
+          pageIndex: chunk.pageIndex ?? null,
+          blockId: chunk.blockId ?? null,
+          previewText: chunk.text?.slice(0, 300) ?? '',
+          paperId: paper.id,
+          paperTitle: paper.title,
+        }]);
       }
 
       return { chunks, ragErrors: [] };
@@ -2253,6 +2225,14 @@ export async function runConversationalLibraryAgent({
     }
 
     const citationAccumulator: LibraryAgentRagCitation[] = [];
+    const surveyRegistry = new AgentCitationRegistry(citationAccumulator);
+    surveyRegistry.register((capabilityResume?.citations ?? []).map((citation, index) => ({
+      ...citation,
+      id: citation.id ?? `agent-rag:${citation.paperId}:recovered:${citation.pageIndex ?? 'na'}:${citation.blockId ?? 'na'}`,
+      label: citation.label ?? String(index + 1),
+      pageIndex: citation.pageIndex ?? null,
+      sourceType: citation.sourceType ?? 'pdf-text',
+    })));
     const ragErrors: string[] = [];
     const callModel = async (system: string, user: string) => {
       const controller = new AbortController();
@@ -2357,13 +2337,17 @@ export async function runConversationalLibraryAgent({
             }
             const subquestion = subquestions[index] ?? normalizedInstruction;
             onProgress(index, subquestions.length, subquestion);
-            const contexts = await loadContextsInBatches(subquestion);
-            for (const context of contexts) {
-              addUniqueAgentCitations(citationAccumulator, context.citations);
+            const contexts = (await loadContextsInBatches(subquestion)).map((context) => {
+              const canonical = surveyRegistry.register(context.citations);
               if (context.ragError?.trim() && !ragErrors.includes(context.ragError.trim())) {
                 ragErrors.push(context.ragError.trim());
               }
-            }
+              return {
+                ...context,
+                citations: canonical,
+                text: rewriteAgentCitationSourceLabels(context.text, context.citations, canonical),
+              };
+            });
             const response = await callModel(
               'Synthesize evidence for one comparative-survey subquestion. Preserve paper IDs and source citation labels. Return compact research notes, not a final report.',
               JSON.stringify({
@@ -2384,6 +2368,8 @@ export async function runConversationalLibraryAgent({
           return {
             notes: notes.join('\n\n'),
             citations: citationAccumulator.map((citation) => ({
+              id: citation.id,
+              label: citation.label,
               paperId: citation.paperId,
               paperTitle: citation.paperTitle,
               pageIndex: citation.pageIndex,
@@ -2412,16 +2398,16 @@ export async function runConversationalLibraryAgent({
       )) {
         continue;
       }
-      citationAccumulator.push({
-        id: `agent-rag:${citation.paperId}:recovered:${citation.pageIndex ?? 'na'}:${citation.blockId ?? 'na'}`,
-        label: String(citationAccumulator.length + 1),
+      surveyRegistry.register([{
+        id: citation.id ?? `agent-rag:${citation.paperId}:recovered:${citation.pageIndex ?? 'na'}:${citation.blockId ?? 'na'}`,
+        label: citation.label ?? '',
         sourceType: citation.sourceType ?? 'pdf-text',
         pageIndex: citation.pageIndex ?? null,
         blockId: citation.blockId ?? null,
         previewText: citation.previewText,
         paperId: citation.paperId,
         paperTitle: citation.paperTitle,
-      });
+      }]);
     }
     streamHandlers?.onDelta?.(survey.markdown, survey.markdown);
     streamHandlers?.onDone?.();
@@ -2595,11 +2581,16 @@ export async function runConversationalLibraryAgent({
     });
     paperInputs = enriched.inputs;
     contextLabel = enriched.label;
-    addUniqueAgentCitations(citations, enriched.citations);
-    recordAgentCitations(artifacts, enriched.citations);
+    const initialCitations = citationRegistry.register(enriched.citations);
+    recordAgentCitations(artifacts, initialCitations);
     ragErrors.push(...enriched.ragErrors);
     for (const [paperId, context] of enriched.contexts) {
-      contexts.set(paperId, context);
+      const canonicalCitations = citationRegistry.register(context.citations);
+      contexts.set(paperId, {
+        ...context,
+        citations: canonicalCitations,
+        text: rewriteAgentCitationSourceLabels(context.text, context.citations, canonicalCitations),
+      });
       contextModes.set(paperId, 'summary');
     }
   }
@@ -2630,18 +2621,24 @@ export async function runConversationalLibraryAgent({
       throw new Error(`Unable to load context for ${paper.title}.`);
     }
 
+    const canonicalCitations = citationRegistry.register(context.citations);
+    const canonicalContext = {
+      ...context,
+      citations: canonicalCitations,
+      text: rewriteAgentCitationSourceLabels(context.text, context.citations, canonicalCitations),
+    };
+
     if (shouldReload) {
-      contexts.set(paper.id, context);
+      contexts.set(paper.id, canonicalContext);
       contextModes.set(paper.id, input.mode);
     }
 
-    addUniqueAgentCitations(citations, context.citations);
-    recordAgentCitations(artifacts, context.citations);
-    if (context.ragError?.trim() && !ragErrors.includes(context.ragError.trim())) {
-      ragErrors.push(context.ragError.trim());
+    recordAgentCitations(artifacts, canonicalCitations);
+    if (canonicalContext.ragError?.trim() && !ragErrors.includes(canonicalContext.ragError.trim())) {
+      ragErrors.push(canonicalContext.ragError.trim());
     }
 
-    return context;
+    return canonicalContext;
   };
 
   const tools = createLibraryAgentTools({

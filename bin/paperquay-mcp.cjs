@@ -34,7 +34,7 @@ const options = parseArgs();
 const service = new PaperQuayKnowledgeService({ dataDir: options.dataDir });
 
 const SERVER_NAME = 'paperquay-knowledge-mcp';
-const SERVER_VERSION = '0.3.0';
+const SERVER_VERSION = require('../package.json').version;
 
 const ALLOW_WHILE_APP_RUNNING_SCHEMA = {
   type: 'boolean',
@@ -81,11 +81,6 @@ const TOOLS = [
         paperId: {
           type: 'string',
           description: 'The unique ID of the paper in PaperQuay.',
-        },
-        pageKind: {
-          type: 'string',
-          enum: ['paper-card', 'concept', 'synthesis', 'qa', 'excerpt', 'index', 'log', 'overview'],
-          description: 'Filter by structural page kind.',
         },
       },
       required: ['paperId'],
@@ -215,11 +210,6 @@ const TOOLS = [
         folderId: {
           type: 'string',
           description: 'Note folder ID (see list_note_folders). Omit for uncategorized.',
-        },
-        pageKind: {
-          type: 'string',
-          enum: ['paper-card', 'concept', 'synthesis', 'qa', 'excerpt', 'index', 'log', 'overview'],
-          description: 'Structural page kind.',
         },
         allowWhileAppRunning: ALLOW_WHILE_APP_RUNNING_SCHEMA,
       },
@@ -386,7 +376,7 @@ const TOOLS = [
   {
     name: 'paperquay_sync_from_zotero',
     description:
-      'Import selected items or a collection from the local Zotero library into PaperQuay, copying local PDFs and preserving metadata and collections.',
+      'Import selected items or a collection from the local Zotero library into PaperQuay, copying local PDFs and preserving metadata and collections. Refused while the PaperQuay desktop app is running unless allowWhileAppRunning is explicitly set.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -412,6 +402,7 @@ const TOOLS = [
           type: 'string',
           description: 'Optional custom Zotero data directory. Omit to auto-detect.',
         },
+        allowWhileAppRunning: ALLOW_WHILE_APP_RUNNING_SCHEMA,
       },
     },
   },

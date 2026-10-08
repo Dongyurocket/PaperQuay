@@ -137,6 +137,28 @@ function completionEndpoint(options) {
     : chatEndpoint(options?.baseUrl);
 }
 
+function safeEndpointOrigin(endpoint) {
+  try {
+    return new URL(endpoint).origin;
+  } catch {
+    return 'configured model endpoint';
+  }
+}
+
+function modelRequestError(error, endpoint, signal) {
+  if (signal?.aborted || error?.name === 'AbortError') {
+    const aborted = new Error('AGENT_MODEL_ABORTED: Model request was cancelled.');
+    aborted.name = 'AbortError';
+    return aborted;
+  }
+
+  const code = cleanString(error?.cause?.code || error?.code).toUpperCase();
+  const timeout = error?.name === 'TimeoutError' || code === 'ETIMEDOUT';
+  const kind = timeout ? 'AGENT_MODEL_TIMEOUT' : 'AGENT_MODEL_NETWORK_ERROR';
+  const codeSuffix = code ? ` (${code})` : '';
+  return new Error(`${kind}${codeSuffix}: Unable to reach ${safeEndpointOrigin(endpoint)}.`);
+}
+
 function embeddingsEndpoint(baseUrl) {
   const trimmed = cleanString(baseUrl).replace(/\/+$/, '');
   if (/\/embeddings$/i.test(trimmed)) return trimmed;
@@ -750,15 +772,21 @@ async function openAiChat(options, messages, extra = {}) {
     ? AbortSignal.any([extra.signal, timeoutSignal])
     : extra.signal ?? timeoutSignal;
 
-  const response = await fetch(completionEndpoint(options), {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${options.apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(body),
-    signal,
-  });
+  const endpoint = completionEndpoint(options);
+  let response;
+  try {
+    response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${options.apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+      signal,
+    });
+  } catch (error) {
+    throw modelRequestError(error, endpoint, signal);
+  }
 
   if (extra.stream) return response;
   return readRequestJson(
@@ -1318,6 +1346,7 @@ module.exports = {
   isPdf,
   listOpenAiModels,
   mergeOpenAiStreamChunks,
+  modelRequestError,
   modelsEndpoint,
   normalizeApiMode,
   now,

@@ -148,6 +148,7 @@ function createBackend({ app }) {
   };
 
   return {
+    appPaths,
     close() {
       context.noteIndexer.close();
       noteStore.close();

@@ -152,6 +152,46 @@ test('bindAnswerEvidence resolves a unique short-title page citation from curren
   assert.equal(absentPage.claims[0].status, 'not-in-library');
 });
 
+test('numeric citation metadata conflicts are marked partial even when the snippet overlaps', () => {
+  const citations: InputCitation[] = [
+    { label: '3', paperId: 'a', paperTitle: '宽速域变体飞机总体方案设计', pageIndex: 69, previewText: '飞机总体设计决定性能并影响后续设计机会。' },
+    { label: '4', paperId: 'b', paperTitle: '基于飞行品质的无人旋翼飞行器总体多学科设计优化研究', pageIndex: 25, previewText: '飞行品质设计优化。' },
+  ];
+  const result = bindAnswerEvidence({
+    answer: '[3] 基于飞行品质的无人旋翼飞行器总体多学科设计优化研究，第 26 页：飞机总体设计决定性能并影响后续设计机会。',
+    citations,
+  });
+  assert.equal(result.claims[0].status, 'partial');
+  assert.equal(result.claims[0].reason, 'citation-mismatch');
+});
+
+test('duplicate numeric labels are not valid evidence', () => {
+  const result = bindAnswerEvidence({
+    answer: '本文采用深度学习神经网络方法对旋翼气动噪声进行建模 [1]。',
+    citations: [mockCitations[0], { ...mockCitations[1], label: '1' }],
+  });
+  assert.equal(result.claims[0].status, 'not-in-library');
+  assert.equal(result.claims[0].reason, 'dangling-citation');
+});
+
+test('structured [[cite:id]] tokens resolve to canonical labels before evidence checks', () => {
+  const citations: InputCitation[] = [
+    { id: 'agent-rag:paper-alpha:pdf-text:chunk-1', label: '1', paperId: 'paper-alpha', paperTitle: '基于深度学习的旋翼气动噪声预测', pageIndex: 12, previewText: '本文采用深度学习神经网络方法，对倾转旋翼飞行器的气动噪声进行高精度数值预测。' },
+  ];
+  const result = bindAnswerEvidence({
+    answer: '本项研究采用深度学习神经网络对旋翼气动噪声进行建模分析 [[cite:agent-rag:paper-alpha:pdf-text:chunk-1]]。',
+    citations,
+  });
+  assert.equal(result.claims[0].status, 'supported');
+  assert.equal(result.claims[0].citations[0].paperId, 'paper-alpha');
+
+  const unknown = bindAnswerEvidence({
+    answer: '本项研究采用深度学习神经网络对旋翼气动噪声进行建模分析 [[cite:agent-rag:unknown:chunk]]。',
+    citations,
+  });
+  assert.equal(unknown.claims[0].status, 'not-in-library');
+});
+
 test('assertEvidenceForNoteDraft enforces strict gate on excerpt and synthesis', () => {
   // synthesis 包含 partial 句时被拒绝
   assert.throws(() => {

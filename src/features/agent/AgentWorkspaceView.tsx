@@ -1,21 +1,15 @@
 import {
   useCallback,
-  useEffect,
-  useRef,
   useState,
-  type CSSProperties,
   type Ref,
   type WheelEventHandler,
 } from 'react';
-import { createPortal } from 'react-dom';
 import {
   Archive,
   Camera,
   BookOpen,
   Check,
-  ChevronDown,
   Database,
-  Gauge,
   ImagePlus,
   Loader2,
   Paperclip,
@@ -29,6 +23,7 @@ import {
   X,
 } from 'lucide-react';
 import { ModelPresetPicker } from '../../components/ModelPresetPicker';
+import { ReasoningEffortPicker } from '../../components/ReasoningEffortPicker';
 import { isImeComposing, useImeSafeTextareaValue } from '../../hooks/useImeSafeTextareaValue';
 import type { LibraryAgentPlan, LibraryAgentRagCitation } from '../../services/libraryAgent';
 import type { AgentMemoryWritePlan } from '../../services/agentMemory';
@@ -150,141 +145,6 @@ function compactTokenCount(value: number): string {
 
   return String(Math.max(0, Math.trunc(value)));
 }
-const agentReasoningOptions: Array<{ value: ModelReasoningEffort; labelZh: string; labelEn: string }> = [
-  { value: 'auto', labelZh: '自动', labelEn: 'Auto' },
-  { value: 'low', labelZh: '低', labelEn: 'Low' },
-  { value: 'medium', labelZh: '中', labelEn: 'Medium' },
-  { value: 'high', labelZh: '高', labelEn: 'High' },
-  { value: 'xhigh', labelZh: '极高', labelEn: 'XHigh' },
-  { value: 'max', labelZh: '最高', labelEn: 'Max' },
-];
-
-function AgentReasoningPicker({
-  l,
-  onChange,
-  value,
-}: {
-  l: (zh: string, en: string) => string;
-  onChange: (reasoningEffort: ModelReasoningEffort) => void;
-  value: ModelReasoningEffort;
-}) {
-  const rootRef = useRef<HTMLDivElement | null>(null);
-  const buttonRef = useRef<HTMLButtonElement | null>(null);
-  const menuRef = useRef<HTMLDivElement | null>(null);
-  const [open, setOpen] = useState(false);
-  const [menuStyle, setMenuStyle] = useState<CSSProperties>({});
-  const selectedOption = agentReasoningOptions.find((option) => option.value === value) ?? agentReasoningOptions[0];
-  const updateMenuPosition = useCallback(() => {
-    const button = buttonRef.current;
-
-    if (!button || typeof window === 'undefined') {
-      return;
-    }
-
-    const rect = button.getBoundingClientRect();
-    const width = Math.min(190, Math.max(160, window.innerWidth - 24));
-    const left = Math.max(12, Math.min(rect.left, window.innerWidth - width - 12));
-
-    setMenuStyle({
-      bottom: Math.max(12, window.innerHeight - rect.top + 8),
-      left,
-      width,
-    });
-  }, []);
-
-  useEffect(() => {
-    if (!open) {
-      return undefined;
-    }
-
-    updateMenuPosition();
-
-    const handlePointerDown = (event: PointerEvent) => {
-      const target = event.target;
-
-      if (
-        target instanceof Node &&
-        (rootRef.current?.contains(target) || menuRef.current?.contains(target))
-      ) {
-        return;
-      }
-
-      setOpen(false);
-    };
-    const handleViewportChange = () => updateMenuPosition();
-
-    window.addEventListener('pointerdown', handlePointerDown);
-    window.addEventListener('resize', handleViewportChange);
-    window.addEventListener('scroll', handleViewportChange, true);
-    return () => {
-      window.removeEventListener('pointerdown', handlePointerDown);
-      window.removeEventListener('resize', handleViewportChange);
-      window.removeEventListener('scroll', handleViewportChange, true);
-    };
-  }, [open, updateMenuPosition]);
-
-  const menu = open ? (
-    <div
-      ref={menuRef}
-      className="pq-card fixed z-[9999] max-h-[50vh] overflow-y-auto p-1 shadow-[0_18px_48px_rgba(15,23,42,0.18)]"
-      style={menuStyle}
-    >
-      {agentReasoningOptions.map((option) => {
-        const selected = option.value === value;
-
-        return (
-          <button
-            key={option.value}
-            type="button"
-            onClick={() => {
-              onChange(option.value);
-              setOpen(false);
-            }}
-            className={[
-              'flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left text-sm transition',
-              selected
-                ? 'bg-[var(--pq-accent-soft)] text-[var(--pq-accent)]'
-                : 'text-[var(--pq-text)] hover:bg-[var(--pq-surface-2)]',
-            ].join(' ')}
-          >
-            <span>{l(option.labelZh, option.labelEn)}</span>
-            {selected ? <Check className="h-4 w-4" strokeWidth={2.2} /> : null}
-          </button>
-        );
-      })}
-    </div>
-  ) : null;
-
-  return (
-    <div ref={rootRef} className="relative shrink-0">
-      <button
-        ref={buttonRef}
-        type="button"
-        onClick={() => setOpen((current) => !current)}
-        title={`${l('思考强度', 'Reasoning effort')}: ${l(selectedOption.labelZh, selectedOption.labelEn)}`}
-        aria-label={l('选择思考强度', 'Choose reasoning effort')}
-        aria-expanded={open}
-        className={[
-          'flex h-10 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-xl border px-2.5 text-xs font-semibold transition',
-          value === 'auto'
-            ? 'border-[var(--pq-border)] bg-white/60 text-[var(--pq-text-muted)] hover:border-[var(--pq-border-strong)] hover:bg-[var(--pq-accent-soft)] dark:bg-white/5'
-            : 'border-[var(--pq-accent)] bg-[var(--pq-accent-soft)] text-[var(--pq-accent)]',
-        ].join(' ')}
-      >
-        <Gauge className="h-3.5 w-3.5 shrink-0" strokeWidth={1.8} />
-        <span className="font-medium opacity-70">{l('思考', 'Think')}</span>
-        <span>{l(selectedOption.labelZh, selectedOption.labelEn)}</span>
-        <ChevronDown
-          className={['h-3.5 w-3.5 shrink-0 opacity-70 transition-transform', open ? 'rotate-180' : ''].join(' ')}
-          strokeWidth={1.9}
-        />
-      </button>
-
-      {typeof document === 'undefined' || !menu ? null : createPortal(menu, document.body)}
-    </div>
-  );
-}
-
 export default function AgentWorkspaceView({
   activeSessionId,
   activeSessionRunning,
@@ -920,8 +780,8 @@ export default function AgentWorkspaceView({
                     }
                     placeholder={l('在此处发送消息...', 'Send a message here...')}
                   />
-                  <div className="mt-3 flex flex-nowrap items-end justify-between gap-3">
-                    <div className="flex min-w-0 flex-1 flex-nowrap items-center gap-2 overflow-x-auto overscroll-x-contain pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                  <div className="mt-3 flex flex-wrap items-end gap-2">
+                    <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
                       <button
                         type="button"
                         onClick={onSelectImageAttachments}
@@ -1004,6 +864,8 @@ export default function AgentWorkspaceView({
                           {compactTokenCount(currentRunTokens.promptTokens + currentRunTokens.completionTokens)} tok
                         </span>
                       ) : null}
+                    </div>
+                    <div className="ml-auto flex max-w-full flex-wrap items-center justify-end gap-2">
                       <ModelPresetPicker
                         l={l}
                         presets={agentModelPresets}
@@ -1011,36 +873,37 @@ export default function AgentWorkspaceView({
                         onChange={onAgentPresetChange}
                         title={l('选择 Agent 模型', 'Choose Agent model')}
                       />
-                      <AgentReasoningPicker
+                      <ReasoningEffortPicker
                         l={l}
                         value={selectedAgentReasoningEffort}
                         onChange={onAgentReasoningEffortChange}
+                        title={l('Agent 思考强度', 'Agent reasoning effort')}
                       />
-                    </div>
 
-                    <button
-                      type={activeSessionRunning ? 'button' : 'submit'}
-                      onClick={activeSessionRunning && !activeSessionCancelling ? onCancelAgentRun : undefined}
-                      disabled={activeSessionRunning ? activeSessionCancelling : !canSubmitPrompt}
-                      className={activeSessionRunning
-                        ? 'pq-button h-11 shrink-0 border-rose-200 px-5 text-sm text-rose-600 disabled:opacity-60 dark:border-rose-300/20 dark:text-rose-300'
-                        : 'pq-button-primary h-11 shrink-0 px-5 text-sm disabled:opacity-50'}
-                    >
-                      {activeSessionRunning ? (
-                        activeSessionCancelling ? (
-                          <Loader2 className="h-4 w-4 animate-spin" strokeWidth={2} />
+                      <button
+                        type={activeSessionRunning ? 'button' : 'submit'}
+                        onClick={activeSessionRunning && !activeSessionCancelling ? onCancelAgentRun : undefined}
+                        disabled={activeSessionRunning ? activeSessionCancelling : !canSubmitPrompt}
+                        className={activeSessionRunning
+                          ? 'pq-button h-11 shrink-0 border-rose-200 px-5 text-sm text-rose-600 disabled:opacity-60 dark:border-rose-300/20 dark:text-rose-300'
+                          : 'pq-button-primary h-11 shrink-0 px-5 text-sm disabled:opacity-50'}
+                      >
+                        {activeSessionRunning ? (
+                          activeSessionCancelling ? (
+                            <Loader2 className="h-4 w-4 animate-spin" strokeWidth={2} />
+                          ) : (
+                            <X className="h-4 w-4" strokeWidth={2} />
+                          )
                         ) : (
-                          <X className="h-4 w-4" strokeWidth={2} />
-                        )
-                      ) : (
-                        <Send className="h-4 w-4" strokeWidth={2} />
-                      )}
-                      {activeSessionRunning
-                        ? activeSessionCancelling
-                          ? l('正在取消', 'Cancelling')
-                          : l('取消', 'Cancel')
-                        : l('发送', 'Send')}
-                    </button>
+                          <Send className="h-4 w-4" strokeWidth={2} />
+                        )}
+                        {activeSessionRunning
+                          ? activeSessionCancelling
+                            ? l('正在取消', 'Cancelling')
+                            : l('取消', 'Cancel')
+                          : l('发送', 'Send')}
+                      </button>
+                    </div>
                   </div>
                 </form>
               </div>

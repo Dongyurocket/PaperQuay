@@ -259,6 +259,7 @@ test('paperquay-mcp stdio server handles JSON-RPC 2.0 requests', async () => {
     // 1. initialize
     const initRes = (await call(1, 'initialize', {})) as any;
     assert.equal(initRes.result.serverInfo.name, 'paperquay-knowledge-mcp');
+    assert.equal(initRes.result.serverInfo.version, require('../package.json').version);
     assert.ok(initRes.result.capabilities.tools);
 
     // 2. tools/list
@@ -279,6 +280,11 @@ test('paperquay-mcp stdio server handles JSON-RPC 2.0 requests', async () => {
     assert.ok(toolNames.includes('set_paper_categories'));
     assert.ok(toolNames.includes('update_paper'));
     assert.ok(toolNames.includes('delete_papers'));
+    assert.equal(toolNames.length, 23);
+    const detailsSchema = listRes.result.tools.find((tool: any) => tool.name === 'get_paper_details').inputSchema;
+    assert.equal(detailsSchema.properties.pageKind, undefined);
+    const createNoteSchema = listRes.result.tools.find((tool: any) => tool.name === 'create_note').inputSchema;
+    assert.equal(createNoteSchema.properties.pageKind.type, 'string');
 
     // 3. tools/call search_knowledge_base
     const callRes = (await call(3, 'tools/call', {

@@ -2,6 +2,7 @@ const path = require('node:path');
 const { app, BrowserWindow, ipcMain, shell } = require('electron');
 const { createBackend } = require('./backend.cjs');
 const { perfMark, perfMeasure } = require('./perfTrace.cjs');
+const { removeDesktopRunMarker, writeDesktopRunMarker } = require('./backend/desktopRunMarker.cjs');
 const {
   registerLocalPdfProtocol,
   registerLocalPdfProtocolScheme,
@@ -9,6 +10,7 @@ const {
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 let backend = null;
+let desktopMarkerDataDir = null;
 
 registerLocalPdfProtocolScheme();
 
@@ -150,12 +152,23 @@ app.whenReady().then(() => {
   }
 
   registerLocalPdfProtocol();
+  let initializedBackend;
+  try {
+    initializedBackend = getBackend();
+    writeDesktopRunMarker(initializedBackend.appPaths.dataDir);
+    desktopMarkerDataDir = initializedBackend.appPaths.dataDir;
+  } catch (error) {
+    // Do not expose a development desktop instance without the write guard.
+    console.error('[paperquay] Failed to register desktop run state.', error);
+    backend?.close();
+    app.exit(1);
+    return;
+  }
+  perfMark('backend:ready');
+  perfMeasure('startup:backend-init', 'app:ready');
   createWindow();
   perfMark('window:created');
   perfMeasure('startup:window-created', 'app:ready');
-  getBackend();
-  perfMark('backend:ready');
-  perfMeasure('startup:backend-init', 'app:ready');
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -171,7 +184,13 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
+  // Keep the advisory run state through synchronous store shutdown so MCP writes
+  // cannot enter between the window closing and backend resource teardown.
   backend?.close();
+  if (desktopMarkerDataDir) {
+    removeDesktopRunMarker(desktopMarkerDataDir);
+    desktopMarkerDataDir = null;
+  }
   // 兜底：后端资源（如 RAG worker 线程卡在同步 SQLite 调用里）关闭耗时过长时，
   // 3 秒后强制退出，避免留下无窗口的驻留进程，导致覆盖安装被误判为"正在运行"。
   setTimeout(() => app.exit(0), 3000).unref();

@@ -126,6 +126,13 @@ test('Agent tool traces resolve the same call from running to a terminal result'
   assert.equal(completed[0]?.detail, 'Found one result.');
 });
 
+test('the same terminal error is rendered only once across loop and outer catch', () => {
+  const first = applyAgentLoopEventToTrace([], { kind: 'error', turn: 1, message: 'Unable to connect' });
+  const second = applyAgentLoopEventToTrace(first, { kind: 'error', message: 'Unable to connect' });
+  assert.equal(second.length, 1);
+  assert.equal(second[0].status, 'error');
+});
+
 test('Agent final trace summary reflects a completed answer', () => {
   const running = applyAgentLoopEventToTrace([], { kind: 'answer_delta', text: 'Answer' });
   const completed = applyAgentLoopEventToTrace(running, {

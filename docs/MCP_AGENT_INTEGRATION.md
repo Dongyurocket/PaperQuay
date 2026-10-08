@@ -1,5 +1,7 @@
 # PaperQuay 知识库 MCP 接入指南
 
+当前 MCP 协议版本随 PaperQuay 应用版本发布；客户端应以 `initialize` 返回的 `serverInfo.version` 与 `tools/list` 为准，不应依赖硬编码版本或旧参数快照。
+
 PaperQuay 提供了基于标准 **Model Context Protocol (MCP)** 的知识库服务。Proma、Pi、Codex 等各类 AI Agent 可以通过 stdio 协议直连 PaperQuay 本地知识库，进行文献检索、证据定位、学术问答，以及受安全护栏约束的文库与笔记维护（导入 PDF、更新元数据、调整分类、创建/更新/删除笔记、维护笔记分类等）。
 
 ---
@@ -10,7 +12,7 @@ PaperQuay 提供了基于标准 **Model Context Protocol (MCP)** 的知识库服
 2. **并发安全无锁**：数据库开启 WAL 模式，外部只读查询与桌面应用读写互不阻塞、无锁冲突。
 3. **精准段落引用**：`search_knowledge_base` 返回段落所在的**文献 ID、文献标题、页码与结构块 ID**，便于 Agent 依据事实回答并自动生成 `[1] (Paper Title, P.x)` 格式引用。
 4. **向量混合检索**：在阅读器设置中配置了 Embedding API 时，`search_knowledge_base` 自动将查询向量化，与 FTS5 全文检索双通道召回，经 RRF（Reciprocal Rank Fusion）融合排序；未配置或接口异常时自动降级为关键词检索，并在分词或特殊字符场景下无缝降级到模糊匹配。
-5. **写入安全护栏**：所有写工具在执行前检测 PaperQuay 桌面应用是否运行——桌面应用持有文库内存态，外部写入会在应用下一次保存时被整体覆盖，因此检测到运行中会**显式拒绝并提示关闭应用**；确需并行写入时可传 `allowWhileAppRunning: true` 强制覆盖，设环境变量 `PAPERQUAY_MCP_WRITE=off` 可将服务切换为全局只读。
+5. **写入安全护栏**：所有写工具在执行前检测 PaperQuay 桌面应用是否运行——已安装版通过进程检测，开发版通过应用运行标记检测。桌面应用持有文库内存态，外部写入会在应用下一次保存时被整体覆盖，因此检测到运行中会**显式拒绝并提示关闭应用**；确需并行写入时可传 `allowWhileAppRunning: true` 强制覆盖，设环境变量 `PAPERQUAY_MCP_WRITE=off` 可将服务切换为全局只读。
 
 ---
 
@@ -73,15 +75,19 @@ PaperQuay 提供了基于标准 **Model Context Protocol (MCP)** 的知识库服
 
 文库数据库采用「应用内存态 + 整体落盘」的持久化模型：**桌面应用运行时持有文库的内存副本，其任何保存动作都会全量覆盖数据库**。因此 MCP 写工具默认遵循以下规则：
 
-1. 每次写入前检测 `PaperQuay.exe`（Windows）或 `PaperQuay` 进程（macOS/Linux）是否在运行；
+1. 每次写入前检查应用运行标记，并补充检测 `PaperQuay.exe`（Windows）或 `PaperQuay` 进程（macOS/Linux）；运行标记同时覆盖 `electron` 开发模式；
 2. 检测到运行时，写入被**拒绝**并返回明确错误提示（引导先关闭桌面应用），数据库不产生任何修改；
 3. 明确知道风险时可传 `allowWhileAppRunning: true` 强制写入（桌面应用随后的保存可能覆盖本次写入）；
-4. 进程探测失败（权限不足等）时写入放行，但在返回结果中附带 `warning` 说明未能完成检测；
+4. 运行标记损坏或无法读取时按应用运行处理，避免开发期出现无保护的外部写入；进程探测失败但无运行标记时写入放行，并在返回结果中附带 `warning`；
 5. 设环境变量 `PAPERQUAY_MCP_WRITE=off` 可禁用全部写工具（此时服务等价于纯只读），该开关优先级高于 `allowWhileAppRunning`。
 
 Zotero 同步工具（`paperquay_sync_from_zotero`）同样受该护栏保护。建议让 Agent 形成「写前确认桌面应用已关闭」的标准作业程序。
 
 笔记库的护栏说明：笔记库是逐条 SQL 写入，桌面应用不会像文库那样用内存快照整体覆盖外部写入；但应用界面（笔记列表与编辑器）在写入前已加载的快照不会自动刷新，因此仍采用同一道「默认拒绝 + `allowWhileAppRunning` 可覆盖」护栏，并要求写入后重新加载应用界面。
+
+## 仓库 Skills
+
+仓库维护与 MCP 同步发布的作业规范：`skills/paperquay-knowledge-search/SKILL.md`（只读证据检索）、`skills/paperquay-notes/SKILL.md`（笔记维护）、`skills/paperquay-zotero-sync/SKILL.md`（预检后选择性同步）和 `skills/paperquay-library-manage/SKILL.md`（文库写入管理）。Skills 只定义操作顺序和安全边界；完整参数以 MCP `tools/list` 和本指南为准。
 
 ---
 

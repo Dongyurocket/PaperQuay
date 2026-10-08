@@ -24,7 +24,7 @@ description: 通过 PaperQuay Knowledge MCP 维护 PaperQuay 论文阅读器的�
 ## 护栏（必须先读）
 
 - `PAPERQUAY_MCP_WRITE=off` 时全局只读（默认 on）。
-- PaperQuay 桌面应用运行中默认拒绝写操作（`PaperQuay.exe` 进程检测；开发模式下该护栏不生效）。
+- PaperQuay 桌面应用运行中默认拒绝写操作（已安装版通过进程检测，开发版也通过运行标记保护）。
 - 若确需在应用运行时写入，工具参数传 `allowWhileAppRunning: true`——但桌面 UI 持内存快照，外部写入需用户重启或重新加载后才能看到，请谨慎。
 
 ## 笔记工具
@@ -38,7 +38,7 @@ description: 通过 PaperQuay Knowledge MCP 维护 PaperQuay 论文阅读器的�
 | `update_note` | 局部更新；替换 `content` 会清空富文本缓存由编辑器重建 |
 | `delete_note` | 软删除 |
 
-笔记正文中的 `[[笔记标题]]` 会被解析为双链（仅当目标已存在），`#标签` 自动归一化。
+完整参数契约以 `docs/MCP_AGENT_INTEGRATION.md` 为准。笔记正文中的 `[[笔记标题]]` 会被解析为双链（仅当目标已存在），`#标签` 自动归一化。
 
 ## 笔记宪章（红线）
 

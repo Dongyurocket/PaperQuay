@@ -6,6 +6,7 @@ import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import 'katex/dist/katex.min.css';
 import type { LibraryAgentRagCitation } from '../../services/libraryAgent';
+import { findUniqueAgentCitationByLabel } from '../../services/agentCitationRegistry.ts';
 import type { LiteraturePaper } from '../../types/library';
 import { normalizeMarkdownMath, remarkFixGluedLatex, remarkSuperscriptPlugin } from '../../utils/markdown';
 import { resolveBarePaperIds } from './agentMarkdownPaperIds.ts';
@@ -103,7 +104,7 @@ function findCitationByHref(
   }
 
   const label = normalizeAgentCitationHref(href);
-  return citations.find((citation) => citation.label === label) ?? null;
+  return findUniqueAgentCitationByLabel(citations, label);
 }
 
 function injectAgentCitationLinks(
@@ -114,8 +115,15 @@ function injectAgentCitationLinks(
     return content;
   }
 
-  const labels = new Set(citations.map((citation) => citation.label));
-  const normalizedContent = content
+  const labels = new Set(citations
+    .map((citation) => citation.label)
+    .filter((label) => findUniqueAgentCitationByLabel(citations, label) !== null));
+  const citationById = new Map(citations.map((citation) => [citation.id, citation]));
+  const withCanonicalTokens = content.replace(/\[\[cite:([^\]]+)\]\]/gi, (match, rawId: string) => {
+    const citation = citationById.get(rawId.trim());
+    return citation ? `[${citation.label}](${buildAgentCitationHref(citation.label)})` : match;
+  });
+  const normalizedContent = withCanonicalTokens
     .replace(/\[(\d+(?:\s*[,，、]\s*\d+)+)\]/g, (_match, group: string) =>
       group
         .split(/\s*[,，、]\s*/)

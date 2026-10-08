@@ -15,10 +15,12 @@ export interface AnswerEvidenceClaim {
   text: string;
   status: AnswerEvidenceStatus;
   citations: BoundCitation[];
-  reason: 'snippet-overlap' | 'cited-without-overlap' | 'no-citation-in-run' | 'dangling-citation';
+  reason: 'snippet-overlap' | 'cited-without-overlap' | 'no-citation-in-run' | 'dangling-citation' | 'citation-mismatch';
 }
 
 export interface InputCitation {
+  /** Stable canonical citation id; enables [[cite:<id>]] tokens from the model. */
+  id?: string;
   label: string;
   paperId: string;
   paperTitle: string;
@@ -95,6 +97,31 @@ function normalizeCitationLabel(label: string): string {
   return label.replace(/[\[\]]/g, '').trim();
 }
 
+function hasExplicitCitationMetadataMismatch(
+  sentence: string,
+  boundCitations: BoundCitation[],
+  availableCitations: InputCitation[],
+): boolean {
+  if (boundCitations.length === 0) return false;
+
+  const boundPaperIds = new Set(boundCitations.map((citation) => citation.paperId));
+  const namesAnotherAvailablePaper = availableCitations.some((citation) =>
+    !boundPaperIds.has(citation.paperId) &&
+    citation.paperTitle.trim().length >= 4 &&
+    sentence.includes(citation.paperTitle.trim()),
+  );
+  if (namesAnotherAvailablePaper) return true;
+
+  const mentionedPages = Array.from(sentence.matchAll(/(?:第\s*(\d+)\s*页|\bp\.?\s*(\d+)\b|\bpage\s*(\d+)\b)/gi))
+    .map((match) => Number(match[1] ?? match[2] ?? match[3]))
+    .filter((page) => Number.isFinite(page) && page > 0);
+  if (mentionedPages.length === 0) return false;
+
+  return boundCitations.some((citation) =>
+    citation.pageIndex !== null && !mentionedPages.includes(citation.pageIndex + 1),
+  );
+}
+
 /**
  * 纯字符串回答证据绑定（100% 同步纯函数，零模型调用）。
  */
@@ -109,12 +136,25 @@ export function bindAnswerEvidence(input: {
     'not-in-library': 0,
   };
 
-  if (!input.answer) {
+  // Canonical structured tokens [[cite:<id>]] resolve to numeric labels before
+  // any sentence processing; unknown ids are left intact and treated as dangling.
+  const citationIdToLabel = new Map<string, string>();
+  for (const citation of input.citations ?? []) {
+    if (citation.id && citation.label) {
+      citationIdToLabel.set(citation.id, normalizeCitationLabel(citation.label));
+    }
+  }
+  const answer = input.answer.replace(/\[\[cite:([^\]]+)\]\]/gi, (match, rawId: string) => {
+    const label = citationIdToLabel.get(rawId.trim());
+    return label ? `[${label}]` : match;
+  });
+
+  if (!answer) {
     return { claims, counts };
   }
 
   // 1. 切句预处理：去除代码块
-  const withoutCodeBlocks = input.answer.replace(/```[\s\S]*?```/g, '');
+  const withoutCodeBlocks = answer.replace(/```[\s\S]*?```/g, '');
 
   // 按行初步拆分，滤掉 Markdown 标题行、空行
   const lines = withoutCodeBlocks.split(/\r?\n/);
@@ -163,11 +203,17 @@ export function bindAnswerEvidence(input: {
 
   // 构建可用引用索引
   const availableCitations = input.citations ?? [];
-  const citationByLabel = new Map<string, InputCitation>();
+  const citationsByLabel = new Map<string, InputCitation[]>();
   for (const cit of availableCitations) {
-    if (cit.label) {
-      citationByLabel.set(normalizeCitationLabel(cit.label), cit);
-    }
+    const label = normalizeCitationLabel(cit.label);
+    if (!label) continue;
+    const matches = citationsByLabel.get(label) ?? [];
+    matches.push(cit);
+    citationsByLabel.set(label, matches);
+  }
+  const citationByLabel = new Map<string, InputCitation>();
+  for (const [label, matches] of citationsByLabel) {
+    if (matches.length === 1) citationByLabel.set(label, matches[0]);
   }
 
   // 3. 对每条主张做编号与文献匹配，以及重叠判定
@@ -261,6 +307,9 @@ export function bindAnswerEvidence(input: {
     if (boundCitations.length === 0) {
       status = 'not-in-library';
       reason = hasDanglingCitation ? 'dangling-citation' : 'no-citation-in-run';
+    } else if (hasExplicitCitationMetadataMismatch(sentence, boundCitations, availableCitations)) {
+      status = 'partial';
+      reason = 'citation-mismatch';
     } else {
       // 提取主张中的关键词并在引用片段中计算重叠
       const claimText = sentence.replace(/\[\[[^\]]+\]\]|\[[^\[\]]*p\.\d+[^\[\]]*\]|\[\d+\]/gi, '')

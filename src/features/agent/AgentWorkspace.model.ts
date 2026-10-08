@@ -530,6 +530,9 @@ export function applyAgentLoopEventToTrace(
   }
 
   if (event.kind === 'error') {
+    if (next.some((step) => step.status === 'error' && step.detail === event.message)) {
+      return next;
+    }
     update('react-final', { status: 'error' });
     add({
       id: `error-${event.turn ?? 'run'}-${next.length}`,

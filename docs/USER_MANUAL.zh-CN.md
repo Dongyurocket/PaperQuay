@@ -353,7 +353,7 @@ Agent 工作区可以直接读写笔记（需在本地文库模式下）：
 
 ### 5.5 用外部 Agent（MCP）维护笔记
 
-PaperQuay 内置标准的 MCP stdio 服务（`bin/paperquay-mcp.cjs`），Codex、Pi、Proma、Claude 等外部 Agent 无需打开桌面应用即可连接本地笔记库。配置方式见 [MCP 接入指南](./MCP_AGENT_INTEGRATION.md)，本仓库还提供了 `skills/paperquay-notes/SKILL.md` 作为外部 Agent 的作业规范。
+PaperQuay 内置标准的 MCP stdio 服务（`bin/paperquay-mcp.cjs`），Codex、Pi、Proma、Claude 等外部 Agent 无需打开桌面应用即可连接本地笔记库。配置方式见 [MCP 接入指南](./MCP_AGENT_INTEGRATION.md)。仓库同时提供 `skills/paperquay-knowledge-search/SKILL.md`（证据检索）、`skills/paperquay-notes/SKILL.md`（笔记维护）、`skills/paperquay-zotero-sync/SKILL.md`（选择性同步）和 `skills/paperquay-library-manage/SKILL.md`（文库管理）作为外部 Agent 的作业规范。
 
 笔记相关工具：
 
@@ -371,7 +371,7 @@ PaperQuay 内置标准的 MCP stdio 服务（`bin/paperquay-mcp.cjs`），Codex�
 1. `PAPERQUAY_MCP_WRITE=off` 时全局只读，优先级最高；
 2. 检测到 PaperQuay 桌面应用在运行则**显式拒绝**写入，提示先关闭应用；
 3. 确需并行写入时可传 `allowWhileAppRunning: true`；写入后需要重新加载应用界面才能看到（界面持有内存快照）；
-4. 已知盲区：进程检测只能识别打包后的 `PaperQuay.exe`，开发模式（`electron .`）下护栏不生效。
+4. 开发模式也由应用运行标记保护；运行标记损坏或无法读取时按应用仍在运行处理，避免无保护写入。
 
 使用边界：
 

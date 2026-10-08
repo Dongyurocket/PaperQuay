@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties }
 import { createPortal } from 'react-dom';
 import { Brain, Check } from 'lucide-react';
 import type { ModelReasoningEffort } from '../types/reader';
+import { placeAnchoredMenu } from '../utils/anchoredMenu';
 import { cn } from '../utils/cn';
 
 const REASONING_OPTIONS: Array<{ value: ModelReasoningEffort; labelZh: string; labelEn: string }> = [
@@ -33,13 +34,37 @@ export function ReasoningEffortPicker({
   const rootRef = useRef<HTMLDivElement | null>(null);
   const buttonRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const menuItemRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const pendingFocusIndexRef = useRef<number | null>(null);
   const [open, setOpen] = useState(false);
   const [menuStyle, setMenuStyle] = useState<CSSProperties>({});
+  const [menuPlacement, setMenuPlacement] = useState<'above' | 'below'>('below');
   const selectedOption = useMemo(
     () => REASONING_OPTIONS.find((option) => option.value === value) ?? REASONING_OPTIONS[0],
     [value],
   );
+  const selectedIndex = Math.max(0, REASONING_OPTIONS.findIndex((option) => option.value === selectedOption.value));
   const label = title ?? l('思考强度', 'Reasoning effort');
+
+  const restoreButtonFocus = useCallback(() => {
+    window.requestAnimationFrame(() => buttonRef.current?.focus());
+  }, []);
+
+  const closeMenu = useCallback((restoreFocus = false) => {
+    setOpen(false);
+    pendingFocusIndexRef.current = null;
+    if (restoreFocus && typeof window !== 'undefined') {
+      restoreButtonFocus();
+    }
+  }, [restoreButtonFocus]);
+
+  const openMenu = useCallback((focusIndex?: number) => {
+    pendingFocusIndexRef.current = focusIndex ?? null;
+    setOpen(true);
+    if (focusIndex !== undefined && typeof window !== 'undefined') {
+      window.requestAnimationFrame(() => menuItemRefs.current[focusIndex]?.focus());
+    }
+  }, []);
 
   const updateMenuPosition = useCallback(() => {
     const button = buttonRef.current;
@@ -49,15 +74,34 @@ export function ReasoningEffortPicker({
     }
 
     const rect = button.getBoundingClientRect();
-    const width = Math.min(window.innerWidth - 24, 176);
-    const left = Math.max(12, Math.min(rect.left, window.innerWidth - width - 12));
+    const placement = placeAnchoredMenu({
+      anchor: {
+        left: rect.left,
+        top: rect.top,
+        bottom: rect.bottom,
+        width: rect.width,
+      },
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
+      preferredWidth: 176,
+      preferredMaxHeight: 320,
+      minUsefulHeight: 180,
+    });
 
+    setMenuPlacement(placement.placement);
     setMenuStyle({
-      bottom: Math.max(12, window.innerHeight - rect.top + 8),
-      left,
-      width,
+      left: placement.left,
+      width: placement.width,
+      maxHeight: placement.maxHeight,
+      top: placement.top,
+      bottom: placement.bottom,
     });
   }, []);
+
+  const selectOption = useCallback((option: ModelReasoningEffort) => {
+    onChange(option);
+    closeMenu(true);
+  }, [closeMenu, onChange]);
 
   useEffect(() => {
     if (!open) {
@@ -65,6 +109,10 @@ export function ReasoningEffortPicker({
     }
 
     updateMenuPosition();
+    const focusIndex = pendingFocusIndexRef.current;
+    if (focusIndex !== null) {
+      window.requestAnimationFrame(() => menuItemRefs.current[focusIndex]?.focus());
+    }
 
     const handlePointerDown = (event: PointerEvent) => {
       const target = event.target;
@@ -76,7 +124,7 @@ export function ReasoningEffortPicker({
         return;
       }
 
-      setOpen(false);
+      closeMenu();
     };
     const handleViewportChange = () => updateMenuPosition();
 
@@ -88,24 +136,54 @@ export function ReasoningEffortPicker({
       window.removeEventListener('resize', handleViewportChange);
       window.removeEventListener('scroll', handleViewportChange, true);
     };
-  }, [open, updateMenuPosition]);
+  }, [closeMenu, open, updateMenuPosition]);
 
   const menu = open ? (
     <div
       ref={menuRef}
-      className="pq-card fixed z-[9999] overflow-hidden p-1 shadow-[0_18px_48px_rgba(15,23,42,0.18)]"
+      role="menu"
+      aria-label={label}
+      className={cn(
+        'pq-card fixed z-[9999] overflow-y-auto p-1 shadow-[0_18px_48px_rgba(15,23,42,0.18)]',
+        menuPlacement === 'above' ? 'origin-bottom' : 'origin-top',
+      )}
       style={menuStyle}
     >
-      {REASONING_OPTIONS.map((option) => {
+      {REASONING_OPTIONS.map((option, index) => {
         const selected = option.value === value;
 
         return (
           <button
             key={option.value}
+            ref={(element) => {
+              menuItemRefs.current[index] = element;
+            }}
             type="button"
-            onClick={() => {
-              onChange(option.value);
-              setOpen(false);
+            role="menuitemradio"
+            aria-checked={selected}
+            onClick={() => selectOption(option.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') {
+                event.preventDefault();
+                closeMenu(true);
+                return;
+              }
+
+              if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                event.preventDefault();
+                const direction = event.key === 'ArrowDown' ? 1 : -1;
+                const nextIndex = (index + direction + REASONING_OPTIONS.length) % REASONING_OPTIONS.length;
+                menuItemRefs.current[nextIndex]?.focus();
+                return;
+              }
+
+              if (event.key === 'Home' || event.key === 'End') {
+                event.preventDefault();
+                const nextIndex = event.key === 'Home' ? 0 : REASONING_OPTIONS.length - 1;
+                menuItemRefs.current[nextIndex]?.focus();
+                return;
+              }
+
             }}
             className={cn(
               'flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left text-sm transition',
@@ -127,9 +205,31 @@ export function ReasoningEffortPicker({
       <button
         ref={buttonRef}
         type="button"
-        onClick={() => setOpen((current) => !current)}
+        onClick={() => {
+          if (open) {
+            closeMenu();
+          } else {
+            openMenu();
+          }
+        }}
+        onKeyDown={(event) => {
+          if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+            event.preventDefault();
+            const focusIndex = event.key === 'ArrowDown'
+              ? selectedIndex
+              : (selectedIndex - 1 + REASONING_OPTIONS.length) % REASONING_OPTIONS.length;
+            openMenu(focusIndex);
+            return;
+          }
+
+          if (event.key === 'Escape' && open) {
+            event.preventDefault();
+            closeMenu(true);
+          }
+        }}
         title={`${label}: ${l(selectedOption.labelZh, selectedOption.labelEn)}`}
         aria-label={label}
+        aria-haspopup="menu"
         aria-expanded={open}
         className={cn(
           'pq-icon-button border bg-white/60',

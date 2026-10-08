@@ -1,5 +1,6 @@
 import { invoke } from '../platform/electron/core';
 import { listen } from '../platform/electron/event';
+import { normalizeAgentChatErrorMessage } from './agentError.ts';
 import type {
   AgentChatTurnResponse,
   AgentLoopMessage,
@@ -70,7 +71,10 @@ export async function runOpenAiCompatibleAgentChatTurn(input: {
     try {
       return await invoke<AgentChatTurnResponse>('agent_chat_turn', { request });
     } catch (error) {
-      const nextError = new Error(toErrorMessage(error, 'Agent chat turn failed'));
+      const nextError = new Error(normalizeAgentChatErrorMessage(
+        toErrorMessage(error, 'Agent chat turn failed'),
+        '模型请求失败，请稍后重试。',
+      ));
       if (input.signal?.aborted) nextError.name = 'AbortError';
       throw nextError;
     } finally {
@@ -123,11 +127,14 @@ export async function runOpenAiCompatibleAgentChatTurn(input: {
           request: { ...request, stream: false },
         });
       } catch (fallbackError) {
-        throw new Error(toErrorMessage(fallbackError, message));
+        throw new Error(normalizeAgentChatErrorMessage(
+          toErrorMessage(fallbackError, message),
+          '模型请求失败，请稍后重试。',
+        ));
       }
     }
 
-    const nextError = new Error(message);
+    const nextError = new Error(normalizeAgentChatErrorMessage(message, '模型请求失败，请稍后重试。'));
     if (input.signal?.aborted) nextError.name = 'AbortError';
     throw nextError;
   } finally {
