@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import type { AgentAnswerReference, AgentAnswerReferenceModel, AgentCitationClick } from './agentCitationRendering';
+import type { LiteraturePaper } from '../../types/library';
 
 export function referenceIdentityHint(reference: AgentAnswerReference, references: AgentAnswerReference[]): string {
   const samePreview = references.filter((other) => other !== reference &&
@@ -26,25 +27,29 @@ export function referencePreview(reference: AgentAnswerReference, references: Ag
   return `${offset > 0 ? '…' : ''}${text.slice(offset, offset + 280)}${text.length > offset + 280 ? '…' : ''}`;
 }
 
-export function AgentAnswerReferenceEntry({ reference, preview, identityHint, onOpenCitation, l }: {
+export function AgentAnswerReferenceEntry({ reference, preview, identityHint, paper, onOpenCitation, l }: {
   reference: AgentAnswerReference;
   preview: string;
   identityHint?: string;
+  paper?: LiteraturePaper;
   onOpenCitation?: AgentCitationClick;
   l: (zh: string, en: string) => string;
 }) {
   const [expanded, setExpanded] = useState(false);
   const { citation, number } = reference;
+  const title = paper?.title.trim() || citation.paperTitle;
+  const metadata = [paper?.authors.map((author) => author.name).filter(Boolean).join(', '), paper?.year, paper?.publication].filter(Boolean).join(' · ');
   const text = citation.previewText?.trim() ?? '';
   const long = text.length > 280;
   const page = citation.pageIndex == null ? '' : l(` · PDF 第 ${citation.pageIndex + 1} 页`, ` · PDF page ${citation.pageIndex + 1}`);
   return <li className="min-w-0 text-sm leading-6 [overflow-wrap:anywhere]">
     <button type="button" disabled={!onOpenCitation} onClick={() => onOpenCitation?.(citation, number)}
-      aria-label={l(`引用 ${number}：${citation.paperTitle}${page}`, `Reference ${number}: ${citation.paperTitle}${page}`)}
+      aria-label={l(`引用 ${number}：${title}${page}`, `Reference ${number}: ${title}${page}`)}
       className="max-w-full text-left align-baseline font-medium text-[var(--pq-accent)] hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--pq-accent)] disabled:cursor-default">
-      [{number}] {citation.paperTitle}
+      [{number}] {title}
     </button>
     <span className="text-xs text-[var(--pq-text-muted)]">{page}</span>
+    {metadata ? <div className="text-xs text-[var(--pq-text-muted)]">{metadata}</div> : null}
     {preview ? <div className="mt-0.5 whitespace-pre-wrap text-xs leading-5 text-[var(--pq-text-muted)]">{expanded ? text : preview}</div> : null}
     {identityHint ? <div className="text-xs text-[var(--pq-text-faint)]">{l('片段标识：', 'Fragment ID: ')}{identityHint}</div> : null}
     {long ? <button type="button" aria-expanded={expanded} onClick={() => setExpanded((value) => !value)}
@@ -55,16 +60,19 @@ export function AgentAnswerReferenceEntry({ reference, preview, identityHint, on
   </li>;
 }
 
-export default function AgentAnswerReferences({ model, onOpenCitation, l }: {
+export default function AgentAnswerReferences({ model, papers, onOpenCitation, l }: {
   model: AgentAnswerReferenceModel;
+  papers?: LiteraturePaper[];
   onOpenCitation?: AgentCitationClick;
   l: (zh: string, en: string) => string;
 }) {
   if (!model.references.length) return null;
+  const papersById = new Map(papers?.map((paper) => [paper.id, paper]));
   return <section className="mt-4 min-w-0" aria-label={l('参考文献', 'References')}>
     <h3 className="text-sm font-semibold text-[var(--pq-text)]">{l('参考文献', 'References')}</h3>
     <ol className="mt-2 list-none space-y-3">
       {model.references.map((reference) => <AgentAnswerReferenceEntry key={reference.citationId} reference={reference}
+        paper={papersById.get(reference.citation.paperId)}
         preview={referencePreview(reference, model.references)} identityHint={referenceIdentityHint(reference, model.references)} onOpenCitation={onOpenCitation} l={l} />)}
     </ol>
   </section>;

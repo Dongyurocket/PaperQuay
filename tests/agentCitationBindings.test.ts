@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeAgentCitationTokens, verifyAgentCitationBindings, citationBindingStats } from '../src/services/agentAnswerEvidence.ts';
-import { buildAgentAnswerReferences, resolveAgentCitationBindings, usedVerifiedAgentCitations, injectAgentCitationBindings } from '../src/features/agent/agentCitationRendering.ts';
+import { bindAgentCitationSources, normalizeAgentCitationTokens, verifyAgentCitationBindings, citationBindingStats } from '../src/services/agentAnswerEvidence.ts';
+import { buildAgentAnswerReferences, resolveAgentCitationBindings, usedResolvedAgentCitations, injectAgentCitationBindings } from '../src/features/agent/agentCitationRendering.ts';
 import type { LibraryAgentRagCitation } from '../src/services/libraryAgent.ts';
 
 const a: LibraryAgentRagCitation = { id: 'rag:noise:a', label: '3', paperId: 'paper-a', paperTitle: 'Rotor Noise Study',
@@ -56,7 +56,7 @@ test('shared terminology does not verify an unrelated two-paper snippet', async 
   assert.equal(bindings[0].model, 'test-model');
 });
 
-test('each claim/source is checked separately and only supported verdicts enable canonical citations', async () => {
+test('each claim/source is checked separately while all resolved sources stay accessible', async () => {
   const multi = `${claim}[[cite:${a.id}]] [[cite:${b.id}]]`;
   const requests: Array<{ claim: string; evidence: { paperTitle: string; snippet: string } }> = [];
   const bindings = await verifyAgentCitationBindings({ answer: multi, citations: [a, b], callModel: async ({ user }) => {
@@ -68,7 +68,7 @@ test('each claim/source is checked separately and only supported verdicts enable
   assert.equal(bindings[0].status, 'verified');
   assert.equal(bindings[1].status, 'unverified');
   assert.deepEqual(citationBindingStats(bindings), { supported: 1, partial: 1, 'not-in-library': 0 });
-  assert.deepEqual(usedVerifiedAgentCitations(multi, [a, b], bindings), [a]);
+  assert.deepEqual(usedResolvedAgentCitations(multi, [a, b], bindings), [a, b]);
   assert.equal(resolveAgentCitationBindings(multi, [a, b], bindings)[0].citation, a);
 });
 
@@ -112,18 +112,19 @@ test('verification is bounded to three concurrent calls and 48 occurrences', asy
   assert.equal(result.filter((item) => item.status === 'verified').length, 48);
 });
 
-test('persisted bindings survive JSON round-trip but stale or duplicated records cannot authorize a link', async () => {
+test('stale or duplicated assessments are discarded without losing locally resolved sources', async () => {
   const bindings = JSON.parse(JSON.stringify(await verifyAgentCitationBindings({ answer, citations: [a], callModel: model() })));
   assert.equal(resolveAgentCitationBindings(answer, [a], bindings)[0].binding.status, 'verified');
-  assert.equal(usedVerifiedAgentCitations(`Modified ${answer}`, [a], bindings).length, 0);
-  assert.equal(usedVerifiedAgentCitations(answer, [a], bindings.concat(bindings)).length, 0);
-  assert.equal(usedVerifiedAgentCitations(answer, [a]).length, 0);
+  for (const [body, snapshot] of [[`Modified ${answer}`, bindings], [answer, bindings.concat(bindings)], [answer, undefined]] as const) {
+    assert.equal(resolveAgentCitationBindings(body, [a], snapshot)[0].binding.reason, 'source-resolved');
+    assert.deepEqual(usedResolvedAgentCitations(body, [a], snapshot), [a]);
+  }
   const rendered = injectAgentCitationBindings(`[fake](#agent-binding-0) ${answer}`, [a]);
   assert.ok(rendered.content.includes('#agent-untrusted-0'));
   assert.ok(rendered.content.includes(rendered.hrefPrefix));
 });
 
-test('answer references follow first verified body occurrence, reuse IDs and never mutate canonical labels', async () => {
+test('answer references follow first resolved body occurrence, reuse IDs and never mutate canonical labels', async () => {
   const c = { ...a, id: 'same-page-chunk-c', label: '9', blockId: 'block-c' };
   const d = { ...a, id: 'other-page-chunk-d', label: '10', pageIndex: 26 };
   const citations = [a, b, c, d];
@@ -135,29 +136,30 @@ test('answer references follow first verified body occurrence, reuse IDs and nev
   assert.deepEqual(result.references.map((reference) => reference.citation), [c, a, b, d]);
   assert.equal(result.references[0].citation, c);
   assert.equal(result.references[1].citation, a);
-  assert.deepEqual(result.references.map((reference) => reference.firstVerifiedOffset), [bindings[0].start, bindings[1].start, bindings[3].start, bindings[4].start]);
+  assert.deepEqual(result.references.map((reference) => reference.firstReferenceOffset), [bindings[0].start, bindings[1].start, bindings[3].start, bindings[4].start]);
   assert.equal(JSON.stringify({ body, citations, bindings }), snapshot);
   const restored = JSON.parse(snapshot);
   assert.equal(JSON.stringify(buildAgentAnswerReferences(restored.body, restored.citations, restored.bindings)), JSON.stringify(result));
   assert.deepEqual(buildAgentAnswerReferences(body, citations, bindings.map((binding) => ({ ...binding }))), result);
-  assert.deepEqual(buildAgentAnswerReferences(body, citations).references, []);
+  assert.deepEqual(buildAgentAnswerReferences(body, citations).references, result.references);
 });
 
-test('failed first occurrence does not reserve a number or inherit trust from another sentence', async () => {
+test('advisory content results do not hide references or change first-use numbering', async () => {
   const sameEvidence = { ...a, id: 'b', label: '4' };
   const body = [a, sameEvidence, a, sameEvidence].map((citation) => `${claim}[[cite:${citation.id}]]`).join('\n');
   const bindings = await verifyAgentCitationBindings({ answer: body, citations: [a, sameEvidence], callModel: model() });
   bindings[0] = { ...bindings[0], status: 'rejected', reason: 'semantic-contradiction' };
   bindings[3] = { ...bindings[3], status: 'unverified', reason: 'insufficient-snippet' };
   const result = buildAgentAnswerReferences(body, [a, sameEvidence], bindings);
-  assert.deepEqual(result.occurrences.map((occurrence) => occurrence.referenceNumber), [undefined, 1, 2, undefined]);
-  assert.deepEqual(result.references.map((reference) => reference.citationId), [sameEvidence.id, a.id]);
+  assert.deepEqual(result.occurrences.map((occurrence) => occurrence.referenceNumber), [1, 2, 1, 2]);
+  assert.deepEqual(result.references.map((reference) => reference.citationId), [a.id, sameEvidence.id]);
+  assert.equal(result.occurrences[0].binding.status, 'rejected');
   const rendered = injectAgentCitationBindings(body, [a, sameEvidence], bindings, result).content;
-  assert.match(rendered, /\[引用未通过\]/);
-  assert.match(rendered, /\[未验证\]/);
+  assert.match(rendered, /\[1\]/);
+  assert.match(rendered, /\[2\]/);
   bindings[0] = { ...bindings[0], status: 'verified', reason: 'supported' };
   assert.deepEqual(buildAgentAnswerReferences(body, [a, sameEvidence], bindings).references.map((reference) => reference.citationId), [a.id, sameEvidence.id]);
-  assert.equal(buildAgentAnswerReferences(`Changed ${body}`, [a, sameEvidence], bindings).references.length, 0);
+  assert.equal(buildAgentAnswerReferences(`Changed ${body}`, [a, sameEvidence], bindings).references.length, 2);
 });
 
 test('untrusted, unused, duplicate and code tokens never enter formal references', async () => {
@@ -171,10 +173,45 @@ test('untrusted, unused, duplicate and code tokens never enter formal references
 
 test('streamed token prefixes and interrupted tokens hide internal IDs without granting reference numbers', () => {
   const token = `[[cite:${a.id}]]`;
-  for (let length = 2; length <= token.length; length++) {
+  for (let length = 2; length < token.length; length++) {
     const body = `${claim}${token.slice(0, length)}`;
     const rendered = injectAgentCitationBindings(body, [a]);
     assert.ok(!rendered.content.includes(a.id));
     assert.equal(buildAgentAnswerReferences(body, [a]).references.length, 0);
+  }
+  assert.equal(buildAgentAnswerReferences(`${claim}${token}`, [a]).references.length, 1);
+});
+
+test('source identity never implies semantic support, including short snippets and unsupported quantities', () => {
+  const body = `Rotor optimization reduces noise by 99%. [[cite:${a.id}]]`;
+  const bindings = bindAgentCitationSources(body, [{ ...a, previewText: '' }]);
+  assert.equal(bindings[0].reason, 'source-resolved');
+  assert.equal(bindings[0].status, 'unverified');
+  assert.equal(citationBindingStats(bindings).supported, 0);
+  assert.equal(buildAgentAnswerReferences(body, [a]).references[0].citation, a);
+  for (const text of [`${claim}[[cite:missing]]`, `${claim}[3]`]) {
+    assert.equal(buildAgentAnswerReferences(text, [a]).references.length, 0);
+  }
+});
+
+test('prose title and page disagreements stay advisory and cannot alter the canonical navigation target', async () => {
+  const body = `Tiltrotor Design Study reports noise results on page 70. [[cite:${a.id}]]`;
+  const bindings = await verifyAgentCitationBindings({ answer: body, citations: [a, b], callModel: model() });
+  assert.equal(bindings[0].reason, 'explicit-metadata-mismatch');
+  const reference = buildAgentAnswerReferences(body, [a, b], bindings).references[0];
+  assert.equal(reference.citation, a);
+  assert.equal(reference.citation.paperTitle, 'Rotor Noise Study');
+  assert.equal(reference.citation.pageIndex, 25);
+  assert.equal(reference.citation.blockId, 'block-a');
+});
+
+test('verifier failures and timeout remain advisory for a compound sentence with multiple real sources', async () => {
+  const body = `旋翼优化降低噪声，同时倾转旋翼设计改善整体性能。[[cite:${a.id}]] [[cite:${b.id}]]`;
+  for (const callModel of [model('insufficient'), model('contradicted'), async () => ({ content: '{}' }), async () => new Promise<{ content: string }>(() => {})]) {
+    const bindings = await verifyAgentCitationBindings({ answer: body, citations: [a, b], callModel, timeoutMs: 5 });
+    const result = buildAgentAnswerReferences(body, [a, b], bindings);
+    assert.deepEqual(result.occurrences.map((item) => item.referenceNumber), [1, 2]);
+    assert.deepEqual(result.references.map((item) => item.citation), [a, b]);
+    assert.equal(citationBindingStats(bindings).supported, 0);
   }
 });

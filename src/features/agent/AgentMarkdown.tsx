@@ -14,14 +14,15 @@ import { resolveBarePaperIds } from './agentMarkdownPaperIds.ts';
 
 export { resolveBarePaperIds } from './agentMarkdownPaperIds.ts';
 
-export function AgentCitationMarker({ binding, citation, referenceNumber, onCitationClick }: {
+export function AgentCitationMarker({ binding, citation, sourceResolved, referenceNumber, onCitationClick }: {
   binding?: AgentCitationBinding;
   citation?: LibraryAgentRagCitation;
+  sourceResolved?: boolean;
   referenceNumber?: number;
   onCitationClick?: AgentCitationClick;
   children: ReactNode;
 }) {
-  if (binding?.status === 'verified' && citation && referenceNumber != null && onCitationClick) {
+  if (sourceResolved && citation && referenceNumber != null && onCitationClick) {
     const title = `${citation.paperTitle}${citation.pageIndex == null ? '' : ` · PDF ${citation.pageIndex + 1}`}\n${citation.previewText?.slice(0, 400) ?? ''}`;
     return <button type="button" onClick={() => onCitationClick(citation, referenceNumber)}
       className="align-baseline font-semibold text-[var(--pq-accent)] hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--pq-accent)]"
@@ -162,7 +163,7 @@ export default function AgentMarkdown({
         const occurrence = /^\d+$/.test(bindingIndex) ? citationRendering.resolved[Number(bindingIndex)] : undefined;
         const citation = occurrence?.citation;
         if (occurrence || /^#agent-(?:cite|binding|untrusted)-/i.test(href ?? '')) {
-          return <AgentCitationMarker binding={occurrence?.binding} citation={citation} referenceNumber={occurrence?.referenceNumber} onCitationClick={onCitationClick}>{children}</AgentCitationMarker>;
+          return <AgentCitationMarker binding={occurrence?.binding} citation={citation} sourceResolved={occurrence?.sourceResolved} referenceNumber={occurrence?.referenceNumber} onCitationClick={onCitationClick}>{children}</AgentCitationMarker>;
         }
 
         if (href?.startsWith('#agent-paper-unresolved:')) {

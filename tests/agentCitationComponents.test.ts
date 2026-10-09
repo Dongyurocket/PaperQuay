@@ -4,6 +4,7 @@ import { build } from 'esbuild';
 import { createRequire } from 'node:module';
 import { verifyAgentCitationBindings } from '../src/services/agentAnswerEvidence.ts';
 import type { LibraryAgentRagCitation } from '../src/services/libraryAgent.ts';
+import type { LiteraturePaper } from '../src/types/library.ts';
 
 const require = createRequire(import.meta.url);
 const citation: LibraryAgentRagCitation = { id: 'evidence-a', label: '7', paperId: 'paper-a', paperTitle: 'Rotor Noise',
@@ -26,12 +27,12 @@ async function loadComponents() {
   return module.exports;
 }
 
-test('actual Markdown renders only verified occurrences as buttons, including before/after streaming completion', async () => {
+test('actual Markdown renders locally resolved sources before any optional content check', async () => {
   const { render } = await loadComponents();
   const props = { content, citations: [citation], onCitationClick() {} };
   const pending = render(props);
-  assert.ok(!pending.includes('<button'));
-  assert.ok(pending.includes('role="note"') && pending.includes('aria-label='));
+  assert.equal((pending.match(/<button/g) ?? []).length, 1);
+  assert.ok(pending.includes('[1]') && pending.includes('aria-label='));
   const citationBindings = await verifyAgentCitationBindings({ answer: content, citations: [citation],
     callModel: async () => ({ content: '{"verdict":"supported","reason":"direct support"}' }) });
   const verified = render({ ...props, citationBindings });
@@ -40,8 +41,8 @@ test('actual Markdown renders only verified occurrences as buttons, including be
   assert.ok(!verified.includes('[7]'));
   for (const status of ['rejected', 'unverified']) {
     const html = render({ ...props, citationBindings: [{ ...citationBindings[0], status }] });
-    assert.ok(!html.includes('<button'));
-    assert.ok(html.includes('role="note"'));
+    assert.equal((html.match(/<button/g) ?? []).length, 1);
+    assert.ok(html.includes('[1]'));
   }
   const legacy = render({ ...props, content: content.replace('[[cite:evidence-a]]', '[7]'), citationBindings });
   assert.ok(!legacy.includes('<button'));
@@ -54,7 +55,7 @@ test('verified citation button callback forwards the exact canonical object and 
     callModel: async () => ({ content: '{"verdict":"supported","reason":"ok"}' }) });
   let opened: LibraryAgentRagCitation | undefined;
   let openedNumber: number | undefined;
-  const button = AgentCitationMarker({ binding, citation, referenceNumber: 2, children: '7', onCitationClick: (value: LibraryAgentRagCitation, number: number) => { opened = value; openedNumber = number; } });
+  const button = AgentCitationMarker({ binding, citation, sourceResolved: true, referenceNumber: 2, children: '7', onCitationClick: (value: LibraryAgentRagCitation, number: number) => { opened = value; openedNumber = number; } });
   assert.equal(button.type, 'button'); button.props.onClick();
   assert.equal(opened, citation);
   assert.equal(openedNumber, 2);
@@ -81,15 +82,17 @@ test('message footer places ordered references immediately after body and before
     papers: [], l: (zh: string) => zh, approvedItemIds: new Set(), expandedStepKeys: new Set(), expandedToolIds: new Set(),
     onOpenRagCitation() {}, onForkFromMessage() {} };
   const html = renderCard(props);
-  const footer = html.slice(html.indexOf('aria-label="参考文献"'), html.indexOf('已核验 1 条'));
+  const footer = html.slice(html.indexOf('aria-label="参考文献"'), html.indexOf('来源可用 1 处'));
   assert.ok(footer.includes('Rotor Noise') && footer.includes('<button'));
   assert.ok(!footer.includes('Retrieved Only'));
   const retrieved = html.slice(html.indexOf('本轮检索材料'), html.indexOf('</details>', html.indexOf('本轮检索材料')));
   assert.ok(retrieved.includes('Retrieved Only') && !retrieved.includes('<button'));
-  assert.ok(html.indexOf('aria-label="参考文献"') < html.indexOf('已核验 1 条'));
-  assert.ok(html.indexOf('引用核验明细') < html.indexOf('本轮检索材料'));
+  assert.ok(html.indexOf('aria-label="参考文献"') < html.indexOf('来源可用 1 处'));
+  assert.ok(html.indexOf('来源与内容检查明细') < html.indexOf('本轮检索材料'));
   assert.ok(!html.includes('已核验证据'));
-  assert.ok(!renderCard({ ...props, message: { ...props.message, citationBindings: undefined } }).includes('aria-label="参考文献"'));
+  const unchecked = renderCard({ ...props, message: { ...props.message, citationBindings: undefined } });
+  assert.ok(unchecked.includes('aria-label="参考文献"'));
+  assert.ok(!unchecked.includes('内容检查：') && !unchecked.includes('已核验'));
 });
 
 test('actual message preserves same-page fragments, repeated numbers, failed occurrences and all references past six', async () => {
@@ -107,8 +110,8 @@ test('actual message preserves same-page fragments, repeated numbers, failed occ
   const html = renderCard(props);
   const footer = html.slice(html.indexOf('<section'), html.indexOf('</section>'));
   assert.equal((footer.match(/<li /g) ?? []).length, 8);
-  assert.equal((html.match(/<button/g) ?? []).length, 18); // Nine body occurrences, eight references, fork.
-  assert.ok(html.includes('[引用未通过]'));
+  assert.equal((html.match(/<button/g) ?? []).length, 19); // Ten body occurrences, eight references, fork.
+  assert.ok(html.includes('内容检查提示该片段与此句冲突'));
   assert.ok(!html.includes('[17]'));
   assert.ok(footer.indexOf('Distinct excerpt 7') < footer.indexOf('Distinct excerpt 2'));
   const reloaded = renderCard({ ...props, message: JSON.parse(JSON.stringify(props.message)) });
@@ -119,7 +122,7 @@ test('same-page long previews expose differing text without rendering Markdown o
   const { renderCard, referencePreview, referenceIdentityHint } = await loadComponents();
   const common = 'Rotor noise baseline and optimization conditions. '.repeat(20);
   const citations = ['first unique fragment', 'second unique fragment'].map((text, index) => ({ ...citation, id: `long-${index}`, label: String(20 + index), previewText: `${common}${text} $x$ **plain**` }));
-  const references = citations.map((value, index) => ({ number: index + 1, citationId: value.id, citation: value, firstVerifiedOffset: index }));
+  const references = citations.map((value, index) => ({ number: index + 1, citationId: value.id, citation: value, firstReferenceOffset: index }));
   assert.match(referencePreview(references[0], references), /first unique fragment/);
   assert.match(referencePreview(references[1], references), /second unique fragment/);
   const identical = references.map((reference, index) => ({ ...reference,
@@ -136,4 +139,21 @@ test('same-page long previews expose differing text without rendering Markdown o
   assert.ok(footer.includes('first unique fragment') && footer.includes('second unique fragment'));
   assert.equal((footer.match(/展开片段/g) ?? []).length, 2);
   assert.ok(!footer.includes('katex') && !footer.includes('<strong>'));
+});
+
+test('message uses local bibliographic metadata and keeps content checks and trace collapsed', async () => {
+  const { renderCard } = await loadComponents();
+  const paper = { id: citation.paperId, title: 'Canonical Library Title', year: '2024', publication: 'Real Journal',
+    authors: [{ name: 'Actual Author' }] } as LiteraturePaper;
+  const html = renderCard({ message: { id: 'metadata', role: 'assistant', content, createdAt: 1, ragCitations: [citation],
+    trace: [{ id: 'done', title: 'Tools complete', summary: 'Done', status: 'success' }] },
+    papers: [paper], l: (zh: string) => zh, onOpenRagCitation() {}, onVerifyCitations() {},
+    expandedStepKeys: new Set(['metadata:done']), onToggleStep() {} });
+  const footer = html.slice(html.indexOf('<section'), html.indexOf('</section>'));
+  assert.ok(footer.includes('Canonical Library Title'));
+  assert.ok(footer.includes('Actual Author · 2024 · Real Journal'));
+  assert.ok(!footer.includes('Rotor Noise'));
+  assert.ok(html.includes('检查内容') && html.includes('执行轨迹'));
+  assert.ok(!html.includes('<details open') && !html.includes('内容检查：'));
+  assert.ok(html.includes('来源已定位，内容尚未检查'));
 });

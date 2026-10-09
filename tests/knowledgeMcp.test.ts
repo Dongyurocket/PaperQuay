@@ -542,7 +542,7 @@ test('PaperQuayKnowledgeService handles selective Zotero sync workflow', async (
   writeFileSync(path.join(zoteroDir, 'zotero.sqlite'), Buffer.from(zdb.export()));
   zdb.close();
 
-  const service = new PaperQuayKnowledgeService({ dataDir });
+  const service = new PaperQuayKnowledgeService({ dataDir, isAppRunning: () => false });
 
   try {
     // 1. 测试列出分类

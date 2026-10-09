@@ -545,7 +545,7 @@ export function AssistantMessageCard({
                 onCitationClick={onOpenRagCitation}
               />
             </div>
-            <AgentAnswerReferences model={referenceModel} l={l} onOpenCitation={onOpenRagCitation} />
+            <AgentAnswerReferences model={referenceModel} papers={papers} l={l} onOpenCitation={onOpenRagCitation} />
             <AgentCitationEvidence message={message} referenceModel={referenceModel} disabled={activeSessionRunning} onVerify={onVerifyCitations} l={l} />
             {message.ragCitations?.length ? <details className="mt-2 text-xs text-[var(--pq-text-muted)]">
               <summary className="cursor-pointer">{l(`本轮检索材料（${message.ragCitations.length}）`, `Retrieved materials (${message.ragCitations.length})`)}</summary>

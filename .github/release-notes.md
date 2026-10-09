@@ -1,14 +1,14 @@
 # PaperQuay v{{VERSION}}
 
-Agent answers now number verified evidence fragments in first-use order and show a matching reference list immediately after the answer.
+Agent citations now open locally resolved sources immediately. Content checks are optional and do not hide valid references.
 
-- Each answer starts at [1]. Repeated uses of the same verified fragment share a number; different fragments from the same paper and PDF page retain separate entries.
-- The complete reference list includes titles, available PDF page numbers and distinguishable previews, with expandable long excerpts. Body markers and list entries open the same canonical target.
-- Citation verification details use the same numbers. Failed, pending and legacy citations remain unavailable; partial streaming tokens do not expose internal IDs or enable navigation.
-- Reader navigation locates only a unique original block. Missing or ambiguous blocks fall back explicitly to a reliable PDF page; missing locations, invalid pages and unavailable PDFs show clear status messages.
-- Fixed persistence of citation-verification run events. Display numbering is derived from existing saved evidence; no database migration is required.
+- Body markers and the ordered fragment reference list use canonical source identities and remain available without AI verification, including when an optional check reports insufficient support, contradiction or an unavailable response.
+- Normal answer generation no longer invokes the citation verifier. Use Check content to request an advisory assessment; content details and execution traces start collapsed.
+- References include available local titles, authors, years and publication names. Literature recommendations are prompted to name real papers and explain relevance and evidence limits.
+- Unknown, ambiguous, forged, legacy numeric and partial tokens cannot authorize navigation. Source identity does not prove factual support; note evidence and write checks remain independent.
+- No database migration is required. Existing structured citation snapshots can be viewed with the new behavior.
 
-Validation: frontend build and all 690 tests passed, along with production message-component interaction checks. Full desktop acceptance remains pending: the live model verifier produced no successful bindings and subsequent desktop automation failed. The user will continue manual testing after release; verification gates have not been weakened.
+Validation: frontend build, all 695 tests and production message-component browser interactions passed. Browser checks use isolated fixtures; full Electron workflows and real model answer quality remain for the user's manual testing.
 
 ## Downloads
 
@@ -18,15 +18,15 @@ Choose the installer for your system from Assets: Windows `.exe`, macOS `.dmg`, 
 
 # PaperQuay v{{VERSION}} 中文说明
 
-本版让 Agent 按正文首次有效引用顺序编号，并在正文后显示对应的片段级参考文献列表。
+本版让 Agent 引用直接查看本地来源，内容检查改为可选操作，不再隐藏有效参考文献。
 
-- 每条回答从 [1] 开始，同一已核验片段重复引用复用编号；同篇同页的不同片段保留独立条目。
-- 完整列表包含题名、可用 PDF 页序及可区分的预览，长片段可展开；正文编号与列表入口使用同一原始定位目标。
-- 核验明细共享编号；失败、待核验和历史数字引用仍不可跳转，流式半 token 不泄露内部 ID 或生成可信链接。
-- 阅读器只定位唯一原结构块；失效或歧义 block 明确降级到可靠 PDF 页面，缺失位置、越界页码和 PDF 不可用均显示明确提示。
-- 修复引用核验运行事件保存。编号来自既有证据快照，无需数据库迁移。
+- 正文编号和片段列表按本地来源身份生成，无需等待 AI 核验；内容检查提示支撑不足、冲突或响应不可用时，仍可查看有效来源。
+- 正常生成不再调用引用核验模型；点击「检查内容」才请求提示性评估，内容明细和执行轨迹默认折叠。
+- 片段列表补充可用的本地题名、作者、年份和刊物；推荐提示要求给出真实文献题名、具体相关性及证据边界。
+- 未知、歧义、伪造、历史裸数字和未完成 token 仍不能获得跳转权限。来源可定位不等于事实已核实，笔记证据门禁与写入检查继续独立执行。
+- 无需数据库迁移，已有结构化引用快照可按新规则查看。
 
-验证：前端构建与全部 690 项测试及生产消息组件交互检查通过。完整桌面验收待补测：真实模型核验未产生成功绑定，后续桌面自动化报错。用户将在发布后继续人工测试，核验门禁未放宽。
+验证：前端构建、全部 695 项测试与生产消息组件浏览器交互检查通过。浏览器检查使用隔离 fixture，完整 Electron 流程及真实模型回答质量由用户继续人工测试。
 
 ## 下载
 

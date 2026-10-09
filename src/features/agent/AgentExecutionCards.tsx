@@ -166,20 +166,17 @@ export function TraceTimeline({
   const locale = useAppLocale();
 
   return (
-    <div className="rounded-[26px] border border-slate-200 bg-slate-50/70 p-4 dark:border-white/10 dark:bg-chrome-950/54">
-      <div className="mb-4 flex items-center justify-between gap-3">
+    <details className="group/trace border-t border-slate-200 pt-3 dark:border-white/10">
+      <summary className="flex cursor-pointer flex-wrap items-center justify-between gap-3">
         <div>
-          <div className="text-sm font-black text-slate-950 dark:text-white">{l('执行轨迹', 'Execution Trace')}</div>
-          <div className="mt-1 text-xs text-slate-500 dark:text-chrome-400">
-            {l('意图 · 计划 · 工具调用 · 结果 · 最终回答', 'Intent · Plan · Tool call · Result · Final')}
-          </div>
+          <div className="flex items-center gap-1 text-sm font-black text-slate-950 dark:text-white"><ChevronRight className="h-4 w-4 shrink-0 group-open/trace:rotate-90" />{l('执行轨迹', 'Execution Trace')}</div>
         </div>
         <div className="rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-bold text-slate-500 dark:border-white/10 dark:bg-chrome-900 dark:text-chrome-400">
           {steps.filter((step) => step.status === 'success' || step.status === 'skipped').length}/{steps.length} {l('已完成', 'completed')}
         </div>
-      </div>
+      </summary>
 
-      <div className="space-y-0">
+      <div className="mt-4 space-y-0">
         {steps.map((step, index) => {
           const stepKey = `${traceKey}:${step.id}`;
           const expanded = expandedStepKeys.has(stepKey);
@@ -233,7 +230,7 @@ export function TraceTimeline({
           );
         })}
       </div>
-    </div>
+    </details>
   );
 }
 

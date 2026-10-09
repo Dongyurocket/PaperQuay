@@ -26,7 +26,7 @@ import {
 } from './agentCapabilityRegistry';
 import { resolveAgentCapabilityRoute } from './agentCapabilityRoute';
 import { classifyAgentCapabilityRoute } from './agentCapabilityClassifier';
-import { citationBindingStats, verifyAgentCitationBindings, type AgentCitationBinding, type AnswerEvidenceStatus } from './agentAnswerEvidence.ts';
+import { bindAgentCitationSources, citationBindingStats, verifyAgentCitationBindings, type AgentCitationBinding, type AnswerEvidenceStatus } from './agentAnswerEvidence.ts';
 import { AGENT_CITATION_PROTOCOL, AgentCitationRegistry, formatCitationEvidenceToken, rewriteAgentCitationSourceLabels } from './agentCitationRegistry.ts';
 import { buildWorkingMemoryInjection } from './agentMemoryContract.ts';
 import { isComparativeSurveyInstruction } from './agentCapabilityTrigger';
@@ -1990,12 +1990,11 @@ export async function verifyLibraryAgentAnswerCitations(input: {
   preset: LibraryAgentModelPreset;
   signal?: AbortSignal;
   streamHandlers?: LibraryAgentStreamHandlers;
+  checkContent?: boolean;
 }) {
-  let enabled = true;
-  try { enabled = localStorage.getItem('pq.agentCitationVerifier') !== 'off'; } catch { /* Non-browser runtime. */ }
-  const citationBindings = await verifyAgentCitationBindings({
+  const citationBindings = input.checkContent ? await verifyAgentCitationBindings({
     answer: input.answer, citations: input.citations, signal: input.signal, model: input.preset.model,
-    callModel: enabled ? async ({ system, user, signal }) => {
+    callModel: async ({ system, user, signal }) => {
       const response = await runOpenAiCompatibleAgentChatTurn({
         options: { baseUrl: input.preset.baseUrl, apiKey: input.preset.apiKey, model: input.preset.model,
           apiMode: input.preset.apiMode, reasoningEffort: 'low', temperature: 0, maxOutputTokens: 512 },
@@ -2007,8 +2006,8 @@ export async function verifyLibraryAgentAnswerCitations(input: {
         completionTokens: response.usage?.completionTokens ?? 0,
       });
       return { content: response.content };
-    } : undefined,
-  });
+    },
+  }) : bindAgentCitationSources(input.answer, input.citations);
   input.streamHandlers?.onCitationVerification?.(citationBindings);
   return { citationBindings, evidenceStats: citationBindingStats(citationBindings) };
 }

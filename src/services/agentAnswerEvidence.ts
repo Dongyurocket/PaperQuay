@@ -11,7 +11,7 @@ export interface AgentCitationBinding {
   status: 'verified' | 'rejected' | 'unverified';
   reason: 'supported' | 'explicit-metadata-mismatch' | 'no-token-in-registry' | 'ambiguous-token'
     | 'duplicate-token' | 'legacy-citation' | 'malformed-token' | 'insufficient-snippet'
-    | 'semantic-contradiction' | 'verifier-unavailable';
+    | 'semantic-contradiction' | 'verifier-unavailable' | 'source-resolved';
   verifier: 'rule' | 'model' | 'legacy';
   model?: string;
   detail?: string;
@@ -27,7 +27,7 @@ function citationPattern(): RegExp {
   return /\[\[cite:([^\]\n]+)\]\]|\[\[cite:[^\n]*|\[(\d+(?:\s*[,，、]\s*\d+)*)\](?!\()/g;
 }
 
-export function normalizeAgentCitationTokens(answer: string, citations: InputCitation[]): AgentCitationBinding[] {
+export function normalizeAgentCitationTokens(answer: string, citations: InputCitation[], options?: { identityOnly?: boolean }): AgentCitationBinding[] {
   const masked = maskCitationCode(answer);
   const occurrences = Array.from(masked.matchAll(citationPattern()));
   const protectedText = masked.replace(citationPattern(), (token) => 'x'.repeat(token.length));
@@ -67,7 +67,8 @@ export function normalizeAgentCitationTokens(answer: string, citations: InputCit
     else if (!candidates.length) { reason = 'no-token-in-registry'; status = 'rejected'; }
     else if (candidates.length !== 1 || citations.filter((c) => normalizeCitationLabel(c.label) === normalizeCitationLabel(citation!.label)).length !== 1) {
       reason = 'ambiguous-token'; status = 'rejected';
-    } else if (hasExplicitCitationMetadataMismatch(sentenceText, [{
+    } else if (options?.identityOnly) reason = 'source-resolved';
+    else if (hasExplicitCitationMetadataMismatch(sentenceText, [{
       ...citation!, pageIndex: citation!.pageIndex ?? null, blockId: citation!.blockId ?? null, snippet: citation!.previewText ?? '',
     }], citations)) { reason = 'explicit-metadata-mismatch'; status = 'rejected'; }
     else if (/^#{1,6}\s/.test(sentenceText) || sentenceText.length < 12 || /[?？]$/.test(sentenceText) || !citation?.previewText?.trim() || citation.previewText.trim().length < 24) {
@@ -97,6 +98,11 @@ export function normalizeAgentCitationTokens(answer: string, citations: InputCit
     }
   }
   return bindings;
+}
+
+// Resolving a source authorizes navigation, never a factual support verdict or note write.
+export function bindAgentCitationSources(answer: string, citations: InputCitation[]): AgentCitationBinding[] {
+  return normalizeAgentCitationTokens(answer, citations, { identityOnly: true });
 }
 
 // Restrict cheap contradiction checks to the same literal subject and relation.

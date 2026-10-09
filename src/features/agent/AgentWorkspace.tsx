@@ -802,7 +802,7 @@ function AgentWorkspace() {
       } catch { runId = null; }
       updateSessionMessage(sessionId, message.id, (current) => ({ ...current, citationBindings: undefined, evidenceStats: undefined }));
       const result = await verifyLibraryAgentAnswerCitations({
-        answer: message.content, citations: message.ragCitations ?? [], preset, signal: controller.signal,
+        answer: message.content, citations: message.ragCitations ?? [], preset, signal: controller.signal, checkContent: true,
         streamHandlers: {
           onCapabilityUsage: (usage) => {
             tokens.promptTokens += usage.promptTokens;
@@ -818,7 +818,7 @@ function AgentWorkspace() {
         },
       });
       updateSessionMessage(sessionId, message.id, (current) => current.content === message.content ? { ...current, ...result } : current);
-      if (activeSessionIdRef.current === sessionId) setStatusMessage(l('引用核验已完成。', 'Citation verification completed.'));
+      if (activeSessionIdRef.current === sessionId) setStatusMessage(l('内容检查已完成。', 'Content check completed.'));
     } catch (error) {
       failed = true;
       if (activeSessionIdRef.current === sessionId) setStatusMessage(error instanceof Error ? error.message : l('引用核验失败。', 'Citation verification failed.'));
