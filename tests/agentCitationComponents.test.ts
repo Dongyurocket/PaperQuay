@@ -49,6 +49,46 @@ test('actual Markdown renders locally resolved sources before any optional conte
   assert.ok(legacy.includes('历史或数字引用'));
 });
 
+test('numeric ranges keep a literal single tilde while explicit double tilde remains deletion', async () => {
+  const { render } = await loadComponents();
+  const html = render({ content: '飞行距离 15~30 km，半径 -0.5~2.25 km，~~删除~~。', citations: [] });
+  assert.ok(html.includes('15~30 km'));
+  assert.ok(html.includes('-0.5~2.25 km'));
+  assert.match(html, /<del>删除<\/del>/);
+  assert.equal((html.match(/<del>/g) ?? []).length, 1);
+});
+
+test('citation tokens inside inline and block math render outside math with the canonical occurrence', async () => {
+  const { render } = await loadComponents();
+  const inline = `该量满足 $U_j [[cite:${citation.id}]]$。`;
+  const block = `\n$$\nU_j = 1 + [[cite:${citation.id}]]\n$$\n`;
+  const escapedInline = `该量满足 \\(U_j [[cite:${citation.id}]]\\)。`;
+  const escapedBlock = `\n\\[\nU_j = 1 + [[cite:${citation.id}]]\n\\]\n`;
+  for (const body of [inline, block, escapedInline, escapedBlock]) {
+    const html = render({ content: body, citations: [citation], onCitationClick() {} });
+    assert.equal((html.match(/<button/g) ?? []).length, 1);
+    assert.ok(html.includes('[1]'));
+    assert.ok(!html.includes('#agent-binding-'));
+    assert.ok(html.includes('katex'));
+    assert.ok(!/[\uE010\uE011]/.test(html));
+  }
+});
+
+test('math supports several canonical sources while code and unfinished tokens stay noninteractive', async () => {
+  const { render } = await loadComponents();
+  const second = { ...citation, id: 'evidence-b', label: '8', blockId: 'block-43', previewText: 'Second source.' };
+  const body = `满足 $U_j [[cite:${citation.id}]] + T_0 [[cite:${second.id}]]$。\n\n` +
+    '`[[cite:evidence-a]]`\n\n```text\n[[cite:evidence-b]]\n```\n\n未完成 [[cite:evidence-a';
+  const html = render({ content: body, citations: [citation, second], onCitationClick() {} });
+  assert.equal((html.match(/<button/g) ?? []).length, 2);
+  assert.ok(html.includes('[1]') && html.includes('[2]'));
+  assert.ok(html.includes('katex') && html.includes('<pre>'));
+  assert.ok(html.includes('[[cite:evidence-a]]') && html.includes('[[cite:evidence-b]]'));
+  assert.ok(html.includes('引用未完成'));
+  assert.ok(!/[\uE010\uE011]/.test(html));
+  assert.ok(!html.includes('#agent-binding-'));
+});
+
 test('verified citation button callback forwards the exact canonical object and its page/block', async () => {
   const { AgentCitationMarker } = await loadComponents();
   const [binding] = await verifyAgentCitationBindings({ answer: content, citations: [citation],

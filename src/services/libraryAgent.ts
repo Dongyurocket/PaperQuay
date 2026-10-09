@@ -27,7 +27,8 @@ import {
 import { resolveAgentCapabilityRoute } from './agentCapabilityRoute';
 import { classifyAgentCapabilityRoute } from './agentCapabilityClassifier';
 import { bindAgentCitationSources, citationBindingStats, verifyAgentCitationBindings, type AgentCitationBinding, type AnswerEvidenceStatus } from './agentAnswerEvidence.ts';
-import { AGENT_CITATION_PROTOCOL, AgentCitationRegistry, formatCitationEvidenceToken, rewriteAgentCitationSourceLabels } from './agentCitationRegistry.ts';
+import { AGENT_CITATION_PROTOCOL, AgentCitationRegistry, createAgentDocumentExcerptCitation, formatCitationEvidenceToken, recoverAgentToolCitations, rewriteAgentCitationSourceLabels } from './agentCitationRegistry.ts';
+import { agentToolTextVersion, sliceAgentToolText } from './agentToolContent.ts';
 import { buildWorkingMemoryInjection } from './agentMemoryContract.ts';
 import { isComparativeSurveyInstruction } from './agentCapabilityTrigger';
 import {
@@ -49,6 +50,26 @@ import {
 } from './agentVision';
 import { resolveLocalRag } from './localRag';
 import { embedRagText, ragRetrieveDocumentChunks } from './rag';
+import { resolveAgentPaperScope, resolveAgentPaperIds } from './agentPaperScope';
+import { buildAgentDeliveryQualityPrompt, deriveAgentDeliveryRequirement, inspectAgentDeliveryQuality, type DeliveryQualityResult } from './agentDeliveryQuality.ts';
+import {
+  createSurveyCoverageLedger,
+  ensureSurveyCoveragePapers,
+  ensureSurveyCoverageSubquestions,
+  finishSurveyCoverage,
+  getSurveyCoverageBudgetStopReason,
+  normalizeSurveyCoverageLedger,
+  normalizeSurveyResearchContexts,
+  processSurveyCoverageBatch,
+  recordSurveyPaperCoverage,
+  recordSurveySubquestionCoverage,
+  selectSurveyCoverageBatch,
+  summarizeSurveyCoverage,
+  updateSurveyCoverageBudget,
+  type SurveyCoverageLedger,
+  type SurveyCoverageBatchResult,
+  type SurveyPaperRetrievalOutcome,
+} from './agentSurveyCoverage';
 import {
   paperAuthors,
   paperPdfPath,
@@ -289,6 +310,7 @@ export type LibraryAgentRunResult =
     ragNotice?: string | null;
     evidenceStats?: Record<AnswerEvidenceStatus, number>;
     citationBindings?: AgentCitationBinding[];
+    deliveryQuality?: DeliveryQualityResult;
   }
   | {
     kind: 'choice';
@@ -367,6 +389,7 @@ interface PaperContextPayload {
   visionCandidates?: AgentVisionCandidate[];
   /** RAG 检索失败时的错误信息（已回退到全文/摘要），用于向用户透传状态。 */
   ragError?: string | null;
+  retrievalOutcome?: SurveyPaperRetrievalOutcome;
 }
 
 function buildAgentRagNotice(ragErrors: string[]): string | null {
@@ -449,8 +472,9 @@ const MAX_REACT_INITIAL_PAPERS = 20;
 const MAX_REACT_INITIAL_CONTEXT_CHARS = 48_000;
 
 export interface LibraryAgentStreamHandlers {
-  onDelta?: (text: string, fullText: string) => void;
-  onThinkingDelta?: (text: string, fullText: string) => void;
+  /** `turn` lets consumers keep a draft scoped to the current model turn. */
+  onDelta?: (text: string, fullText: string, turn?: number) => void;
+  onThinkingDelta?: (text: string, fullText: string, turn?: number) => void;
   onLoopEvent?: (event: AgentLoopEvent) => void;
   onCapabilityEvent?: (event: AgentCapabilityEvent) => void;
   /**
@@ -739,6 +763,7 @@ function buildReActAgentMessages({
       role: 'system',
       content: [
         AGENT_CITATION_PROTOCOL,
+        buildAgentDeliveryQualityPrompt(deriveAgentDeliveryRequirement({ instruction, historyMessages })),
         'For write requests, call exactly one matching write tool with reviewable items. The user must approve before application.',
         'Notebook workflows: to turn scattered excerpts into a close-reading card, first use search_notes with pageKind="excerpt" and the target paperId; to turn cross-paper excerpts into a concept page, use pageKind="excerpt" plus the topic keyword or tag. Create the result with write_notes using pageKind="paper-card" or "concept". Every substantive point must link back to the exact excerpt title with [[title]].',
         'Notebook citation rule: paper citations in generated notes must be paperReference nodes reconstructed by the shared Markdown parser from [n] plus a unique ## 参考文献 entry containing the real paper title or DOI. Never hand-write citation prose or citation numbers as a substitute for paperReference. Do not alter source excerpt anchors, snapshots, or “我的想法”; aggregation is additive and reviewable through write_notes.',
@@ -1005,6 +1030,7 @@ async function loadPaperContext(
     return {
       source: `${fallback.source}-fallback-no-pdf`,
       text: normalizeAgentContext(fallback.text),
+      retrievalOutcome: 'unavailable',
     };
   }
 
@@ -1029,11 +1055,13 @@ async function loadPaperContext(
         const pdfText = await extractPdfTextByPdfJs(pdfData);
         normalizedPdfText = normalizeAgentContext(pdfText);
       } catch (error) {
+        if (options?.signal?.aborted || (error instanceof Error && error.name === 'AbortError')) throw error;
         console.warn('Failed to load Agent PDF context', error);
       }
     }
 
     let ragError: string | null = null;
+    let retrievalOutcome: SurveyPaperRetrievalOutcome = 'unavailable';
 
     if (
       options?.ragEnabled !== false &&
@@ -1071,6 +1099,7 @@ async function loadPaperContext(
           const figures = mineruContext?.figures ?? [];
           return {
             source: `${mineruContext?.source ?? 'pdf-text'}-rag`,
+            retrievalOutcome: 'hit',
             text: normalizeAgentContext(ragResolution.documentText),
             citations: buildAgentRagCitations(paper, ragResolution.citations),
             figures,
@@ -1084,9 +1113,14 @@ async function loadPaperContext(
         }
 
         if (ragResolution.kind === 'failed') {
+          retrievalOutcome = 'failed';
           ragError = ragResolution.errorMessage?.trim() || '本地 RAG 检索失败';
+        } else if (ragResolution.kind === 'empty') {
+          retrievalOutcome = 'empty';
         }
       } catch (error) {
+        if (options?.signal?.aborted || (error instanceof Error && error.name === 'AbortError')) throw error;
+        retrievalOutcome = 'failed';
         ragError = error instanceof Error ? error.message : String(error);
         console.warn('Failed to build local Agent RAG context', error);
       }
@@ -1098,6 +1132,7 @@ async function loadPaperContext(
         text: mineruContext.text,
         figures: mineruContext.figures,
         ragError,
+        retrievalOutcome,
       };
     }
 
@@ -1107,9 +1142,11 @@ async function loadPaperContext(
         text: normalizedPdfText,
         figures: mineruContext?.figures ?? [],
         ragError,
+        retrievalOutcome,
       };
     }
   } catch (error) {
+    if (options?.signal?.aborted || (error instanceof Error && error.name === 'AbortError')) throw error;
     console.warn('Failed to load Agent document context', error);
   }
 
@@ -1118,6 +1155,7 @@ async function loadPaperContext(
   return {
     source: `${fallback.source}-fallback-pdf-error`,
     text: normalizeAgentContext(fallback.text),
+    retrievalOutcome: 'unavailable',
   };
 }
 
@@ -1164,9 +1202,9 @@ async function buildPapersWithRequestedContext(
   const requestedPapers = requestedIds.size > 0
     ? papers.filter((paper) => requestedIds.has(paper.id))
     : [];
-  const targetPapers = requestedIds.size > 0 && requestedPapers.length > 0
-    ? requestedPapers
-    : papers;
+  // A non-empty request that resolves to no papers is an empty result, not a
+  // reason to widen the context back to the whole library.
+  const targetPapers = requestedIds.size > 0 ? requestedPapers : papers;
   const targetIds = new Set(targetPapers.map((paper) => paper.id));
   const contextByPaperId = new Map<string, PaperContextPayload>();
   const contextMode: LibraryAgentContextRequest['mode'] = request.mode === 'pdf-text' ? 'pdf-text' : 'summary';
@@ -1334,7 +1372,7 @@ function currentScopePapers(papers: LiteraturePaper[], currentPaperScopeIds: str
   const idSet = new Set(currentPaperScopeIds);
   const scopedPapers = papers.filter((paper) => idSet.has(paper.id));
 
-  return scopedPapers.length > 0 ? scopedPapers : papers;
+  return scopedPapers;
 }
 
 function uniqueAvailablePaperIds(
@@ -2014,12 +2052,13 @@ export async function verifyLibraryAgentAnswerCitations(input: {
 
 export async function runConversationalLibraryAgent({
   papers,
+  knownLibraryPapers,
   categories = [],
   instruction,
   preset,
   streamHandlers,
   historyMessages = [],
-  currentPaperScopeIds = [],
+  currentPaperScopeIds,
   paperScopes = [],
   responseLanguage,
   ragEnabled = true,
@@ -2031,6 +2070,8 @@ export async function runConversationalLibraryAgent({
   pinnedCapabilityId,
 }: {
   papers: LiteraturePaper[];
+  /** Full local identity map; model context and tools still obey currentPaperScopeIds. */
+  knownLibraryPapers?: LiteraturePaper[];
   categories?: LiteratureCategory[];
   instruction: string;
   preset: LibraryAgentModelPreset;
@@ -2057,11 +2098,22 @@ export async function runConversationalLibraryAgent({
     throw new Error('请输入要让 Agent 执行的文库整理指令。');
   }
 
+  const deliveryRequirement = deriveAgentDeliveryRequirement({ instruction: normalizedInstruction, historyMessages });
+
+  // An omitted scope is the explicit all-library mode used by direct service
+  // callers. An explicitly empty array remains an authorized empty scope.
+  const allLibraryPapers = knownLibraryPapers ?? papers;
+  currentPaperScopeIds = currentPaperScopeIds === undefined
+    ? papers.map((paper) => paper.id)
+    : [...new Set(currentPaperScopeIds.map((id) => id.trim()).filter(Boolean))];
+  const paperScope = resolveAgentPaperScope(allLibraryPapers, currentPaperScopeIds);
+  papers = paperScope.papers;
+
   const persisted = await loadAgentSettingsAndSecrets();
 
   const mountContext: AgentToolMountContext = {
-    papersCount: papers.length,
-    hasOpenDocument: papers.some((paper) => Boolean(paperPdfPath(paper))),
+    papersCount: paperScope.papers.length,
+    hasOpenDocument: paperScope.papers.some((paper) => Boolean(paperPdfPath(paper))),
     ragReady: persisted.settings.localRagEnabled !== false,
     localLibraryMode: true,
   };
@@ -2070,22 +2122,14 @@ export async function runConversationalLibraryAgent({
   // citation-audit 的 retrieve、note-distill 的 RAG 兜底都向同一个数组追加（方案第 3.3 节）。
   const citations: LibraryAgentRagCitation[] = [];
   const citationRegistry = new AgentCitationRegistry(citations);
-  citationRegistry.register(loopResumeCitations);
+  const registerScopedCitations = (next: LibraryAgentRagCitation[] | undefined) =>
+    citationRegistry.register((next ?? []).filter((citation) =>
+      paperScope.ids.includes(citation.paperId) && paperScope.paperById.has(citation.paperId)));
+
+  registerScopedCitations(loopResumeCitations);
   for (const message of loopResumeMessages ?? []) {
     if (message.role !== 'tool') continue;
-    try {
-      const payload = JSON.parse(message.content);
-      for (const context of payload.papers ?? []) citationRegistry.register(context.citations);
-      for (const chunk of payload.chunks ?? []) {
-        if (!chunk.citationId || !chunk.paperId) continue;
-        citationRegistry.register([{
-          id: chunk.citationId, label: '', paperId: chunk.paperId,
-          paperTitle: chunk.paperTitle || papers.find((p) => p.id === chunk.paperId)?.title || chunk.paperId,
-          sourceType: chunk.sourceType ?? 'pdf-text', pageIndex: chunk.page == null ? null : chunk.page - 1,
-          blockId: chunk.blockId ?? null, previewText: chunk.snippet ?? '',
-        }]);
-      }
-    } catch { /* Most messages are prose rather than tool JSON. */ }
+    registerScopedCitations(recoverAgentToolCitations(message.content, paperScope.paperById, paperScope.ids));
   }
   const ragErrors: string[] = [];
   const ragSettings = normalizeStoredReaderSettings(persisted.settings);
@@ -2115,6 +2159,12 @@ export async function runConversationalLibraryAgent({
     }
 
     try {
+      const resolvedIds = resolveAgentPaperIds(paperScope, input.paperIds);
+      if (resolvedIds.error) {
+        return { chunks: [], ragErrors: [`scope_error:${resolvedIds.error.code}:${resolvedIds.error.message}`] };
+      }
+      const targetKeys = resolvedIds.ids;
+
       const queryEmbedding = await embedRagText(
         input.query,
         {
@@ -2133,9 +2183,6 @@ export async function runConversationalLibraryAgent({
       }
 
       const topK = Math.max(1, Math.min(30, input.topK ?? 12));
-      const targetKeys = Array.isArray(input.paperIds) && input.paperIds.length > 0
-        ? input.paperIds.filter(Boolean)
-        : undefined;
 
       const rawResults = await ragRetrieveDocumentChunks({
         documentKeys: targetKeys,
@@ -2144,40 +2191,67 @@ export async function runConversationalLibraryAgent({
         topK,
       });
 
-      const paperById = new Map(papers.map((p) => [p.id, p]));
-      const chunks = rawResults.map((chunk) => {
-        const paper = chunk.documentKey ? paperById.get(chunk.documentKey) : undefined;
-        return {
-          citationId: `agent-rag:${chunk.documentKey}:${chunk.sourceType ?? 'pdf-text'}:${chunk.chunkId}`,
-          evidenceToken: formatCitationEvidenceToken({ id: `agent-rag:${chunk.documentKey}:${chunk.sourceType ?? 'pdf-text'}:${chunk.chunkId}` }),
-          sourceType: chunk.sourceType ?? 'pdf-text',
-          paperId: chunk.documentKey || '',
-          paperTitle: paper?.title,
-          page: chunk.pageIndex === null || chunk.pageIndex === undefined ? null : chunk.pageIndex + 1,
-          blockId: chunk.blockId ?? null,
-          snippet: chunk.text ?? '',
-          hasImage: false,
-        };
-      });
+      const paperById = paperScope.paperById;
+      const chunks: Array<{
+        citationId: string;
+        evidenceToken: string;
+        sourceType: string;
+        paperId: string;
+        paperTitle?: string;
+        page: number | null;
+        blockId: string | null;
+        snippet: string;
+        hasImage: boolean;
+      }> = [];
+      const droppedReasons: string[] = [];
 
+      // Validate identity and scope, register canonical citation, then expose
+      // the token. This ordering prevents model-visible unregistered evidence.
       for (const chunk of rawResults) {
-        if (!chunk.documentKey) continue;
-        const paper = paperById.get(chunk.documentKey);
-        if (!paper) continue;
-        const citationId = `agent-rag:${paper.id}:${chunk.sourceType ?? 'pdf-text'}:${chunk.chunkId}`;
-        citationRegistry.register([{
+        const documentKey = chunk.documentKey?.trim();
+        if (!documentKey) {
+          droppedReasons.push(`missing_document_key:${chunk.chunkId}`);
+          continue;
+        }
+        const paper = paperById.get(documentKey);
+        if (!paper) {
+          droppedReasons.push(`unknown_paper:${documentKey}`);
+          continue;
+        }
+        if (!targetKeys.includes(documentKey)) {
+          droppedReasons.push(`out_of_scope:${documentKey}`);
+          continue;
+        }
+        const sourceType = chunk.sourceType ?? 'pdf-text';
+        const citationId = `agent-rag:${paper.id}:${sourceType}:${chunk.chunkId}`;
+        const [canonical] = citationRegistry.register([{
           id: citationId,
           label: '',
-          sourceType: chunk.sourceType ?? 'pdf-text',
+          sourceType,
           pageIndex: chunk.pageIndex ?? null,
           blockId: chunk.blockId ?? null,
           previewText: chunk.text ?? '',
           paperId: paper.id,
           paperTitle: paper.title,
         }]);
+        if (!canonical) {
+          droppedReasons.push(`unregistered_citation:${citationId}`);
+          continue;
+        }
+        chunks.push({
+          citationId: canonical.id,
+          evidenceToken: formatCitationEvidenceToken(canonical),
+          sourceType,
+          paperId: paper.id,
+          paperTitle: paper.title,
+          page: chunk.pageIndex === null || chunk.pageIndex === undefined ? null : chunk.pageIndex + 1,
+          blockId: chunk.blockId ?? null,
+          snippet: chunk.text ?? '',
+          hasImage: false,
+        });
       }
 
-      return { chunks, ragErrors: [] };
+      return { chunks, ragErrors: droppedReasons.length > 0 ? [`dropped_indexed_results:${droppedReasons.join(',')}`] : [] };
     } catch (error) {
       if (effectiveSignal?.aborted || (error instanceof Error && error.name === 'AbortError')) {
         throw error;
@@ -2244,6 +2318,7 @@ export async function runConversationalLibraryAgent({
   const route = resolveAgentCapabilityRoute({
     instruction: normalizedInstruction,
     paperCount: papers.length,
+    deliveryRequirement,
     pinnedCapabilityId,
     mountContext,
     classifierResult,
@@ -2271,6 +2346,11 @@ export async function runConversationalLibraryAgent({
             citations: [],
             tokenUsage: { promptTokens: 0, completionTokens: 0 },
             artifacts: { completedStages: [] },
+            deliveryQuality: inspectAgentDeliveryQuality({
+              markdown: noticeMarkdown,
+              requirement: { ...deliveryRequirement, kind: 'survey', completeness: 'full' },
+              runState: 'partial',
+            }),
           },
         },
         citations: [],
@@ -2291,10 +2371,48 @@ export async function runConversationalLibraryAgent({
       sourceType: citation.sourceType ?? 'pdf-text',
     })));
     const ragErrors: string[] = [];
+    // Keep one mutable, serializable ledger for the whole capability run. It
+    // is returned by the research stage and checkpointed after each batch so
+    // an interrupted survey can resume without treating candidates as read.
+    let surveyCoverage: SurveyCoverageLedger = normalizeSurveyCoverageLedger(capabilityResume?.coverage)
+      ?? createSurveyCoverageLedger({
+        papers: papers.map((paper) => ({ id: paper.id, title: paper.title })),
+        budget: { maxPapers: 40, maxSubquestions: 6, maxTokens: 200_000, maxMilliseconds: 15 * 60_000 },
+      });
+    surveyCoverage = ensureSurveyCoveragePapers(
+      surveyCoverage,
+      papers.map((paper) => ({ id: paper.id, title: paper.title })),
+    );
+    surveyCoverage = {
+      ...surveyCoverage,
+      budget: {
+        ...surveyCoverage.budget,
+        maxPapers: surveyCoverage.budget.maxPapers ?? 40,
+        maxSubquestions: surveyCoverage.budget.maxSubquestions ?? 6,
+        maxTokens: surveyCoverage.budget.maxTokens ?? 200_000,
+        maxMilliseconds: surveyCoverage.budget.maxMilliseconds ?? 15 * 60_000,
+      },
+    };
+    let persistSurveyCoverage: ((coverage: SurveyCoverageLedger) => void) | undefined;
+    const mergeCoverageSnapshot = (snapshot: SurveyCoverageLedger) => ({
+      ...snapshot,
+      budget: {
+        ...snapshot.budget,
+        maxPapers: snapshot.budget.maxPapers ?? surveyCoverage.budget.maxPapers,
+        maxSubquestions: snapshot.budget.maxSubquestions ?? surveyCoverage.budget.maxSubquestions,
+        maxTokens: snapshot.budget.maxTokens ?? surveyCoverage.budget.maxTokens,
+        maxMilliseconds: snapshot.budget.maxMilliseconds ?? surveyCoverage.budget.maxMilliseconds,
+        promptTokens: Math.max(snapshot.budget.promptTokens, surveyCoverage.budget.promptTokens),
+        completionTokens: Math.max(snapshot.budget.completionTokens, surveyCoverage.budget.completionTokens),
+        elapsedMilliseconds: Math.max(snapshot.budget.elapsedMilliseconds, surveyCoverage.budget.elapsedMilliseconds),
+      },
+    });
     const callModel = async (system: string, user: string) => {
       const controller = new AbortController();
       const abortFromParent = () => controller.abort();
       signal?.addEventListener('abort', abortFromParent, { once: true });
+      const startedAt = Date.now();
+      let elapsedRecorded = false;
       try {
         const response = await runOpenAiCompatibleAgentChatTurn({
           options: {
@@ -2319,20 +2437,38 @@ export async function runConversationalLibraryAgent({
           completionTokens: response.usage?.completionTokens ?? 0,
           capabilityId: 'comparative-survey',
         });
+        surveyCoverage = updateSurveyCoverageBudget(surveyCoverage, {
+          promptTokens: response.usage?.promptTokens ?? 0,
+          completionTokens: response.usage?.completionTokens ?? 0,
+          elapsedMilliseconds: Date.now() - startedAt,
+        });
+        elapsedRecorded = true;
+        persistSurveyCoverage?.(surveyCoverage);
         return response;
       } finally {
+        if (!elapsedRecorded) {
+          surveyCoverage = updateSurveyCoverageBudget(surveyCoverage, { elapsedMilliseconds: Date.now() - startedAt });
+          persistSurveyCoverage?.(surveyCoverage);
+        }
         signal?.removeEventListener('abort', abortFromParent);
       }
     };
     const survey = await runComparativeSurveyCapability({
       question: normalizedInstruction,
+      deliveryRequirement,
       resume: capabilityResume,
       signal,
       onEvent: streamHandlers?.onCapabilityEvent
         ? (event) => streamHandlers.onCapabilityEvent?.({ ...event, capabilityId: 'comparative-survey' })
         : undefined,
       onCheckpoint(artifacts) {
-        streamHandlers?.onCapabilityCheckpoint?.(artifacts);
+        const normalizedCoverage = normalizeSurveyCoverageLedger(artifacts.coverage ?? surveyCoverage);
+        const checkpointCoverage = normalizedCoverage ? mergeCoverageSnapshot(normalizedCoverage) : undefined;
+        if (checkpointCoverage) surveyCoverage = checkpointCoverage;
+        streamHandlers?.onCapabilityCheckpoint?.({
+          ...artifacts,
+          ...(checkpointCoverage ? { coverage: checkpointCoverage } : {}),
+        });
       },
       handlers: {
         async rephrase({ question }) {
@@ -2352,38 +2488,104 @@ export async function runConversationalLibraryAgent({
             usage: response.usage,
           };
         },
-        async research({ subquestions, onProgress }) {
-          const notes: string[] = [];
+        async research({ subquestions, onProgress, coverage, researchNotes, researchContexts, onCheckpoint }) {
+          const notes: string[] = researchNotes?.trim() ? [researchNotes] : [];
+          const pendingContexts = new Map(normalizeSurveyResearchContexts(researchContexts)
+            .map((context) => [`${context.subquestionId}:${context.paperId}`, context]));
           let promptTokens = 0;
           let completionTokens = 0;
+          // The capability runner passes the latest checkpoint back on resume.
+          // Keep the outer ledger as the single mutable source so model usage,
+          // retrieval events and stage checkpoints cannot diverge.
+          if (coverage) {
+            const normalizedCoverage = normalizeSurveyCoverageLedger(coverage);
+            if (normalizedCoverage) surveyCoverage = mergeCoverageSnapshot(normalizedCoverage);
+          }
+          surveyCoverage = ensureSurveyCoveragePapers(
+            surveyCoverage,
+            papers.map((paper) => ({ id: paper.id, title: paper.title })),
+          );
+          surveyCoverage = ensureSurveyCoverageSubquestions(
+            surveyCoverage,
+            subquestions.map((question, index) => ({
+              id: `subquestion-${index + 1}`,
+              question,
+              candidatePaperIds: papers.map((paper) => paper.id),
+            })),
+          );
+          surveyCoverage = { ...surveyCoverage, runState: 'running' };
+          // callModel also updates the token/time budget. Forward those updates
+          // to the capability checkpoint so an interrupted run can continue.
+          const saveResearchProgress = () => onCheckpoint?.(surveyCoverage, {
+            notes: notes.join('\n\n'),
+            citations: citationAccumulator.map((citation) => ({ ...citation })),
+            contexts: [...pendingContexts.values()],
+          });
+          persistSurveyCoverage = () => saveResearchProgress();
+          saveResearchProgress();
+
           // 按模型上下文窗口分配每篇论文的正文配额，避免大范围调研把 prompt 撑爆。
           // token 到字符按保守的 1:2 换算，并预留系统提示与报告阶段的开销。
           const contextCharBudget = Math.max(8192, ((preset.contextWindow ?? 128_000) - 32_768) * 2);
           const perPaperContextChars = Math.max(
-            2000,
+            256,
             Math.min(16_000, Math.floor(contextCharBudget / Math.max(1, papers.length))),
           );
           // 并发抽取全量 PDF 文本会造成内存峰值，分批处理。
           const CONTEXT_LOAD_CONCURRENCY = 4;
-          const loadContextsInBatches = async (subquestion: string) => {
-            const results: Awaited<ReturnType<typeof loadPaperContext>>[] = [];
-
-            for (let start = 0; start < papers.length; start += CONTEXT_LOAD_CONCURRENCY) {
+          const loadContextsInBatches = async (
+            subquestion: string,
+            subquestionId: string,
+            onResult: (result: SurveyCoverageBatchResult<PaperContextPayload>) => Promise<void>,
+          ) => {
+            let loadedCount = 0;
+            const pendingPaperIds = new Set(papers.map((paper) => paper.id));
+            while (pendingPaperIds.size > 0) {
               if (signal?.aborted) {
                 const error = new Error('Comparative survey cancelled');
                 error.name = 'AbortError';
                 throw error;
               }
-              const batch = papers.slice(start, start + CONTEXT_LOAD_CONCURRENCY);
-              results.push(...await Promise.all(batch.map((paper) => loadPaperContext(
-                paper,
-                'pdf-text',
-                subquestion,
-                { ragEnabled },
-              ))));
+              // Keep maxPapers meaningful even though context extraction is
+              // concurrent. A resumed ledger may already have consumed part
+              // of the allowance, so never schedule a batch larger than the
+              // remaining paper budget.
+              const batchIds = selectSurveyCoverageBatch(surveyCoverage, [...pendingPaperIds], subquestionId, CONTEXT_LOAD_CONCURRENCY);
+              if (batchIds.length === 0) break;
+              const batch = batchIds.flatMap((id) => papers.find((paper) => paper.id === id) ?? []);
+              for (const paper of batch) {
+                pendingPaperIds.delete(paper.id);
+                const prior = surveyCoverage.papers.find((item) => item.paperId === paper.id);
+                surveyCoverage = recordSurveyPaperCoverage(surveyCoverage, paper.id, {
+                  attempts: (prior?.attempts ?? 0) + 1,
+                  subquestionIds: [...(prior?.subquestionIds ?? []), subquestionId],
+                });
+              }
+              saveResearchProgress();
+              const loadStartedAt = Date.now();
+              try {
+                const results = await processSurveyCoverageBatch({
+                  paperIds: batchIds,
+                  signal,
+                  load: async (paperId) => {
+                    const paper = batch.find((item) => item.id === paperId)!;
+                    return loadPaperContext(
+                      paper,
+                      'pdf-text',
+                      subquestion,
+                      { ragEnabled, signal },
+                    );
+                  },
+                  onResult,
+                });
+                loadedCount += results.length;
+              } finally {
+                surveyCoverage = updateSurveyCoverageBudget(surveyCoverage, { elapsedMilliseconds: Date.now() - loadStartedAt });
+                saveResearchProgress();
+              }
             }
 
-            return results;
+            return loadedCount;
           };
 
           for (let index = 0; index < subquestions.length; index += 1) {
@@ -2393,32 +2595,253 @@ export async function runConversationalLibraryAgent({
               throw error;
             }
             const subquestion = subquestions[index] ?? normalizedInstruction;
+            const subquestionId = `subquestion-${index + 1}`;
+            const candidatePaperIds = papers.map((paper) => paper.id);
+            const budgetStopReason = getSurveyCoverageBudgetStopReason(surveyCoverage);
+            if (budgetStopReason) {
+              surveyCoverage = finishSurveyCoverage(surveyCoverage, {
+                state: 'partial',
+                stopReason: budgetStopReason,
+              });
+              saveResearchProgress();
+              break;
+            }
+            const existingSubquestion = surveyCoverage.subquestions.find((item) =>
+              item.id === subquestionId || item.question === subquestion,
+            );
+            if (existingSubquestion?.state === 'completed') {
+              onProgress(index + 1, subquestions.length, subquestion);
+              continue;
+            }
+            const effectiveSubquestionId = existingSubquestion?.id ?? subquestionId;
+            surveyCoverage = ensureSurveyCoverageSubquestions(surveyCoverage, [{
+              id: effectiveSubquestionId,
+              question: subquestion,
+              candidatePaperIds,
+            }]);
+            surveyCoverage = recordSurveySubquestionCoverage(surveyCoverage, effectiveSubquestionId, {
+              state: 'in-progress',
+              candidatePaperIds,
+            });
+            saveResearchProgress();
             onProgress(index, subquestions.length, subquestion);
-            const contexts = (await loadContextsInBatches(subquestion)).map((context) => {
+            const contextsByPaperId = new Map<string, PaperContextPayload>([...pendingContexts.values()]
+              .filter((context) => context.subquestionId === effectiveSubquestionId)
+              .map((context) => [context.paperId, {
+                source: context.source,
+                text: context.text,
+                citations: citationAccumulator.filter((citation) => context.citationIds.includes(citation.id)),
+              }]));
+            const completedPaperIds = [...(existingSubquestion?.completedPaperIds ?? [])];
+            const failedPaperIds = new Set(existingSubquestion?.failedPaperIds ?? []);
+            const evidenceCitationIds = [...(existingSubquestion?.evidenceCitationIds ?? [])];
+            const evidenceGaps = (existingSubquestion?.evidenceGaps ?? []).filter((gap) =>
+              !papers.some((paper) => gap.startsWith(`${paper.title}:`))
+              && !gap.startsWith(`${subquestion}: research stopped at`)
+              && !gap.startsWith(`${subquestion}: synthesis `),
+            );
+            const paperEvidenceGaps = new Map(surveyCoverage.papers
+              .filter((paper) => candidatePaperIds.includes(paper.paperId) && (paper.failed || paper.unresolved))
+              .map((paper) => [paper.paperId, `${paper.paperTitle ?? paper.paperId}: ${paper.failed ? 'context loading failed' : 'no full-text evidence was available'}`]));
+            const allEvidenceGaps = () => [...evidenceGaps, ...paperEvidenceGaps.values()];
+            const saveSubquestionProgress = () => {
+              surveyCoverage = recordSurveySubquestionCoverage(surveyCoverage, effectiveSubquestionId, {
+                state: 'in-progress', candidatePaperIds, completedPaperIds,
+                failedPaperIds: [...failedPaperIds], evidenceCitationIds: [...new Set(evidenceCitationIds)],
+                evidenceGaps: allEvidenceGaps(),
+              });
+              saveResearchProgress();
+            };
+            const loadedCount = await loadContextsInBatches(subquestion, effectiveSubquestionId, async (result) => {
+              const paper = papers.find((item) => item.id === result.paperId)!;
+              const priorPaper = surveyCoverage.papers.find((item) => item.paperId === paper.id);
+              const attempts = priorPaper?.attempts ?? 1;
+              if ('error' in result) {
+                failedPaperIds.add(paper.id);
+                surveyCoverage = recordSurveyPaperCoverage(surveyCoverage, paper.id, {
+                  paperTitle: paper.title,
+                  attempts,
+                  failed: true,
+                  error: toErrorMessage(result.error, 'context load failed'),
+                  subquestionIds: [...(priorPaper?.subquestionIds ?? []), effectiveSubquestionId],
+                });
+                paperEvidenceGaps.set(paper.id, `${paper.title}: context loading failed`);
+                saveSubquestionProgress();
+                return;
+              }
+
+              const context = result.value;
+              if (!context) {
+                failedPaperIds.add(paper.id);
+                surveyCoverage = recordSurveyPaperCoverage(surveyCoverage, paper.id, {
+                  paperTitle: paper.title,
+                  attempts,
+                  failed: true,
+                  error: 'context load returned no result',
+                  subquestionIds: [...(priorPaper?.subquestionIds ?? []), effectiveSubquestionId],
+                });
+                paperEvidenceGaps.set(paper.id, `${paper.title}: context load returned no result`);
+                saveSubquestionProgress();
+                return;
+              }
+
+              const hasBodyContext = /(?:pdf-text|mineru)/i.test(context.source)
+                && !/fallback-no-pdf|fallback-pdf-error/i.test(context.source);
               const canonical = surveyRegistry.register(context.citations);
+              const slice = sliceAgentToolText(rewriteAgentCitationSourceLabels(context.text, context.citations, canonical), perPaperContextChars);
+              let visibleText = slice.text;
+              if (canonical.length === 0 && hasBodyContext && visibleText.trim()) {
+                const excerptCitation = createAgentDocumentExcerptCitation({
+                  paperId: paper.id, paperTitle: paper.title, source: context.source,
+                  contextVersion: await agentToolTextVersion(paper.id, context.source, context.text),
+                  textStart: 0, textEnd: slice.offset, text: visibleText,
+                });
+                if (excerptCitation) {
+                  canonical.push(...surveyRegistry.register([excerptCitation]));
+                  visibleText = `# Source ${formatCitationEvidenceToken(canonical[0]!)}\n${visibleText}`;
+                }
+              }
+              const citationIds = canonical.filter((citation) => visibleText.includes(formatCitationEvidenceToken(citation))).map((citation) => citation.id);
+              const hasEffectiveEvidence = Boolean(visibleText.trim()) && hasBodyContext && citationIds.length > 0;
               if (context.ragError?.trim() && !ragErrors.includes(context.ragError.trim())) {
                 ragErrors.push(context.ragError.trim());
               }
-              return {
+              if (citationIds.length > 0) evidenceCitationIds.push(...citationIds);
+              if (!hasEffectiveEvidence) {
+                paperEvidenceGaps.set(paper.id, `${paper.title}: no full-text evidence was available`);
+              } else {
+                paperEvidenceGaps.delete(paper.id);
+              }
+              failedPaperIds.delete(paper.id);
+              if (!completedPaperIds.includes(paper.id)) completedPaperIds.push(paper.id);
+              surveyCoverage = recordSurveyPaperCoverage(surveyCoverage, paper.id, {
+                paperTitle: paper.title,
+                attempts,
+                abstractReviewed: true,
+                bodySearched: hasBodyContext,
+                unresolved: !hasEffectiveEvidence,
+                unresolvedReason: hasEffectiveEvidence ? undefined
+                  : /fallback-no-pdf/i.test(context.source) ? 'no-document'
+                    : /fallback-pdf-error/i.test(context.source) ? 'unreadable-document'
+                      : context.retrievalOutcome === 'empty' ? 'no-hit' : 'no-citable-evidence',
+                retrievalOutcome: context.retrievalOutcome,
+                failed: false,
+                error: context.ragError ?? '',
+                citationIds: [...(priorPaper?.citationIds ?? []), ...citationIds],
+                subquestionIds: [...(priorPaper?.subquestionIds ?? []), effectiveSubquestionId],
+              });
+              contextsByPaperId.set(paper.id, {
                 ...context,
                 citations: canonical,
-                text: rewriteAgentCitationSourceLabels(context.text, context.citations, canonical),
-              };
+                text: visibleText,
+              });
+              pendingContexts.set(`${effectiveSubquestionId}:${paper.id}`, {
+                paperId: paper.id, subquestionId: effectiveSubquestionId,
+                source: context.source, text: visibleText, citationIds,
+              });
+              saveSubquestionProgress();
             });
+            const postLoadBudgetStopReason = getSurveyCoverageBudgetStopReason({
+              ...surveyCoverage,
+              budget: { ...surveyCoverage.budget, maxPapers: undefined, maxSubquestions: undefined },
+            }) ?? getSurveyCoverageBudgetStopReason(surveyCoverage);
+            if (postLoadBudgetStopReason && (loadedCount === 0 || postLoadBudgetStopReason === 'budget-time' || postLoadBudgetStopReason === 'budget-tokens')) {
+              evidenceGaps.push(`${subquestion}: research stopped at ${postLoadBudgetStopReason}`);
+              surveyCoverage = recordSurveySubquestionCoverage(surveyCoverage, effectiveSubquestionId, {
+                state: 'partial',
+                candidatePaperIds,
+                evidenceCitationIds: [...new Set(evidenceCitationIds)],
+                evidenceGaps: allEvidenceGaps(),
+                completedPaperIds,
+                failedPaperIds: [...failedPaperIds],
+              });
+              surveyCoverage = finishSurveyCoverage(surveyCoverage, {
+                state: 'partial',
+                stopReason: postLoadBudgetStopReason,
+              });
+              saveResearchProgress();
+              break;
+            }
+            // Preserve paper ordering in the model payload, including failed or
+            // unresolved entries as empty context rather than shifting IDs.
             const response = await callModel(
               `Synthesize evidence for one comparative-survey subquestion. Return compact research notes. ${AGENT_CITATION_PROTOCOL}`,
               JSON.stringify({
                 subquestion,
-                papers: papers.map((paper, paperIndex) => ({
+                previousResearchNotes: notes.join('\n\n'),
+                papers: papers.map((paper) => ({
                   id: paper.id,
                   title: paper.title,
-                  context: contexts[paperIndex]?.text.slice(0, perPaperContextChars) ?? '',
+                  context: contextsByPaperId.get(paper.id)?.text ?? '',
                 })),
               }),
             );
             promptTokens += response.usage?.promptTokens ?? 0;
             completionTokens += response.usage?.completionTokens ?? 0;
+            // Input evidence is not proof that synthesis retained it. Only
+            // locally resolved output tokens for this subquestion can finish
+            // its synthesis; interrupted notes must keep their source context.
+            const synthesisBindings = bindAgentCitationSources(response.content, citationAccumulator);
+            const availableEvidenceIds = new Set(evidenceCitationIds);
+            const uniqueEvidenceCitationIds = [...new Set(synthesisBindings
+              .filter((binding) => binding.reason === 'source-resolved' && availableEvidenceIds.has(binding.citationId))
+              .map((binding) => binding.citationId))];
+            const synthesisGap = response.finishReason === 'length'
+              ? `${subquestion}: synthesis stopped at model output length`
+              : !response.content.trim()
+                ? `${subquestion}: synthesis returned no research notes`
+                : synthesisBindings.some((binding) => binding.reason !== 'source-resolved')
+                  ? `${subquestion}: synthesis contains unresolved evidence citations`
+                  : uniqueEvidenceCitationIds.length === 0
+                    ? `${subquestion}: synthesis produced no canonical evidence citation`
+                    : undefined;
+            if (synthesisGap) {
+              evidenceGaps.push(synthesisGap);
+              surveyCoverage = recordSurveySubquestionCoverage(surveyCoverage, effectiveSubquestionId, {
+                state: 'partial', candidatePaperIds, completedPaperIds,
+                failedPaperIds: [...failedPaperIds], evidenceCitationIds: [...availableEvidenceIds],
+                evidenceGaps: allEvidenceGaps(),
+              });
+              surveyCoverage = finishSurveyCoverage(surveyCoverage, {
+                state: 'partial', stopReason: response.finishReason === 'length' ? 'budget-tokens' : 'error',
+              });
+              saveResearchProgress();
+              onProgress(index, subquestions.length, `${subquestion}：证据合成未完成，已保存正文摘段与来源。`);
+              break;
+            }
             notes.push(`## ${subquestion}\n${response.content}`);
+            for (const paperId of completedPaperIds) {
+              const context = contextsByPaperId.get(paperId);
+              if (!context) continue;
+              const paper = surveyCoverage.papers.find((item) => item.paperId === paperId);
+              if (paper?.bodySearched && !paper.failed && !paper.unresolved) {
+                surveyCoverage = recordSurveyPaperCoverage(surveyCoverage, paperId, { focusedRead: true });
+              }
+              pendingContexts.delete(`${effectiveSubquestionId}:${paperId}`);
+            }
+            const completedCount = new Set([...completedPaperIds, ...failedPaperIds]).size;
+            const state = failedPaperIds.size > 0 || allEvidenceGaps().length > 0 || completedCount < candidatePaperIds.length
+              ? 'partial'
+              : 'completed';
+            surveyCoverage = recordSurveySubquestionCoverage(surveyCoverage, effectiveSubquestionId, {
+              state,
+              candidatePaperIds,
+              evidenceCitationIds: uniqueEvidenceCitationIds,
+              evidenceGaps: allEvidenceGaps(),
+              completedPaperIds,
+              failedPaperIds: [...failedPaperIds],
+            });
+            saveResearchProgress();
+            const postSynthesisBudgetStopReason = getSurveyCoverageBudgetStopReason(surveyCoverage);
+            if (postSynthesisBudgetStopReason) {
+              surveyCoverage = finishSurveyCoverage(surveyCoverage, {
+                state: 'partial',
+                stopReason: postSynthesisBudgetStopReason,
+              });
+              saveResearchProgress();
+              onProgress(index + 1, subquestions.length, subquestion);
+              break;
+            }
             onProgress(index + 1, subquestions.length, subquestion);
           }
 
@@ -2435,14 +2858,39 @@ export async function runConversationalLibraryAgent({
               sourceType: citation.sourceType,
             })),
             usage: { promptTokens, completionTokens },
+            coverage: surveyCoverage,
+            researchContexts: [...pendingContexts.values()],
           };
         },
         async report({ question, subquestions, researchNotes }) {
-          const response = await callModel(
-            `Write a comparative academic survey in Markdown. Start with the conclusion, compare methods and evidence, state limitations and research gaps. ${AGENT_CITATION_PROTOCOL}`,
-            JSON.stringify({ question, subquestions, researchNotes }),
+          const modelBudgetStopReason = getSurveyCoverageBudgetStopReason({
+            ...surveyCoverage,
+            budget: { ...surveyCoverage.budget, maxPapers: undefined, maxSubquestions: undefined },
+          });
+          const synthesisStopped = surveyCoverage.subquestions.some((subquestion) =>
+            subquestion.state === 'partial' && subquestion.evidenceGaps.some((gap) =>
+              gap.startsWith(`${subquestion.question}: synthesis `)),
           );
-          return { markdown: response.content, usage: response.usage };
+          if (modelBudgetStopReason || synthesisStopped) {
+            surveyCoverage = finishSurveyCoverage(surveyCoverage, {
+              state: 'partial', stopReason: modelBudgetStopReason ?? surveyCoverage.stopReason ?? 'error',
+            });
+            persistSurveyCoverage?.(surveyCoverage);
+            const summary = summarizeSurveyCoverage(surveyCoverage);
+            const reason = modelBudgetStopReason
+              ? `本轮已达到${modelBudgetStopReason === 'budget-time' ? '时间' : 'token'}预算，调研尚未完成。`
+              : surveyCoverage.stopReason === 'budget-tokens'
+                ? '本轮证据合成达到模型输出长度限制，调研尚未完成。'
+                : '本轮未取得带有效来源引用的完整证据合成，调研尚未完成。';
+            return {
+              markdown: `# 部分调研结果\n\n${reason}\n\n${researchNotes.trim() || '本轮尚未完成证据合成。'}\n\n## 待处理\n\n尚有 ${summary.pendingCount} 篇候选待处理，${summary.pendingSubquestionCount + summary.partialSubquestionCount} 个子问题未完成。已取得的正文摘段与来源仍保存在调研检查点，可继续调研以处理剩余证据并重新生成报告。`,
+            };
+          }
+          const response = await callModel(
+            `Write the requested academic deliverable in Markdown. Start with the conclusion unless the user's requested chapter order requires otherwise, compare methods and evidence, and state limitations. ${buildAgentDeliveryQualityPrompt({ ...deliveryRequirement, completeness: deliveryRequirement.completeness === 'partial' ? 'partial' : 'full' })} ${AGENT_CITATION_PROTOCOL}`,
+            JSON.stringify({ originalRequest: normalizedInstruction, question, subquestions, researchNotes, deliveryRequirement }),
+          );
+          return { markdown: response.content, usage: response.usage, finishReason: response.finishReason };
         },
       },
     });
@@ -2474,6 +2922,52 @@ export async function runConversationalLibraryAgent({
       citations: citationAccumulator,
       preset, signal, streamHandlers,
     });
+
+    // Only citations that actually occur in the final answer count as cited.
+    // Retrieval and synthesis citations remain evidence candidates until the
+    // answer binding step resolves their canonical IDs.
+    const finalCoverageSnapshot = normalizeSurveyCoverageLedger(survey.artifacts.coverage);
+    if (finalCoverageSnapshot) surveyCoverage = mergeCoverageSnapshot(finalCoverageSnapshot);
+    const citedCitationIds = new Set(
+      bindingResult.citationBindings
+        .filter((binding) => binding.reason === 'source-resolved')
+        .map((binding) => binding.citationId)
+        .filter(Boolean),
+    );
+    for (const citationId of citedCitationIds) {
+      const citation = citationAccumulator.find((candidate) => candidate.id === citationId);
+      if (!citation) continue;
+      const coveredPaper = surveyCoverage.papers.find((paper) => paper.paperId === citation.paperId);
+      surveyCoverage = recordSurveyPaperCoverage(surveyCoverage, citation.paperId, {
+        cited: true,
+        citationIds: [...(coveredPaper?.citationIds ?? []), citationId],
+      });
+    }
+    survey.artifacts.coverage = surveyCoverage;
+    survey.coverageSummary = summarizeSurveyCoverage(surveyCoverage);
+    const deliveryRunState = surveyCoverage.stopReason?.startsWith('budget-')
+      ? 'budget'
+      : surveyCoverage.runState === 'cancelled'
+        ? 'cancelled'
+        : surveyCoverage.runState === 'failed'
+          ? 'failed'
+          : surveyCoverage.runState === 'partial'
+            ? 'partial'
+            : surveyCoverage.runState === 'completed'
+              ? 'completed'
+              : undefined;
+    survey.deliveryQuality = inspectAgentDeliveryQuality({
+      markdown: survey.markdown,
+      requirement: {
+        ...deliveryRequirement,
+        kind: deliveryRequirement.kind === 'engineering' ? 'engineering' : 'survey',
+        completeness: deliveryRequirement.completeness === 'partial' ? 'partial' : 'full',
+        candidateCount: survey.coverageSummary.candidateCount,
+        pendingCount: survey.coverageSummary.pendingCount,
+      },
+      runState: deliveryRunState,
+    });
+    streamHandlers?.onCapabilityCheckpoint?.(survey.artifacts);
 
     return {
       kind: 'capability',
@@ -2629,6 +3123,8 @@ export async function runConversationalLibraryAgent({
   recordAgentCitations(artifacts, citations);
   const contexts = new Map<string, PaperContextPayload>();
   const contextModes = new Map<string, LibraryAgentContextRequest['mode']>();
+  const contextQueries = new Map<string, string>();
+  const fullTextContexts = new Set<string>();
   if (currentPaperScopeIds.length > 0) {
     const enriched = await buildPapersWithRequestedContext(scopedPapers, {
       summary: 'Use the papers selected for this turn.',
@@ -2641,11 +3137,11 @@ export async function runConversationalLibraryAgent({
     });
     paperInputs = enriched.inputs;
     contextLabel = enriched.label;
-    const initialCitations = citationRegistry.register(enriched.citations);
+    const initialCitations = registerScopedCitations(enriched.citations);
     recordAgentCitations(artifacts, initialCitations);
     ragErrors.push(...enriched.ragErrors);
     for (const [paperId, context] of enriched.contexts) {
-      const canonicalCitations = citationRegistry.register(context.citations);
+      const canonicalCitations = registerScopedCitations(context.citations);
       contexts.set(paperId, {
         ...context,
         citations: canonicalCitations,
@@ -2657,7 +3153,7 @@ export async function runConversationalLibraryAgent({
 
   const getPaperContext = async (
     paper: LiteraturePaper,
-    input: { mode: 'summary' | 'pdf-text'; query: string },
+    input: { mode: 'summary' | 'pdf-text'; query: string; fullText?: boolean },
     contextOptions?: { signal?: AbortSignal },
   ): Promise<AgentPaperContextResult> => {
     const effectiveSignal = contextOptions?.signal ?? signal;
@@ -2669,10 +3165,13 @@ export async function runConversationalLibraryAgent({
 
     const current = contexts.get(paper.id);
     const loadedMode = contextModes.get(paper.id);
-    const shouldReload = !current || (input.mode === 'pdf-text' && loadedMode !== 'pdf-text');
+    const query = input.query || normalizedInstruction;
+    const shouldReload = !current || loadedMode !== input.mode || (input.mode === 'pdf-text' && (
+      fullTextContexts.has(paper.id) !== Boolean(input.fullText) || contextQueries.get(paper.id) !== query
+    ));
     const context = shouldReload
-      ? await loadPaperContext(paper, input.mode, input.query || normalizedInstruction, {
-        ragEnabled,
+      ? await loadPaperContext(paper, input.mode, query, {
+        ragEnabled: input.fullText ? false : ragEnabled,
         signal: effectiveSignal,
       })
       : current;
@@ -2681,7 +3180,7 @@ export async function runConversationalLibraryAgent({
       throw new Error(`Unable to load context for ${paper.title}.`);
     }
 
-    const canonicalCitations = citationRegistry.register(context.citations);
+    const canonicalCitations = registerScopedCitations(context.citations);
     const canonicalContext = {
       ...context,
       citations: canonicalCitations,
@@ -2691,6 +3190,9 @@ export async function runConversationalLibraryAgent({
     if (shouldReload) {
       contexts.set(paper.id, canonicalContext);
       contextModes.set(paper.id, input.mode);
+      contextQueries.set(paper.id, query);
+      if (input.fullText) fullTextContexts.add(paper.id);
+      else fullTextContexts.delete(paper.id);
     }
 
     recordAgentCitations(artifacts, canonicalCitations);
@@ -2702,7 +3204,7 @@ export async function runConversationalLibraryAgent({
   };
 
   const tools = createLibraryAgentTools({
-    papers,
+    papers: allLibraryPapers,
     currentPaperScopeIds,
     searchRag,
     getPaperContext,
@@ -2759,8 +3261,11 @@ export async function runConversationalLibraryAgent({
       return plan;
     },
   });
+  let streamedAnswerTurn = 0;
   let streamedAnswer = '';
+  let streamedThinkingTurn = 0;
   let streamedThinking = '';
+  let finalAnswerFinishReason: string | undefined;
   let memoryContext = { topics: '', synthesis: '' };
   const nonVisionAttachments = (attachments ?? []).filter((attachment) =>
     attachment.kind !== 'image' &&
@@ -2884,12 +3389,27 @@ export async function runConversationalLibraryAgent({
     onEvent(event) {
       streamHandlers?.onLoopEvent?.(event);
 
-      if (event.kind === 'answer_delta') {
+      if (event.kind === 'turn_end') finalAnswerFinishReason = event.finishReason;
+
+      if (event.kind === 'turn_start') {
+        streamedAnswerTurn = event.turn;
+        streamedThinkingTurn = event.turn;
+        streamedAnswer = '';
+        streamedThinking = '';
+      } else if (event.kind === 'answer_delta') {
+        if (streamedAnswerTurn !== event.turn) {
+          streamedAnswerTurn = event.turn;
+          streamedAnswer = '';
+        }
         streamedAnswer += event.text;
-        streamHandlers?.onDelta?.(event.text, streamedAnswer);
+        streamHandlers?.onDelta?.(event.text, streamedAnswer, event.turn);
       } else if (event.kind === 'thinking_delta') {
+        if (streamedThinkingTurn !== event.turn) {
+          streamedThinkingTurn = event.turn;
+          streamedThinking = '';
+        }
         streamedThinking += event.text;
-        streamHandlers?.onThinkingDelta?.(event.text, streamedThinking);
+        streamHandlers?.onThinkingDelta?.(event.text, streamedThinking, event.turn);
       } else if (event.kind === 'tool_call') {
         recordToolPaperIds(artifacts, event.args);
       } else if (event.kind === 'error') {
@@ -2918,9 +3438,19 @@ export async function runConversationalLibraryAgent({
   const visionNotice = preparedVision.notice;
 
   if (result.kind === 'answer') {
+    const deliveryRunState = finalAnswerFinishReason === 'length' || finalAnswerFinishReason === 'max_turns' ? 'budget' : 'completed';
+    const shouldInspectDelivery = deliveryRequirement.kind !== 'general'
+      || deliveryRequirement.completeness === 'full'
+      || Boolean(deliveryRequirement.requiredSections?.length)
+      || deliveryRunState !== 'completed';
     return {
       ...result,
       ...await verifyLibraryAgentAnswerCitations({ answer: result.answer, citations, preset, signal, streamHandlers }),
+      deliveryQuality: shouldInspectDelivery ? inspectAgentDeliveryQuality({
+        markdown: result.answer,
+        requirement: deliveryRequirement,
+        runState: deliveryRunState,
+      }) : undefined,
       citations,
       figures: figureReferences,
       visionNotice,

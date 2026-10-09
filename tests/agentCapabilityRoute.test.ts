@@ -280,3 +280,18 @@ test('returns none when no rule matches', () => {
   assert.equal(route.capabilityId, null);
   assert.equal(route.source, 'none');
 });
+
+test('a full survey follow-up routes with its derived requirements while pins keep priority', () => {
+  const base = {
+    instruction: '请继续给出完整版',
+    paperCount: 176,
+    mountContext: { ...defaultMountContext, papersCount: 176 },
+    deliveryRequirement: { kind: 'survey' as const, completeness: 'full' as const, requiredSections: ['背景', '方法比较'] },
+  };
+  const route = resolveAgentCapabilityRoute(base);
+  assert.equal(route.capabilityId, 'comparative-survey');
+  assert.equal(route.source, 'keyword');
+  assert.equal(resolveAgentCapabilityRoute({ ...base, pinnedCapabilityId: 'citation-audit' }).capabilityId, 'citation-audit');
+  assert.equal(resolveAgentCapabilityRoute({ ...base, paperCount: 1 }).capabilityId, null);
+  assert.equal(resolveAgentCapabilityRoute({ ...base, deliveryRequirement: { kind: 'general', completeness: 'full' } }).capabilityId, null);
+});

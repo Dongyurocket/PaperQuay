@@ -4,6 +4,7 @@ import {
   getAgentCapability,
 } from './agentCapabilityRegistry.ts';
 import { isComparativeSurveyInstruction } from './agentCapabilityTrigger.ts';
+import type { DeliveryRequirement } from './agentDeliveryQuality.ts';
 
 export type AgentCapabilityRouteSource = 'user' | 'keyword' | 'model' | 'none';
 
@@ -19,6 +20,7 @@ export function resolveAgentCapabilityRoute(input: {
   pinnedCapabilityId?: AgentCapabilityId | 'auto' | null;
   mountContext: AgentToolMountContext;
   classifierResult?: { capabilityId: AgentCapabilityId | null; confidence: number } | null;
+  deliveryRequirement?: DeliveryRequirement;
 }): AgentCapabilityRoute {
   // 1. 用户钉选优先级最高
   if (input.pinnedCapabilityId && input.pinnedCapabilityId !== 'auto') {
@@ -38,11 +40,14 @@ export function resolveAgentCapabilityRoute(input: {
 
   // 2. 关键词兜底：仅当未钉选或为 'auto' 时检测
   const isAutoOrUnpinned = !input.pinnedCapabilityId || input.pinnedCapabilityId === 'auto';
-  if (isAutoOrUnpinned && isComparativeSurveyInstruction(input.instruction, input.paperCount)) {
+  const fullSurveyDelivery = input.paperCount >= 2
+    && input.deliveryRequirement?.kind === 'survey'
+    && input.deliveryRequirement.completeness === 'full';
+  if (isAutoOrUnpinned && (isComparativeSurveyInstruction(input.instruction, input.paperCount) || fullSurveyDelivery)) {
     return {
       capabilityId: 'comparative-survey',
       source: 'keyword',
-      reason: 'Matched comparative survey keywords',
+      reason: fullSurveyDelivery ? 'Matched full survey delivery requirements' : 'Matched comparative survey keywords',
     };
   }
 

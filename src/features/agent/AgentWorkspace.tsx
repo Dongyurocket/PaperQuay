@@ -39,6 +39,8 @@ import {
   getAgentCapability,
 } from '../../services/agentCapabilityRegistry';
 import { resolveAgentCapabilityRoute } from '../../services/agentCapabilityRoute';
+import { deriveAgentDeliveryRequirement } from '../../services/agentDeliveryQuality';
+import { normalizeSurveyCoverageLedger } from '../../services/agentSurveyCoverage';
 import { listLibraryCategories, listLibraryPapers } from '../../services/library';
 import { paperPdfPath } from '../../utils/libraryPaper';
 import type { LiteratureCategory, LiteraturePaper } from '../../types/library';
@@ -61,13 +63,14 @@ import {
 import {
   applyAgentLoopEventToTrace,
   buildRunningTrace,
-  completeDirectAgentTrace,
   buildAgentHistorySession,
   buildToolCallView,
   durationLabel,
+  settleAgentTrace,
   formatPaperMeta,
   hasAgentConversationHistory,
   loadAgentHistorySessions,
+  normalizeAgentHistorySessionMeta,
   newAgentSessionId,
   newMessageId,
   paperMatchesQuery,
@@ -90,16 +93,11 @@ import { captureSystemScreenshot, selectChatAttachmentPaths } from '../../servic
 import { mergeUniqueAgentAttachments } from './agentAttachmentUtils';
 import {
   buildConversationPaperScopes,
-  collectPaperScopeCandidateIds,
   containsLegacyMojibake,
   hasSameAgentHistoryMessages,
-  latestConversationPaperScopeIds,
-  uniquePaperScopeIds,
+  resolveAgentWorkspacePaperScope,
 } from './agentPaperScopes';
-import {
-  findMentionedCategoryScope,
-  hasExplicitFullLibraryScope,
-} from './agentCategoryScopes';
+import { createAgentStreamMessageBuffer } from './agentStreamMessageBuffer';
 
 const AGENT_CHAT_AUTO_SCROLL_BOTTOM_THRESHOLD = 96;
 
@@ -136,9 +134,11 @@ function recoverySnapshotMessages(messages: AgentLoopMessage[]) {
 
   return [...(root ? [root] : []), ...windowed].map((message) => ({
     role: message.role,
-    content: message.content.slice(0, 8000),
+    // Tool results have already passed the loop budget. Preserve their JSON
+    // and continuation arguments verbatim so recovery cannot create half a record.
+    content: message.role === 'tool' ? message.content : message.content.slice(0, 8000),
     toolCallId: message.toolCallId,
-    toolCalls: message.toolCalls?.slice(0, 12).map((call) => ({
+    toolCalls: message.toolCalls?.map((call) => ({
       id: call.id,
       name: call.name,
       arguments: call.arguments,
@@ -969,54 +969,37 @@ function AgentWorkspace() {
       return;
     }
 
-    const explicitPaperScopeIds = uniquePaperScopeIds(inlinePaperIds ?? []);
-    const fallbackPaperScopeIds =
-      explicitPaperScopeIds.length === 0 && selectedPaperIds.size === 0
-        ? latestConversationPaperScopeIds(messages)
-        : [];
-    const currentTurnPaperScopeIds =
-      explicitPaperScopeIds.length > 0 ? explicitPaperScopeIds : fallbackPaperScopeIds;
-    const inlinePaperIdSet = new Set(currentTurnPaperScopeIds);
-    const inlinePapers = inlinePaperIdSet.size > 0
-      ? papers.filter((paper) => inlinePaperIdSet.has(paper.id))
-      : [];
-    const useInlinePaperScope = inlinePapers.length > 0;
-    const categoryScope = useInlinePaperScope ? null : findMentionedCategoryScope(instruction, categories, papers);
-    const useCategoryScope = !useInlinePaperScope && Boolean(categoryScope && categoryScope.papers.length > 0);
-    const useFullLibraryCandidates =
-      !useInlinePaperScope &&
-      !useCategoryScope &&
-      papers.length > 0 &&
-      (hasExplicitFullLibraryScope(instruction) ||
-        (agentRagEnabled && selectedPapers.length === 0));
-    const selectedPapersSnapshot = useInlinePaperScope
-      ? inlinePapers
-      : useCategoryScope
-      ? categoryScope?.papers ?? []
-      : useFullLibraryCandidates
-        ? papers
-        : selectedPapers;
-    const selectedPaperIdsSnapshot = useInlinePaperScope
-      ? inlinePapers.map((paper) => paper.id)
-      : useCategoryScope
-      ? selectedPapersSnapshot.map((paper) => paper.id)
-      : useFullLibraryCandidates
-        ? papers.map((paper) => paper.id)
-        : [...selectedPaperIds];
+    const currentPaperScope = resolveAgentWorkspacePaperScope({
+      instruction,
+      papers,
+      categories,
+      messages,
+      selectedPaperIds,
+      inlinePaperIds,
+      ragEnabled: agentRagEnabled,
+    });
+    const { categoryScope } = currentPaperScope;
+    const useInlinePaperScope = currentPaperScope.source === 'inline' || currentPaperScope.source === 'history';
+    const useCategoryScope = currentPaperScope.source === 'category';
+    const useFullLibraryCandidates = currentPaperScope.source === 'full-library';
+    const selectedPapersSnapshot = currentPaperScope.papers;
+    const selectedPaperIdsSnapshot = currentPaperScope.paperIds;
     const paperScopesSnapshot = buildConversationPaperScopes(messages, selectedPaperIdsSnapshot);
-    const paperScopeCandidateIds = collectPaperScopeCandidateIds(paperScopesSnapshot);
-    const selectedPaperCandidateSet = new Set(selectedPapersSnapshot.map((paper) => paper.id));
-    const modelPapersSnapshot = paperScopeCandidateIds.length > 0
-      ? papers.filter((paper) => selectedPaperCandidateSet.has(paper.id) || paperScopeCandidateIds.includes(paper.id))
-      : selectedPapersSnapshot;
+    // Historical paper scopes remain conversation context only. They must not
+    // widen the current retrieval scope or introduce unselected papers into
+    // model-visible metadata and evidence registration.
+    const modelPapersSnapshot = selectedPapersSnapshot;
     const startedAt = performance.now();
     const assistantMessageId = newMessageId();
     const paperCount = selectedPapersSnapshot.length;
+    const historyMessages = buildConversationHistory();
+    const pinnedCapabilityIdForRun = effectiveCapabilityResume ? 'comparative-survey' : pinnedCapabilityId;
     // 触发判定与服务层共用同一路由解析，进度卡展示与实际执行路径保持一致。
     const capabilityRoute = resolveAgentCapabilityRoute({
       instruction,
       paperCount: modelPapersSnapshot.length,
-      pinnedCapabilityId,
+      deliveryRequirement: deriveAgentDeliveryRequirement({ instruction, historyMessages }),
+      pinnedCapabilityId: pinnedCapabilityIdForRun,
       mountContext: {
         papersCount: modelPapersSnapshot.length,
         hasOpenDocument: modelPapersSnapshot.some((paper) => Boolean(paperPdfPath(paper))),
@@ -1025,32 +1008,37 @@ function AgentWorkspace() {
       },
     });
     const capabilityRequested = capabilityRoute.capabilityId !== null;
-    const historyMessages = buildConversationHistory();
     const attachmentsSnapshot = [...agentAttachments];
     const userMessage: AgentChatMessage = {
       id: newMessageId(),
       role: 'user',
       content: instruction,
       attachments: attachmentsSnapshot,
-      paperScopeIds: selectedPaperIdsSnapshot.length > 0 ? selectedPaperIdsSnapshot : undefined,
-      meta: useInlinePaperScope
-        ? l(`本轮已选择 ${paperCount} 篇论文`, `This turn selected ${paperCount} papers`)
+      paperScopeIds: currentPaperScope.source === 'empty' ? undefined : selectedPaperIdsSnapshot,
+      meta: [useInlinePaperScope
+        ? currentPaperScope.source === 'history'
+          ? l(`沿用最近对话范围：${paperCount} 篇论文`, `Continuing the latest chat scope: ${paperCount} papers`)
+          : l(`本轮已选择 ${paperCount} 篇论文`, `This turn selected ${paperCount} papers`)
         : useCategoryScope && categoryScope
         ? l(
           `文献范围：分类「${categoryScope.path}」中的 ${paperCount} 篇`,
           `Paper scope: ${paperCount} papers in category "${categoryScope.path}"`,
         )
         : useFullLibraryCandidates
-          ? l(`未手动选择，RAG 使用全库候选：${paperCount} 篇`, `No manual selection; RAG uses ${paperCount} full-library candidates`)
+          ? l(`本轮使用全库候选：${paperCount} 篇`, `This turn uses ${paperCount} full-library candidates`)
           : paperCount > 0
             ? l(`已选择 ${paperCount} 篇论文`, `${paperCount} papers selected`)
             : undefined,
+        currentPaperScope.unavailablePaperIds.length > 0
+          ? l(`范围中有 ${currentPaperScope.unavailablePaperIds.length} 篇已删除或不可用`, `${currentPaperScope.unavailablePaperIds.length} scoped papers are deleted or unavailable`)
+          : undefined,
+      ].filter(Boolean).join(' · ') || undefined,
       createdAt: Date.now(),
     };
     const pendingAssistantMessage: AgentChatMessage = {
       id: assistantMessageId,
       role: 'assistant',
-      paperScopeIds: selectedPaperIdsSnapshot.length > 0 ? selectedPaperIdsSnapshot : undefined,
+      paperScopeIds: currentPaperScope.source === 'empty' ? undefined : selectedPaperIdsSnapshot,
       content: l('Agent 正在回复...', 'Agent is replying...'),
       meta: l('执行中', 'Running'),
       createdAt: Date.now(),
@@ -1135,7 +1123,30 @@ function AgentWorkspace() {
         .then(() => undefined)
         .catch(() => undefined);
     };
+    const streamMessageBuffer = createAgentStreamMessageBuffer({
+      isActive: isTargetSessionActive,
+      schedule: (callback, delayMs) => window.setTimeout(callback, delayMs),
+      cancel: (timer) => window.clearTimeout(timer),
+      commit: (draft, canApply) => {
+        // React may evaluate a queued updater after the request has settled.
+        // Recheck the draft generation at application time as well as scheduling.
+        updateMessage(assistantMessageId, (message) => canApply() ? {
+          ...message,
+          content: draft.answer.trim() ? draft.answer : message.content,
+          thinking: draft.thinking.trim() ? draft.thinking : message.thinking,
+          meta: l('流式回复中', 'Streaming'),
+          error: undefined,
+        } : message);
+      },
+    });
     const handleAgentLoopEvent = (event: AgentLoopEvent) => {
+      if (streamMessageBuffer.isClosed()) return;
+      if (event.kind === 'turn_start') {
+        streamMessageBuffer.startTurn(event.turn);
+      } else if (event.kind === 'turn_end' && !['stop', 'answer', 'max_turns'].includes(event.finishReason)) {
+        // Text emitted before a tool call is a turn draft, not the final answer.
+        streamMessageBuffer.discardTurn();
+      }
       appendRunEvent(event);
       updateSessionMessage(sessionId, assistantMessageId, (message) => ({
         ...message,
@@ -1157,42 +1168,6 @@ function AgentWorkspace() {
 
       if (isTargetSessionActive() && event.kind === 'tool_call') {
         setStatusMessage(l(`第 ${event.turn} 轮正在调用 ${event.name}...`, `Turn ${event.turn} is calling ${event.name}...`));
-      }
-    };
-    let streamedAgentAnswer = '';
-    let streamedAgentThinking = '';
-    let streamCommitTimer: ReturnType<typeof window.setTimeout> | null = null;
-    let lastStreamCommitAt = 0;
-    const commitStreamedAgentMessage = () => {
-      streamCommitTimer = null;
-
-      if ((!streamedAgentAnswer.trim() && !streamedAgentThinking.trim()) || !isTargetSessionActive()) {
-        return;
-      }
-
-      lastStreamCommitAt = Date.now();
-      updateMessage(assistantMessageId, (message) => ({
-        ...message,
-        content: streamedAgentAnswer.trim() ? streamedAgentAnswer : message.content,
-        thinking: streamedAgentThinking.trim() ? streamedAgentThinking : message.thinking,
-        meta: l('流式回复中', 'Streaming'),
-        error: undefined,
-      }));
-    };
-    const scheduleStreamedAgentMessageCommit = () => {
-      if (!isTargetSessionActive()) {
-        return;
-      }
-
-      const elapsedMs = Date.now() - lastStreamCommitAt;
-
-      if (elapsedMs >= 120) {
-        commitStreamedAgentMessage();
-        return;
-      }
-
-      if (streamCommitTimer === null) {
-        streamCommitTimer = window.setTimeout(commitStreamedAgentMessage, 120 - elapsedMs);
       }
     };
     const handleCapabilityEvent = (event: AgentCapabilityEvent) => {
@@ -1239,14 +1214,13 @@ function AgentWorkspace() {
       }
     };
     const agentStreamHandlers: LibraryAgentStreamHandlers = {
-      onDelta: (_delta, fullText) => {
-        streamedAgentAnswer = fullText;
-        scheduleStreamedAgentMessageCommit();
+      onDelta: (_delta, fullText, turn) => {
+        streamMessageBuffer.receiveAnswer(fullText, turn);
       },
-      onThinkingDelta: (_delta, fullText) => {
-        streamedAgentThinking = fullText;
-        scheduleStreamedAgentMessageCommit();
+      onThinkingDelta: (_delta, fullText, turn) => {
+        streamMessageBuffer.receiveThinking(fullText, turn);
       },
+      onDone: () => streamMessageBuffer.close(),
       onLoopEvent: handleAgentLoopEvent,
       onCapabilityEvent: handleCapabilityEvent,
       onCapabilityRoute: (event) => {
@@ -1374,8 +1348,8 @@ function AgentWorkspace() {
               )
               : useFullLibraryCandidates
               ? l(
-                `正在调用大模型 Agent：${preset.label || preset.model}。未手动选择文献，RAG 使用全库候选 ${paperCount} 篇。`,
-                `Calling Agent model: ${preset.label || preset.model}. No papers were manually selected, so RAG uses ${paperCount} full-library candidates.`,
+                `正在调用大模型 Agent：${preset.label || preset.model}。本轮使用全库候选 ${paperCount} 篇。`,
+                `Calling Agent model: ${preset.label || preset.model}. This turn uses ${paperCount} full-library candidates.`,
               )
               : l(
                 `正在调用大模型 Agent：${preset.label || preset.model}...`,
@@ -1386,6 +1360,7 @@ function AgentWorkspace() {
 
       const result = await runConversationalLibraryAgent({
         papers: modelPapersSnapshot,
+        knownLibraryPapers: papers,
         categories,
         instruction,
         preset: runtimePreset,
@@ -1400,8 +1375,9 @@ function AgentWorkspace() {
         capabilityResume: effectiveCapabilityResume,
         loopResumeMessages: effectiveLoopResumeMessages,
         loopResumeCitations: effectiveLoopResumeMessages ? pendingLoopResume?.citations : undefined,
-        pinnedCapabilityId,
+        pinnedCapabilityId: pinnedCapabilityIdForRun,
       });
+      streamMessageBuffer.close();
       const durationMs = Math.round(performance.now() - startedAt);
 
       if (result.kind === 'capability') {
@@ -1421,6 +1397,15 @@ function AgentWorkspace() {
         const notePlan = result.result.kind === 'note-plan' && result.result.notePlan
           ? result.result.notePlan
           : undefined;
+        const deliveryQuality = result.result.kind === 'survey' ? result.result.survey.deliveryQuality : undefined;
+        const deliveryStatus = deliveryQuality?.state === 'failed' ? 'error' : deliveryQuality?.state === 'partial' || notePlan ? 'warning' : 'success';
+        const deliverySummary = deliveryQuality?.state === 'failed'
+          ? l('本轮交付未完成，请查看交付检查。', 'Delivery failed; review the delivery check.')
+          : deliveryQuality?.state === 'partial'
+            ? l('本轮交付部分完成，请查看交付检查与待处理项。', 'Delivery is partial; review the delivery check and pending work.')
+            : notePlan
+              ? l('笔记计划已生成，等待审批。', 'Note plan prepared; waiting for approval.')
+              : l('能力执行已结束。', 'Capability execution finished.');
 
         updateSessionMessage(sessionId, assistantMessageId, (message) => ({
           ...message,
@@ -1433,29 +1418,46 @@ function AgentWorkspace() {
           evidenceStats: result.evidenceStats,
           citationBindings: result.citationBindings,
           citationAudit,
+          deliveryQuality,
           notePlan,
           capability: {
             ...(message.capability ?? createCapabilityView(result.capabilityId)),
-            status: 'done',
+            status: deliveryQuality?.state === 'failed' ? 'error' : deliveryQuality?.state === 'partial' ? 'partial' : 'done',
             activeStage: undefined,
             stages: (message.capability ?? createCapabilityView(result.capabilityId)).stages.map((stage) => ({
               ...stage,
-              status: 'success',
+              status: stage.id === 'report' && deliveryQuality && deliveryQuality.state !== 'complete'
+                ? deliveryQuality.state === 'failed' ? 'error' : 'warning'
+                : stage.id === 'research' && result.result.kind === 'survey' && result.result.survey.coverageSummary?.canResume
+                  ? 'warning'
+                  : artifacts?.completedStages.includes(stage.id as ComparativeSurveyArtifacts['completedStages'][number])
+                    ? 'success'
+                    : stage.status === 'waiting' ? 'skipped' : stage.status === 'running' ? 'warning' : stage.status,
             })),
             artifacts,
           },
           error: undefined,
-          trace: completeDirectAgentTrace(message.trace),
+          trace: settleAgentTrace(message.trace, {
+            status: deliveryStatus,
+            summary: deliverySummary,
+            detail: deliveryQuality?.issues.map((item) => item.message).join('\n') || undefined,
+            durationMs,
+          }, locale),
         }));
         runTurns = 4;
         if (isTargetSessionActive()) {
           setCurrentRunTokens({ ...runTokens });
-          setStatusMessage(l('能力执行已完成。', 'Capability execution completed.'));
+          setStatusMessage(deliverySummary);
         }
         return;
       }
 
       if (result.kind === 'answer') {
+        const deliverySummary = result.deliveryQuality?.state === 'failed'
+          ? l('回答未完成，请查看交付检查。', 'Answer failed; review the delivery check.')
+          : result.deliveryQuality?.state === 'partial'
+            ? l('回答部分完成，请查看交付检查。', 'Answer is partial; review the delivery check.')
+            : l('回答已完成。', 'Answer completed.');
         updateSessionMessage(sessionId, assistantMessageId, (message) => ({
           ...message,
           content: result.answer,
@@ -1467,20 +1469,21 @@ function AgentWorkspace() {
           ragNotice: result.ragNotice,
           evidenceStats: result.evidenceStats,
           citationBindings: result.citationBindings,
+          deliveryQuality: result.deliveryQuality,
           toolCall: undefined,
           plan: undefined,
           choices: undefined,
           paperSelectionRequest: undefined,
           error: undefined,
-          trace: completeDirectAgentTrace(message.trace, 'answer'),
+          trace: settleAgentTrace(message.trace, {
+            status: result.deliveryQuality?.state === 'failed' ? 'error' : result.deliveryQuality?.state === 'partial' ? 'warning' : 'success',
+            summary: deliverySummary,
+            detail: result.deliveryQuality?.issues.map((item) => item.message).join('\n') || undefined,
+            durationMs,
+          }, locale),
         }));
         if (isTargetSessionActive()) {
-          setStatusMessage(
-            l(
-              `回答已完成。${durationLabel(durationMs, locale)}`,
-              `Answer completed. ${durationLabel(durationMs, locale)}`,
-            ),
-          );
+          setStatusMessage(`${deliverySummary} ${durationLabel(durationMs, locale)}`);
         }
         return;
       }
@@ -1495,7 +1498,9 @@ function AgentWorkspace() {
           ragFigures: result.figures,
           visionNotice: result.visionNotice,
           ragNotice: result.ragNotice,
-          trace: message.trace,
+          trace: settleAgentTrace(message.trace, {
+            status: 'warning', summary: l('等待选择下一步。', 'Waiting for a next-step choice.'), durationMs,
+          }, locale),
           toolCall: undefined,
           plan: undefined,
           choices: result.choices,
@@ -1520,7 +1525,9 @@ function AgentWorkspace() {
           meta: `paper selection · ${durationLabel(durationMs, locale)}`,
           thinking: result.thinking,
           ragCitations: undefined,
-          trace: message.trace,
+          trace: settleAgentTrace(message.trace, {
+            status: 'warning', summary: l('等待选择文献范围。', 'Waiting for a paper scope selection.'), durationMs,
+          }, locale),
           toolCall: undefined,
           plan: undefined,
           choices: undefined,
@@ -1551,7 +1558,9 @@ function AgentWorkspace() {
           ragFigures: result.figures,
           visionNotice: result.visionNotice,
           ragNotice: result.ragNotice,
-          trace: message.trace,
+          trace: settleAgentTrace(message.trace, {
+            status: 'warning', summary: l('记忆计划已生成，等待审批。', 'Memory plan prepared; waiting for approval.'), durationMs,
+          }, locale),
           toolCall: undefined,
           plan: undefined,
           memoryPlan: result.memoryPlan,
@@ -1578,7 +1587,9 @@ function AgentWorkspace() {
           ragFigures: result.figures,
           visionNotice: result.visionNotice,
           ragNotice: result.ragNotice,
-          trace: message.trace,
+          trace: settleAgentTrace(message.trace, {
+            status: 'warning', summary: l('笔记计划已生成，等待审批。', 'Note plan prepared; waiting for approval.'), durationMs,
+          }, locale),
           toolCall: undefined,
           plan: undefined,
           notePlan: result.notePlan,
@@ -1613,7 +1624,13 @@ function AgentWorkspace() {
         ragFigures: result.figures,
         visionNotice: result.visionNotice,
         ragNotice: result.ragNotice,
-        trace: message.trace,
+        trace: settleAgentTrace(message.trace, {
+          status: nextPlan.items.length ? 'warning' : 'success',
+          summary: nextPlan.items.length
+            ? l('文库变更计划已生成，等待审批。', 'Library plan prepared; waiting for approval.')
+            : l('没有需要执行的文库变更。', 'No library changes to apply.'),
+          durationMs,
+        }, locale),
         toolCall: nextToolCall,
         plan: nextPlan,
         choices: undefined,
@@ -1631,6 +1648,7 @@ function AgentWorkspace() {
         setStatusMessage(nextPlan.description);
       }
     } catch (nextError) {
+      streamMessageBuffer.close();
       runStatus = nextError instanceof Error && nextError.name === 'AbortError' ? 'aborted' : 'error';
       const message = nextError instanceof Error ? nextError.message : l('生成 Agent 计划失败', 'Failed to generate Agent plan');
       const durationMs = Math.round(performance.now() - startedAt);
@@ -1645,8 +1663,12 @@ function AgentWorkspace() {
             'The current model did not return a tool call. Use a model that supports OpenAI-compatible tools/function calling.',
           )
           : l(`生成计划失败：${message}`, `Plan generation failed: ${message}`),
-        meta: `error · ${durationLabel(durationMs, locale)}`,
-        trace: applyAgentLoopEventToTrace(chatMessage.trace, { kind: 'error', message }, locale),
+        meta: `${runStatus === 'aborted' ? 'cancelled' : 'error'} · ${durationLabel(durationMs, locale)}`,
+        trace: settleAgentTrace(chatMessage.trace, {
+          status: runStatus === 'aborted' ? 'warning' : 'error',
+          summary: runStatus === 'aborted' ? l('运行已取消，可从检查点继续。', 'Run cancelled; a checkpoint can be resumed.') : message,
+          durationMs,
+        }, locale),
         ragCitations: undefined,
         toolCall: undefined,
         plan: undefined,
@@ -1664,12 +1686,7 @@ function AgentWorkspace() {
         setStatusMessage(runStatus === 'aborted' ? l('已取消当前运行。', 'Current run cancelled.') : message);
       }
     } finally {
-      if (streamCommitTimer !== null) {
-        window.clearTimeout(streamCommitTimer);
-      }
-
-      // 不在此处提交流式缓冲：try 的各个结果分支与 catch 均已写入最终内容，
-      // 再提交会把跨轮累积的流式文本覆盖到最终答案上。
+      streamMessageBuffer.close();
       if (runId) {
         await runEventQueue;
         try {
@@ -2002,6 +2019,28 @@ function AgentWorkspace() {
     void runAgent(nextInstruction);
   };
 
+  const handleContinueSurvey = (message: AgentChatMessage) => {
+    const messageIndex = messages.findIndex((item) => item.id === message.id);
+    const originalRequest = messageIndex < 0 ? undefined : [...messages.slice(0, messageIndex)].reverse().find((item) => item.role === 'user');
+    const rawArtifacts = message.capability?.id === 'comparative-survey' && message.capability.artifacts && typeof message.capability.artifacts === 'object'
+      ? message.capability.artifacts as Partial<ComparativeSurveyArtifacts>
+      : undefined;
+    const coverage = normalizeSurveyCoverageLedger(rawArtifacts?.coverage);
+    if (!originalRequest?.content.trim() || !coverage || coverage.papers.length === 0) {
+      setStatusMessage(l('原任务或覆盖记录未保存，请重新提供要继续的任务。', 'The original request or coverage records are unavailable. Provide the task again.'));
+      return;
+    }
+    const artifacts: Partial<ComparativeSurveyArtifacts> = {
+      ...rawArtifacts,
+      coverage,
+      completedStages: Array.isArray(rawArtifacts?.completedStages)
+        ? rawArtifacts.completedStages.filter((stage) => ['rephrase', 'decompose', 'research', 'report'].includes(stage))
+        : [],
+    };
+    setStatusMessage(l('正在沿用原文献范围和覆盖记录继续调研。', 'Continuing the survey with its original paper scope and coverage records.'));
+    void runAgent(originalRequest.content, coverage.papers.map((paper) => paper.paperId), artifacts);
+  };
+
   const handleAgentChoice = (instruction: string, paperScopeIds?: string[]) => {
     const nextInstruction = instruction.trim();
 
@@ -2192,7 +2231,8 @@ function AgentWorkspace() {
     setStatusMessage(l('已从该消息创建新分支。', 'Created a new branch from this message.'));
   };
 
-  const handleOpenHistorySession = (session: AgentHistorySession) => {
+  const handleOpenHistorySession = (historySession: AgentHistorySession) => {
+    const session = normalizeAgentHistorySessionMeta(historySession);
     setActiveSessionId(session.id);
     activeSessionIdRef.current = session.id;
     setMessages(session.messages);
@@ -2417,6 +2457,7 @@ function AgentWorkspace() {
       handleNewAgentSession={handleNewAgentSession}
       handleOpenHistorySession={handleOpenHistorySession}
       handleRetryAgent={handleRetryAgent}
+      onContinueSurvey={handleContinueSurvey}
       historySidebarCollapsed={historySidebarCollapsed}
       historySidebarRef={historySidebarRef}
       l={l}

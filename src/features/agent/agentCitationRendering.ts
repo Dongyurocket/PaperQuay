@@ -82,18 +82,84 @@ export function buildAgentAnswerReferences(content: string, citations: LibraryAg
 
 export function injectAgentCitationBindings(content: string, citations: LibraryAgentRagCitation[] = [], bindings?: AgentCitationBinding[], model?: AgentAnswerReferenceModel) {
   const resolved = (model ?? buildAgentAnswerReferences(content, citations, bindings)).occurrences;
-  const hrefPrefix = `#agent-binding-${crypto.randomUUID()}-`;
-  let result = '';
-  let previous = 0;
+  const nonce = crypto.randomUUID();
+  const hrefPrefix = `#agent-binding-${nonce}-`;
+  const markerPrefix = `\uE010${nonce}:`;
   // Reserve this URL namespace so model-written Markdown cannot forge a resolved occurrence.
   const sanitize = (text: string) => text.replace(/#agent-(?:binding|cite)-/gi, '#agent-untrusted-')
     .replace(/\[\[(?:c|ci|cit|cite)?$/g, '[引用未完成]');
+  let rendered = '';
+  let fallbackContent = '';
+  let previous = 0;
   resolved.forEach((occurrence, index) => {
     const { binding } = occurrence;
-    result += sanitize(content.slice(previous, binding.start));
-    const label = citationOccurrenceLabel(occurrence);
-    result += `[${label}](${hrefPrefix}${index})`;
+    const before = sanitize(content.slice(previous, binding.start));
+    rendered += `${before}${markerPrefix}${index}\uE011`;
+    fallbackContent += `${before}[${citationOccurrenceLabel(occurrence)}]`;
     previous = binding.end;
   });
-  return { content: result + sanitize(content.slice(previous)), resolved, hrefPrefix };
+  const tail = sanitize(content.slice(previous));
+  return { content: rendered + tail, fallbackContent: fallbackContent + tail, resolved, hrefPrefix, markerPrefix };
+}
+
+interface CitationMarkdownNode {
+  type: string;
+  value?: string;
+  url?: string;
+  children?: CitationMarkdownNode[];
+  data?: Record<string, unknown>;
+}
+
+/** Consume occurrence placeholders in the AST, before any expression reaches KaTeX. */
+export function createAgentCitationRemarkPlugin(rendering: ReturnType<typeof injectAgentCitationBindings>) {
+  const pattern = new RegExp(`${rendering.markerPrefix}(\\d+)\uE011`, 'g');
+  const citationNode = (index: number): CitationMarkdownNode => ({
+    type: 'link',
+    url: `${rendering.hrefPrefix}${index}`,
+    children: [{ type: 'text', value: citationOccurrenceLabel(rendering.resolved[index]) }],
+  });
+
+  return function remarkAgentCitations() {
+    return (tree: CitationMarkdownNode) => {
+      const visit = (parent: CitationMarkdownNode) => {
+        if (!parent.children) return;
+        parent.children = parent.children.flatMap((node): CitationMarkdownNode[] => {
+          if (node.type === 'code' || node.type === 'inlineCode') return [node];
+          if (!['text', 'inlineMath', 'math'].includes(node.type) || node.value == null) {
+            visit(node);
+            return [node];
+          }
+          const matches = [...node.value.matchAll(pattern)].filter((match) => rendering.resolved[Number(match[1])]);
+          if (matches.length === 0) return [node];
+          if (node.type === 'text') {
+            const output: CitationMarkdownNode[] = [];
+            let previous = 0;
+            for (const match of matches) {
+              if (match.index! > previous) output.push({ type: 'text', value: node.value.slice(previous, match.index) });
+              output.push(citationNode(Number(match[1])));
+              previous = match.index! + match[0].length;
+            }
+            if (previous < node.value.length) output.push({ type: 'text', value: node.value.slice(previous) });
+            return output;
+          }
+          const value = node.value.replace(pattern, '');
+          const data = { ...node.data };
+          // remark-math creates hChildren while parsing; update both the mdast
+          // value and the eventual hast text so no placeholder reaches KaTeX.
+          data.hChildren = node.type === 'math'
+            ? [{ type: 'element', tagName: 'code', properties: { className: ['language-math', 'math-display'] }, children: [{ type: 'text', value }] }]
+            : [{ type: 'text', value }];
+          const mathNode = { ...node, value, data };
+          const markers = matches.flatMap((match, index) => [
+            ...(index ? [{ type: 'text', value: ' ' }] : []),
+            citationNode(Number(match[1])),
+          ]);
+          return node.type === 'math'
+            ? [mathNode, { type: 'paragraph', children: markers }]
+            : [mathNode, ...markers];
+        });
+      };
+      visit(tree);
+    };
+  };
 }

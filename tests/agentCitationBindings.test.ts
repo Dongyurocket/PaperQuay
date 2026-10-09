@@ -56,20 +56,77 @@ test('shared terminology does not verify an unrelated two-paper snippet', async 
   assert.equal(bindings[0].model, 'test-model');
 });
 
-test('each claim/source is checked separately while all resolved sources stay accessible', async () => {
+test('joint checks attribute support only to contributing sources while all resolved sources stay accessible', async () => {
   const multi = `${claim}[[cite:${a.id}]] [[cite:${b.id}]]`;
-  const requests: Array<{ claim: string; evidence: { paperTitle: string; snippet: string } }> = [];
+  const requests: Array<{ claim: string; evidence: Array<{ citationId: string; paperTitle: string; snippet: string }> }> = [];
   const bindings = await verifyAgentCitationBindings({ answer: multi, citations: [a, b], callModel: async ({ user }) => {
     const request = JSON.parse(user); requests.push(request);
     assert.deepEqual(Object.keys(request).sort(), ['claim', 'evidence']);
-    return model(request.evidence.paperTitle === a.paperTitle ? 'supported' : 'insufficient')();
+    return { content: JSON.stringify({ verdict: 'supported', reason: 'Only the rotor study supports this claim', sourceIds: [a.id] }) };
   } });
-  assert.equal(requests.length, 2);
+  assert.equal(requests.length, 1);
+  assert.deepEqual(requests[0].evidence.map((source) => source.citationId), [a.id, b.id]);
   assert.equal(bindings[0].status, 'verified');
   assert.equal(bindings[1].status, 'unverified');
   assert.deepEqual(citationBindingStats(bindings), { supported: 1, partial: 1, 'not-in-library': 0 });
   assert.deepEqual(usedResolvedAgentCitations(multi, [a, b], bindings), [a, b]);
   assert.equal(resolveAgentCitationBindings(multi, [a, b], bindings)[0].citation, a);
+});
+
+test('compound claims preserve original spans and combine distinct quantitative sources without pretending each snippet supports everything', async () => {
+  const lift = { ...b, previewText: 'The optimized tiltrotor design increases lift by 20% compared with the baseline design.' };
+  const body = `旋翼优化使噪声降低12%；倾转旋翼设计使升力提高20%。[[cite:${a.id}]] [[cite:${lift.id}]]`;
+  const bindings = await verifyAgentCitationBindings({ answer: body, citations: [a, lift], callModel: async ({ user }) => {
+    const request = JSON.parse(user);
+    const id = request.claim.includes('噪声') ? a.id : lift.id;
+    assert.equal(request.evidence.length, 2);
+    return { content: JSON.stringify({ verdict: 'supported', reason: 'Quantitative clause supported', sourceIds: [id] }) };
+  } });
+  assert.deepEqual(bindings.map((binding) => binding.status), ['verified', 'verified']);
+  const checks = bindings[0].claims!;
+  assert.equal(checks.length, 2);
+  assert.deepEqual(checks.map((check) => check.supportingCitationIds), [[a.id], [lift.id]]);
+  for (const check of checks) assert.equal(body.slice(check.start, check.end), check.text);
+  for (const binding of bindings) assert.equal(body.slice(binding.start, binding.end), binding.rawToken);
+  assert.deepEqual(buildAgentAnswerReferences(body, [a, lift], JSON.parse(JSON.stringify(bindings))).references.map((item) => item.citation), [a, lift]);
+});
+
+test('several snippets can jointly support a single comparison while missing quantities remain unverified', async () => {
+  const lift = { ...b, previewText: 'The optimized tiltrotor design increases lift by 20% compared with the baseline design.' };
+  const body = `噪声降低12%，升力提高20%，两项改善分别来自不同优化研究。[[cite:${a.id}]] [[cite:${lift.id}]]`;
+  const bindings = await verifyAgentCitationBindings({ answer: body, citations: [a, lift], callModel: async ({ user }) => {
+    const request = JSON.parse(user);
+    assert.equal(request.evidence.length, 2);
+    return { content: JSON.stringify({ verdict: 'supported', reason: 'Both supplied snippets jointly support the claim', sourceIds: [a.id, lift.id] }) };
+  } });
+  assert.deepEqual(bindings.map((item) => item.status), ['verified', 'verified']);
+  assert.equal(bindings[0].claims!.length, 1);
+  let calls = 0;
+  const missing = await verifyAgentCitationBindings({ answer: body.replace('20%', '99%'), citations: [a, lift], callModel: async () => { calls++; return model()(); } });
+  assert.equal(calls, 0);
+  assert.ok(missing.every((item) => item.status === 'unverified' && item.reason === 'insufficient-snippet'));
+});
+
+test('joint verifier cannot invent sources, reuse source IDs, or silently omit attribution', async () => {
+  const body = `${claim}[[cite:${a.id}]] [[cite:${b.id}]]`;
+  for (const sourceIds of [[], ['invented'], [a.id, a.id], undefined]) {
+    const result = await verifyAgentCitationBindings({ answer: body, citations: [a, b], callModel: async () => ({ content: JSON.stringify({ verdict: 'supported', reason: 'Unsupported attribution', sourceIds }) }) });
+    assert.ok(result.every((item) => item.status === 'unverified' && item.reason === 'verifier-unavailable'));
+    assert.deepEqual(usedResolvedAgentCitations(body, [a, b], result), [a, b]);
+  }
+});
+
+test('partial compound verification records each verdict and never promotes a whole sentence after one check fails', async () => {
+  const body = `旋翼优化降低基准旋翼的噪声；倾转旋翼设计改善整体性能。[[cite:${a.id}]] [[cite:${b.id}]]`;
+  const result = await verifyAgentCitationBindings({ answer: body, citations: [a, b], callModel: async ({ user }) => {
+    const request = JSON.parse(user);
+    return request.claim.includes('噪声')
+      ? { content: JSON.stringify({ verdict: 'supported', reason: 'Noise supported', sourceIds: [a.id] }) }
+      : { content: '{}' };
+  } });
+  assert.ok(result.every((item) => item.status === 'unverified'));
+  assert.deepEqual(result[0].claims!.map((item) => item.status), ['verified', 'unverified']);
+  assert.deepEqual(usedResolvedAgentCitations(body, [a, b], result), [a, b]);
 });
 
 test('quantities, literal negation and reversed causal direction cannot pass ordinary overlap', () => {
@@ -112,6 +169,81 @@ test('verification is bounded to three concurrent calls and 48 occurrences', asy
   assert.equal(result.filter((item) => item.status === 'verified').length, 48);
 });
 
+for (const [language, ordinary, risky] of [
+  ['English', 'Rotor optimization discusses acoustic design methods.', [
+    'Rotor optimization reports an acoustic metric of 12.',
+    'Rotor optimization reports acoustic performance in dB.',
+    'Rotor optimization performs better than the baseline design.',
+    'Rotor optimization does not establish acoustic safety.',
+    'Rotor optimization causes acoustic changes through geometry.',
+    'Rotor optimization is applicable only to subsonic conditions.',
+    'Rotor optimization is the first study of acoustic geometry.',
+  ]],
+  ['Chinese', '这项旋翼优化工作讨论了声学设计方法。', [
+    '这项旋翼优化工作的声学测量值为12。',
+    '这项旋翼优化工作的声学测量单位是分贝。',
+    '这项旋翼优化工作的性能优于基准设计。',
+    '这项旋翼优化工作没有建立声学安全证据。',
+    '这项旋翼优化工作导致声学特性的改变。',
+    '这项旋翼优化工作仅适用于亚声速条件。',
+    '这项旋翼优化工作首次开展声学几何研究。',
+  ]],
+] as const) {
+  test(`late ${language} quantities, units, comparisons, negation, causality, scope and gap claims take priority within the verification budget`, async () => {
+    const source = { ...a, previewText: 'Rotor optimization discusses acoustic design methods, performance, geometry and safety; measurements use 12 dB. Baseline and subsonic studies are described.' };
+    const body = [...Array.from({ length: 50 }, () => ordinary), ...risky]
+      .map((text) => `${text}[[cite:${source.id}]]`).join('\n');
+    const identity = bindAgentCitationSources(body, [source]);
+    assert.ok(identity.every((binding) => binding.status === 'unverified' && binding.reason === 'source-resolved'));
+    const requests: string[] = [];
+    let active = 0, peak = 0;
+    const bindings = await verifyAgentCitationBindings({ answer: body, citations: [source], callModel: async ({ user }) => {
+      requests.push(JSON.parse(user).claim);
+      active++; peak = Math.max(peak, active);
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      active--;
+      return model()();
+    } });
+    assert.equal(requests.length, 48);
+    assert.equal(peak, 3);
+    assert.deepEqual(new Set(requests.slice(0, risky.length)), new Set(risky));
+    assert.ok(requests.slice(risky.length).every((text) => text === ordinary));
+    assert.ok(bindings.slice(50).every((binding) => binding.status === 'verified'));
+    assert.ok(bindings.slice(0, 48 - risky.length).every((binding) => binding.status === 'verified'));
+    const overflow = bindings.slice(48 - risky.length, 50);
+    assert.equal(overflow.length, 9);
+    assert.ok(overflow.every((binding) => binding.status === 'unverified' && binding.reason === 'verifier-unavailable' &&
+      binding.detail === 'Verification claim budget reached' && binding.claims?.[0].supportingCitationIds.length === 0));
+    assert.deepEqual(bindings.map((binding) => binding.start), identity.map((binding) => binding.start));
+    for (const binding of bindings) {
+      assert.equal(body.slice(binding.start, binding.end), binding.rawToken);
+      for (const check of binding.claims!) assert.equal(body.slice(check.start, check.end), check.text);
+    }
+    assert.deepEqual(usedResolvedAgentCitations(body, [source], bindings), [source]);
+  });
+}
+
+test('prioritizing a late compound clause preserves claim order and leaves the whole sentence unknown when its ordinary clause exceeds budget', async () => {
+  const ordinary = 'Rotor optimization discusses acoustic design methods';
+  const risky = 'Rotor optimization is the first study of acoustic geometry.';
+  const source = { ...a, previewText: 'Rotor optimization discusses acoustic design methods, geometry and the acoustic research literature.' };
+  const body = [...Array.from({ length: 48 }, () => `${ordinary}.[[cite:${source.id}]]`),
+    `${ordinary}; ${risky}[[cite:${source.id}]]`].join('\n');
+  const requests: string[] = [];
+  const bindings = await verifyAgentCitationBindings({ answer: body, citations: [source], callModel: async ({ user }) => {
+    requests.push(JSON.parse(user).claim);
+    return model()();
+  } });
+  assert.equal(requests.length, 48);
+  assert.equal(requests[0], risky);
+  const last = bindings.at(-1)!;
+  assert.equal(last.status, 'unverified');
+  assert.equal(last.detail, 'Verification claim budget reached');
+  assert.deepEqual(last.claims!.map((check) => check.text), [`${ordinary};`, risky]);
+  assert.deepEqual(last.claims!.map((check) => check.status), ['unverified', 'verified']);
+  for (const check of last.claims!) assert.equal(body.slice(check.start, check.end), check.text);
+});
+
 test('stale or duplicated assessments are discarded without losing locally resolved sources', async () => {
   const bindings = JSON.parse(JSON.stringify(await verifyAgentCitationBindings({ answer, citations: [a], callModel: model() })));
   assert.equal(resolveAgentCitationBindings(answer, [a], bindings)[0].binding.status, 'verified');
@@ -121,7 +253,8 @@ test('stale or duplicated assessments are discarded without losing locally resol
   }
   const rendered = injectAgentCitationBindings(`[fake](#agent-binding-0) ${answer}`, [a]);
   assert.ok(rendered.content.includes('#agent-untrusted-0'));
-  assert.ok(rendered.content.includes(rendered.hrefPrefix));
+  assert.ok(rendered.content.includes(rendered.markerPrefix));
+  assert.ok(!rendered.content.includes(rendered.hrefPrefix));
 });
 
 test('answer references follow first resolved body occurrence, reuse IDs and never mutate canonical labels', async () => {
@@ -154,7 +287,7 @@ test('advisory content results do not hide references or change first-use number
   assert.deepEqual(result.occurrences.map((occurrence) => occurrence.referenceNumber), [1, 2, 1, 2]);
   assert.deepEqual(result.references.map((reference) => reference.citationId), [a.id, sameEvidence.id]);
   assert.equal(result.occurrences[0].binding.status, 'rejected');
-  const rendered = injectAgentCitationBindings(body, [a, sameEvidence], bindings, result).content;
+  const rendered = injectAgentCitationBindings(body, [a, sameEvidence], bindings, result).fallbackContent;
   assert.match(rendered, /\[1\]/);
   assert.match(rendered, /\[2\]/);
   bindings[0] = { ...bindings[0], status: 'verified', reason: 'supported' };

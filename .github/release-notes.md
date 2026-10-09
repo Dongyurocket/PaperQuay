@@ -1,32 +1,32 @@
 # PaperQuay v{{VERSION}}
 
-Agent citations now open locally resolved sources immediately. Content checks are optional and do not hide valid references.
+Agent retrieval follows the selected paper scope, preserves resumable research coverage, and keeps streamed drafts out of final answers.
 
-- Body markers and the ordered fragment reference list use canonical source identities and remain available without AI verification, including when an optional check reports insufficient support, contradiction or an unavailable response.
-- Normal answer generation no longer invokes the citation verifier. Use Check content to request an advisory assessment; content details and execution traces start collapsed.
-- References include available local titles, authors, years and publication names. Literature recommendations are prompted to name real papers and explain relevance and evidence limits.
-- Unknown, ambiguous, forged, legacy numeric and partial tokens cannot authorize navigation. Source identity does not prove factual support; note evidence and write checks remain independent.
-- No database migration is required. Existing structured citation snapshots can be viewed with the new behavior.
+- Scope validation and local source registration prevent silent expansion and invalid citation navigation. Single-tilde ranges and citations inside formulas render correctly across four Markdown surfaces.
+- Tool results remain valid JSON within their budget. Long paper context supports version-bound offset continuation; RAG uses deterministic topK batches and source deduplication, without cursor pagination.
+- Surveys track abstract screening, retrieved passages, focused reading, citations and unresolved questions. Cancellation preserves completed work and a checkpoint for continuation; token and time budgets use measured usage.
+- Delivery checks detect missing sections and incomplete output. Optional content checks prioritize risky claims and keep failed or invalid responses unknown; note evidence and write approval remain independent.
+- Stream completion and recovery no longer restore tool-call drafts into the answer. Reader page counts and consecutive citations to different pages of the same PDF stay synchronized.
 
-Validation: frontend build, all 695 tests and production message-component browser interactions passed. Browser checks use isolated fixtures; full Electron workflows and real model answer quality remain for the user's manual testing.
+Validation: frontend build and all 828 tests passed. Isolated Electron checks covered a single-paper engineering question and a 13-paper, four-section survey cancelled and resumed. The original 176-paper request was not reproduced; a fixture verifies its scheduling contract only. Reading excerpts does not imply full-paper reading, and structural checks do not guarantee scientific correctness.
 
 ## Downloads
 
-Choose the installer for your system from Assets: Windows `.exe`, macOS `.dmg`, or Linux `.AppImage` / `.deb` / `.tar.gz`.
+Choose the matching system and architecture from Assets: Windows `.exe`, macOS `.dmg`, or Linux `.AppImage` / `.deb` / `.tar.gz`.
 
 ---
 
 # PaperQuay v{{VERSION}} 中文说明
 
-本版让 Agent 引用直接查看本地来源，内容检查改为可选操作，不再隐藏有效参考文献。
+本版统一 Agent 检索范围，补齐可继续的综述覆盖记录，并修复流式草稿、数学引用和阅读器来源跳转。
 
-- 正文编号和片段列表按本地来源身份生成，无需等待 AI 核验；内容检查提示支撑不足、冲突或响应不可用时，仍可查看有效来源。
-- 正常生成不再调用引用核验模型；点击「检查内容」才请求提示性评估，内容明细和执行轨迹默认折叠。
-- 片段列表补充可用的本地题名、作者、年份和刊物；推荐提示要求给出真实文献题名、具体相关性及证据边界。
-- 未知、歧义、伪造、历史裸数字和未完成 token 仍不能获得跳转权限。来源可定位不等于事实已核实，笔记证据门禁与写入检查继续独立执行。
-- 无需数据库迁移，已有结构化引用快照可按新规则查看。
+- 检索遵循所选文献范围，校验本地来源后才注册引用；四个 Markdown 入口正确显示单波浪号数值范围和公式内引用。
+- 工具预算保持合法 JSON；长正文支持版本绑定的 offset 续取。RAG 使用确定性 topK 批次与来源去重，没有游标分页。
+- 综述分别记录摘要筛选、正文检索、重点摘段、实际引用与未解决问题；取消保留已完成结果，可从 checkpoint 继续，预算依据实际 token 与耗时。
+- 交付检查识别章节缺项与未完成输出；可选内容检查优先核验高风险主张，失败或无效响应保持未知，笔记证据门禁与写入审批独立。
+- 修复终态竞态和恢复时工具前草稿混入正文；阅读器页数与 PDF 生命周期同步，同篇不同页引用可连续定位。
 
-验证：前端构建、全部 695 项测试与生产消息组件浏览器交互检查通过。浏览器检查使用隔离 fixture，完整 Electron 流程及真实模型回答质量由用户继续人工测试。
+验证：前端构建与全部 828 项测试通过。隔离 Electron 实测单篇工程问答，以及 13 篇四节综述取消后继续。原 176 篇任务未原样复现，fixture 仅验证调度契约；摘段阅读不代表全文通读，结构检查不保证学术结论正确。
 
 ## 下载
 

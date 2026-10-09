@@ -15,6 +15,7 @@ import type {
   LibraryAgentRunResult,
 } from './libraryAgent';
 import { bindAnswerEvidence } from './agentAnswerEvidence.ts';
+import { sliceAgentToolText } from './agentToolContent.ts';
 
 export const DEFAULT_AGENT_LOOP_MAX_TURNS = 8;
 export const MAX_TOOL_RESULT_CHARS = 4000;
@@ -107,8 +108,8 @@ export type AgentLoopEvent =
   | { kind: 'turn_start'; turn: number }
   | { kind: 'tool_call'; turn: number; callId: string; name: string; args: Record<string, unknown> }
   | { kind: 'tool_result'; turn: number; callId: string; name: string; ok: boolean; preview: string }
-  | { kind: 'answer_delta'; text: string }
-  | { kind: 'thinking_delta'; text: string }
+  | { kind: 'answer_delta'; turn: number; text: string }
+  | { kind: 'thinking_delta'; turn: number; text: string }
   | { kind: 'context_compacted'; tokenEstimate: number; droppedMessages: number; fallback: boolean }
   | {
     kind: 'turn_end';
@@ -189,14 +190,257 @@ function toolAttachmentBytes(attachment: DocumentChatAttachment): number {
   return Math.max(0, Math.floor(payload.length * 3 / 4) - padding);
 }
 
-function truncateToolContent(value: string): string {
-  const text = String(value ?? '');
+const TOOL_TEXT_FIELDS = new Set(['text', 'snippet', 'previewText', 'abstract', 'overview', 'excerpt', 'summary', 'detail']);
 
-  if (text.length <= MAX_TOOL_RESULT_CHARS) {
-    return text;
+function truncateTextAtParagraphs(value: string, budget: number): { text: string; truncated: boolean; offset: number } {
+  return sliceAgentToolText(String(value ?? ''), budget);
+}
+
+function clipStructuredStrings(value: unknown, textBudget: number): { value: unknown; clipped: boolean } {
+  if (Array.isArray(value)) {
+    let clipped = false;
+    const items = value.map((item) => {
+      const result = clipStructuredStrings(item, textBudget);
+      clipped ||= result.clipped;
+      return result.value;
+    });
+    return { value: items, clipped };
+  }
+  if (!value || typeof value !== 'object') return { value, clipped: false };
+  const output: Record<string, unknown> = {};
+  let clipped = false;
+  let clippedTextOffset: number | undefined;
+  const proseOffsets: Record<string, number> = {};
+  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof item === 'string' && TOOL_TEXT_FIELDS.has(key)) {
+      const result = truncateTextAtParagraphs(item, textBudget);
+      output[key] = result.text;
+      if (result.truncated) {
+        proseOffsets[key] = result.offset;
+        clipped = true;
+        if (key === 'text') clippedTextOffset = result.offset;
+      }
+      continue;
+    }
+    const result = clipStructuredStrings(item, textBudget);
+    output[key] = result.value;
+    clipped ||= result.clipped;
+  }
+  // Existing false flags in the source record must not overwrite a new clip.
+  for (const [key, offset] of Object.entries(proseOffsets)) {
+    output[`${key}Truncated`] = true;
+    output[`${key}Offset`] = offset;
+  }
+  if (clippedTextOffset != null && typeof output.textStart === 'number' && output.continuation && typeof output.continuation === 'object') {
+    const offset = output.textStart + clippedTextOffset;
+    output.textEnd = offset;
+    output.continuation = {
+      ...output.continuation,
+      offset,
+      canContinue: offset > output.textStart,
+    };
+  }
+  return { value: output, clipped };
+}
+
+const TOOL_RECORD_ARRAY_KEYS = new Set(['chunks', 'papers', 'matches', 'citations', 'results', 'items', 'contexts', 'records']);
+
+function numericCount(value: unknown): number | undefined {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? Math.trunc(number) : undefined;
+}
+
+function recordIdentity(value: unknown): string | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  for (const key of ['paperId', 'documentKey', 'id']) {
+    if (typeof record[key] === 'string' && record[key].trim()) return record[key].trim();
+  }
+  return undefined;
+}
+
+function isRecordArray(key: string, value: unknown[]): boolean {
+  return TOOL_RECORD_ARRAY_KEYS.has(key) || value.some((item) => item && typeof item === 'object' && !Array.isArray(item));
+}
+
+function trimMetadataArray(key: string, value: unknown[], budget: number): unknown[] {
+  if (value.length === 0) return [];
+  // IDs are indivisible metadata. A budget error is preferable to changing
+  // identifiers or silently dropping the IDs needed to resume a paper batch.
+  if (/Ids$/.test(key)) return value;
+  if (value.every((item) => typeof item === 'string')) {
+    const output: string[] = [];
+    for (const item of value) {
+      if (output.length >= 20) break;
+      const clipped = truncateTextAtParagraphs(item as string, Math.min(320, budget));
+      output.push(clipped.text);
+    }
+    return output;
+  }
+  return value.slice(0, 20);
+}
+
+/**
+ * Keep tool messages valid JSON while selecting complete records under the
+ * context budget. Identity/location fields are kept together; only known
+ * prose fields may be paragraph-clipped and are annotated with their offset.
+ */
+export function truncateToolContent(value: string, budget = MAX_TOOL_RESULT_CHARS): string {
+  const text = String(value ?? '');
+  const limit = Math.max(128, Math.trunc(budget));
+  if (text.length <= limit) return text;
+
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('not an object payload');
+    const original = parsed as Record<string, unknown>;
+    const arrays = Object.entries(original).filter(([, item]) => Array.isArray(item)) as Array<[string, unknown[]]>;
+    const recordArrays = arrays.filter(([key, items]) => isRecordArray(key, items));
+    const primaryEntry = recordArrays.find(([key]) => TOOL_RECORD_ARRAY_KEYS.has(key)) ?? recordArrays[0];
+    const primaryKey = primaryEntry?.[0];
+    const primary = primaryEntry?.[1] ?? [];
+    const matchedCount = numericCount(original.matchedCount)
+      ?? numericCount(original.totalCount)
+      ?? numericCount(original.requestedCount)
+      ?? primary.length;
+    const originalOmittedIds = Array.isArray(original.omittedPaperIds)
+      ? original.omittedPaperIds.filter((item): item is string => typeof item === 'string')
+      : [];
+    const originalContinuation = original.continuation && typeof original.continuation === 'object' && !Array.isArray(original.continuation)
+      ? original.continuation as Record<string, unknown> : {};
+
+    const baseOriginal: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(original)) {
+      if (Array.isArray(item)) continue;
+      if (key === 'matchedCount' || key === 'returnedCount' || key === 'truncated' || key === 'continuation') continue;
+      baseOriginal[key] = item;
+    }
+    const metadataArrays = arrays.filter(([key]) => !recordArrays.some(([recordKey]) => recordKey === key));
+
+    const textBudgets = [Number.POSITIVE_INFINITY, 1600, 900, 500, 300, 180, 100, 60];
+    const recordTextBudgets = [Number.POSITIVE_INFINITY, 1400, 900, 600, 360, 220, 120, 60];
+    let best = '';
+    for (const baseTextBudget of textBudgets) {
+      const baseResult = Number.isFinite(baseTextBudget)
+        ? clipStructuredStrings(baseOriginal, baseTextBudget)
+        : { value: baseOriginal, clipped: false };
+      const base = baseResult.value as Record<string, unknown>;
+      const metadata: Record<string, unknown> = {};
+      for (const [key, items] of metadataArrays) metadata[key] = trimMetadataArray(key, items, Number.isFinite(baseTextBudget) ? baseTextBudget : 320);
+      const selected: Record<string, unknown[]> = Object.fromEntries(recordArrays.map(([key]) => [key, []]));
+      let clippedAnyText = baseResult.clipped;
+      const omittedIds = [...originalOmittedIds];
+      let stopped = false;
+
+      const buildCandidate = (forceTruncated: boolean) => {
+        const output: Record<string, unknown> = { ...base, ...metadata };
+        for (const [key] of recordArrays) output[key] = selected[key] ?? [];
+        const omittedPaperIds = [...new Set(omittedIds)];
+        if (Array.isArray(original.omittedPaperIds) || originalContinuation.tool === 'request_paper_context') {
+          output.omittedPaperIds = omittedPaperIds;
+        }
+        const returnedCount = primaryKey ? (selected[primaryKey]?.length ?? 0) : numericCount(original.returnedCount) ?? 0;
+        const omittedRecords = Math.max(0, matchedCount - returnedCount);
+        const truncated = forceTruncated || clippedAnyText || omittedRecords > 0 || original.truncated === true;
+        output.matchedCount = matchedCount;
+        output.returnedCount = returnedCount;
+        output.truncated = truncated;
+        if (truncated) {
+          const canContinue = originalContinuation.canContinue === true ||
+            Object.values(selected).flat().some((record) => {
+              if (!record || typeof record !== 'object') return false;
+              const continuation = (record as Record<string, unknown>).continuation;
+              return Boolean(continuation && typeof continuation === 'object' && (continuation as Record<string, unknown>).canContinue === true);
+            }) ||
+            (originalContinuation.tool === 'request_paper_context' && omittedIds.length > 0);
+          output.continuation = {
+            ...originalContinuation,
+            canContinue,
+            omittedRecords,
+            omittedPaperIds,
+            hint: canContinue
+              ? 'Use the returned per-record continuation or request omittedPaperIds next.'
+              : 'Narrow the query or request fewer records; this response has no stable page cursor.',
+          };
+        }
+        return output;
+      };
+
+      // Add records in source order. Once a record cannot fit even after prose
+      // clipping, stop that array so the returned prefix remains deterministic.
+      for (const [key, items] of recordArrays) {
+        for (let itemIndex = 0; itemIndex < items.length; itemIndex += 1) {
+          const item = items[itemIndex];
+          let accepted: unknown;
+          let acceptedClipped = false;
+          for (const itemBudget of recordTextBudgets) {
+            const candidateItem = Number.isFinite(itemBudget)
+              ? clipStructuredStrings(item, itemBudget)
+              : { value: item, clipped: false };
+            selected[key].push(candidateItem.value);
+            const serialized = JSON.stringify(buildCandidate(true));
+            selected[key].pop();
+            if (serialized.length <= limit) {
+              accepted = candidateItem.value;
+              acceptedClipped = candidateItem.clipped;
+              break;
+            }
+          }
+          if (accepted === undefined) {
+            stopped = true;
+            if (primaryKey === key) {
+              for (const omitted of items.slice(itemIndex)) {
+                const id = recordIdentity(omitted);
+                if (id && !originalOmittedIds.includes(id)) omittedIds.push(id);
+              }
+            }
+            break;
+          }
+          selected[key].push(accepted);
+          clippedAnyText ||= acceptedClipped;
+        }
+        if (stopped) break;
+      }
+
+      const serialized = JSON.stringify(buildCandidate(true));
+      if (serialized.length <= limit) {
+        best = serialized;
+        break;
+      }
+      // Retry with a smaller base budget. The final fallback below always
+      // remains valid JSON, even when metadata alone is unusually large.
+    }
+    if (best) return best;
+    // Identity metadata alone may exceed the budget. Do not wrap a sliced JSON
+    // fragment as prose: return an explicit empty batch the model can narrow.
+    const overBudget = {
+      status: 'budget_exceeded',
+      matchedCount,
+      returnedCount: 0,
+      ...(original.countUnit ? { countUnit: original.countUnit } : {}),
+      truncated: true,
+      ...(primaryKey ? { [primaryKey]: [] } : {}),
+      continuation: { canContinue: false, hint: 'Request fewer records or a narrower query; identity metadata cannot fit the tool-result budget.' },
+    };
+    const serialized = JSON.stringify(overBudget);
+    return serialized.length <= limit ? serialized : JSON.stringify({ status: 'budget_exceeded', returnedCount: 0, truncated: true });
+  } catch {
+    // Plain text or malformed historical tool output follows the compatibility path.
   }
 
-  return `${text.slice(0, MAX_TOOL_RESULT_CHARS)}\n\n[Tool result truncated by PaperQuay]`;
+  const clipped = truncateTextAtParagraphs(text, Math.max(32, limit - 180));
+  const fallback = {
+    status: 'truncated',
+    text: clipped.text,
+    textTruncated: clipped.truncated,
+    offset: clipped.offset,
+    truncated: true,
+    continuation: { canContinue: false, offset: clipped.offset, hint: 'Narrow the query or request a smaller result.' },
+  };
+  const serializedFallback = JSON.stringify(fallback);
+  return serializedFallback.length <= limit
+    ? serializedFallback
+    : JSON.stringify({ status: 'truncated', truncated: true });
 }
 
 function normalizeToolArguments(value: unknown): Record<string, unknown> {
@@ -350,12 +594,12 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<LibraryAg
             onAnswerDelta: (text) => {
               if (!text) return;
               emittedAnswerDelta = true;
-              emit({ kind: 'answer_delta', text });
+              emit({ kind: 'answer_delta', turn, text });
             },
             onThinkingDelta: (text) => {
               if (!text) return;
               emittedThinkingDelta = true;
-              emit({ kind: 'thinking_delta', text });
+              emit({ kind: 'thinking_delta', turn, text });
             },
           });
           break;
@@ -369,6 +613,11 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<LibraryAg
           ) {
             contextRetryUsed = true;
             await compactContextAtTurnBoundary(true);
+            // A provider can emit text before reporting a context error. The
+            // retry is a fresh draft even though it uses the same turn index.
+            emittedAnswerDelta = false;
+            emittedThinkingDelta = false;
+            emit({ kind: 'turn_start', turn });
             continue;
           }
 
@@ -386,7 +635,7 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<LibraryAg
     const toolCalls = Array.isArray(response.toolCalls) ? response.toolCalls : [];
 
     if (!emittedThinkingDelta && response.thinking?.trim()) {
-      emit({ kind: 'thinking_delta', text: response.thinking.trim() });
+      emit({ kind: 'thinking_delta', turn, text: response.thinking.trim() });
     }
 
     if (!forceFinalAnswer && toolCalls.length > 0) {
@@ -445,9 +694,11 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<LibraryAg
           })),
         });
 
-        // 执行前预检混合写：论文/笔记/记忆写入必须拆成独立可审批动作，错误喂回模型分拆。
-        if (writeKindsPresent > 1) {
-          const message = 'PaperQuay requires paper, note, and memory writes in separate turns. Propose only one kind of write plan this turn.';
+        // 执行前预检：不同写入类型必须分拆；记忆卡一次只能审批一个文件写入。
+        if (writeKindsPresent > 1 || memoryWriteCalls.length > 1) {
+          const message = writeKindsPresent > 1
+            ? 'PaperQuay requires paper, note, and memory writes in separate turns. Propose only one kind of write plan this turn.'
+            : 'PaperQuay can review only one memory write per turn. Propose one memory write now and the other in a later turn.';
 
           for (const call of writeCalls) {
             emit({ kind: 'tool_call', turn, callId: call.id, name: call.name, args: normalizeToolArguments(call.arguments) });
@@ -472,7 +723,7 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<LibraryAg
         const plans: LibraryAgentPlan[] = [];
         const memoryPlans: AgentMemoryWritePlan[] = [];
         const notePlans: AgentNoteWritePlan[] = [];
-        let writeToolFailed = false;
+        const writeToolErrors: string[] = [];
 
         for (const call of writeCalls) {
           throwIfAborted(options.signal);
@@ -490,6 +741,11 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<LibraryAg
             const result = await tool.execute(args, toolContext);
             const content = truncateToolContent(result.content);
             emit({ kind: 'tool_result', turn, callId: call.id, name: call.name, ok: true, preview: content.slice(0, 500) });
+            messages.push({
+              role: 'tool',
+              toolCallId: call.id,
+              content: JSON.stringify({ name: call.name, isError: false, result: content }),
+            });
             if (result.plan) plans.push(result.plan);
             if (result.memoryPlan) memoryPlans.push(result.memoryPlan);
             if (result.notePlan) notePlans.push(result.notePlan);
@@ -503,11 +759,14 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<LibraryAg
               toolCallId: call.id,
               content: JSON.stringify({ name: call.name, isError: true, result: message }),
             });
-            writeToolFailed = true;
+            writeToolErrors.push(`${call.name}: ${message.slice(0, 500)}`);
           }
         }
 
-        if (writeToolFailed) {
+        // A failed sibling must not discard a successful approval draft. Return
+        // the surviving actions for review and make the omitted actions explicit.
+        // A completely failed batch still lets the model correct its arguments.
+        if (writeToolErrors.length > 0 && plans.length + memoryPlans.length + notePlans.length === 0) {
           emit({
             kind: 'turn_end',
             turn,
@@ -521,16 +780,21 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<LibraryAg
         emit({
           kind: 'turn_end',
           turn,
-          finishReason: 'write_plan',
+          finishReason: writeToolErrors.length > 0 ? 'partial_write_plan' : 'write_plan',
           ...usage,
         });
         const plan = mergePlans(plans);
+        const failureNotice = writeToolErrors.length > 0
+          ? `部分写入计划生成失败；当前审批只包含成功生成的操作。 Some write plans failed; this approval contains only the successful actions.\n${writeToolErrors.join('\n')}`
+          : '';
 
         if (memoryPlans.length > 0) {
           checkpoint(turn);
           return {
             kind: 'memory-plan',
-            memoryPlan: memoryPlans[0],
+            memoryPlan: failureNotice
+              ? { ...memoryPlans[0], summary: `${memoryPlans[0].summary}\n${failureNotice}` }
+              : memoryPlans[0],
             citations: options.citations,
             ragNotice: options.ragNotice,
           };
@@ -540,7 +804,11 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<LibraryAg
           checkpoint(turn);
           return {
             kind: 'note-plan',
-            notePlan: notePlans[0],
+            notePlan: {
+              ...notePlans[0],
+              summary: [notePlans.map((item) => item.summary).filter(Boolean).join('\n'), failureNotice].filter(Boolean).join('\n'),
+              operations: notePlans.flatMap((item) => item.operations),
+            },
             citations: options.citations,
             ragNotice: options.ragNotice,
           };
@@ -553,7 +821,7 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<LibraryAg
         checkpoint(turn);
         return {
           kind: 'plan',
-          plan,
+          plan: failureNotice ? { ...plan, description: `${plan.description}\n${failureNotice}` } : plan,
           citations: options.citations,
           ragNotice: options.ragNotice,
         };
@@ -569,11 +837,14 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<LibraryAg
         })),
       });
 
-      const results = await Promise.all(toolCalls.map(async (call) => {
-        throwIfAborted(options.signal);
+      // A cancelled sibling must not let the run return while other tools can
+      // still register evidence or emit progress. Settle the current batch,
+      // then save one response for every declared call before propagating abort.
+      const settledResults = await Promise.allSettled(toolCalls.map(async (call) => {
         const tool = toolByName.get(call.name);
         const args = normalizeToolArguments(call.arguments);
         emit({ kind: 'tool_call', turn, callId: call.id, name: call.name, args });
+        throwIfAborted(options.signal);
 
         if (!tool) {
           const content = `Unknown PaperQuay tool: ${call.name}`;
@@ -608,6 +879,13 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<LibraryAg
           return { call, content, attachments: undefined, isError: true };
         }
       }));
+      const results = settledResults.map((settled, index) => {
+        if (settled.status === 'fulfilled') return settled.value;
+        const call = toolCalls[index]!;
+        const content = resultErrorMessage(settled.reason);
+        emit({ kind: 'tool_result', turn, callId: call.id, name: call.name, ok: false, preview: content.slice(0, 500) });
+        return { call, content, attachments: undefined, isError: true };
+      });
 
       let toolImageCount = 0;
       let toolImageBytes = 0;
@@ -652,6 +930,12 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<LibraryAg
         });
       }
 
+      if (options.signal?.aborted) {
+        emit({ kind: 'turn_end', turn, finishReason: 'cancelled', ...usage });
+        checkpoint(turn);
+        throw abortError();
+      }
+
       emit({
         kind: 'turn_end',
         turn,
@@ -666,7 +950,7 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<LibraryAg
 
     if (!answer) {
       const isLengthFinish = response.finishReason === 'length';
-      const finishReason = isLengthFinish ? 'length' : (response.finishReason || 'empty_response');
+      const finishReason = isLengthFinish ? 'length' : 'empty_response';
 
       emit({
         kind: 'turn_end',
@@ -686,7 +970,9 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<LibraryAg
         });
         messages.push({
           role: 'system',
-          content: '上一次输出被长度限制截断，没有产生最终回答。请直接给出简洁最终回答，不要继续推理，不要输出 think 标签。 The previous output was truncated by the length limit and produced no final answer. Provide a concise final answer directly without additional reasoning or <think> tags.',
+          content: isLengthFinish
+            ? '上一次输出被长度限制截断，没有产生最终回答。请直接给出简洁最终回答，不要继续推理，不要输出 think 标签。 The previous output was truncated by the length limit and produced no final answer. Provide a concise final answer directly without additional reasoning or <think> tags.'
+            : '上一次模型未返回回答正文。请直接给出最终回答。 The previous response contained no answer. Provide a final answer directly.',
         });
 
         continue;
@@ -696,12 +982,14 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<LibraryAg
         ? '模型输出被长度上限截断（finish_reason=length），没有产生最终回答（已尝试自动恢复）。请重试，或在设置里调低思考强度 / 调大最大输出。 Model output was truncated by the length limit (finish_reason=length) and did not produce a final answer (auto-recovery attempted). Please retry, or lower the reasoning effort / increase the maximum output tokens in Settings.'
         : '模型输出被长度上限截断（finish_reason=length），没有产生最终回答。请重试，或在设置里调低思考强度 / 调大最大输出。 Model output was truncated by the length limit (finish_reason=length) and did not produce a final answer. Please retry, or lower the reasoning effort / increase the maximum output tokens in Settings.';
 
-      emit({ kind: 'error', turn, message: truncatedErrorMessage });
-      throw new Error(truncatedErrorMessage);
+      const errorMessage = isLengthFinish ? truncatedErrorMessage
+        : `模型未返回回答正文${emptyAnswerRecoveryAttempted ? '（已尝试自动恢复）' : ''}。请重试。 The model returned no answer content.`;
+      emit({ kind: 'error', turn, message: errorMessage });
+      throw new Error(errorMessage);
     }
 
     if (!emittedAnswerDelta) {
-      emit({ kind: 'answer_delta', text: answer });
+      emit({ kind: 'answer_delta', turn, text: answer });
     }
 
     messages.push({ role: 'assistant', content: answer });
@@ -709,7 +997,8 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<LibraryAg
       kind: 'turn_end',
       turn,
       // 恢复轮（forceNextFinalAnswer）报告真实 finishReason；只有真正顶到 maxTurns 的强制回答才标 max_turns。
-      finishReason: forceFinalAnswer && !forceNextFinalAnswer ? 'max_turns' : response.finishReason || 'answer',
+      finishReason: response.finishReason === 'length' ? 'length'
+        : forceFinalAnswer && !forceNextFinalAnswer ? 'max_turns' : response.finishReason || 'answer',
       ...usage,
     });
     checkpoint(turn);

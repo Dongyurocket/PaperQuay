@@ -7,7 +7,7 @@ import remarkMath from 'remark-math';
 import 'katex/dist/katex.min.css';
 import type { LibraryAgentRagCitation } from '../../services/libraryAgent';
 import type { AgentCitationBinding } from '../../services/agentAnswerEvidence';
-import { citationBindingReason, citationOccurrenceLabel, injectAgentCitationBindings, type AgentAnswerReferenceModel, type AgentCitationClick } from './agentCitationRendering.ts';
+import { citationBindingReason, citationOccurrenceLabel, createAgentCitationRemarkPlugin, injectAgentCitationBindings, type AgentAnswerReferenceModel, type AgentCitationClick } from './agentCitationRendering.ts';
 import type { LiteraturePaper } from '../../types/library';
 import { normalizeMarkdownMath, remarkFixGluedLatex, remarkSuperscriptPlugin } from '../../utils/markdown';
 import { resolveBarePaperIds } from './agentMarkdownPaperIds.ts';
@@ -23,7 +23,11 @@ export function AgentCitationMarker({ binding, citation, sourceResolved, referen
   children: ReactNode;
 }) {
   if (sourceResolved && citation && referenceNumber != null && onCitationClick) {
-    const title = `${citation.paperTitle}${citation.pageIndex == null ? '' : ` · PDF ${citation.pageIndex + 1}`}\n${citation.previewText?.slice(0, 400) ?? ''}`;
+    const checks = binding?.claims?.map((claim) => {
+      const status = claim.status === 'verified' ? '已支持' : claim.status === 'rejected' ? '存在冲突' : '检查未完成';
+      return `${status}：${claim.text}${claim.detail ? `（${claim.detail}）` : ''}`;
+    }).join('\n');
+    const title = `${citation.paperTitle}${citation.pageIndex == null ? '' : ` · PDF ${citation.pageIndex + 1}`}\n${citationBindingReason(binding)}${checks ? `\n${checks}` : ''}\n${citation.previewText?.slice(0, 400) ?? ''}`;
     return <button type="button" onClick={() => onCitationClick(citation, referenceNumber)}
       className="align-baseline font-semibold text-[var(--pq-accent)] hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--pq-accent)]"
       aria-label={`引用 ${referenceNumber}：${citation.paperTitle}${citation.pageIndex == null ? '' : `，PDF 第 ${citation.pageIndex + 1} 页`}`}
@@ -145,6 +149,7 @@ export default function AgentMarkdown({
   }, [paperTitleById, papers]);
 
   const citationRendering = useMemo(() => injectAgentCitationBindings(content, citations, citationBindings, referenceModel), [content, citations, citationBindings, referenceModel]);
+  const remarkCitations = useMemo(() => createAgentCitationRemarkPlugin(citationRendering), [citationRendering]);
   const normalizedContent = useMemo(() => {
     try {
       const safeContent = liftPaperIdsOutOfMath(citationRendering.content);
@@ -222,7 +227,7 @@ export default function AgentMarkdown({
     }),
     [citations, citationRendering, onCitationClick, titleFallbackMap],
   );
-  const fallback = <AgentMarkdownFallback content={citationRendering.content.replace(/\]\(#[^)]+\)/g, ']')} />;
+  const fallback = <AgentMarkdownFallback content={citationRendering.fallbackContent} />;
 
   return (
     <AgentMarkdownBoundary resetKey={normalizedContent} fallback={fallback}>
@@ -243,7 +248,7 @@ export default function AgentMarkdown({
           '[&_table]:my-4 [&_table]:block [&_table]:w-full [&_table]:border-collapse [&_table]:overflow-x-auto [&_table]:rounded-[var(--pq-radius-md)] [&_th]:border [&_th]:border-[var(--pq-border)] [&_th]:bg-[var(--pq-surface-2)] [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:font-semibold [&_td]:border [&_td]:border-[var(--pq-border)] [&_td]:px-3 [&_td]:py-2 [&_td]:break-words',
           '[&_.katex]:text-[var(--pq-text)] [&_.katex-display]:my-4 [&_.katex-display]:overflow-x-auto [&_.katex-display]:overflow-y-hidden [&_.katex-display]:py-2',
         ].join(' ')}
-        remarkPlugins={[remarkGfm, remarkMath, remarkFixGluedLatex, remarkSuperscriptPlugin]}
+        remarkPlugins={[[remarkGfm, { singleTilde: false }], remarkMath, remarkFixGluedLatex, remarkSuperscriptPlugin, remarkCitations]}
         rehypePlugins={[[rehypeKatex, { strict: 'ignore', throwOnError: true }]]}
         components={{
           sup: ({ children }) => (

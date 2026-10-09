@@ -1,5 +1,70 @@
 import type { LibraryAgentPaperScopeInput } from '../../services/libraryAgent';
+import { resolveAgentPaperScope } from '../../services/agentPaperScope.ts';
+import type { LiteratureCategory, LiteraturePaper } from '../../types/library';
 import type { AgentChatMessage, AgentHistorySession } from './AgentWorkspace.types';
+import {
+  findMentionedCategoryScope,
+  hasExplicitFullLibraryScope,
+  type AgentCategoryScopeMatch,
+} from './agentCategoryScopes.ts';
+
+export interface AgentWorkspacePaperScope {
+  source: 'inline' | 'category' | 'full-library' | 'selected' | 'history' | 'empty';
+  /** Keep requested IDs, including deleted IDs, until the service resolves them. */
+  paperIds: string[];
+  papers: LiteraturePaper[];
+  unavailablePaperIds: string[];
+  categoryScope: AgentCategoryScopeMatch | null;
+}
+
+/** Resolve this turn before consulting historical scopes; empty explicit scopes stay empty. */
+export function resolveAgentWorkspacePaperScope(input: {
+  instruction: string;
+  papers: LiteraturePaper[];
+  categories: LiteratureCategory[];
+  messages: AgentChatMessage[];
+  selectedPaperIds: Iterable<string>;
+  inlinePaperIds?: string[];
+  ragEnabled: boolean;
+}): AgentWorkspacePaperScope {
+  const scopeForIds = (
+    source: AgentWorkspacePaperScope['source'],
+    requestedIds: string[],
+    categoryScope: AgentCategoryScopeMatch | null = null,
+  ): AgentWorkspacePaperScope => {
+    const paperIds = uniquePaperScopeIds(requestedIds);
+    const scope = resolveAgentPaperScope(input.papers, paperIds);
+    return { source, paperIds, papers: scope.papers, unavailablePaperIds: scope.unavailableIds, categoryScope };
+  };
+
+  if (input.inlinePaperIds !== undefined) {
+    return scopeForIds('inline', input.inlinePaperIds);
+  }
+
+  const categoryScope = findMentionedCategoryScope(input.instruction, input.categories, input.papers);
+  if (categoryScope) {
+    return scopeForIds('category', categoryScope.papers.map((paper) => paper.id), categoryScope);
+  }
+  if (hasExplicitFullLibraryScope(input.instruction)) {
+    return scopeForIds('full-library', input.papers.map((paper) => paper.id));
+  }
+
+  const selectedPaperIds = uniquePaperScopeIds([...input.selectedPaperIds]);
+  if (selectedPaperIds.length > 0) {
+    return scopeForIds('selected', selectedPaperIds);
+  }
+
+  for (let index = input.messages.length - 1; index >= 0; index -= 1) {
+    const paperIds = input.messages[index]?.paperScopeIds;
+    if (Array.isArray(paperIds)) {
+      return scopeForIds('history', paperIds);
+    }
+  }
+
+  return input.ragEnabled
+    ? scopeForIds('full-library', input.papers.map((paper) => paper.id))
+    : scopeForIds('empty', []);
+}
 
 export function containsLegacyMojibake(value: string): boolean {
   return /[\uFFFD]|\u93b6|\u95ab|\u7b49|\u93c0|\u7025/.test(value);
@@ -81,10 +146,9 @@ export function collectPaperScopeCandidateIds(scopes: LibraryAgentPaperScopeInpu
 
 export function latestConversationPaperScopeIds(messages: AgentChatMessage[]): string[] {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const ids = uniquePaperScopeIds(messages[index]?.paperScopeIds ?? []);
-
-    if (ids.length > 0) {
-      return ids;
+    const paperIds = messages[index]?.paperScopeIds;
+    if (Array.isArray(paperIds)) {
+      return uniquePaperScopeIds(paperIds);
     }
   }
 

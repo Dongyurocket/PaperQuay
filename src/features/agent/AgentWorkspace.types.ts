@@ -11,6 +11,7 @@ import type { AgentMemoryWritePlan } from '../../services/agentMemory';
 import type { AgentCitationBinding } from '../../services/agentAnswerEvidence';
 import type { AgentNoteWritePlan } from '../../services/agentNotePlan';
 import type { ComparativeSurveyArtifacts } from '../../services/agentCapability';
+import type { DeliveryQualityResult } from '../../services/agentDeliveryQuality';
 import type { AgentCapabilityId, CitationAuditResult } from '../../services/agentCapabilityRegistry';
 import type { DocumentChatAttachment } from '../../types/reader';
 
@@ -57,7 +58,7 @@ export interface AgentToolCallView {
 
 export interface AgentCapabilityView {
   id: AgentCapabilityId;
-  status: 'running' | 'done' | 'error' | 'aborted';
+  status: 'running' | 'done' | 'partial' | 'error' | 'aborted';
   activeStage?: string;
   stages: Array<{
     id: string;
@@ -96,6 +97,8 @@ export interface AgentChatMessage {
   notePlanStatus?: 'applied' | 'cancelled';
   /** 引用核对（citation-audit）能力产物；rejectedClaimLines 非空时渲染「写入工作记忆」入口。 */
   citationAudit?: CitationAuditResult;
+  /** 能力交付质量检查；可选以兼容旧消息与恢复 checkpoint。 */
+  deliveryQuality?: DeliveryQualityResult;
   capability?: AgentCapabilityView;
   choices?: LibraryAgentUserChoice[];
   paperSelectionRequest?: LibraryAgentPaperSelectionRequest;

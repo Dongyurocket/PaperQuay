@@ -106,6 +106,41 @@ function summarizeMessage(message: AgentChatMessage | undefined, locale: UiLangu
   return stripMarkdown(message.content).slice(0, 88) || pickLocaleText(locale, '空消息', 'Empty message');
 }
 
+/** Repair an old stream label only when the saved message contains a terminal result. */
+export function normalizeAgentHistoryMessageMeta(message: AgentChatMessage): AgentChatMessage {
+  const streamMeta = message.meta?.trim();
+  if (message.role !== 'assistant' || (streamMeta !== '流式回复中' && streamMeta !== 'Streaming')) return message;
+  const final = [...(message.trace ?? [])].reverse().find((step) => step.type === 'final');
+  if (!final || !['success', 'warning', 'error'].includes(final.status)) return message;
+
+  const locale = streamMeta === 'Streaming' ? 'en-US' : 'zh-CN';
+  const fallback = final.status === 'success'
+    ? pickLocaleText(locale, '回答已完成。', 'Answer completed.')
+    : final.status === 'error'
+      ? pickLocaleText(locale, '运行失败。', 'Run failed.')
+      : pickLocaleText(locale, '运行已结束，请查看运行结果。', 'Run ended; review its result.');
+  const summary = stripMarkdown(typeof final.summary === 'string' ? final.summary : '').slice(0, 120) || fallback;
+  const measuredDuration = typeof final.durationMs === 'number' && Number.isFinite(final.durationMs) && final.durationMs >= 0
+    ? ` · ${durationLabel(final.durationMs, locale)}`
+    : '';
+  return { ...message, meta: `${summary}${measuredDuration}` };
+}
+
+export function normalizeAgentHistorySessionMeta(session: AgentHistorySession): AgentHistorySession {
+  const messages = session.messages.map(normalizeAgentHistoryMessageMeta);
+  if (!messages.some((message, index) => message !== session.messages[index])) return session;
+  const latestAssistant = [...messages].reverse().find((message) => message.role === 'assistant');
+  const locale = latestAssistant?.meta && /[\u3400-\u9fff]/u.test(latestAssistant.meta) ? 'zh-CN' : 'en-US';
+  return {
+    ...session,
+    messages,
+    summary: latestAssistant?.meta
+      ? `${latestAssistant.meta} · ${summarizeMessage(latestAssistant, locale)}`
+      : summarizeMessage(latestAssistant, locale),
+    status: sessionStatusFromMessages(messages),
+  };
+}
+
 function sessionStatusFromMessages(messages: AgentChatMessage[]): AgentStepStatus {
   const latestAssistant = [...messages].reverse().find((message) => message.role === 'assistant');
 
@@ -174,8 +209,9 @@ export function buildAgentHistorySession({
   attachments?: DocumentChatAttachment[];
   locale?: UiLanguage;
 }): AgentHistorySession {
-  const latestUserMessage = [...messages].reverse().find((message) => message.role === 'user');
-  const latestAssistantMessage = [...messages].reverse().find((message) => message.role === 'assistant');
+  const normalizedMessages = messages.map(normalizeAgentHistoryMessageMeta);
+  const latestUserMessage = [...normalizedMessages].reverse().find((message) => message.role === 'user');
+  const latestAssistantMessage = [...normalizedMessages].reverse().find((message) => message.role === 'assistant');
   const title = latestUserMessage
     ? summarizeMessage(latestUserMessage, locale)
     : pickLocaleText(locale, '新的 Agent 对话', 'New Agent Chat');
@@ -188,13 +224,13 @@ export function buildAgentHistorySession({
     title,
     summary,
     updatedAt: Date.now(),
-    messages,
+    messages: normalizedMessages,
     selectedPaperIds,
     lastInstruction,
     ragEnabled,
     selectedModelPresetId,
     attachments,
-    status: sessionStatusFromMessages(messages),
+    status: sessionStatusFromMessages(normalizedMessages),
   };
 }
 
@@ -215,6 +251,7 @@ export function loadAgentHistorySessions(): AgentHistorySession[] {
     return parsed
       .filter((item): item is AgentHistorySession => Boolean(item && typeof item === 'object' && item.id))
       .filter((item) => hasAgentConversationHistory(item.messages ?? []))
+      .map(normalizeAgentHistorySessionMeta)
       .slice(0, MAX_AGENT_HISTORY_SESSIONS);
   } catch {
     return [];
@@ -239,6 +276,7 @@ function stripAgentMessageForHistory(message: AgentChatMessage): AgentChatMessag
 export function saveAgentHistorySessions(sessions: AgentHistorySession[]) {
   try {
     const normalized = sessions
+      .map(normalizeAgentHistorySessionMeta)
       .filter((session) => hasAgentConversationHistory(session.messages))
       .slice()
       .sort((left, right) => right.updatedAt - left.updatedAt)
@@ -336,7 +374,6 @@ export function buildRunningTrace(
       title: pickLocaleText(locale, '用户意图识别', 'User Intent Recognition'),
       summary: pickLocaleText(locale, `已接收指令：${instruction}`, `Instruction received: ${instruction}`),
       status: 'success',
-      durationMs: 120,
       detail: pickLocaleText(
         locale,
         `当前上下文包含 ${paperCount} 篇选中文献。`,
@@ -353,7 +390,6 @@ export function buildRunningTrace(
         'The request is sent to a tool/function-calling model so it can choose the most suitable tool.',
       ),
       status: 'success',
-      durationMs: 180,
       detail: pickLocaleText(
         locale,
         '这里只展示可审查的任务摘要，不展示完整推理链。',
@@ -393,16 +429,57 @@ export function buildRunningTrace(
 
 /** 直接能力流水线没有 ReAct 工具计划时，收敛通用轨迹，避免遗留 RUNNING/WAITING。 */
 export function completeDirectAgentTrace(trace: AgentTraceStep[] | undefined, source: 'capability' | 'answer' = 'capability'): AgentTraceStep[] {
-  return (trace ?? []).map((step) => ({
+  return normalizeFinalTraceSteps(trace).map((step) => ({
     ...step,
-    status: step.id === 'final' ? 'success' :
+    status: step.id === 'final' ? (step.status === 'warning' || step.status === 'error' ? step.status : 'success') :
       (step.id === 'plan' || step.id === 'tool-call' || step.id === 'tool-result') ? 'skipped' :
         step.status === 'running' || step.status === 'waiting' ? 'success' : step.status,
-    summary: step.id === 'final' ? '最终回答已生成。' :
+    summary: step.id === 'final' ? (step.status === 'warning' || step.status === 'error' ? step.summary : '最终回答已生成。') :
       (step.id === 'plan' || step.id === 'tool-call' || step.id === 'tool-result')
         ? source === 'capability' ? '本次由能力流水线直接完成。' : '具体轮次与工具结果见下方轨迹。'
         : step.summary,
   }));
+}
+
+/** Historical traces may contain both final and react-final; keep one terminal identity. */
+function normalizeFinalTraceSteps(trace: AgentTraceStep[] | undefined): AgentTraceStep[] {
+  const steps = trace ?? [];
+  const final = [...steps].reverse().find((step) => step.type === 'final');
+  const next = steps.filter((step) => step.type !== 'final');
+  if (final) next.push({ ...final, id: 'final' });
+  return next;
+}
+
+/** Record only the measured run duration, and leave no pending work after a terminal result. */
+export function settleAgentTrace(
+  trace: AgentTraceStep[] | undefined,
+  result: {
+    status: 'success' | 'warning' | 'error';
+    summary: string;
+    detail?: string;
+    durationMs?: number;
+  },
+  locale: UiLanguage = 'zh-CN',
+): AgentTraceStep[] {
+  const next: AgentTraceStep[] = normalizeFinalTraceSteps(trace).map((step) => ({
+    ...step,
+    status: step.status === 'running' || step.status === 'waiting' ? 'skipped' as const : step.status,
+  }));
+  const index = next.findIndex((step) => step.id === 'final');
+  const terminal: AgentTraceStep = {
+    id: 'final',
+    type: 'final',
+    title: pickLocaleText(locale, '运行结果', 'Run Result'),
+    status: result.status,
+    summary: result.summary,
+    detail: result.detail,
+    ...(typeof result.durationMs === 'number' && Number.isFinite(result.durationMs) && result.durationMs >= 0
+      ? { durationMs: result.durationMs }
+      : {}),
+  };
+  if (index >= 0) next[index] = terminal;
+  else next.push(terminal);
+  return next;
 }
 
 export function applyAgentLoopEventToTrace(
@@ -410,7 +487,7 @@ export function applyAgentLoopEventToTrace(
   event: AgentLoopEvent,
   locale: UiLanguage = 'zh-CN',
 ): AgentTraceStep[] {
-  const next = [...(trace ?? [])];
+  const next = normalizeFinalTraceSteps(trace);
   const update = (id: string, patch: Partial<AgentTraceStep>) => {
     const index = next.findIndex((step) => step.id === id);
 
@@ -494,13 +571,18 @@ export function applyAgentLoopEventToTrace(
   }
 
   if (event.kind === 'answer_delta') {
-    add({
-      id: 'react-final',
-      type: 'final',
-      title: pickLocaleText(locale, '最终回答', 'Final Answer'),
-      summary: pickLocaleText(locale, '正在生成最终回答。', 'Generating the final answer.'),
-      status: 'running',
-    });
+    const summary = pickLocaleText(locale, `正在生成第 ${event.turn} 轮回答草稿。`, `Generating the draft for turn ${event.turn}.`);
+    if (next.some((step) => step.id === 'final')) {
+      update('final', { type: 'final', title: pickLocaleText(locale, '最终回答', 'Final Answer'), summary, status: 'running' });
+    } else {
+      add({
+        id: 'final',
+        type: 'final',
+        title: pickLocaleText(locale, '最终回答', 'Final Answer'),
+        summary,
+        status: 'running',
+      });
+    }
     return next;
   }
 
@@ -520,28 +602,37 @@ export function applyAgentLoopEventToTrace(
             `Turn ${event.turn} completed: ${event.finishReason}.`,
           ),
     });
-    if (event.finishReason !== 'tool_calls' && !isTruncated) {
-      update('react-final', {
+    if (isTruncated || event.finishReason === 'max_turns') {
+      const summary = isTruncated
+        ? pickLocaleText(locale, '回答被输出长度上限截断，需要继续。', 'The answer reached the output length limit and needs continuation.')
+        : pickLocaleText(locale, '已达到轮次预算，已返回当前结果。', 'The turn budget was reached; the available result was returned.');
+      if (next.some((step) => step.id === 'final')) update('final', { status: 'warning', summary });
+      else add({ id: 'final', type: 'final', title: pickLocaleText(locale, '运行结果', 'Run Result'), status: 'warning', summary });
+    } else if (event.finishReason === 'write_plan') {
+      update('final', {
+        status: 'success',
+        summary: pickLocaleText(locale, '已生成执行预览，等待审批。', 'Execution preview generated; approval is pending.'),
+      });
+    } else if (event.finishReason === 'stop' || event.finishReason === 'answer') {
+      update('final', {
         status: 'success',
         summary: pickLocaleText(locale, '最终回答已生成。', 'Final answer generated.'),
+      });
+    } else {
+      update('final', {
+        status: 'waiting',
+        summary: pickLocaleText(locale, '本轮进度已记录，等待后续轮次。', 'Turn progress recorded; waiting for the next turn.'),
       });
     }
     return next;
   }
 
   if (event.kind === 'error') {
-    if (next.some((step) => step.status === 'error' && step.detail === event.message)) {
-      return next;
-    }
-    update('react-final', { status: 'error' });
-    add({
-      id: `error-${event.turn ?? 'run'}-${next.length}`,
-      type: 'final',
-      title: pickLocaleText(locale, '执行错误', 'Execution Error'),
+    return settleAgentTrace(next, {
       summary: event.message,
       detail: event.message,
       status: 'error',
-    });
+    }, locale);
   }
 
   return next;
@@ -565,7 +656,6 @@ export function buildSuccessTrace(
         `The Agent identified a request involving ${paperCount} papers.`,
       ),
       status: 'success',
-      durationMs: 140,
       detail: instruction,
     },
     {
@@ -578,7 +668,6 @@ export function buildSuccessTrace(
         `The model selected "${toolLabel(plan.tool, locale)}" and returned reviewable tool parameters.`,
       ),
       status: 'success',
-      durationMs: 240,
       detail: pickLocaleText(
         locale,
         '完整推理不展示。这里仅保留任务理解、工具选择和执行摘要，方便用户审查。',
@@ -591,7 +680,6 @@ export function buildSuccessTrace(
       title: pickLocaleText(locale, '任务计划', 'Task Plan'),
       summary: plan.description || pickLocaleText(locale, `生成 ${plan.items.length} 个计划项。`, `Generated ${plan.items.length} plan items.`),
       status: 'success',
-      durationMs: Math.max(300, Math.round(durationMs * 0.24)),
       detail: plan.title,
     },
     {
@@ -600,7 +688,6 @@ export function buildSuccessTrace(
       title: pickLocaleText(locale, '工具调用', 'Tool Call'),
       summary: `${toolFunctionName(plan.tool)} · ${paperCount} papers`,
       status: 'success',
-      durationMs: Math.max(500, Math.round(durationMs * 0.56)),
       detail: pickLocaleText(
         locale,
         '模型只返回工具调用参数，本地数据库尚未被修改。',
@@ -617,7 +704,6 @@ export function buildSuccessTrace(
         `Converted into ${plan.items.length} checkable plan items.`,
       ),
       status: 'success',
-      durationMs: Math.max(160, Math.round(durationMs * 0.14)),
       detail: pickLocaleText(
         locale,
         '计划项将在用户确认后由本地命令执行。',
@@ -634,7 +720,8 @@ export function buildSuccessTrace(
         'Execution preview is ready. Confirm, modify, or cancel it on the right.',
       ),
       status: 'success',
-      durationMs: Math.max(80, Math.round(durationMs * 0.06)),
+      durationMs,
+      detail: pickLocaleText(locale, '耗时为本次运行的实际总耗时。', 'Duration is the measured total for this run.'),
     },
   ];
 }
@@ -657,7 +744,6 @@ export function buildErrorTrace(
         `Instruction received. Target scope: ${paperCount} papers.`,
       ),
       status: 'success',
-      durationMs: 120,
       detail: instruction,
     },
     {
@@ -670,7 +756,6 @@ export function buildErrorTrace(
         'The Agent prepared to generate a tool-based plan, but the execution chain was interrupted.',
       ),
       status: 'success',
-      durationMs: 160,
     },
     {
       id: 'plan',
@@ -678,7 +763,6 @@ export function buildErrorTrace(
       title: pickLocaleText(locale, '任务计划', 'Task Plan'),
       summary: pickLocaleText(locale, '计划生成失败。', 'Plan generation failed.'),
       status: 'error',
-      durationMs,
       detail: errorMessage,
     },
     {
@@ -694,7 +778,7 @@ export function buildErrorTrace(
       type: 'tool-result',
       title: pickLocaleText(locale, '工具返回结果', 'Tool Result'),
       summary: pickLocaleText(locale, '无返回结果。', 'No result returned.'),
-      status: 'waiting',
+      status: 'skipped',
     },
     {
       id: 'final',
@@ -706,6 +790,8 @@ export function buildErrorTrace(
         'Check the model configuration, API key, or switch to a model that supports tools/function calling.',
       ),
       status: 'error',
+      durationMs,
+      detail: pickLocaleText(locale, '耗时为本次运行的实际总耗时。', 'Duration is the measured total for this run.'),
     },
   ];
 }

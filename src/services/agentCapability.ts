@@ -1,4 +1,20 @@
 import { bindAnswerEvidence, type AnswerEvidenceStatus } from './agentAnswerEvidence.ts';
+import {
+  inspectAgentDeliveryQuality,
+  deriveAgentDeliveryRequirement,
+  type DeliveryQualityResult,
+  type DeliveryRequirement,
+} from './agentDeliveryQuality.ts';
+import {
+  finishSurveyCoverage,
+  normalizeSurveyCoverageLedger,
+  normalizeSurveyResearchContexts,
+  resumeSurveyCoverageLedger,
+  summarizeSurveyCoverage,
+  type SurveyCoverageLedger,
+  type SurveyCoverageSummary,
+  type SurveyResearchContext,
+} from './agentSurveyCoverage.ts';
 
 export type ComparativeSurveyStage = 'rephrase' | 'decompose' | 'research' | 'report';
 
@@ -6,7 +22,10 @@ export interface ComparativeSurveyArtifacts {
   rephrasedQuestion?: string;
   subquestions?: string[];
   researchNotes?: string;
+  researchContexts?: SurveyResearchContext[];
   citations?: ComparativeSurveyCitation[];
+  /** Optional resumable paper/subquestion coverage ledger for long surveys. */
+  coverage?: SurveyCoverageLedger;
   completedStages: ComparativeSurveyStage[];
 }
 
@@ -27,6 +46,9 @@ export interface ComparativeSurveyResult {
   tokenUsage: { promptTokens: number; completionTokens: number };
   artifacts: ComparativeSurveyArtifacts;
   evidenceStats?: Record<AnswerEvidenceStatus, number>;
+  coverageSummary?: SurveyCoverageSummary;
+  /** Explainable delivery checks; the markdown and citation identities are untouched. */
+  deliveryQuality?: DeliveryQualityResult;
 }
 
 export type ComparativeSurveyEvent =
@@ -38,12 +60,25 @@ export type ComparativeSurveyEvent =
 export interface ComparativeSurveyHandlers {
   rephrase: (input: { question: string }) => Promise<{ text: string; usage?: Partial<ComparativeSurveyResult['tokenUsage']> }>;
   decompose: (input: { question: string }) => Promise<{ questions: string[]; usage?: Partial<ComparativeSurveyResult['tokenUsage']> }>;
-  research: (input: { question: string; subquestions: string[]; onProgress: (completed: number, total: number, detail?: string) => void }) => Promise<{
+  research: (input: {
+    question: string;
+    subquestions: string[];
+    onProgress: (completed: number, total: number, detail?: string) => void;
+    coverage?: SurveyCoverageLedger;
+    researchNotes?: string;
+    researchContexts?: SurveyResearchContext[];
+    citations?: ComparativeSurveyCitation[];
+    /** Persist resumable coverage while a long research stage is running. */
+    onCheckpoint?: (coverage: SurveyCoverageLedger, progress?: { notes?: string; citations?: ComparativeSurveyCitation[]; contexts?: SurveyResearchContext[] }) => void;
+  }) => Promise<{
     notes: string;
     citations: ComparativeSurveyCitation[];
     usage?: Partial<ComparativeSurveyResult['tokenUsage']>;
+    /** A handler may update the ledger after each batch; old handlers can omit it. */
+    coverage?: SurveyCoverageLedger;
+    researchContexts?: SurveyResearchContext[];
   }>;
-  report: (input: { question: string; subquestions: string[]; researchNotes: string }) => Promise<{ markdown: string; usage?: Partial<ComparativeSurveyResult['tokenUsage']> }>;
+  report: (input: { question: string; subquestions: string[]; researchNotes: string }) => Promise<{ markdown: string; usage?: Partial<ComparativeSurveyResult['tokenUsage']>; finishReason?: string }>;
 }
 
 export interface ComparativeSurveyOptions {
@@ -54,6 +89,7 @@ export interface ComparativeSurveyOptions {
   signal?: AbortSignal;
   onEvent?: (event: ComparativeSurveyEvent) => void;
   onCheckpoint?: (artifacts: ComparativeSurveyArtifacts) => void;
+  deliveryRequirement?: DeliveryRequirement;
 }
 
 function abortError(): Error {
@@ -124,20 +160,38 @@ export async function runComparativeSurveyCapability(options: ComparativeSurveyO
 
   const emit = (event: ComparativeSurveyEvent) => options.onEvent?.(event);
   const maxRetries = Math.max(0, Math.min(3, Math.trunc(options.maxRetries ?? 1)));
+  const recoveredCoverage = normalizeSurveyCoverageLedger(options.resume?.coverage);
+  const resumedCoverage = recoveredCoverage && recoveredCoverage.runState !== 'completed'
+    ? resumeSurveyCoverageLedger(recoveredCoverage)
+    : recoveredCoverage;
   const artifacts: ComparativeSurveyArtifacts = {
     rephrasedQuestion: options.resume?.rephrasedQuestion,
     subquestions: options.resume?.subquestions ? [...options.resume.subquestions] : undefined,
     researchNotes: options.resume?.researchNotes,
+    researchContexts: normalizeSurveyResearchContexts(options.resume?.researchContexts),
+    ...(options.resume?.citations ? { citations: options.resume.citations.map((citation) => ({ ...citation })) } : {}),
+    ...(resumedCoverage ? { coverage: resumedCoverage } : {}),
     completedStages: [...(options.resume?.completedStages ?? [])],
   };
+  if (artifacts.coverage) {
+    artifacts.coverage = {
+      ...artifacts.coverage,
+      runState: artifacts.coverage.runState === 'completed' ? 'completed' : 'running',
+    };
+  }
   const tokenUsage = { promptTokens: 0, completionTokens: 0 };
   const saveCheckpoint = () => options.onCheckpoint?.({
     ...artifacts,
     subquestions: artifacts.subquestions ? [...artifacts.subquestions] : undefined,
     citations: artifacts.citations?.map((citation) => ({ ...citation })),
+    researchContexts: normalizeSurveyResearchContexts(artifacts.researchContexts),
+    coverage: artifacts.coverage
+      ? normalizeSurveyCoverageLedger(JSON.parse(JSON.stringify(artifacts.coverage))) ?? undefined
+      : undefined,
     completedStages: [...artifacts.completedStages],
   });
 
+  try {
   if (!artifacts.rephrasedQuestion) {
     const result = await withRetry({
       stage: 'rephrase',
@@ -168,7 +222,8 @@ export async function runComparativeSurveyCapability(options: ComparativeSurveyO
   }
 
   let citations: ComparativeSurveyCitation[] = artifacts.citations?.map((citation) => ({ ...citation })) ?? [];
-  if (!artifacts.researchNotes) {
+  const coverageNeedsResearch = artifacts.coverage ? summarizeSurveyCoverage(artifacts.coverage).canResume : false;
+  if (!artifacts.researchNotes || !artifacts.completedStages.includes('research') || coverageNeedsResearch) {
     const result = await withRetry({
       stage: 'research',
       maxRetries,
@@ -178,12 +233,29 @@ export async function runComparativeSurveyCapability(options: ComparativeSurveyO
         question: artifacts.rephrasedQuestion ?? question,
         subquestions: artifacts.subquestions ?? [question],
         onProgress: (completed, total, detail) => emit({ kind: 'stage_progress', stage: 'research', completed, total, detail }),
+        researchNotes: artifacts.researchNotes,
+        researchContexts: normalizeSurveyResearchContexts(artifacts.researchContexts),
+        citations: artifacts.citations?.map((citation) => ({ ...citation })),
+        onCheckpoint: (coverage, progress) => {
+          const normalized = normalizeSurveyCoverageLedger(coverage);
+          if (!normalized) return;
+          artifacts.coverage = normalized;
+          if (progress?.notes !== undefined) artifacts.researchNotes = progress.notes;
+          if (progress?.citations) artifacts.citations = progress.citations.map((citation) => ({ ...citation }));
+          if (progress?.contexts) artifacts.researchContexts = normalizeSurveyResearchContexts(progress.contexts);
+          saveCheckpoint();
+        },
+        ...(artifacts.coverage ? { coverage: artifacts.coverage } : {}),
       }),
     });
     artifacts.researchNotes = result.notes;
     citations = result.citations;
     artifacts.citations = result.citations.map((citation) => ({ ...citation }));
-    artifacts.completedStages.push('research');
+    artifacts.researchContexts = normalizeSurveyResearchContexts(result.researchContexts);
+    if (result.coverage) {
+      artifacts.coverage = normalizeSurveyCoverageLedger(result.coverage) ?? artifacts.coverage;
+    }
+    if (!artifacts.completedStages.includes('research')) artifacts.completedStages.push('research');
     addUsage(tokenUsage, result.usage);
     saveCheckpoint();
   }
@@ -199,11 +271,40 @@ export async function runComparativeSurveyCapability(options: ComparativeSurveyO
       researchNotes: artifacts.researchNotes ?? '',
     }),
   });
-  artifacts.completedStages.push('report');
+  if (!artifacts.completedStages.includes('report')) artifacts.completedStages.push('report');
   addUsage(tokenUsage, report.usage);
+  if (artifacts.coverage) {
+    artifacts.coverage = finishSurveyCoverage(artifacts.coverage, report.finishReason === 'length'
+      ? { state: 'partial', stopReason: 'budget-tokens' }
+      : !report.markdown.trim()
+        ? { state: 'failed', stopReason: 'error' }
+        : undefined);
+  }
   saveCheckpoint();
 
   const markdown = report.markdown.trim() || 'No comparative survey report was generated.';
+  const deliveryRequirement = options.deliveryRequirement ?? deriveAgentDeliveryRequirement({ instruction: question, defaultKind: 'survey' });
+  const deliveryQuality = inspectAgentDeliveryQuality({
+    markdown,
+    requirement: {
+      ...deliveryRequirement,
+      kind: deliveryRequirement.kind === 'engineering' ? 'engineering' : 'survey',
+      completeness: deliveryRequirement.completeness === 'partial' ? 'partial' : 'full',
+      candidateCount: artifacts.coverage ? summarizeSurveyCoverage(artifacts.coverage).candidateCount : undefined,
+      pendingCount: artifacts.coverage ? summarizeSurveyCoverage(artifacts.coverage).pendingCount : undefined,
+    },
+    runState: !report.markdown.trim()
+      ? 'invalid-output'
+      : report.finishReason === 'length' || artifacts.coverage?.stopReason?.startsWith('budget-')
+        ? 'budget'
+        : artifacts.coverage?.runState === 'failed'
+          ? 'failed'
+          : artifacts.coverage?.runState === 'cancelled'
+            ? 'cancelled'
+            : artifacts.coverage?.runState === 'partial'
+              ? 'partial'
+              : 'completed',
+  });
   const evidence = bindAnswerEvidence({
     answer: markdown,
     citations: citations.map((c, index) => ({
@@ -223,5 +324,21 @@ export async function runComparativeSurveyCapability(options: ComparativeSurveyO
     tokenUsage,
     artifacts,
     evidenceStats: evidence.counts,
+    coverageSummary: artifacts.coverage ? summarizeSurveyCoverage(artifacts.coverage) : undefined,
+    deliveryQuality,
   };
+  } catch (error) {
+    // Preserve the most recent research checkpoint when a long survey is
+    // cancelled or fails. A resumed run must see an explicit terminal reason
+    // instead of mistaking the last running snapshot for a completed stage.
+    if (artifacts.coverage) {
+      const cancelled = error instanceof Error && error.name === 'AbortError';
+      artifacts.coverage = finishSurveyCoverage(artifacts.coverage, {
+        state: cancelled ? 'cancelled' : 'failed',
+        stopReason: cancelled ? 'cancelled' : 'error',
+      });
+      saveCheckpoint();
+    }
+    throw error;
+  }
 }

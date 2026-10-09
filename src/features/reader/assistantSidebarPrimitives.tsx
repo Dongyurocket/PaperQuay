@@ -208,7 +208,7 @@ function MarkdownPreview({
           '[&_hr]:my-5 [&_hr]:border-slate-200 [&_.katex]:text-slate-900 [&_.katex-display]:my-4 [&_.katex-display]:overflow-x-auto [&_.katex-display]:overflow-y-hidden [&_.katex-display]:py-2',
           className,
         )}
-        remarkPlugins={[remarkGfm, remarkMath, remarkFixGluedLatex, remarkSuperscriptPlugin]}
+        remarkPlugins={[[remarkGfm, { singleTilde: false }], remarkMath, remarkFixGluedLatex, remarkSuperscriptPlugin]}
         rehypePlugins={[[rehypeKatex, { strict: 'ignore', throwOnError: false }]]}
         components={{
           sup: ({ children }) => (

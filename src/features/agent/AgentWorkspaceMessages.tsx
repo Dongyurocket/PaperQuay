@@ -21,8 +21,10 @@ import {
 import type { LibraryAgentFigureReference, LibraryAgentPlan, LibraryAgentRagCitation } from '../../services/libraryAgent';
 import type { AgentMemoryWritePlan } from '../../services/agentMemory';
 import type { AgentNoteWritePlan } from '../../services/agentNotePlan';
+import type { DeliveryQualityIssue, DeliveryQualityResult } from '../../services/agentDeliveryQuality';
 import type { AgentCapabilityView } from './AgentWorkspace.types';
 import { getAgentCapability } from '../../services/agentCapabilityRegistry';
+import { normalizeSurveyCoverageLedger, summarizeSurveyCoverage, type SurveyCoverageStopReason } from '../../services/agentSurveyCoverage';
 import type { LiteraturePaper } from '../../types/library';
 import type { UiLanguage } from '../../types/reader';
 import type { AgentChatMessage, AgentToolCallView } from './AgentWorkspace.types';
@@ -359,6 +361,15 @@ function CapabilityProgress({
     if (pair) return l(pair[0], pair[1]);
     return stageId.charAt(0).toUpperCase() + stageId.slice(1);
   };
+  const statusLabel = capability.status === 'running'
+    ? l('执行中', 'Running')
+    : capability.status === 'done'
+      ? l('执行结束', 'Finished')
+      : capability.status === 'partial'
+        ? l('部分完成', 'Partial')
+        : capability.status === 'aborted'
+          ? l('已取消', 'Cancelled')
+          : l('未完成', 'Failed');
 
   return (
     <div className="mt-4 rounded-[20px] border border-slate-200 bg-slate-50/70 p-4 dark:border-white/10 dark:bg-chrome-950/60">
@@ -366,7 +377,7 @@ function CapabilityProgress({
         <div className="text-sm font-bold text-slate-950 dark:text-white">
           {title}
         </div>
-        <span className="text-xs font-semibold text-slate-500 dark:text-chrome-400">{capability.status}</span>
+        <span className="text-xs font-semibold text-slate-500 dark:text-chrome-400">{statusLabel}</span>
       </div>
       <div className="mt-3 grid gap-2 sm:grid-cols-4">
         {capability.stages.map((stage, index) => (
@@ -380,7 +391,9 @@ function CapabilityProgress({
                     ? 'bg-sky-100 text-sky-700 dark:bg-sky-300/15 dark:text-sky-200'
                     : stage.status === 'error'
                       ? 'bg-rose-100 text-rose-700 dark:bg-rose-300/15 dark:text-rose-200'
-                      : 'bg-slate-100 text-slate-500 dark:bg-white/10 dark:text-chrome-400',
+                      : stage.status === 'warning'
+                        ? 'bg-amber-100 text-amber-700 dark:bg-amber-300/15 dark:text-amber-200'
+                        : 'bg-slate-100 text-slate-500 dark:bg-white/10 dark:text-chrome-400',
               ].join(' ')}>{index + 1}</span>
               <span className="text-xs font-semibold text-slate-700 dark:text-chrome-200">
                 {getStageTitle(stage.id)}
@@ -390,6 +403,159 @@ function CapabilityProgress({
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+function DeliveryQualitySummary({
+  quality,
+  l,
+}: {
+  quality: DeliveryQualityResult;
+  l: (zh: string, en: string) => string;
+}) {
+  const stateLabel = quality.state === 'complete'
+    ? l('交付检查：未发现结构缺项', 'Delivery check: no structural gaps found')
+    : quality.state === 'partial'
+      ? l('交付检查：部分完成', 'Delivery check: partial')
+      : l('交付检查：未完成', 'Delivery check: failed');
+  const stateClass = quality.state === 'complete'
+    ? 'border-emerald-200 bg-emerald-50/70 text-emerald-700 dark:border-emerald-300/25 dark:bg-emerald-300/10 dark:text-emerald-200'
+    : quality.state === 'partial'
+      ? 'border-amber-200 bg-amber-50/70 text-amber-700 dark:border-amber-300/25 dark:bg-amber-300/10 dark:text-amber-200'
+      : 'border-rose-200 bg-rose-50/70 text-rose-700 dark:border-rose-300/25 dark:bg-rose-300/10 dark:text-rose-200';
+  const issueLabel = (item: DeliveryQualityIssue) => {
+    const labels: Record<DeliveryQualityIssue['code'], [string, string]> = {
+      'empty-answer': ['回答为空', 'Answer is empty'],
+      'missing-section': ['缺少要求的章节', 'Required section is missing'],
+      'unfinished-content': ['包含未完成内容', 'Unfinished content detected'],
+      'internal-protocol-leak': ['发现内部引用协议', 'Internal citation protocol detected'],
+      'incomplete-run': ['运行未完整收敛', 'Run did not complete'],
+      'engineering-structure-gap': ['工程条件说明不完整', 'Engineering conditions are incomplete'],
+      'missing-conditionality': ['建议缺少适用条件', 'Recommendation lacks conditions'],
+      'unbounded-research-gap': ['研究空白表述过强', 'Research-gap wording is too broad'],
+      'missing-evidence-boundary': ['证据边界未明确', 'Evidence boundary is unclear'],
+      'coverage-gap': ['仍有候选文献待处理', 'Candidate papers remain pending'],
+    };
+    return l(item.message, `${labels[item.code][1]}${item.section ? ` · ${item.section}` : ''}`);
+  };
+  const issues = quality.issues.slice(0, 2);
+
+  return (
+    <div className={`mt-4 rounded-2xl border px-4 py-3 text-xs ${stateClass}`}>
+      <div className="font-bold">{stateLabel}</div>
+      {issues.length > 0 ? (
+        <ul className="mt-2 list-disc space-y-1 pl-4 leading-5">
+          {issues.map((item, index) => (
+            <li key={`${item.code}:${index}`}>
+              {issueLabel(item)}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {quality.issues.length > issues.length ? (
+        <details className="mt-2">
+          <summary className="cursor-pointer font-semibold">{l(`查看其余 ${quality.issues.length - issues.length} 项`, `Show ${quality.issues.length - issues.length} more issues`)}</summary>
+          <ul className="mt-2 list-disc space-y-1 pl-4 leading-5">
+            {quality.issues.slice(issues.length).map((item, index) => <li key={`${item.code}:more:${index}`}>{issueLabel(item)}</li>)}
+          </ul>
+        </details>
+      ) : null}
+    </div>
+  );
+}
+
+export function SurveyCoverageCard({
+  capability,
+  disabled,
+  l,
+  onContinue,
+}: {
+  capability: AgentCapabilityView;
+  disabled: boolean;
+  l: (zh: string, en: string) => string;
+  onContinue?: () => void;
+}) {
+  if (capability.id !== 'comparative-survey') return null;
+  const artifacts = capability.artifacts && typeof capability.artifacts === 'object'
+    ? capability.artifacts as { coverage?: unknown }
+    : undefined;
+  const coverage = normalizeSurveyCoverageLedger(artifacts?.coverage);
+  if (!coverage || coverage.papers.length === 0) return (
+    <div className="mt-3 text-xs text-slate-500 dark:text-chrome-400">
+      {capability.status === 'running' ? l('覆盖情况：等待本轮记录。', 'Coverage: awaiting this run’s records.') : l('覆盖情况：未记录，无法推定已读数量。', 'Coverage: not recorded; reading counts are unknown.')}
+    </div>
+  );
+  const summary = summarizeSurveyCoverage(coverage);
+  const counts: Array<[string, string, number]> = [
+    ['候选', 'Candidates', summary.candidateCount],
+    ['摘要已看', 'Abstracts reviewed', summary.abstractReviewedCount],
+    ['正文已检索', 'Body searched', summary.bodySearchedCount],
+    ['重点正文已读', 'Focused reading', summary.focusedReadCount],
+    ['实际引用', 'Cited', summary.citedCount],
+    ['无关', 'Irrelevant', summary.irrelevantCount],
+    ['证据未解决', 'Unresolved evidence', summary.unresolvedCount],
+    ['检索空命中', 'Empty retrieval', summary.emptyHitCount],
+    ['无正文或未解析', 'Body unavailable', summary.unreadableCount],
+    ['正文检索失败', 'Body retrieval failed', summary.retrievalFailedCount],
+    ['处理失败', 'Processing failed', summary.failedCount],
+    ['待处理', 'Pending', summary.pendingCount],
+  ];
+  const stopLabels: Record<SurveyCoverageStopReason, [string, string]> = {
+    completed: ['检索计划已完成', 'Research plan completed'],
+    'budget-time': ['达到时间预算', 'Time budget reached'],
+    'budget-tokens': ['达到 token 预算', 'Token budget reached'],
+    'budget-papers': ['达到本批文献预算', 'Paper batch budget reached'],
+    'budget-subquestions': ['达到子问题预算', 'Subquestion budget reached'],
+    cancelled: ['用户取消', 'Cancelled'],
+    error: ['执行失败', 'Execution failed'],
+    unknown: ['停止原因未记录', 'Stop reason unknown'],
+  };
+  const { budget } = coverage;
+  const measuredTokens = budget.promptTokens + budget.completionTokens;
+  const executionTokens = measuredTokens - (budget.execution?.promptTokenBaseline ?? 0) - (budget.execution?.completionTokenBaseline ?? 0);
+  const executionMilliseconds = budget.elapsedMilliseconds - (budget.execution?.elapsedBaseline ?? 0);
+  const continueDelivery = summary.canResume || coverage.runState === 'partial' || coverage.runState === 'failed' || coverage.runState === 'cancelled';
+  const evidenceGaps = coverage.subquestions.flatMap((question) => question.evidenceGaps.map((gap) => ({ question: question.question, gap })));
+  const unresolvedLabels = {
+    'no-document': ['无正文来源', 'No body source'],
+    'unreadable-document': ['正文尚未解析或无法读取', 'Body is unparsed or unreadable'],
+    'no-hit': ['检索空命中', 'Empty retrieval'],
+    'no-citable-evidence': ['未取得可引用正文证据', 'No citable body evidence'],
+  } as const;
+  return (
+    <div className="mt-3 rounded-2xl border border-slate-200 bg-white/70 p-4 text-xs dark:border-white/10 dark:bg-chrome-950/60">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="font-bold text-slate-900 dark:text-white">{l('本轮调研覆盖（篇）', 'Research coverage (papers)')}</span>
+        <span className="text-slate-500 dark:text-chrome-400">{coverage.stopReason ? l(...stopLabels[coverage.stopReason]) : l('检索进行中', 'Research in progress')}</span>
+      </div>
+      <dl className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
+        {counts.map(([zh, en, count]) => <div key={en} className="rounded-xl bg-slate-50 px-3 py-2 dark:bg-white/5">
+          <dt className="text-slate-500 dark:text-chrome-400">{l(zh, en)}</dt>
+          <dd className="mt-1 font-semibold text-slate-900 dark:text-white">{count}</dd>
+        </div>)}
+      </dl>
+      <div className="mt-3 space-y-1 leading-5 text-slate-600 dark:text-chrome-300">
+        <div>{l(`子问题完成 ${summary.completedSubquestionCount}/${summary.subquestionCount}，部分完成 ${summary.partialSubquestionCount}，失败 ${summary.failedSubquestionCount}，待处理 ${summary.pendingSubquestionCount}。`, `Subquestions: ${summary.completedSubquestionCount}/${summary.subquestionCount} completed, ${summary.partialSubquestionCount} partial, ${summary.failedSubquestionCount} failed, ${summary.pendingSubquestionCount} pending.`)}</div>
+        <div>{l(`累计已记录用量 ${measuredTokens} tokens、${(budget.elapsedMilliseconds / 1000).toFixed(1)} 秒。`, `Recorded cumulative usage: ${measuredTokens} tokens, ${(budget.elapsedMilliseconds / 1000).toFixed(1)} seconds.`)}</div>
+        <div>{l(`本次执行 ${Math.max(0, executionTokens)}${budget.maxTokens === undefined ? '' : `/${budget.maxTokens}`} tokens、${(Math.max(0, executionMilliseconds) / 1000).toFixed(1)}${budget.maxMilliseconds === undefined ? '' : `/${(budget.maxMilliseconds / 1000).toFixed(1)}`} 秒。`, `This execution: ${Math.max(0, executionTokens)}${budget.maxTokens === undefined ? '' : `/${budget.maxTokens}`} tokens, ${(Math.max(0, executionMilliseconds) / 1000).toFixed(1)}${budget.maxMilliseconds === undefined ? '' : `/${(budget.maxMilliseconds / 1000).toFixed(1)}`} seconds.`)}</div>
+        <div>{l('各项记录可重叠。正文切片命中只计为检索；重点阅读与全文通读不同。', 'These records can overlap. A body hit counts as retrieval; focused reading does not mean the entire paper was read.')}</div>
+      </div>
+      {coverage.subquestions.length > 0 || summary.pendingCount || summary.failedCount || summary.unresolvedCount ? (
+        <details className="mt-3 text-slate-600 dark:text-chrome-300">
+          <summary className="cursor-pointer font-semibold">{l('查看子问题与待处理项', 'Show subquestions and remaining work')}</summary>
+          <ul className="mt-2 list-disc space-y-1 pl-4 leading-5">
+            {coverage.subquestions.map((question) => <li key={question.id} className="break-words">{question.question} · {l(`检索 ${question.completedPaperIds.length}/${question.candidatePaperIds.length} 篇`, `${question.completedPaperIds.length}/${question.candidatePaperIds.length} papers searched`)}</li>)}
+            {evidenceGaps.map((item, index) => <li key={`gap:${index}`} className="break-words">{item.question} · {item.gap}</li>)}
+            {coverage.papers.filter((paper) => paper.failed || paper.unresolved || (!paper.focusedRead && !paper.irrelevant)).map((paper) => <li key={paper.paperId} className="break-words">{paper.paperTitle || paper.paperId} · {paper.unresolvedReason ? l(unresolvedLabels[paper.unresolvedReason][0], unresolvedLabels[paper.unresolvedReason][1]) : paper.failed ? l('处理失败', 'Processing failed') : paper.unresolved ? l('未取得正文证据', 'Body evidence unavailable') : l('待处理', 'Pending')}{paper.error ? ` · ${paper.error}` : ''}</li>)}
+          </ul>
+        </details>
+      ) : null}
+      {onContinue && continueDelivery && capability.status !== 'running' ? (
+        <button type="button" onClick={onContinue} disabled={disabled} className={`${agentPlanSecondaryActionClass} mt-3`}>
+          <PlayCircle className="h-4 w-4" />{l('从本轮记录继续', 'Continue from these records')}
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -460,6 +626,7 @@ export function AssistantMessageCard({
   onCancelPlan,
   onCopyToolParameters,
   onContinueWithSelectedPapers,
+  onContinueSurvey,
   onForkFromMessage,
   onOpenRagCitation,
   onVerifyCitations,
@@ -497,6 +664,7 @@ export function AssistantMessageCard({
   onCancelPlan: () => void;
   onCopyToolParameters: (toolCall: AgentToolCallView) => void;
   onContinueWithSelectedPapers: (instruction: string, paperIds: string[]) => void;
+  onContinueSurvey?: (message: AgentChatMessage) => void;
   onForkFromMessage: (messageId: string) => void;
   onOpenRagCitation?: AgentCitationClick;
   onVerifyCitations?: (message: AgentChatMessage) => Promise<void>;
@@ -565,6 +733,8 @@ export function AssistantMessageCard({
               </div>
             ) : null}
             {message.capability ? <CapabilityProgress capability={message.capability} l={l} /> : null}
+            {message.capability ? <SurveyCoverageCard capability={message.capability} disabled={activeSessionRunning} l={l} onContinue={onContinueSurvey ? () => onContinueSurvey(message) : undefined} /> : null}
+            {message.deliveryQuality ? <DeliveryQualitySummary quality={message.deliveryQuality} l={l} /> : null}
             {message.citationAudit && message.citationAudit.rejectedClaimLines.length > 0 && !message.memoryPlan ? (
               <div className="mt-4 rounded-[20px] border border-amber-200 bg-amber-50/70 p-4 dark:border-amber-300/25 dark:bg-amber-300/10">
                 <div className="text-sm font-bold text-slate-950 dark:text-white">

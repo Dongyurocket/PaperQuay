@@ -7,7 +7,14 @@ import {
   upsertAgentHistorySession,
 } from '../src/features/agent/agentSessionState.ts';
 import type { AgentChatMessage, AgentHistorySession } from '../src/features/agent/AgentWorkspace.types.ts';
-import { applyAgentLoopEventToTrace } from '../src/features/agent/AgentWorkspace.model.ts';
+import {
+  applyAgentLoopEventToTrace,
+  buildErrorTrace,
+  buildRunningTrace,
+  buildSuccessTrace,
+  completeDirectAgentTrace,
+  settleAgentTrace,
+} from '../src/features/agent/AgentWorkspace.model.ts';
 import { normalizeAgentCitationTokens } from '../src/services/agentAnswerEvidence.ts';
 
 function message(id: string, role: AgentChatMessage['role'], content: string): AgentChatMessage {
@@ -135,7 +142,7 @@ test('the same terminal error is rendered only once across loop and outer catch'
 });
 
 test('Agent final trace summary reflects a completed answer', () => {
-  const running = applyAgentLoopEventToTrace([], { kind: 'answer_delta', text: 'Answer' });
+  const running = applyAgentLoopEventToTrace([], { kind: 'answer_delta', turn: 1, text: 'Answer' });
   const completed = applyAgentLoopEventToTrace(running, {
     kind: 'turn_end',
     turn: 1,
@@ -144,8 +151,53 @@ test('Agent final trace summary reflects a completed answer', () => {
     completionTokens: 5,
   });
 
-  assert.equal(completed.find((step) => step.id === 'react-final')?.status, 'success');
-  assert.equal(completed.find((step) => step.id === 'react-final')?.summary, '最终回答已生成。');
+  assert.equal(completed.find((step) => step.id === 'final')?.status, 'success');
+  assert.equal(completed.find((step) => step.id === 'final')?.summary, '最终回答已生成。');
+});
+
+test('Agent traces retain one terminal result after drafts, tool progress and errors', () => {
+  let trace = buildRunningTrace('Review evidence', 2);
+  trace = applyAgentLoopEventToTrace(trace, { kind: 'turn_start', turn: 1 });
+  trace = applyAgentLoopEventToTrace(trace, { kind: 'answer_delta', turn: 1, text: 'I will search first.' });
+  trace = applyAgentLoopEventToTrace(trace, {
+    kind: 'turn_end', turn: 1, finishReason: 'tool_calls', promptTokens: 10, completionTokens: 5,
+  });
+  assert.equal(trace.filter((step) => step.type === 'final').length, 1);
+  assert.equal(trace.find((step) => step.id === 'final')?.status, 'waiting');
+  trace = applyAgentLoopEventToTrace(trace, { kind: 'turn_start', turn: 2 });
+  trace = applyAgentLoopEventToTrace(trace, { kind: 'error', turn: 2, message: 'Connection failed' });
+  trace = applyAgentLoopEventToTrace(trace, { kind: 'error', message: 'Connection failed' });
+  assert.equal(trace.filter((step) => step.type === 'final').length, 1);
+  assert.equal(trace.find((step) => step.id === 'final')?.detail, 'Connection failed');
+  assert.equal(trace.some((step) => step.status === 'running' || step.status === 'waiting'), false);
+});
+
+test('length and turn budgets stay partial when direct trace completion runs', () => {
+  for (const finishReason of ['length', 'max_turns']) {
+    const running = applyAgentLoopEventToTrace(buildRunningTrace('Review evidence', 2), {
+      kind: 'answer_delta', turn: 1, text: 'Partial answer',
+    });
+    const completed = completeDirectAgentTrace(applyAgentLoopEventToTrace(running, {
+      kind: 'turn_end', turn: 1, finishReason, promptTokens: 10, completionTokens: 5,
+    }), 'answer');
+    assert.equal(completed.find((step) => step.id === 'final')?.status, 'warning');
+    assert.equal(completed.filter((step) => step.type === 'final').length, 1);
+  }
+});
+
+test('terminal trace stores the measured total without invented step durations', () => {
+  const success = buildSuccessTrace('Review evidence', 2, {
+    id: 'plan-a', tool: 'classify', title: 'Plan', description: 'Review plan', items: [], createdAt: 1,
+  }, 23);
+  const failed = buildErrorTrace('Review evidence', 2, 'Connection failed', 17);
+  for (const [trace, elapsed] of [[success, 23], [failed, 17]] as const) {
+    assert.deepEqual(trace.filter((step) => typeof step.durationMs === 'number').map((step) => [step.id, step.durationMs]), [['final', elapsed]]);
+  }
+  const cancelled = settleAgentTrace(buildRunningTrace('Review evidence', 2), {
+    status: 'warning', summary: 'Run cancelled', durationMs: 31,
+  });
+  assert.equal(cancelled.find((step) => step.id === 'final')?.durationMs, 31);
+  assert.equal(cancelled.some((step) => step.status === 'running' || step.status === 'waiting'), false);
 });
 
 test('forkAgentHistorySession copies a message prefix without sharing mutable message arrays', () => {

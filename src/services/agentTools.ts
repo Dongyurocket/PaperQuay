@@ -1,9 +1,16 @@
 import type { LiteraturePaper } from '../types/library';
 import type { Note, NotePageKind, NoteType } from '../types/notes';
-import { getNote, searchNotes } from './notes';
-import { createAgentNoteWritePlan } from './agentNotePlan';
+import { getNote, searchNotes } from './notes.ts';
+import { createAgentNoteWritePlan } from './agentNotePlan.ts';
 import { assertEvidenceForNoteDraft } from './agentAnswerEvidence.ts';
 import { formatCitationEvidenceToken } from './agentCitationRegistry.ts';
+import { agentToolTextVersion, isAgentToolTextBoundary, sliceAgentToolText } from './agentToolContent.ts';
+import {
+  emptyAgentPaperScopeError,
+  resolveAgentPaperIds,
+  resolveAgentPaperScope,
+  type AgentPaperScopeError,
+} from './agentPaperScope.ts';
 import {
   normalizeGraphPaperId,
   GRAPH_MISSING_EDGE_MAX_PAPERS,
@@ -17,7 +24,7 @@ import {
 import {
   WORKING_MEMORY_MAX_CHARS,
 } from './agentMemoryContract.ts';
-import type { AgentMemoryFile, AgentMemoryWritePlan } from './agentMemory';
+import type { AgentMemoryFile, AgentMemoryWritePlan } from './agentMemory.ts';
 import type {
   AgentToolDefinition,
   AgentToolMountContext,
@@ -108,6 +115,7 @@ function noteSummary(note: Note) {
 }
 
 const AGENT_NOTE_CONTENT_LIMIT = 12000;
+const AGENT_RAG_TOP_K = 12;
 
 function noteDetail(note: Note) {
   const body = (note.contentText ?? note.content ?? '').trim();
@@ -166,7 +174,7 @@ export interface CreateLibraryAgentToolsOptions {
   }>;
   getPaperContext?: (
     paper: LiteraturePaper,
-    input: { mode: 'summary' | 'pdf-text'; query: string },
+    input: { mode: 'summary' | 'pdf-text'; query: string; fullText?: boolean },
     options?: { signal?: AbortSignal },
   ) => Promise<AgentPaperContextResult>;
   getFigure?: (
@@ -182,6 +190,26 @@ export interface CreateLibraryAgentToolsOptions {
       content: string;
       summary: string;
     }) => AgentMemoryWritePlan;
+  };
+}
+
+function scopeErrorResult(error: AgentPaperScopeError): AgentToolResult {
+  return {
+    content: JSON.stringify({
+      status: 'scope_error',
+      error: {
+        code: error.code,
+        paperIds: error.paperIds,
+        allowedPaperIds: error.allowedPaperIds,
+        ...(error.unknownPaperIds ? { unknownPaperIds: error.unknownPaperIds } : {}),
+        ...(error.outOfScopePaperIds ? { outOfScopePaperIds: error.outOfScopePaperIds } : {}),
+        message: error.message,
+      },
+      chunks: [],
+      papers: [],
+      ragErrors: [error.message],
+    }),
+    cards: [{ kind: 'text', title: 'Paper scope', detail: error.message }],
   };
 }
 
@@ -229,8 +257,13 @@ function writeToolDefinition(
 }
 
 export function createLibraryAgentTools(options: CreateLibraryAgentToolsOptions): AgentToolDefinition[] {
-  const paperById = new Map(options.papers.map((paper) => [paper.id, paper]));
-  const resolvePaper = (value: unknown) => paperById.get(stringValue(value));
+  const scope = resolveAgentPaperScope(options.papers, options.currentPaperScopeIds);
+  // Keep the full map for identity checks and structured errors. Paper reads
+  // resolve only from the authorized subset for this run.
+  const allLibraryPaperById = new Map(options.papers.map((paper) => [paper.id, paper]));
+  const scopedPaperById = new Map(scope.papers.map((paper) => [paper.id, paper]));
+  const scopedPapers = scope.papers;
+  const resolvePaper = (value: unknown) => scopedPaperById.get(stringValue(value));
   const getContext = options.getPaperContext;
 
   const tools: AgentToolDefinition[] = [
@@ -247,11 +280,13 @@ export function createLibraryAgentTools(options: CreateLibraryAgentToolsOptions)
         required: ['query'],
       },
       async execute(args): Promise<AgentToolResult> {
+        const emptyScope = emptyAgentPaperScopeError(scope);
+        if (emptyScope) return scopeErrorResult(emptyScope);
         const query = stringValue(args.query).toLocaleLowerCase();
         const limit = boundedInteger(args.limit, 8, 20);
         const matches = query
-          ? options.papers.filter((paper) => paperSearchText(paper).includes(query)).slice(0, limit)
-          : options.papers.slice(0, limit);
+          ? scopedPapers.filter((paper) => paperSearchText(paper).includes(query)).slice(0, limit)
+          : scopedPapers.slice(0, limit);
 
         return {
           content: JSON.stringify({
@@ -320,7 +355,7 @@ export function createLibraryAgentTools(options: CreateLibraryAgentToolsOptions)
     },
     {
       name: 'rag_search',
-      description: 'Search local paper library with hybrid RAG (vector + full-text) and return page-aware evidence snippets. When paperIds is omitted, it performs a global search across the entire library.',
+      description: 'Search the authorized paper scope with hybrid RAG (vector + full-text) and return page-aware evidence snippets. When paperIds is omitted, the current scope is used.',
       kind: 'read',
       available: (ctx: AgentToolMountContext) => ctx.ragReady,
       parameters: {
@@ -339,20 +374,40 @@ export function createLibraryAgentTools(options: CreateLibraryAgentToolsOptions)
         }
 
         const query = stringValue(args.query);
-        const paperIds = stringArray(args.paperIds);
+        const requestedIds = stringArray(args.paperIds);
+        const resolved = resolveAgentPaperIds(scope, requestedIds);
+
+        if (resolved.error) {
+          return scopeErrorResult(resolved.error);
+        }
+
+        const paperIds = resolved.ids;
 
         if (options.searchRag) {
           const result = await options.searchRag(
-            { query, paperIds: paperIds.length > 0 ? paperIds : undefined, topK: 12 },
+            { query, paperIds, topK: AGENT_RAG_TOP_K },
             { signal: ctx.signal },
           );
+          const chunks = result.chunks
+            .filter((chunk) => allLibraryPaperById.has(chunk.paperId) && scopedPaperById.has(chunk.paperId) && paperIds.includes(chunk.paperId))
+            .slice(0, AGENT_RAG_TOP_K);
+          const matchedCount = chunks.length;
 
           return {
             content: JSON.stringify({
-              chunks: result.chunks,
+              status: 'ok',
+              // Counts are chunk counts for this deterministic top-K batch;
+              // they are not paper counts or an implicit whole-library total.
+              matchedCount,
+              returnedCount: chunks.length,
+              truncated: false,
+              coverage: 'top-k-batch',
+              countUnit: 'chunks',
+              batchLimit: AGENT_RAG_TOP_K,
+              chunks,
               ragErrors: result.ragErrors ?? [],
             }),
-            cards: [{ kind: 'citations', title: `${result.chunks.length} RAG evidence snippets` }],
+            cards: [{ kind: 'citations', title: `${chunks.length} RAG evidence snippets` }],
           };
         }
 
@@ -360,9 +415,9 @@ export function createLibraryAgentTools(options: CreateLibraryAgentToolsOptions)
           throw new Error('Local RAG context is unavailable for this Agent run.');
         }
 
-        const targetPapers = paperIds.length > 0
-          ? paperIds.map((paperId) => paperById.get(paperId)).filter((paper): paper is LiteraturePaper => Boolean(paper))
-          : options.papers;
+        const targetPapers = paperIds
+          .map((paperId) => scopedPaperById.get(paperId))
+          .filter((paper): paper is LiteraturePaper => Boolean(paper));
         const contexts = await Promise.all(
           targetPapers.map((paper) => getContext(paper, { mode: 'pdf-text', query }, { signal: ctx.signal })),
         );
@@ -376,17 +431,29 @@ export function createLibraryAgentTools(options: CreateLibraryAgentToolsOptions)
           blockId: citation.blockId ?? null,
           snippet: citation.previewText ?? '',
           hasImage: Boolean(context.figures?.some((figure) => figure.blockId && figure.blockId === citation.blockId)),
-        })));
+        }))).slice(0, AGENT_RAG_TOP_K);
 
         return {
-          content: JSON.stringify({ chunks, ragErrors: contexts.map((context) => context.ragError).filter(Boolean) }),
+          content: JSON.stringify({
+            status: 'ok',
+            // Fallback context loading has no stable global total or cursor;
+            // expose only the deterministic top-K chunk batch to the model.
+            matchedCount: chunks.length,
+            returnedCount: chunks.length,
+            truncated: false,
+            coverage: 'top-k-batch',
+            countUnit: 'chunks',
+            batchLimit: AGENT_RAG_TOP_K,
+            chunks,
+            ragErrors: contexts.map((context) => context.ragError).filter(Boolean),
+          }),
           cards: [{ kind: 'citations', title: `${chunks.length} RAG evidence snippets` }],
         };
       },
     },
     {
       name: 'request_paper_context',
-      description: 'Load summary or full paper context for papers already in the current PaperQuay library scope.',
+      description: 'Read summary, retrieved snippets, or full text in the authorized scope. At most five papers are returned; request omittedPaperIds next. For remaining text, repeat the exact continuation arguments, including offset and contextVersion. Set fullText=true to read document text rather than a query-selected snippet batch.',
       kind: 'read',
       available: (ctx: AgentToolMountContext) => ctx.papersCount > 0,
       parameters: {
@@ -395,8 +462,12 @@ export function createLibraryAgentTools(options: CreateLibraryAgentToolsOptions)
           mode: { type: 'string', enum: ['summary', 'pdf-text'] },
           reason: { type: 'string' },
           paperIds: { type: 'array', items: { type: 'string' } },
+          fullText: { type: 'boolean' },
+          offset: { type: 'integer', minimum: 0 },
+          maxChars: { type: 'integer', minimum: 128, maximum: 1600, description: 'Target prose characters per paper. A leading evidence token is returned whole, up to the 1600-character page limit.' },
+          contextVersion: { type: 'string' },
         },
-        required: ['mode', 'reason', 'paperIds'],
+        required: ['mode', 'reason'],
       },
       async execute(args, ctx) {
         if (ctx.signal?.aborted) {
@@ -412,23 +483,113 @@ export function createLibraryAgentTools(options: CreateLibraryAgentToolsOptions)
         const mode = args.mode === 'summary' ? 'summary' : 'pdf-text';
         const query = stringValue(args.reason);
         const requestedIds = stringArray(args.paperIds);
-        const targetPapers = (requestedIds.length > 0
-          ? requestedIds.map((paperId) => paperById.get(paperId)).filter((paper): paper is LiteraturePaper => Boolean(paper))
-          : options.papers).slice(0, 5);
+        const resolved = resolveAgentPaperIds(scope, requestedIds);
+
+        if (resolved.error) {
+          return scopeErrorResult(resolved.error);
+        }
+
+        const targetPapers = resolved.ids
+          .map((paperId) => scopedPaperById.get(paperId))
+          .filter((paper): paper is LiteraturePaper => Boolean(paper));
+        const omittedPaperIds = targetPapers.slice(5).map((paper) => paper.id);
+        const returnedPapers = targetPapers.slice(0, 5);
+        const offset = Math.max(0, Math.trunc(Number(args.offset) || 0));
+        const expectedVersion = stringValue(args.contextVersion);
+        const fullText = args.fullText === true;
+        const maxChars = Math.max(128, boundedInteger(args.maxChars, Math.max(128, Math.floor(1600 / returnedPapers.length)), 1600));
+        if ((offset > 0 || expectedVersion) && returnedPapers.length !== 1) {
+          return { content: JSON.stringify({ status: 'continuation_error', code: 'single_paper_required', papers: [], hint: 'Resume one paper at a time using its continuation arguments.' }) };
+        }
+        if (offset > 0 && !expectedVersion) {
+          return { content: JSON.stringify({ status: 'continuation_error', code: 'context_version_required', papers: [], hint: 'Start at offset 0, then use the returned contextVersion and offset.' }) };
+        }
         const contexts = await Promise.all(
-          targetPapers.map((paper) => getContext(paper, { mode, query }, { signal: ctx.signal })),
+          returnedPapers.map((paper) => getContext(paper, { mode, query, fullText }, { signal: ctx.signal })),
         );
+        const papers = await Promise.all(contexts.map(async (context, index) => {
+          const paper = returnedPapers[index]!;
+          const contextVersion = await agentToolTextVersion(paper.id, context.source, context.text);
+          if (expectedVersion && contextVersion !== expectedVersion) {
+            return { paperId: paper.id, source: context.source, status: 'continuation_error', code: 'context_changed', contextVersion, hint: 'The source changed. Restart this paper at offset 0.' };
+          }
+          if (offset > context.text.length) {
+            return { paperId: paper.id, source: context.source, status: 'continuation_error', code: 'offset_out_of_range', contextVersion, hint: 'Restart this paper at offset 0.' };
+          }
+          if (!isAgentToolTextBoundary(context.text, offset)) {
+            return { paperId: paper.id, source: context.source, status: 'continuation_error', code: 'invalid_offset', contextVersion, hint: 'Use the exact returned offset; an evidence token or Unicode character cannot be split.' };
+          }
+          const slice = sliceAgentToolText(context.text, maxChars, offset);
+          if (slice.text.length > 1600) {
+            return {
+              paperId: paper.id,
+              source: context.source,
+              status: 'continuation_error',
+              code: 'evidence_token_exceeds_page_budget',
+              contextVersion,
+              textStart: offset,
+              textEnd: offset,
+              requiredChars: slice.text.length,
+              maximumPageChars: 1600,
+              continuation: { canContinue: false },
+              hint: 'The evidence token cannot fit the maximum text page and cannot be split. Use another available context mode or report this source as unavailable.',
+            };
+          }
+          const sourceCoverage = /-rag$/.test(context.source) ? 'retrieved-snippets'
+            : /summary|metadata/.test(context.source) ? 'summary' : 'document-text';
+          // A continuation may start after the source header. Keep the section's
+          // canonical identity alongside its remaining text so attribution is
+          // available without changing the original text or cursor.
+          const sourceHeaders = [...context.text.matchAll(/^# Source\b(?: (\[\[cite:[^\]\r\n]+\]\]))?[^\n]*/gm)];
+          const citations = (context.citations ?? []).filter((citation) => {
+            const token = formatCitationEvidenceToken(citation);
+            if (slice.text.includes(token)) return true;
+            return sourceHeaders.some((header, headerIndex) => header[1] === token &&
+              header.index! < slice.offset && (sourceHeaders[headerIndex + 1]?.index ?? context.text.length) > offset);
+          }).map((citation) => ({ ...citation, evidenceToken: formatCitationEvidenceToken(citation) }));
+          return {
+            paperId: paper.id,
+            title: paper.title,
+            source: context.source,
+            sourceCoverage,
+            text: slice.text,
+            textStart: offset,
+            textEnd: slice.offset,
+            totalTextChars: context.text.length,
+            textTruncated: slice.truncated,
+            citations,
+            contextVersion,
+            continuation: {
+              canContinue: slice.truncated && slice.offset > offset,
+              tool: 'request_paper_context',
+              paperIds: [paper.id],
+              mode,
+              reason: query,
+              fullText,
+              offset: slice.offset,
+              maxChars,
+              contextVersion,
+            },
+          };
+        }));
 
         return {
           content: JSON.stringify({
             mode,
-            papers: contexts.map((context, index) => ({
-              paperId: targetPapers[index]?.id,
-              title: targetPapers[index]?.title,
-              source: context.source,
-              text: context.text,
-              citations: context.citations,
-            })),
+            status: papers.some((paper) => 'status' in paper && paper.status === 'continuation_error') ? 'continuation_error' : 'ok',
+            requestedCount: targetPapers.length,
+            matchedCount: targetPapers.length,
+            returnedCount: papers.length,
+            countUnit: 'papers',
+            omittedPaperIds,
+            truncated: omittedPaperIds.length > 0 || papers.some((paper) => 'textTruncated' in paper && paper.textTruncated),
+            continuation: {
+              canContinue: omittedPaperIds.length > 0 || papers.some((paper) => 'continuation' in paper && paper.continuation?.canContinue),
+              tool: 'request_paper_context',
+              omittedPaperIds,
+              hint: 'Request omitted papers next; resume text with each paper continuation. Snippets and summaries are not full-document reading.',
+            },
+            papers,
           }),
           cards: [{ kind: 'papers', title: `${contexts.length} paper context result(s)` }],
         };
@@ -526,7 +687,10 @@ export function createLibraryAgentTools(options: CreateLibraryAgentToolsOptions)
           throw new Error('graph_neighbors requires a paperId.');
         }
 
-        const result = await loadGraphNeighbors(paperId, {
+        const resolved = resolveAgentPaperIds(scope, [paperId]);
+        if (resolved.error) return scopeErrorResult(resolved.error);
+
+        const result = await loadGraphNeighbors(resolved.ids[0]!, {
           depth: Number(args.depth) === 2 ? 2 : 1,
           includeNotes: args.includeNotes !== false,
         });
@@ -554,14 +718,14 @@ export function createLibraryAgentTools(options: CreateLibraryAgentToolsOptions)
       },
       async execute(args, ctx): Promise<AgentToolResult> {
         const requestedIds = stringArray(args.paperIds).map(normalizeGraphPaperId).filter(Boolean);
-        const scopeIds = requestedIds.length > 0
-          ? requestedIds
-          : (options.currentPaperScopeIds ?? []).map(normalizeGraphPaperId).filter(Boolean);
+        const resolved = resolveAgentPaperIds(scope, requestedIds);
+        if (resolved.error) return scopeErrorResult(resolved.error);
+        const scopeIds = resolved.ids;
         const seen = new Set<string>();
         const targetPapers: GraphExplorePaperInput[] = [];
 
         for (const paperId of scopeIds) {
-          const paper = paperById.get(paperId);
+          const paper = scopedPaperById.get(paperId);
 
           if (!paper || seen.has(paper.id)) {
             continue;

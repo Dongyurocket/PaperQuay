@@ -408,15 +408,30 @@ function DocumentReaderTab({
   const [currentDocument, setCurrentDocument] = useState<WorkspaceItem>(document);
   const [attachTranslatedPdfBusy, setAttachTranslatedPdfBusy] = useState(false);
   const [pdfSource, setPdfSource] = useState<PdfSource>(null);
-  const [pdfPageCount, setPdfPageCount] = useState(0);
+  const [pdfData, setPdfData] = useState<Uint8Array | null>(null);
+  const [pdfPageCountSnapshot, setPdfPageCountSnapshot] = useState<{
+    source: PdfSource;
+    data: Uint8Array | null;
+    count: number;
+  } | null>(null);
+  // 页数由 PDF 视图负责，父层只接受当前源的快照，避免独立清零后无法重放引用。
+  const pdfPageCount = pdfPageCountSnapshot?.source === pdfSource &&
+    pdfPageCountSnapshot.data === pdfData
+    ? pdfPageCountSnapshot.count
+    : 0;
+  const handlePdfPageCountChange = useCallback((count: number) => {
+    setPdfPageCountSnapshot((current) =>
+      current?.source === pdfSource && current.data === pdfData && current.count === count
+        ? current
+        : { source: pdfSource, data: pdfData, count },
+    );
+  }, [pdfData, pdfSource]);
   const [pdfDocumentError, setPdfDocumentError] = useState('');
   const [pdfOpenFailed, setPdfOpenFailed] = useState(false);
   const [restoringDocumentBlocks, setRestoringDocumentBlocks] = useState(false);
   useEffect(() => {
-    setPdfPageCount(0);
     setPdfDocumentError('');
   }, [pdfSource]);
-  const [pdfData, setPdfData] = useState<Uint8Array | null>(null);
   const [pdfPath, setPdfPath] = useState('');
   const pdfScrollPositionsRef = useRef<Record<string, PdfScrollPosition>>({});
   const pdfReadingHeatmapsRef = useRef<Record<string, PdfReadingHeatmap>>({});
@@ -4319,7 +4334,7 @@ function DocumentReaderTab({
   return (
     <div className="relative h-full min-h-0" hidden={!isActive}>
       <ReaderWorkspace
-        onPdfPageCountChange={setPdfPageCount}
+        onPdfPageCountChange={handlePdfPageCountChange}
         onPdfDocumentErrorChange={setPdfDocumentError}
         active={isActive}
         currentDocument={currentDocument}

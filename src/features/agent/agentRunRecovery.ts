@@ -3,6 +3,7 @@ import type { ComparativeSurveyArtifacts } from '../../services/agentCapability'
 import type { AgentLoopMessage } from '../../services/agentLoop';
 import type { AgentChatMessage } from './AgentWorkspace.types';
 import type { LibraryAgentRagCitation } from '../../services/libraryAgent';
+import { normalizeSurveyCoverageLedger, normalizeSurveyResearchContexts } from '../../services/agentSurveyCoverage.ts';
 import { newMessageId } from './AgentWorkspace.model.ts';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -99,12 +100,15 @@ export function latestComparativeSurveyCheckpoint(
       isRecord(event.payload.artifacts)
     ) {
       const artifacts = event.payload.artifacts;
-      return {
+      const recovered: Partial<ComparativeSurveyArtifacts> = {
         rephrasedQuestion: typeof artifacts.rephrasedQuestion === 'string' ? artifacts.rephrasedQuestion : undefined,
         subquestions: Array.isArray(artifacts.subquestions)
           ? artifacts.subquestions.filter((value): value is string => typeof value === 'string')
           : undefined,
         researchNotes: typeof artifacts.researchNotes === 'string' ? artifacts.researchNotes : undefined,
+        ...(Array.isArray(artifacts.researchContexts)
+          ? { researchContexts: normalizeSurveyResearchContexts(artifacts.researchContexts) }
+          : {}),
         citations: Array.isArray(artifacts.citations)
           ? artifacts.citations.flatMap((value) => {
             if (!isRecord(value) || typeof value.paperId !== 'string' || typeof value.paperTitle !== 'string') {
@@ -130,6 +134,9 @@ export function latestComparativeSurveyCheckpoint(
           )
           : [],
       };
+      const coverage = normalizeSurveyCoverageLedger(artifacts.coverage);
+      if (coverage) recovered.coverage = coverage;
+      return recovered;
     }
   }
 
@@ -171,7 +178,11 @@ export function latestAgentRecoveryCitations(events: AgentRunEventRecord[]): Lib
 export function recoveryCheckpointToChatMessages(messages: AgentLoopMessage[]): AgentChatMessage[] {
   return messages
     .filter((message): message is AgentLoopMessage & { role: 'user' | 'assistant' } =>
-      message.role === 'user' || message.role === 'assistant',
+      // Tool-turn text is a progress draft, even when it has a nonempty body.
+      // Keep those messages in the checkpoint for provider recovery, but not
+      // in the restored chat; the workspace already explains where to resume.
+      Boolean(message.content.trim()) && (message.role === 'user'
+        || (message.role === 'assistant' && !message.toolCalls?.length)),
     )
     .map((message) => ({
       id: newMessageId(),
