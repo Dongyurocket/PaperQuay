@@ -1,13 +1,14 @@
 # PaperQuay v{{VERSION}}
 
-This release verifies the relationship between each Agent answer sentence and its cited evidence before enabling citation navigation.
+Agent answers now number verified evidence fragments in first-use order and show a matching reference list immediately after the answer.
 
-- Answers copy structured citation tokens; displayed numbers and navigation targets come from canonical sources. Unknown, ambiguous, conflicting, and unverified citations remain visibly unavailable.
-- The selected Agent model checks each sentence/source pair. Only a valid supported verdict enables navigation; timeouts, invalid responses, and failures remain unverified. Verification adds model latency and usage cost, and readers should still check the original source.
-- Verification results persist across saved conversations, forks, and recovery. Citations can be checked again with the current model, with run and token usage recorded.
-- The verified-evidence footer lists only sources actually verified for the answer. Other retrieved materials are collapsed separately; legacy numeric citations remain unverified.
+- Each answer starts at [1]. Repeated uses of the same verified fragment share a number; different fragments from the same paper and PDF page retain separate entries.
+- The complete reference list includes titles, available PDF page numbers and distinguishable previews, with expandable long excerpts. Body markers and list entries open the same canonical target.
+- Citation verification details use the same numbers. Failed, pending and legacy citations remain unavailable; partial streaming tokens do not expose internal IDs or enable navigation.
+- Reader navigation locates only a unique original block. Missing or ambiguous blocks fall back explicitly to a reliable PDF page; missing locations, invalid pages and unavailable PDFs show clear status messages.
+- Fixed persistence of citation-verification run events. Display numbering is derived from existing saved evidence; no database migration is required.
 
-Validation: build and all 678 tests passed; the user confirmed manual acceptance on 2026-10-09.
+Validation: frontend build and all 690 tests passed, along with production message-component interaction checks. Full desktop acceptance remains pending: the live model verifier produced no successful bindings and subsequent desktop automation failed. The user will continue manual testing after release; verification gates have not been weakened.
 
 ## Downloads
 
@@ -17,14 +18,15 @@ Choose the installer for your system from Assets: Windows `.exe`, macOS `.dmg`, 
 
 # PaperQuay v{{VERSION}} 中文说明
 
-本版在开放 Agent 引用跳转前，逐条核验回答句子与所引证据的关系。
+本版让 Agent 按正文首次有效引用顺序编号，并在正文后显示对应的片段级参考文献列表。
 
-- 回答复制结构化引用 token，显示编号与跳转目标来自 canonical 来源；未知、歧义、元数据冲突和未验证引用保留可见状态且不可跳转。
-- 当前 Agent 模型逐对核验句子与来源，仅有效的支持判定可放行；超时、非法响应及失败保持未验证。二次核验会增加延迟和模型费用，判断仍须以原文为准。
-- 核验结果随会话保存，分叉及恢复保留完整证据；支持使用当前模型重新核验，并记录运行和 token 用量。
-- 底部已核验证据仅列回答实际通过核验的来源，其他检索材料单独折叠；历史数字引用保持未验证。
+- 每条回答从 [1] 开始，同一已核验片段重复引用复用编号；同篇同页的不同片段保留独立条目。
+- 完整列表包含题名、可用 PDF 页序及可区分的预览，长片段可展开；正文编号与列表入口使用同一原始定位目标。
+- 核验明细共享编号；失败、待核验和历史数字引用仍不可跳转，流式半 token 不泄露内部 ID 或生成可信链接。
+- 阅读器只定位唯一原结构块；失效或歧义 block 明确降级到可靠 PDF 页面，缺失位置、越界页码和 PDF 不可用均显示明确提示。
+- 修复引用核验运行事件保存。编号来自既有证据快照，无需数据库迁移。
 
-验证：构建与全部 678 项测试通过；2026-10-09 用户确认人工核验通过。
+验证：前端构建与全部 690 项测试及生产消息组件交互检查通过。完整桌面验收待补测：真实模型核验未产生成功绑定，后续桌面自动化报错。用户将在发布后继续人工测试，核验门禁未放宽。
 
 ## 下载
 
