@@ -8,7 +8,7 @@ export function formatCitationEvidenceToken(citation: { id: string }): string {
   return `[[cite:${citation.id}]]`;
 }
 
-export const AGENT_CITATION_PROTOCOL = 'For factual answer sentences, copy only exact [[cite:<id>]] tokens supplied with evidence in this run. Never generate numeric [n] citations or invent tokens. Do not hand-write source titles/pages/blocks or raw paper_/category_ IDs. If no evidence token supports a claim, say 当前库内没有查到. Label model inferences 我的推断 and never put them in excerpt or synthesis notes. Preserve tokens verbatim when summarizing or compressing context.';
+export const AGENT_CITATION_PROTOCOL = 'For factual answer sentences, copy only exact [[cite:<id>]] tokens supplied with evidence in this run into the answer body. Never generate numeric [n] citations or invent tokens. Do not hand-write a references or bibliography appendix; the application generates an ordered fragment-level reference list from verified body tokens. Do not hand-write source titles/pages/blocks or raw paper_/category_ IDs. If no evidence token supports a claim, say 当前库内没有查到. Label model inferences 我的推断 and never put them in excerpt or synthesis notes. Preserve tokens verbatim when summarizing or compressing context.';
 
 /**
  * Maintains one canonical citation list for a single Agent run. Labels are

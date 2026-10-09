@@ -1,6 +1,33 @@
 import { normalizeAgentCitationTokens, type AgentCitationBinding } from '../../services/agentAnswerEvidence.ts';
 import type { LibraryAgentRagCitation } from '../../services/libraryAgent';
 
+export interface AgentAnswerReference {
+  number: number;
+  citationId: string;
+  citation: LibraryAgentRagCitation;
+  firstVerifiedOffset: number;
+}
+
+export interface AgentAnswerCitationOccurrence {
+  binding: AgentCitationBinding;
+  citation?: LibraryAgentRagCitation;
+  referenceNumber?: number;
+}
+
+export interface AgentAnswerReferenceModel {
+  occurrences: AgentAnswerCitationOccurrence[];
+  references: AgentAnswerReference[];
+}
+
+export type AgentCitationClick = (citation: LibraryAgentRagCitation, referenceNumber?: number) => void;
+
+export function citationOccurrenceLabel({ binding, referenceNumber }: AgentAnswerCitationOccurrence): string {
+  if (referenceNumber != null) return String(referenceNumber);
+  if (binding.reason === 'legacy-citation') return `${binding.rawToken.replace(/[\[\]]/g, '')} · 未验证`;
+  if (binding.status === 'rejected') return '引用未通过';
+  return binding.reason === 'verifier-unavailable' || binding.reason === 'malformed-token' ? '待核验' : '未验证';
+}
+
 export function citationBindingReason(binding?: AgentCitationBinding): string {
   switch (binding?.reason) {
     case 'supported': return '该句已通过片段证据核验';
@@ -29,21 +56,39 @@ export function resolveAgentCitationBindings(content: string, citations: Library
 }
 
 export function usedVerifiedAgentCitations(content: string, citations: LibraryAgentRagCitation[] = [], bindings?: AgentCitationBinding[]) {
-  const ids = new Set(resolveAgentCitationBindings(content, citations, bindings)
-    .filter(({ binding }) => binding.status === 'verified').map(({ binding }) => binding.citationId));
-  return citations.filter((c) => ids.has(c.id));
+  return buildAgentAnswerReferences(content, citations, bindings).references.map((reference) => reference.citation);
 }
 
-export function injectAgentCitationBindings(content: string, citations: LibraryAgentRagCitation[] = [], bindings?: AgentCitationBinding[]) {
-  const resolved = resolveAgentCitationBindings(content, citations, bindings);
+export function buildAgentAnswerReferences(content: string, citations: LibraryAgentRagCitation[] = [], bindings?: AgentCitationBinding[]): AgentAnswerReferenceModel {
+  const references: AgentAnswerReference[] = [];
+  const byId = new Map<string, AgentAnswerReference>();
+  const occurrences = resolveAgentCitationBindings(content, citations, bindings)
+    .sort((a, b) => a.binding.start - b.binding.start)
+    .map(({ binding, citation }): AgentAnswerCitationOccurrence => {
+      if (binding.status !== 'verified' || !citation) return { binding, citation };
+      let reference = byId.get(citation.id);
+      if (!reference) {
+        reference = { number: references.length + 1, citationId: citation.id, citation, firstVerifiedOffset: binding.start };
+        byId.set(citation.id, reference);
+        references.push(reference);
+      }
+      return { binding, citation, referenceNumber: reference.number };
+    });
+  return { occurrences, references };
+}
+
+export function injectAgentCitationBindings(content: string, citations: LibraryAgentRagCitation[] = [], bindings?: AgentCitationBinding[], model?: AgentAnswerReferenceModel) {
+  const resolved = (model ?? buildAgentAnswerReferences(content, citations, bindings)).occurrences;
   const hrefPrefix = `#agent-binding-${crypto.randomUUID()}-`;
   let result = '';
   let previous = 0;
   // Reserve this URL namespace so model-written Markdown cannot forge a verified occurrence.
-  const sanitize = (text: string) => text.replace(/#agent-(?:binding|cite)-/gi, '#agent-untrusted-');
-  resolved.forEach(({ binding, citation }, index) => {
+  const sanitize = (text: string) => text.replace(/#agent-(?:binding|cite)-/gi, '#agent-untrusted-')
+    .replace(/\[\[(?:c|ci|cit|cite)?$/g, '[待核验]');
+  resolved.forEach((occurrence, index) => {
+    const { binding } = occurrence;
     result += sanitize(content.slice(previous, binding.start));
-    const label = citation?.label ?? (binding.verifier === 'legacy' ? binding.rawToken.replace(/[\[\]]/g, '') : '?');
+    const label = citationOccurrenceLabel(occurrence);
     result += `[${label}](${hrefPrefix}${index})`;
     previous = binding.end;
   });

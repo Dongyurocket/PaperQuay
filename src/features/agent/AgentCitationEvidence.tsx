@@ -1,16 +1,17 @@
 import { useState } from 'react';
 import { Loader2, ShieldCheck } from 'lucide-react';
 import type { AgentChatMessage } from './AgentWorkspace.types';
-import { citationBindingReason, resolveAgentCitationBindings } from './agentCitationRendering.ts';
+import { buildAgentAnswerReferences, citationBindingReason, type AgentAnswerReferenceModel } from './agentCitationRendering.ts';
 
-export default function AgentCitationEvidence({ message, disabled, onVerify, l }: {
+export default function AgentCitationEvidence({ message, referenceModel, disabled, onVerify, l }: {
   message: AgentChatMessage;
+  referenceModel?: AgentAnswerReferenceModel;
   disabled: boolean;
   onVerify?: (message: AgentChatMessage) => Promise<void>;
   l: (zh: string, en: string) => string;
 }) {
   const [running, setRunning] = useState(false);
-  const resolved = resolveAgentCitationBindings(message.content, message.ragCitations, message.citationBindings);
+  const resolved = (referenceModel ?? buildAgentAnswerReferences(message.content, message.ragCitations, message.citationBindings)).occurrences;
   if (!resolved.length) return null;
   const verified = resolved.filter(({ binding }) => binding.status === 'verified').length;
   const rejected = resolved.filter(({ binding }) => binding.status === 'rejected').length;
@@ -28,8 +29,8 @@ export default function AgentCitationEvidence({ message, disabled, onVerify, l }
     <details className="mt-2">
       <summary className="cursor-pointer">{l('引用核验明细', 'Citation verification details')}</summary>
       <ul className="mt-2 space-y-2">
-        {resolved.map(({ binding, citation }, index) => <li key={`${binding.start}:${index}`} className="break-words">
-          <div>[{citation?.label ?? '?'}] {binding.sentenceText}</div>
+        {resolved.map(({ binding, referenceNumber }, index) => <li key={`${binding.start}:${index}`} className="break-words">
+          <div>{referenceNumber == null ? l(`引用位置 ${index + 1}`, `Occurrence ${index + 1}`) : `[${referenceNumber}]`} {binding.sentenceText}</div>
           <div>{citationBindingReason(binding)}{binding.model ? ` · ${binding.model}` : ''}</div>
           {binding.detail ? <div>{binding.detail}</div> : null}
         </li>)}

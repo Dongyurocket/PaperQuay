@@ -10,6 +10,7 @@ import {
   buildSelectedExcerptNoteCreateRequest,
   isNoteEventRecord,
   resolveNoteAnchorJumpTarget,
+  resolveAgentCitationJumpTarget,
   resolveReaderNoteAnchorTarget,
   resolveNotePdfLocation,
   resolveNoteAnchorWorkspaceId,
@@ -189,6 +190,61 @@ test('buildNoteAnchorJumpDetail falls back to the page label when only id and la
 function jumpBlock(blockId: string, pageIndex: number, type = 'text') {
   return { blockId, pageIndex, type };
 }
+
+test('Agent references require the exact block on the cited page', () => {
+  const detail = { noteId: 'n1', anchorId: 'a1', blockId: 'original', pageIndex: 2 };
+  const exact = jumpBlock('original', 2);
+  assert.equal(resolveAgentCitationJumpTarget(detail, [jumpBlock('other', 2), exact], 4).block, exact);
+  for (const blocks of [[], [jumpBlock('other', 2)], [jumpBlock('original', 3)]]) {
+    const target = resolveAgentCitationJumpTarget(detail, blocks, 4);
+    assert.equal(target.block, null);
+    assert.equal(target.pageIndex, 2);
+    assert.deepEqual(target.highlightTarget?.bbox, [0, 0, 1000, 1000]);
+    assert.equal(target.shouldWaitForBlocks, false);
+  }
+});
+
+test('Agent references reject invalid pages without clamping or guessing a block', () => {
+  for (const pageIndex of [-1, 4, 200, 1.5, NaN, Infinity]) {
+    const target = resolveAgentCitationJumpTarget({ noteId: 'n1', anchorId: 'a1', blockId: 'original', pageIndex }, [jumpBlock('original', 2)], 4);
+    assert.equal(target.invalidPage, true);
+    assert.equal(target.block, null);
+    assert.equal(target.highlightTarget, null);
+  }
+});
+
+test('Agent references without a page only locate an available exact block', () => {
+  const detail = { noteId: 'n1', anchorId: 'a1', blockId: 'original', pageIndex: null };
+  const exact = jumpBlock('original', 2);
+  assert.equal(resolveAgentCitationJumpTarget(detail, [exact], 4).block, exact);
+  assert.equal(resolveAgentCitationJumpTarget(detail, [exact], 4).highlightTarget?.pageIndex, 2);
+  for (const blocks of [[], [jumpBlock('other', 2)], [jumpBlock('original', 4)]]) {
+    const target = resolveAgentCitationJumpTarget(detail, blocks, 4);
+    assert.equal(target.block, null);
+    assert.equal(target.highlightTarget, null);
+    assert.equal(target.shouldWaitForBlocks, false);
+  }
+});
+
+test('Agent references with ambiguous block IDs fall back to the page or no location', () => {
+  const blocks = [jumpBlock('duplicated', 2), jumpBlock('duplicated', 2)];
+  const detail = { noteId: 'n1', anchorId: 'a1', blockId: 'duplicated', pageIndex: 2 };
+  const target = resolveAgentCitationJumpTarget(detail, blocks, 4);
+  assert.equal(target.block, null);
+  assert.equal(target.highlightTarget?.pageIndex, 2);
+  const missingPage = resolveAgentCitationJumpTarget({ ...detail, pageIndex: null }, blocks, 4);
+  assert.equal(missingPage.block, null);
+  assert.equal(missingPage.highlightTarget, null);
+});
+
+test('Agent PDF text fallback uses the reliable page and never an unmeasured bbox', () => {
+  const detail = { noteId: 'n1', anchorId: 'a1', pageIndex: 2, pdfLocation: { pageNumber: 200, bbox: [1, 2, 3, 4] as [number, number, number, number] } };
+  const target = resolveAgentCitationJumpTarget(detail, [jumpBlock('other', 2)], 4);
+  assert.equal(target.block, null);
+  assert.equal(target.highlightTarget?.pageIndex, 2);
+  assert.deepEqual(target.highlightTarget?.bbox, [0, 0, 1000, 1000]);
+  assert.equal(resolveAgentCitationJumpTarget({ ...detail, pageIndex: null }, [], 4).highlightTarget, null);
+});
 
 test('resolveNoteAnchorJumpTarget prefers the exact structural block', () => {
   const detail = buildNoteAnchorJumpDetail(

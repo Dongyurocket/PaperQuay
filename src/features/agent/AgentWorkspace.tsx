@@ -886,7 +886,7 @@ function AgentWorkspace() {
     }
   };
 
-  const handleOpenRagCitation = (citation: LibraryAgentRagCitation) => {
+  const handleOpenRagCitation = (citation: LibraryAgentRagCitation, referenceNumber?: number) => {
     const targetPaperId = `native-library:${citation.paperId}`;
     emitJumpToNoteAnchor({
       requestId: createAgentRagCitationJumpRequestId(),
@@ -897,7 +897,7 @@ function AgentWorkspace() {
       notePaperId: targetPaperId,
       anchorId: citation.id,
       anchorPaperId: targetPaperId,
-      anchorLabel: `[${citation.label}] ${citation.paperTitle}`,
+      anchorLabel: `${referenceNumber == null ? '' : `[${referenceNumber}] `}${citation.paperTitle}`,
       blockId: citation.blockId ?? null,
       pageIndex: citation.pageIndex,
       previewText: citation.previewText ?? null,

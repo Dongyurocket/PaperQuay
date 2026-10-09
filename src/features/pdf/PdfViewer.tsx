@@ -131,6 +131,8 @@ type BBoxPageSizeSource = Pick<
 > | null;
 
 interface PdfViewerProps {
+  onPageCountChange?: (pageCount: number) => void;
+  onDocumentErrorChange?: (error: string) => void;
   source: PdfSource;
   pdfData: Uint8Array | null;
   scrollPosition?: PdfScrollPosition | null;
@@ -299,6 +301,8 @@ async function resolveOutlineDestinationPageIndex(
 }
 
 function PdfViewer({
+  onPageCountChange,
+  onDocumentErrorChange,
   source,
   pdfData,
   scrollPosition = null,
@@ -381,6 +385,9 @@ function PdfViewer({
 
   const [editorTool, setEditorTool] = useState<AnnotationEditorTool>('none');
   const [pageCount, setPageCount] = useState(0);
+  useEffect(() => {
+    onPageCountChange?.(pageCount);
+  }, [onPageCountChange, pageCount]);
   const [pageSizes, setPageSizes] = useState<Record<number, PageSize>>({});
   const [pageHosts, setPageHosts] = useState<Record<number, PageHostState>>({});
   const [currentPage, setCurrentPage] = useState(1);
@@ -389,6 +396,9 @@ function PdfViewer({
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [documentError, setDocumentError] = useState('');
+  useEffect(() => {
+    onDocumentErrorChange?.(documentError);
+  }, [onDocumentErrorChange, documentError]);
   const [saveMessage, setSaveMessage] = useState('');
   const [hasSelectedEditor, setHasSelectedEditor] = useState(false);
   const [hasLiveTextSelection, setHasLiveTextSelection] = useState(false);

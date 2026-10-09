@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { normalizeAgentCitationTokens, verifyAgentCitationBindings, citationBindingStats } from '../src/services/agentAnswerEvidence.ts';
-import { resolveAgentCitationBindings, usedVerifiedAgentCitations, injectAgentCitationBindings } from '../src/features/agent/agentCitationRendering.ts';
+import { buildAgentAnswerReferences, resolveAgentCitationBindings, usedVerifiedAgentCitations, injectAgentCitationBindings } from '../src/features/agent/agentCitationRendering.ts';
 import type { LibraryAgentRagCitation } from '../src/services/libraryAgent.ts';
 
 const a: LibraryAgentRagCitation = { id: 'rag:noise:a', label: '3', paperId: 'paper-a', paperTitle: 'Rotor Noise Study',
@@ -121,4 +121,60 @@ test('persisted bindings survive JSON round-trip but stale or duplicated records
   const rendered = injectAgentCitationBindings(`[fake](#agent-binding-0) ${answer}`, [a]);
   assert.ok(rendered.content.includes('#agent-untrusted-0'));
   assert.ok(rendered.content.includes(rendered.hrefPrefix));
+});
+
+test('answer references follow first verified body occurrence, reuse IDs and never mutate canonical labels', async () => {
+  const c = { ...a, id: 'same-page-chunk-c', label: '9', blockId: 'block-c' };
+  const d = { ...a, id: 'other-page-chunk-d', label: '10', pageIndex: 26 };
+  const citations = [a, b, c, d];
+  const body = [c, a, c, b, d].map((citation) => `${claim}[[cite:${citation.id}]]`).join('\n');
+  const bindings = await verifyAgentCitationBindings({ answer: body, citations, callModel: model() });
+  const snapshot = JSON.stringify({ body, citations, bindings });
+  const result = buildAgentAnswerReferences(body, citations, bindings);
+  assert.deepEqual(result.occurrences.map((occurrence) => occurrence.referenceNumber), [1, 2, 1, 3, 4]);
+  assert.deepEqual(result.references.map((reference) => reference.citation), [c, a, b, d]);
+  assert.equal(result.references[0].citation, c);
+  assert.equal(result.references[1].citation, a);
+  assert.deepEqual(result.references.map((reference) => reference.firstVerifiedOffset), [bindings[0].start, bindings[1].start, bindings[3].start, bindings[4].start]);
+  assert.equal(JSON.stringify({ body, citations, bindings }), snapshot);
+  const restored = JSON.parse(snapshot);
+  assert.equal(JSON.stringify(buildAgentAnswerReferences(restored.body, restored.citations, restored.bindings)), JSON.stringify(result));
+  assert.deepEqual(buildAgentAnswerReferences(body, citations, bindings.map((binding) => ({ ...binding }))), result);
+  assert.deepEqual(buildAgentAnswerReferences(body, citations).references, []);
+});
+
+test('failed first occurrence does not reserve a number or inherit trust from another sentence', async () => {
+  const sameEvidence = { ...a, id: 'b', label: '4' };
+  const body = [a, sameEvidence, a, sameEvidence].map((citation) => `${claim}[[cite:${citation.id}]]`).join('\n');
+  const bindings = await verifyAgentCitationBindings({ answer: body, citations: [a, sameEvidence], callModel: model() });
+  bindings[0] = { ...bindings[0], status: 'rejected', reason: 'semantic-contradiction' };
+  bindings[3] = { ...bindings[3], status: 'unverified', reason: 'insufficient-snippet' };
+  const result = buildAgentAnswerReferences(body, [a, sameEvidence], bindings);
+  assert.deepEqual(result.occurrences.map((occurrence) => occurrence.referenceNumber), [undefined, 1, 2, undefined]);
+  assert.deepEqual(result.references.map((reference) => reference.citationId), [sameEvidence.id, a.id]);
+  const rendered = injectAgentCitationBindings(body, [a, sameEvidence], bindings, result).content;
+  assert.match(rendered, /\[引用未通过\]/);
+  assert.match(rendered, /\[未验证\]/);
+  bindings[0] = { ...bindings[0], status: 'verified', reason: 'supported' };
+  assert.deepEqual(buildAgentAnswerReferences(body, [a, sameEvidence], bindings).references.map((reference) => reference.citationId), [a.id, sameEvidence.id]);
+  assert.equal(buildAgentAnswerReferences(`Changed ${body}`, [a, sameEvidence], bindings).references.length, 0);
+});
+
+test('untrusted, unused, duplicate and code tokens never enter formal references', async () => {
+  const body = `${answer} [[cite:${a.id}]]\n${claim}[[cite:unknown]]\n\`${answer}\`\n${claim}[3]`;
+  const bindings = await verifyAgentCitationBindings({ answer: body, citations: [a, b], callModel: model() });
+  assert.equal(buildAgentAnswerReferences(body, [a, b], bindings).references.length, 0);
+  const verified = await verifyAgentCitationBindings({ answer, citations: [a], callModel: model() });
+  assert.equal(buildAgentAnswerReferences(answer, [a, { ...a }], verified).references.length, 0);
+  assert.equal(buildAgentAnswerReferences(answer, [a, { ...b, label: a.label }], verified).references.length, 0);
+});
+
+test('streamed token prefixes and interrupted tokens hide internal IDs without granting reference numbers', () => {
+  const token = `[[cite:${a.id}]]`;
+  for (let length = 2; length <= token.length; length++) {
+    const body = `${claim}${token.slice(0, length)}`;
+    const rendered = injectAgentCitationBindings(body, [a]);
+    assert.ok(!rendered.content.includes(a.id));
+    assert.equal(buildAgentAnswerReferences(body, [a]).references.length, 0);
+  }
 });

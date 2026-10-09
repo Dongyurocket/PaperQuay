@@ -40,6 +40,8 @@ import type {
 } from '../../types/reader';
 
 interface ReaderWorkspaceProps {
+  onPdfPageCountChange?: (pageCount: number) => void;
+  onPdfDocumentErrorChange?: (error: string) => void;
   active: boolean;
   currentDocument: ReaderWorkspaceDocument;
   selectedSectionTitle: string;
@@ -448,6 +450,8 @@ function ReadingStage(props: ReaderWorkspaceProps & { immersiveReading: boolean 
             }}
           >
             <PdfViewer
+              onPageCountChange={props.onPdfPageCountChange}
+              onDocumentErrorChange={props.onPdfDocumentErrorChange}
               source={pdfSource}
               pdfData={pdfData}
               scrollPosition={pdfScrollPosition}

@@ -19,7 +19,6 @@ import {
   X,
 } from 'lucide-react';
 import type { LibraryAgentFigureReference, LibraryAgentPlan, LibraryAgentRagCitation } from '../../services/libraryAgent';
-import { groupAgentCitations, formatGroupPageSummary } from './agentCitationGroups';
 import type { AgentMemoryWritePlan } from '../../services/agentMemory';
 import type { AgentNoteWritePlan } from '../../services/agentNotePlan';
 import type { AgentCapabilityView } from './AgentWorkspace.types';
@@ -29,7 +28,8 @@ import type { UiLanguage } from '../../types/reader';
 import type { AgentChatMessage, AgentToolCallView } from './AgentWorkspace.types';
 import AgentMarkdown from './AgentMarkdown';
 import AgentCitationEvidence from './AgentCitationEvidence';
-import { usedVerifiedAgentCitations } from './agentCitationRendering.ts';
+import AgentAnswerReferences from './AgentAnswerReferences';
+import { buildAgentAnswerReferences, type AgentCitationClick } from './agentCitationRendering.ts';
 import { PlanDiffCard, ToolCallCard, TraceTimeline } from './AgentExecutionCards';
 import { loadLocalAssetDataUrl } from '../../services/assets';
 import { formatFileSize } from '../../utils/files';
@@ -258,113 +258,6 @@ function AssistantThinkingBlock({
   );
 }
 
-function AgentRagCitationChips({
-  citations,
-  l,
-  onOpenCitation,
-}: {
-  citations?: LibraryAgentRagCitation[];
-  l: (zh: string, en: string) => string;
-  onOpenCitation?: (citation: LibraryAgentRagCitation) => void;
-}) {
-  const [expandedPaperIds, setExpandedPaperIds] = useState<Set<string>>(() => new Set());
-  const [showAllGroups, setShowAllGroups] = useState(false);
-
-  const groups = useMemo(() => groupAgentCitations(citations), [citations]);
-
-  if (!groups.length) {
-    return null;
-  }
-
-  const toggleGroup = (paperId: string) => {
-    setExpandedPaperIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(paperId)) {
-        next.delete(paperId);
-      } else {
-        next.add(paperId);
-      }
-      return next;
-    });
-  };
-
-  const visibleGroups = showAllGroups ? groups : groups.slice(0, 6);
-  const hasHiddenGroups = groups.length > 6;
-
-  return (
-    <div className="mt-4 space-y-2">
-      <div className="text-xs font-medium text-[var(--pq-text-muted)]">{l('已核验证据', 'Verified evidence')}</div>
-      <div className="flex flex-wrap items-start gap-2">
-        {visibleGroups.map((group) => {
-          const isExpanded = expandedPaperIds.has(group.paperId);
-          const pageSummary = formatGroupPageSummary(group, l);
-
-          return (
-            <div key={group.paperId} className="flex flex-col gap-1.5">
-              <button
-                type="button"
-                onClick={() => toggleGroup(group.paperId)}
-                className={`inline-flex max-w-full items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] font-semibold transition ${
-                  isExpanded
-                    ? 'border-[var(--pq-accent)] bg-[var(--pq-accent-soft)] text-[var(--pq-accent)]'
-                    : 'border-[var(--pq-accent-border)] bg-[var(--pq-accent-soft)]/60 text-[var(--pq-accent)] hover:border-[var(--pq-accent)] hover:bg-[var(--pq-surface)]'
-                }`}
-                title={group.paperTitle}
-              >
-                <span className="max-w-[220px] truncate">{group.paperTitle}</span>
-                <span className="text-[var(--pq-text-faint)]">· {pageSummary}</span>
-                <ChevronDown
-                  className={`h-3 w-3 shrink-0 text-[var(--pq-text-faint)] transition-transform ${
-                    isExpanded ? 'rotate-180' : ''
-                  }`}
-                />
-              </button>
-
-              {isExpanded && (
-                <div className="flex flex-wrap gap-1.5 pl-2 py-0.5 border-l-2 border-[var(--pq-accent-border)]">
-                  {group.pages.map((page) => {
-                    const pageLabel =
-                      page.pageIndex !== null && page.pageIndex !== undefined
-                        ? l(`第 ${page.pageIndex + 1} 页`, `Page ${page.pageIndex + 1}`)
-                        : l('全文', 'Full text');
-
-                    return (
-                      <button
-                        key={`${group.paperId}:${page.label}:${page.pageIndex ?? 'full'}`}
-                        type="button"
-                        onClick={() => onOpenCitation?.(page.citation)}
-                        disabled={!onOpenCitation}
-                        className="inline-flex items-center gap-1 rounded-full border border-[var(--pq-accent-border)] bg-[var(--pq-surface)] px-2.5 py-0.5 text-[11px] font-medium text-[var(--pq-accent)] transition hover:border-[var(--pq-accent)] hover:bg-[var(--pq-accent-soft)] disabled:cursor-not-allowed disabled:opacity-60"
-                        title={page.citation.previewText || `${group.paperTitle} · ${pageLabel}`}
-                      >
-                        <span className="font-semibold">[{page.label}]</span>
-                        <span className="text-[var(--pq-text-muted)]">{pageLabel}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-
-      {hasHiddenGroups && (
-        <div>
-          <button
-            type="button"
-            onClick={() => setShowAllGroups((prev) => !prev)}
-            className="inline-flex items-center gap-1 rounded-full border border-[var(--pq-border)] bg-[var(--pq-surface-2)] px-2.5 py-1 text-[11px] font-medium text-[var(--pq-text-muted)] hover:border-[var(--pq-accent-border)] hover:text-[var(--pq-accent)] transition"
-          >
-            {showAllGroups
-              ? l('收起文献', 'Show fewer papers')
-              : l(`展开全部（共 ${groups.length} 篇）`, `Show all (${groups.length} papers)`)}
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
 
 function AgentFigureReferences({
   figures,
@@ -605,7 +498,7 @@ export function AssistantMessageCard({
   onCopyToolParameters: (toolCall: AgentToolCallView) => void;
   onContinueWithSelectedPapers: (instruction: string, paperIds: string[]) => void;
   onForkFromMessage: (messageId: string) => void;
-  onOpenRagCitation?: (citation: LibraryAgentRagCitation) => void;
+  onOpenRagCitation?: AgentCitationClick;
   onVerifyCitations?: (message: AgentChatMessage) => Promise<void>;
   onInspectPlanItem: (itemId: string, paperTitle: string) => void;
   onTogglePlanItem: (itemId: string) => void;
@@ -618,6 +511,8 @@ export function AssistantMessageCard({
   const memoryPlan = message.memoryPlan;
   const notePlan = message.notePlan;
   const toolCall = message.toolCall;
+  const referenceModel = useMemo(() => buildAgentAnswerReferences(message.content, message.ragCitations, message.citationBindings),
+    [message.content, message.ragCitations, message.citationBindings]);
 
   return (
     <article className="flex items-start gap-3">
@@ -645,16 +540,13 @@ export function AssistantMessageCard({
                 content={message.content}
                 citations={message.ragCitations}
                 citationBindings={message.citationBindings}
+                referenceModel={referenceModel}
                 papers={papers}
                 onCitationClick={onOpenRagCitation}
               />
             </div>
-            <AgentCitationEvidence message={message} disabled={activeSessionRunning} onVerify={onVerifyCitations} l={l} />
-            <AgentRagCitationChips
-              citations={usedVerifiedAgentCitations(message.content, message.ragCitations, message.citationBindings)}
-              l={l}
-              onOpenCitation={onOpenRagCitation}
-            />
+            <AgentAnswerReferences model={referenceModel} l={l} onOpenCitation={onOpenRagCitation} />
+            <AgentCitationEvidence message={message} referenceModel={referenceModel} disabled={activeSessionRunning} onVerify={onVerifyCitations} l={l} />
             {message.ragCitations?.length ? <details className="mt-2 text-xs text-[var(--pq-text-muted)]">
               <summary className="cursor-pointer">{l(`本轮检索材料（${message.ragCitations.length}）`, `Retrieved materials (${message.ragCitations.length})`)}</summary>
               <ul className="mt-2 space-y-1">{message.ragCitations.map((citation) => <li key={citation.id} className="break-words">

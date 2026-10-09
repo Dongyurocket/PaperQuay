@@ -7,29 +7,33 @@ import remarkMath from 'remark-math';
 import 'katex/dist/katex.min.css';
 import type { LibraryAgentRagCitation } from '../../services/libraryAgent';
 import type { AgentCitationBinding } from '../../services/agentAnswerEvidence';
-import { citationBindingReason, injectAgentCitationBindings } from './agentCitationRendering.ts';
+import { citationBindingReason, citationOccurrenceLabel, injectAgentCitationBindings, type AgentAnswerReferenceModel, type AgentCitationClick } from './agentCitationRendering.ts';
 import type { LiteraturePaper } from '../../types/library';
 import { normalizeMarkdownMath, remarkFixGluedLatex, remarkSuperscriptPlugin } from '../../utils/markdown';
 import { resolveBarePaperIds } from './agentMarkdownPaperIds.ts';
 
 export { resolveBarePaperIds } from './agentMarkdownPaperIds.ts';
 
-export function AgentCitationMarker({ binding, citation, onCitationClick, children }: {
+export function AgentCitationMarker({ binding, citation, referenceNumber, onCitationClick }: {
   binding?: AgentCitationBinding;
   citation?: LibraryAgentRagCitation;
-  onCitationClick?: (citation: LibraryAgentRagCitation) => void;
+  referenceNumber?: number;
+  onCitationClick?: AgentCitationClick;
   children: ReactNode;
 }) {
-  if (binding?.status === 'verified' && citation && onCitationClick) {
-    return <button type="button" onClick={() => onCitationClick(citation)}
-      className="inline-flex items-center rounded-full border border-[var(--pq-accent-border)] bg-[var(--pq-accent-soft)] px-1.5 py-0.5 text-xs font-semibold text-[var(--pq-accent)] transition hover:border-[var(--pq-accent)] hover:bg-[var(--pq-surface)]"
-      title={`${citation.paperTitle}${citation.pageIndex == null ? '' : ` · Page ${citation.pageIndex + 1}`}`}>
-      [{citation.label}]
+  if (binding?.status === 'verified' && citation && referenceNumber != null && onCitationClick) {
+    const title = `${citation.paperTitle}${citation.pageIndex == null ? '' : ` · PDF ${citation.pageIndex + 1}`}\n${citation.previewText?.slice(0, 400) ?? ''}`;
+    return <button type="button" onClick={() => onCitationClick(citation, referenceNumber)}
+      className="align-baseline font-semibold text-[var(--pq-accent)] hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--pq-accent)]"
+      aria-label={`引用 ${referenceNumber}：${citation.paperTitle}${citation.pageIndex == null ? '' : `，PDF 第 ${citation.pageIndex + 1} 页`}`}
+      title={title}>
+      [{referenceNumber}]
     </button>;
   }
   const reason = citationBindingReason(binding);
-  return <span role="note" title={reason} aria-label={`${citation ? `[${citation.label}]` : '[?]'} ${reason}`}
-    className="inline-flex rounded border border-[var(--pq-border)] px-1.5 text-xs text-[var(--pq-text-muted)] cursor-help">[{children}]</span>;
+  const label = binding ? citationOccurrenceLabel({ binding, referenceNumber }) : '未验证';
+  return <span role="note" title={reason} aria-label={reason}
+    className="text-xs text-[var(--pq-text-muted)] cursor-help">[{label}]</span>;
 }
 
 class AgentMarkdownBoundary extends Component<
@@ -109,6 +113,7 @@ export default function AgentMarkdown({
   content,
   citations,
   citationBindings,
+  referenceModel,
   paperTitleById,
   papers,
   onCitationClick,
@@ -116,9 +121,10 @@ export default function AgentMarkdown({
   content: string;
   citations?: LibraryAgentRagCitation[];
   citationBindings?: AgentCitationBinding[];
+  referenceModel?: AgentAnswerReferenceModel;
   paperTitleById?: Record<string, string> | Map<string, string>;
   papers?: LiteraturePaper[];
-  onCitationClick?: (citation: LibraryAgentRagCitation) => void;
+  onCitationClick?: AgentCitationClick;
 }) {
   const titleFallbackMap = useMemo(() => {
     const map = new Map<string, string>();
@@ -137,7 +143,7 @@ export default function AgentMarkdown({
     return map;
   }, [paperTitleById, papers]);
 
-  const citationRendering = useMemo(() => injectAgentCitationBindings(content, citations, citationBindings), [content, citations, citationBindings]);
+  const citationRendering = useMemo(() => injectAgentCitationBindings(content, citations, citationBindings, referenceModel), [content, citations, citationBindings, referenceModel]);
   const normalizedContent = useMemo(() => {
     try {
       const safeContent = liftPaperIdsOutOfMath(citationRendering.content);
@@ -156,7 +162,7 @@ export default function AgentMarkdown({
         const occurrence = /^\d+$/.test(bindingIndex) ? citationRendering.resolved[Number(bindingIndex)] : undefined;
         const citation = occurrence?.citation;
         if (occurrence || /^#agent-(?:cite|binding|untrusted)-/i.test(href ?? '')) {
-          return <AgentCitationMarker binding={occurrence?.binding} citation={citation} onCitationClick={onCitationClick}>{children}</AgentCitationMarker>;
+          return <AgentCitationMarker binding={occurrence?.binding} citation={citation} referenceNumber={occurrence?.referenceNumber} onCitationClick={onCitationClick}>{children}</AgentCitationMarker>;
         }
 
         if (href?.startsWith('#agent-paper-unresolved:')) {
@@ -215,7 +221,7 @@ export default function AgentMarkdown({
     }),
     [citations, citationRendering, onCitationClick, titleFallbackMap],
   );
-  const fallback = <AgentMarkdownFallback content={content} />;
+  const fallback = <AgentMarkdownFallback content={citationRendering.content.replace(/\]\(#[^)]+\)/g, ']')} />;
 
   return (
     <AgentMarkdownBoundary resetKey={normalizedContent} fallback={fallback}>

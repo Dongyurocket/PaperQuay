@@ -176,6 +176,25 @@ export function resolveNoteAnchorJumpTarget<TBlock extends NoteAnchorJumpBlock>(
   };
 }
 
+export function resolveAgentCitationJumpTarget<TBlock extends NoteAnchorJumpBlock>(
+  detail: NoteAnchorJumpDetail,
+  blocks: TBlock[],
+  pageCount: number,
+): NoteAnchorJumpTarget<TBlock> & { invalidPage: boolean } {
+  const page = detail.pageIndex;
+  const invalidPage = page != null && (!Number.isInteger(page) || page < 0 || page >= pageCount);
+  if (invalidPage) return { block: null, pageIndex: null, highlightTarget: null, shouldWaitForBlocks: false, invalidPage: true };
+  // A recycled block ID on another page and unrelated blocks on the same page are not the cited fragment.
+  const exactBlocks = blocks.filter((block) => block.blockId === detail.blockId &&
+    (page == null || block.pageIndex === page) && Number.isInteger(block.pageIndex) &&
+    block.pageIndex >= 0 && block.pageIndex < pageCount);
+  const uniqueBlocks = exactBlocks.length === 1 ? exactBlocks : [];
+  // Agent's pdfLocation is a whole-page placeholder, not a measured excerpt bounding box.
+  const target = resolveNoteAnchorJumpTarget({ ...detail, pageIndex: page ?? uniqueBlocks[0]?.pageIndex ?? null,
+    pdfLocation: null }, uniqueBlocks);
+  return { ...target, shouldWaitForBlocks: false, invalidPage: false };
+}
+
 export function isNoteEventRecord(value: unknown): value is Note {
   if (!value || typeof value !== 'object') return false;
   const note = value as Partial<Note>;

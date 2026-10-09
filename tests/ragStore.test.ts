@@ -370,6 +370,23 @@ test('Agent run storage redacts sensitive event fields and accumulates usage', (
   }
 });
 
+test('Agent run storage accepts citation verification results without dropping later events', () => {
+  const { dataDir, store } = createStore();
+  try {
+    store.createAgentRun({ runId: 'citation-run', sessionId: 'citation-session' });
+    store.appendAgentRunEvent({ runId: 'citation-run', kind: 'citation_verification', payload: {
+      messageId: 'answer-a', citationBindings: [{ citationId: 'source-a', status: 'verified', start: 15, end: 32 }],
+    } });
+    store.appendAgentRunEvent({ runId: 'citation-run', kind: 'turn_end', payload: { content: 'Answer complete.' } });
+    const events = store.getAgentRunEvents({ runId: 'citation-run' });
+    assert.deepEqual(events.map((event) => event.kind), ['citation_verification', 'turn_end']);
+    assert.deepEqual(events[0].payload.citationBindings, [{ citationId: 'source-a', status: 'verified', start: 15, end: 32 }]);
+  } finally {
+    store.close();
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
 test('RAG store retrieves Chinese chunks via trigram FTS keyword match', () => {
   const { dataDir, store } = createStore();
 

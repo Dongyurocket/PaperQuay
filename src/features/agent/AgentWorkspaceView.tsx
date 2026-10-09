@@ -97,7 +97,7 @@ interface AgentWorkspaceViewProps {
   onInlinePaperSelectionContinue: (instruction: string, paperIds: string[]) => void;
   onForkFromMessage: (messageId: string) => void;
   onInspectPlanItem: (itemId: string, paperTitle: string) => void;
-  onOpenRagCitation: (citation: LibraryAgentRagCitation) => void;
+  onOpenRagCitation: (citation: LibraryAgentRagCitation, referenceNumber?: number) => void;
   onVerifyCitations: (message: AgentChatMessage) => Promise<void>;
   onOrganizeMemory: () => void;
   onPaperSearchQueryChange: (value: string) => void;

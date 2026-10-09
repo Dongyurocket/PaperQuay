@@ -181,6 +181,7 @@ import {
   buildSelectedExcerptNoteCreateRequest,
   isNoteEventRecord,
   resolveNoteAnchorJumpTarget,
+  resolveAgentCitationJumpTarget,
   resolveReaderNoteAnchorTarget,
   resolveNoteAnchorWorkspaceId,
   sortReaderNotes,
@@ -407,6 +408,14 @@ function DocumentReaderTab({
   const [currentDocument, setCurrentDocument] = useState<WorkspaceItem>(document);
   const [attachTranslatedPdfBusy, setAttachTranslatedPdfBusy] = useState(false);
   const [pdfSource, setPdfSource] = useState<PdfSource>(null);
+  const [pdfPageCount, setPdfPageCount] = useState(0);
+  const [pdfDocumentError, setPdfDocumentError] = useState('');
+  const [pdfOpenFailed, setPdfOpenFailed] = useState(false);
+  const [restoringDocumentBlocks, setRestoringDocumentBlocks] = useState(false);
+  useEffect(() => {
+    setPdfPageCount(0);
+    setPdfDocumentError('');
+  }, [pdfSource]);
   const [pdfData, setPdfData] = useState<Uint8Array | null>(null);
   const [pdfPath, setPdfPath] = useState('');
   const pdfScrollPositionsRef = useRef<Record<string, PdfScrollPosition>>({});
@@ -1256,6 +1265,7 @@ function DocumentReaderTab({
       perfMark('reader:open-start');
       setLoading(true);
       setError('');
+      setPdfOpenFailed(false);
 
       try {
         let resolvedSource = source;
@@ -1315,6 +1325,7 @@ function DocumentReaderTab({
         onDocumentResolved(nextResolvedItem);
         perfMeasure('reader:open-source-resolved', 'reader:open-start');
 
+        setRestoringDocumentBlocks(true);
         requestDeferredReaderStartupWork(() => {
           void (async () => {
             const isCurrentOpen = () => openDocumentRequestIdRef.current === requestId;
@@ -1436,12 +1447,15 @@ function DocumentReaderTab({
             } catch {
               // Markdown fallback is best-effort. Keep the PDF open even if parsing is unavailable.
             }
-          })().catch(() => undefined);
+          })().catch(() => undefined).finally(() => {
+            if (openDocumentRequestIdRef.current === requestId) setRestoringDocumentBlocks(false);
+          });
         });
 
         setStatusMessage(nextStatus);
         return true;
       } catch (nextError) {
+        setPdfOpenFailed(true);
         setError(nextError instanceof Error ? nextError.message : lRef.current('打开文献失败', 'Failed to open the paper'));
         setStatusMessage(lRef.current('打开文献失败', 'Failed to open the paper'));
         return false;
@@ -1462,6 +1476,7 @@ function DocumentReaderTab({
   );
 
   const openDocumentItem = useCallback(async () => {
+    setPdfOpenFailed(false);
     const history = loadPaperHistory(document.workspaceId);
     const cachedPdfPath = await tryResolveSavedPdfPath(document);
     const candidateLocalPaths = buildReaderLocalPdfPathCandidates({
@@ -1500,6 +1515,7 @@ function DocumentReaderTab({
     }
 
     if (!document.attachmentKey) {
+      setPdfOpenFailed(true);
       resetDocumentState();
       setPdfSource(null);
       setPdfData(null);
@@ -1511,6 +1527,7 @@ function DocumentReaderTab({
     }
 
     if (!zoteroApiKey.trim()) {
+      setPdfOpenFailed(true);
       resetDocumentState();
       setPdfSource(null);
       setPdfData(null);
@@ -1564,6 +1581,7 @@ function DocumentReaderTab({
         'reading',
       );
     } catch (nextError) {
+      setPdfOpenFailed(true);
       setError(
         nextError instanceof Error
           ? nextError.message
@@ -2694,9 +2712,18 @@ function DocumentReaderTab({
   const applyNoteAnchorJump = useCallback((detail: JumpToNoteAnchorEventDetail) => {
     const agentRagJump = detail.jumpSource === 'agent-rag';
     const label = detail.anchorLabel || detail.noteTitle || lRef.current('未命名引用', 'Untitled reference');
-    // 精确块 → 引用所在页的正文块 → 整页高亮，逐级降级，避免只打开文献却不跳转。
-    const { block: targetBlock, highlightTarget, shouldWaitForBlocks } =
-      resolveNoteAnchorJumpTarget(detail, flatBlocks);
+    if (agentRagJump && pdfPageCount === 0) return false;
+    if (agentRagJump && detail.blockId && restoringDocumentBlocks) return false;
+    // Agent citations require the original block; unrelated same-page blocks are only a page fallback.
+    const target = agentRagJump
+      ? resolveAgentCitationJumpTarget(detail, flatBlocks, pdfPageCount)
+      : resolveNoteAnchorJumpTarget(detail, flatBlocks);
+    const { block: targetBlock, highlightTarget, shouldWaitForBlocks } = target;
+
+    if ('invalidPage' in target && target.invalidPage) {
+      setStatusMessage(lRef.current('引用页码超出当前 PDF 范围，无法定位片段', 'The reference page is outside this PDF; the excerpt could not be located'));
+      return true;
+    }
 
     if (!targetBlock && !highlightTarget) {
       // 有 blockId 说明该文献确有结构块，可能还没加载完成：挂起等待，flatBlocks 到位后自动重放。
@@ -2705,8 +2732,8 @@ function DocumentReaderTab({
         return false;
       }
 
-      setStatusMessage(lRef.current('该引用没有绑定 PDF 位置', 'This reference is not linked to a PDF location'));
-      return false;
+      setStatusMessage(lRef.current('已打开文献，该引用缺少可用位置，无法定位片段', 'Paper opened; this reference has no usable location for the excerpt'));
+      return agentRagJump;
     }
 
     setSelectedAnnotationId(null);
@@ -2725,19 +2752,27 @@ function DocumentReaderTab({
         targetBlock,
         lRef.current(`已定位到引用：${label}`, `Located reference: ${label}`),
       );
+      if (agentRagJump && !targetBlock.bbox && highlightTarget) {
+        setActivePdfHighlight(highlightTarget);
+        setPdfHighlightSignal((current) => current + 1);
+      }
       return true;
     }
 
     setActivePdfHighlight(highlightTarget);
+    if (agentRagJump) {
+      setActiveBlockId(null);
+      setHoveredBlockId(null);
+    }
     setPdfHighlightSignal((current) => current + 1);
     setStatusMessage(
       lRef.current(
-        `已定位到引用：${label}`,
-        `Located reference: ${label}`,
+        agentRagJump ? `已定位到页面，原片段暂不可定位：${label}` : `已定位到引用：${label}`,
+        agentRagJump ? `Located page; the original excerpt is unavailable: ${label}` : `Located reference: ${label}`,
       ),
     );
     return true;
-  }, [activateBlock, flatBlocks, setActiveNoteId, setAssistantActivePanel]);
+  }, [activateBlock, flatBlocks, pdfPageCount, restoringDocumentBlocks, setActiveNoteId, setAssistantActivePanel]);
 
   const handleJumpToNoteAnchor = useCallback((note: Note, anchor: NoteAnchor) => {
     const targetWorkspaceId = resolveNoteAnchorWorkspaceId(note, anchor);
@@ -3851,6 +3886,12 @@ function DocumentReaderTab({
       return;
     }
 
+    if (pendingNoteAnchorJump.jumpSource === 'agent-rag' && (pdfOpenFailed || pdfDocumentError)) {
+      setStatusMessage(lRef.current('引用 PDF 不可用，无法定位片段；请检查附件后重试', 'The reference PDF is unavailable; check the attachment and retry'));
+      onPendingNoteAnchorJumpHandled?.(pendingNoteAnchorJump.requestId);
+      return;
+    }
+
     if (!pdfSource) {
       return;
     }
@@ -3862,6 +3903,8 @@ function DocumentReaderTab({
     applyNoteAnchorJump,
     currentDocument.workspaceId,
     onPendingNoteAnchorJumpHandled,
+    pdfDocumentError,
+    pdfOpenFailed,
     pdfSource,
     pendingNoteAnchorJump,
   ]);
@@ -4276,6 +4319,8 @@ function DocumentReaderTab({
   return (
     <div className="relative h-full min-h-0" hidden={!isActive}>
       <ReaderWorkspace
+        onPdfPageCountChange={setPdfPageCount}
+        onPdfDocumentErrorChange={setPdfDocumentError}
         active={isActive}
         currentDocument={currentDocument}
         selectedSectionTitle={
