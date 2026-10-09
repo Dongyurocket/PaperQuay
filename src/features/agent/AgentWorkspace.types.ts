@@ -8,6 +8,7 @@ import type {
   LibraryAgentUserChoice,
 } from '../../services/libraryAgent';
 import type { AgentMemoryWritePlan } from '../../services/agentMemory';
+import type { AgentCitationBinding } from '../../services/agentAnswerEvidence';
 import type { AgentNoteWritePlan } from '../../services/agentNotePlan';
 import type { ComparativeSurveyArtifacts } from '../../services/agentCapability';
 import type { AgentCapabilityId, CitationAuditResult } from '../../services/agentCapabilityRegistry';
@@ -82,6 +83,7 @@ export interface AgentChatMessage {
   /** RAG 检索失败时的用户可见提示（Agent 已回退到全文/摘要上下文）。 */
   ragNotice?: string | null;
   evidenceStats?: Record<string, number>;
+  citationBindings?: AgentCitationBinding[];
   toolCall?: AgentToolCallView;
   plan?: LibraryAgentPlan;
   /** 审批计划生命周期终态；undefined 表示仍可审批。 */

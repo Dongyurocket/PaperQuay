@@ -3,6 +3,7 @@ import type { Note, NotePageKind, NoteType } from '../types/notes';
 import { getNote, searchNotes } from './notes';
 import { createAgentNoteWritePlan } from './agentNotePlan';
 import { assertEvidenceForNoteDraft } from './agentAnswerEvidence.ts';
+import { formatCitationEvidenceToken } from './agentCitationRegistry.ts';
 import {
   normalizeGraphPaperId,
   GRAPH_MISSING_EDGE_MAX_PAPERS,
@@ -152,6 +153,8 @@ export interface CreateLibraryAgentToolsOptions {
     options?: { signal?: AbortSignal },
   ) => Promise<{
     chunks: Array<{
+      citationId?: string;
+      evidenceToken?: string;
       paperId: string;
       paperTitle?: string;
       page: number | null;
@@ -364,6 +367,10 @@ export function createLibraryAgentTools(options: CreateLibraryAgentToolsOptions)
           targetPapers.map((paper) => getContext(paper, { mode: 'pdf-text', query }, { signal: ctx.signal })),
         );
         const chunks = contexts.flatMap((context, index) => (context.citations ?? []).map((citation) => ({
+          citationId: citation.id,
+          evidenceToken: formatCitationEvidenceToken(citation),
+          paperTitle: citation.paperTitle,
+          sourceType: citation.sourceType,
           paperId: targetPapers[index]?.id,
           page: citation.pageIndex === null || citation.pageIndex === undefined ? null : citation.pageIndex + 1,
           blockId: citation.blockId ?? null,
@@ -420,6 +427,7 @@ export function createLibraryAgentTools(options: CreateLibraryAgentToolsOptions)
               title: targetPapers[index]?.title,
               source: context.source,
               text: context.text,
+              citations: context.citations,
             })),
           }),
           cards: [{ kind: 'papers', title: `${contexts.length} paper context result(s)` }],

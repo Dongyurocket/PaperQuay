@@ -10,6 +10,7 @@ export interface AgentSessionArtifacts {
   readPaperIds: string[];
   citedPages: string[];
   appliedPlanIds: string[];
+  citationTokens?: string[];
 }
 
 export interface AgentContextCompactionPlan {
@@ -111,6 +112,7 @@ export function artifactTrail(artifacts: AgentSessionArtifacts): string {
     `- Read papers: ${joined(artifacts.readPaperIds)}`,
     `- Cited pages: ${joined(artifacts.citedPages)}`,
     `- Applied plans: ${joined(artifacts.appliedPlanIds)}`,
+    ...(artifacts.citationTokens?.length ? [`- Evidence tokens: ${joined(artifacts.citationTokens)}`] : []),
   ].join('\n');
 }
 

@@ -17,6 +17,12 @@ function message(role: AgentLoopMessage['role'], content: string): AgentLoopMess
   return { role, content };
 }
 
+test('compaction retains canonical tokens even if the summary model omits them', () => {
+  const artifacts = { ...emptyAgentSessionArtifacts(), citationTokens: ['[[cite:source-a]]', '[[cite:source-b]]'] };
+  const summary = normalizeCompactionSummary('Progress only', artifacts);
+  assert.ok(summary.includes('[[cite:source-a]]') && summary.includes('[[cite:source-b]]'));
+});
+
 test('context budget estimates English and CJK text conservatively', () => {
   assert.equal(estimateTokens('abcd'), 1);
   assert.equal(estimateTokens('abcdefgh'), 2);

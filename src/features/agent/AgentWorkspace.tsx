@@ -5,6 +5,7 @@ import {
   loadLibraryAgentAvailableModelPresets,
   loadLibraryAgentModelPresetById,
   runConversationalLibraryAgent,
+  verifyLibraryAgentAnswerCitations,
   type LibraryAgentConversationMessage,
   type LibraryAgentPlan,
   type LibraryAgentRagCitation,
@@ -51,6 +52,7 @@ import {
   latestAgentRecoveryCheckpoint,
   latestComparativeSurveyCheckpoint,
   recoveryCheckpointToChatMessages,
+  latestAgentRecoveryCitations,
 } from './agentRunRecovery';
 import {
   isAgentSessionRunning,
@@ -227,6 +229,7 @@ function AgentWorkspace() {
   const pendingLoopResumeRef = useRef(new Map<string, {
     instruction: string;
     messages: AgentLoopMessage[];
+    citations?: LibraryAgentRagCitation[];
   }>());
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const historySidebarRef = useRef<HTMLElement | null>(null);
@@ -779,6 +782,62 @@ function AgentWorkspace() {
     setStatusMessage(nextPlan.description);
   };
 
+  const handleVerifyCitations = async (message: AgentChatMessage) => {
+    const sessionId = activeSessionId;
+    if (isAgentSessionRunning(runningSessionIdsRef.current, sessionId)) return;
+    const controller = new AbortController();
+    abortControllersRef.current.set(sessionId, controller);
+    setAgentSessionRunning(sessionId, true);
+    let runId: string | null = null;
+    let queue = Promise.resolve();
+    const tokens = { promptTokens: 0, completionTokens: 0 };
+    let failed = false;
+    try {
+      const preset = await loadLibraryAgentModelPresetById(selectedAgentPresetId);
+      if (!preset) throw new Error(l('请先配置 Agent 模型。', 'Configure an Agent model first.'));
+      if (controller.signal.aborted) return;
+      try {
+        runId = crypto.randomUUID();
+        await startAgentRun({ runId, sessionId, model: preset.model, presetId: preset.id, instruction: `Verify citations: ${message.id}` });
+      } catch { runId = null; }
+      updateSessionMessage(sessionId, message.id, (current) => ({ ...current, citationBindings: undefined, evidenceStats: undefined }));
+      const result = await verifyLibraryAgentAnswerCitations({
+        answer: message.content, citations: message.ragCitations ?? [], preset, signal: controller.signal,
+        streamHandlers: {
+          onCapabilityUsage: (usage) => {
+            tokens.promptTokens += usage.promptTokens;
+            tokens.completionTokens += usage.completionTokens;
+            setSessionTokenUsage((current) => ({ ...current, [sessionId]: (current[sessionId] ?? 0) + usage.promptTokens + usage.completionTokens }));
+          },
+          onCitationVerification: (bindings) => {
+            if (!runId) return;
+            const targetRunId = runId;
+            queue = queue.then(() => appendAgentRunEvent({ runId: targetRunId, kind: 'citation_verification',
+              payload: { messageId: message.id, bindings }, ...tokens })).then(() => undefined).catch(() => undefined);
+          },
+        },
+      });
+      updateSessionMessage(sessionId, message.id, (current) => current.content === message.content ? { ...current, ...result } : current);
+      if (activeSessionIdRef.current === sessionId) setStatusMessage(l('引用核验已完成。', 'Citation verification completed.'));
+    } catch (error) {
+      failed = true;
+      if (activeSessionIdRef.current === sessionId) setStatusMessage(error instanceof Error ? error.message : l('引用核验失败。', 'Citation verification failed.'));
+    } finally {
+      await queue;
+      if (runId) await finishAgentRun({ runId, status: controller.signal.aborted ? 'aborted' : failed ? 'error' : 'done', ...tokens }).catch(() => undefined);
+      if (abortControllersRef.current.get(sessionId) === controller) {
+        abortControllersRef.current.delete(sessionId);
+        setAgentSessionRunning(sessionId, false);
+        setCancellingSessionIds((current) => {
+          if (!current.has(sessionId)) return current;
+          const next = new Set(current);
+          next.delete(sessionId);
+          return next;
+        });
+      }
+    }
+  };
+
   const appendAssistantMessageToSession = (
     sessionId: string,
     content: string,
@@ -1060,7 +1119,7 @@ function AgentWorkspace() {
         .then(() => undefined)
         .catch(() => undefined);
     };
-    const appendRecoveryCheckpoint = (checkpointMessages: AgentLoopMessage[], turn: number) => {
+    const appendRecoveryCheckpoint = (checkpointMessages: AgentLoopMessage[], turn: number, citations?: LibraryAgentRagCitation[]) => {
       if (!runId) {
         return;
       }
@@ -1071,7 +1130,7 @@ function AgentWorkspace() {
           runId: targetRunId,
           kind: 'checkpoint',
           turn,
-          payload: { messages: recoverySnapshotMessages(checkpointMessages) },
+          payload: { messages: recoverySnapshotMessages(checkpointMessages), citations },
         }))
         .then(() => undefined)
         .catch(() => undefined);
@@ -1228,6 +1287,14 @@ function AgentWorkspace() {
           setCurrentRunTokens({ ...runTokens });
         }
       },
+      onCitationVerification: (bindings) => {
+        if (!runId) return;
+        const targetRunId = runId;
+        runEventQueue = runEventQueue.then(() => appendAgentRunEvent({
+          runId: targetRunId, kind: 'citation_verification',
+          payload: { bindings: bindings.map(({ tokenId, start, status, reason, model, detail }) => ({ tokenId, start, status, reason, model, detail })) },
+        })).then(() => undefined).catch(() => undefined);
+      },
       onCapabilityCheckpoint: (artifacts) => {
         updateSessionMessage(sessionId, assistantMessageId, (message) => ({
           ...message,
@@ -1332,6 +1399,7 @@ function AgentWorkspace() {
         signal: abortController.signal,
         capabilityResume: effectiveCapabilityResume,
         loopResumeMessages: effectiveLoopResumeMessages,
+        loopResumeCitations: effectiveLoopResumeMessages ? pendingLoopResume?.citations : undefined,
         pinnedCapabilityId,
       });
       const durationMs = Math.round(performance.now() - startedAt);
@@ -1363,6 +1431,7 @@ function AgentWorkspace() {
           visionNotice: result.visionNotice,
           ragNotice: result.ragNotice,
           evidenceStats: result.evidenceStats,
+          citationBindings: result.citationBindings,
           citationAudit,
           notePlan,
           capability: {
@@ -1397,6 +1466,7 @@ function AgentWorkspace() {
           visionNotice: result.visionNotice,
           ragNotice: result.ragNotice,
           evidenceStats: result.evidenceStats,
+          citationBindings: result.citationBindings,
           toolCall: undefined,
           plan: undefined,
           choices: undefined,
@@ -2155,7 +2225,7 @@ function AgentWorkspace() {
           await finishAgentRun({ runId: staleRun.runId, status: 'aborted' }).catch(() => {});
         }
 
-        const events = await getAgentRunEvents(interruptedRun.runId, 0, { order: 'desc', limit: 200 });
+        const events = (await getAgentRunEvents(interruptedRun.runId, 0, { order: 'desc', limit: 200 })).reverse();
         const checkpoint = latestAgentRecoveryCheckpoint(events);
         const capabilityCheckpoint = latestComparativeSurveyCheckpoint(events);
 
@@ -2235,6 +2305,7 @@ function AgentWorkspace() {
         pendingLoopResumeRef.current.set(session.id, {
           instruction: session.lastInstruction,
           messages: checkpoint,
+          citations: latestAgentRecoveryCitations(events),
         });
         setStatusMessage(l(
           '已恢复到最近完整轮次；发送输入框中的原任务即可从检查点继续。',
@@ -2374,6 +2445,7 @@ function AgentWorkspace() {
         void copyToolParameters(toolCall);
       }}
       onOpenRagCitation={handleOpenRagCitation}
+      onVerifyCitations={handleVerifyCitations}
       onOrganizeMemory={handleOrganizeAgentMemory}
       onAgentPresetChange={handleAgentPresetChange}
       onAgentReasoningEffortChange={setSelectedAgentReasoningEffort}

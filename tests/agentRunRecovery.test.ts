@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   latestAgentRecoveryCheckpoint,
+  latestAgentRecoveryCitations,
   latestComparativeSurveyCheckpoint,
   recoveryCheckpointToChatMessages,
 } from '../src/features/agent/agentRunRecovery.ts';
@@ -11,6 +12,15 @@ import type { AgentRunEventRecord } from '../src/services/agentRuns.ts';
 function event(id: number, kind: string, payload: Record<string, unknown>): AgentRunEventRecord {
   return { id, runId: 'run-a', ts: id, kind, payload };
 }
+
+test('recovery preserves the newest canonical evidence independently from truncated model messages', () => {
+  const citation = { id: 'source-a', label: '1', paperId: 'paper-a', paperTitle: 'Paper A', sourceType: 'pdf-text',
+    pageIndex: 25, blockId: 'block-a', previewText: 'original snippet'.repeat(1000) };
+  const events = [event(1, 'checkpoint', { messages: [], citations: [{ ...citation, id: 'old' }] }),
+    event(2, 'checkpoint', { messages: [], citations: [citation, { id: 'bad' }] })];
+  assert.deepEqual(latestAgentRecoveryCitations(events), [citation]);
+  assert.deepEqual(latestAgentRecoveryCitations(events.concat(event(3, 'checkpoint', { messages: [] }))), []);
+});
 
 test('recovery chooses the newest complete checkpoint and preserves user/assistant conversation', () => {
   const checkpoint = latestAgentRecoveryCheckpoint([
@@ -132,4 +142,12 @@ test('recovery backward compatibility: checkpoint without capabilityId defaults 
   assert.ok(checkpoint);
   assert.equal(checkpoint.rephrasedQuestion, 'Old legacy question');
   assert.deepEqual(checkpoint.completedStages, ['rephrase']);
+});
+
+test('comparative recovery preserves canonical token identity and display label', () => {
+  const checkpoint = latestComparativeSurveyCheckpoint([event(1, 'checkpoint', {
+    artifacts: { citations: [{ id: 'source-a', label: '7', paperId: 'paper-a', paperTitle: 'Paper A' }] },
+  })]);
+  assert.equal(checkpoint?.citations?.[0].id, 'source-a');
+  assert.equal(checkpoint?.citations?.[0].label, '7');
 });

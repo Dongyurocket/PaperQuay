@@ -6,12 +6,31 @@ import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import 'katex/dist/katex.min.css';
 import type { LibraryAgentRagCitation } from '../../services/libraryAgent';
-import { findUniqueAgentCitationByLabel } from '../../services/agentCitationRegistry.ts';
+import type { AgentCitationBinding } from '../../services/agentAnswerEvidence';
+import { citationBindingReason, injectAgentCitationBindings } from './agentCitationRendering.ts';
 import type { LiteraturePaper } from '../../types/library';
 import { normalizeMarkdownMath, remarkFixGluedLatex, remarkSuperscriptPlugin } from '../../utils/markdown';
 import { resolveBarePaperIds } from './agentMarkdownPaperIds.ts';
 
 export { resolveBarePaperIds } from './agentMarkdownPaperIds.ts';
+
+export function AgentCitationMarker({ binding, citation, onCitationClick, children }: {
+  binding?: AgentCitationBinding;
+  citation?: LibraryAgentRagCitation;
+  onCitationClick?: (citation: LibraryAgentRagCitation) => void;
+  children: ReactNode;
+}) {
+  if (binding?.status === 'verified' && citation && onCitationClick) {
+    return <button type="button" onClick={() => onCitationClick(citation)}
+      className="inline-flex items-center rounded-full border border-[var(--pq-accent-border)] bg-[var(--pq-accent-soft)] px-1.5 py-0.5 text-xs font-semibold text-[var(--pq-accent)] transition hover:border-[var(--pq-accent)] hover:bg-[var(--pq-surface)]"
+      title={`${citation.paperTitle}${citation.pageIndex == null ? '' : ` · Page ${citation.pageIndex + 1}`}`}>
+      [{citation.label}]
+    </button>;
+  }
+  const reason = citationBindingReason(binding);
+  return <span role="note" title={reason} aria-label={`${citation ? `[${citation.label}]` : '[?]'} ${reason}`}
+    className="inline-flex rounded border border-[var(--pq-border)] px-1.5 text-xs text-[var(--pq-text-muted)] cursor-help">[{children}]</span>;
+}
 
 class AgentMarkdownBoundary extends Component<
   {
@@ -77,70 +96,6 @@ export function parseAgentPaperHref(href?: string): PaperTargetInfo | null {
  * 实现位于 ./agentMarkdownPaperIds.ts（纯函数，供 node --test 直接加载）。
  */
 
-function buildAgentCitationHref(label: string): string {
-  return `#agent-cite-${encodeURIComponent(label)}`;
-}
-
-function normalizeAgentCitationHref(href: string): string {
-  const trimmed = href.trim();
-
-  if (trimmed.startsWith('#agent-cite-')) {
-    return decodeURIComponent(trimmed.slice('#agent-cite-'.length));
-  }
-
-  if (trimmed.startsWith('%23agent-cite-')) {
-    return decodeURIComponent(trimmed.slice('%23agent-cite-'.length));
-  }
-
-  return '';
-}
-
-function findCitationByHref(
-  href: string | undefined,
-  citations: LibraryAgentRagCitation[] | undefined,
-): LibraryAgentRagCitation | null {
-  if (!href || !citations?.length) {
-    return null;
-  }
-
-  const label = normalizeAgentCitationHref(href);
-  return findUniqueAgentCitationByLabel(citations, label);
-}
-
-function injectAgentCitationLinks(
-  content: string,
-  citations: LibraryAgentRagCitation[] | undefined,
-): string {
-  if (!citations?.length) {
-    return content;
-  }
-
-  const labels = new Set(citations
-    .map((citation) => citation.label)
-    .filter((label) => findUniqueAgentCitationByLabel(citations, label) !== null));
-  const citationById = new Map(citations.map((citation) => [citation.id, citation]));
-  const withCanonicalTokens = content.replace(/\[\[cite:([^\]]+)\]\]/gi, (match, rawId: string) => {
-    const citation = citationById.get(rawId.trim());
-    return citation ? `[${citation.label}](${buildAgentCitationHref(citation.label)})` : match;
-  });
-  const normalizedContent = withCanonicalTokens
-    .replace(/\[(\d+(?:\s*[,，、]\s*\d+)+)\]/g, (_match, group: string) =>
-      group
-        .split(/\s*[,，、]\s*/)
-        .map((label) => `[${label}]`)
-        .join(' '),
-    )
-    .replace(/\](?=\[\d+\])/g, '] ');
-
-  return normalizedContent.replace(/\[(\d+)\](?!\()/g, (match, label: string) => {
-    if (!labels.has(label)) {
-      return match;
-    }
-
-    return `[${label}](${buildAgentCitationHref(label)})`;
-  });
-}
-
 // paperId 是结构化标识符，不能被 remark-math 当作带下划线的 TeX 变量。
 // 模型偶尔会把标识符包在 $...$ 中；解除这层数学包裹后再生成标题胶囊，避免 KaTeX
 // 在链接 href/文本中解析到 `#agent-paper-...`。
@@ -153,12 +108,14 @@ function liftPaperIdsOutOfMath(content: string): string {
 export default function AgentMarkdown({
   content,
   citations,
+  citationBindings,
   paperTitleById,
   papers,
   onCitationClick,
 }: {
   content: string;
   citations?: LibraryAgentRagCitation[];
+  citationBindings?: AgentCitationBinding[];
   paperTitleById?: Record<string, string> | Map<string, string>;
   papers?: LiteraturePaper[];
   onCitationClick?: (citation: LibraryAgentRagCitation) => void;
@@ -180,33 +137,26 @@ export default function AgentMarkdown({
     return map;
   }, [paperTitleById, papers]);
 
+  const citationRendering = useMemo(() => injectAgentCitationBindings(content, citations, citationBindings), [content, citations, citationBindings]);
   const normalizedContent = useMemo(() => {
     try {
-      const safeContent = liftPaperIdsOutOfMath(content);
-      const mathNormalized = normalizeMarkdownMath(injectAgentCitationLinks(safeContent, citations));
+      const safeContent = liftPaperIdsOutOfMath(citationRendering.content);
+      const mathNormalized = normalizeMarkdownMath(safeContent);
       return resolveBarePaperIds(liftPaperIdsOutOfMath(mathNormalized), citations, titleFallbackMap);
     } catch {
-      const safeContent = liftPaperIdsOutOfMath(content);
-      return resolveBarePaperIds(injectAgentCitationLinks(safeContent, citations), citations, titleFallbackMap);
+      const safeContent = liftPaperIdsOutOfMath(citationRendering.content);
+      return resolveBarePaperIds(safeContent, citations, titleFallbackMap);
     }
-  }, [citations, content, titleFallbackMap]);
+  }, [citations, citationRendering, titleFallbackMap]);
 
   const components = useMemo<Components>(
     () => ({
       a: ({ href, children, ...props }) => {
-        const citation = findCitationByHref(href, citations);
-
-        if (citation && onCitationClick) {
-          return (
-            <button
-              type="button"
-              onClick={() => onCitationClick(citation)}
-              className="inline-flex items-center rounded-full border border-[var(--pq-accent-border)] bg-[var(--pq-accent-soft)] px-1.5 py-0.5 text-xs font-semibold text-[var(--pq-accent)] transition hover:border-[var(--pq-accent)] hover:bg-[var(--pq-surface)]"
-              title={`${citation.paperTitle}${citation.pageIndex !== null && citation.pageIndex !== undefined ? ` · Page ${citation.pageIndex + 1}` : ''}`}
-            >
-              [{children}]
-            </button>
-          );
+        const bindingIndex = href?.startsWith(citationRendering.hrefPrefix) ? href.slice(citationRendering.hrefPrefix.length) : '';
+        const occurrence = /^\d+$/.test(bindingIndex) ? citationRendering.resolved[Number(bindingIndex)] : undefined;
+        const citation = occurrence?.citation;
+        if (occurrence || /^#agent-(?:cite|binding|untrusted)-/i.test(href ?? '')) {
+          return <AgentCitationMarker binding={occurrence?.binding} citation={citation} onCitationClick={onCitationClick}>{children}</AgentCitationMarker>;
         }
 
         if (href?.startsWith('#agent-paper-unresolved:')) {
@@ -263,7 +213,7 @@ export default function AgentMarkdown({
         );
       },
     }),
-    [citations, onCitationClick, titleFallbackMap],
+    [citations, citationRendering, onCitationClick, titleFallbackMap],
   );
   const fallback = <AgentMarkdownFallback content={content} />;
 

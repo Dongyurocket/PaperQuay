@@ -98,6 +98,7 @@ interface AgentWorkspaceViewProps {
   onForkFromMessage: (messageId: string) => void;
   onInspectPlanItem: (itemId: string, paperTitle: string) => void;
   onOpenRagCitation: (citation: LibraryAgentRagCitation) => void;
+  onVerifyCitations: (message: AgentChatMessage) => Promise<void>;
   onOrganizeMemory: () => void;
   onPaperSearchQueryChange: (value: string) => void;
   onRefreshPapers: () => void;
@@ -203,6 +204,7 @@ export default function AgentWorkspaceView({
   onForkFromMessage,
   onInspectPlanItem,
   onOpenRagCitation,
+  onVerifyCitations,
   onOrganizeMemory,
   onPaperSearchQueryChange,
   onRefreshPapers,
@@ -470,6 +472,7 @@ export default function AgentWorkspaceView({
                   onContinueWithSelectedPapers={onInlinePaperSelectionContinue}
                   onForkFromMessage={onForkFromMessage}
                   onOpenRagCitation={onOpenRagCitation}
+                  onVerifyCitations={onVerifyCitations}
                   onInspectPlanItem={onInspectPlanItem}
                       onTogglePlanItem={onTogglePlanItem}
                       onToggleStep={onToggleStep}

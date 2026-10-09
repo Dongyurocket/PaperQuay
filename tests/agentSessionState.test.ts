@@ -8,6 +8,7 @@ import {
 } from '../src/features/agent/agentSessionState.ts';
 import type { AgentChatMessage, AgentHistorySession } from '../src/features/agent/AgentWorkspace.types.ts';
 import { applyAgentLoopEventToTrace } from '../src/features/agent/AgentWorkspace.model.ts';
+import { normalizeAgentCitationTokens } from '../src/services/agentAnswerEvidence.ts';
 
 function message(id: string, role: AgentChatMessage['role'], content: string): AgentChatMessage {
   return {
@@ -161,6 +162,7 @@ test('forkAgentHistorySession copies a message prefix without sharing mutable me
         dataUrl: 'data:image/png;base64,not-persisted',
       }],
       paperScopeIds: ['paper-a'],
+      citationBindings: normalizeAgentCitationTokens('Historical evidence [1]', []),
     },
     message('m3', 'user', 'third'),
   ]);
@@ -180,4 +182,6 @@ test('forkAgentHistorySession copies a message prefix without sharing mutable me
   assert.equal(fork?.messages[1]?.attachments?.[0]?.dataUrl, undefined);
   fork?.messages[1]?.paperScopeIds?.push('paper-b');
   assert.deepEqual(source.messages[1]?.paperScopeIds, ['paper-a']);
+  fork!.messages[1].citationBindings![0].reason = 'supported';
+  assert.equal(source.messages[1].citationBindings![0].reason, 'legacy-citation');
 });

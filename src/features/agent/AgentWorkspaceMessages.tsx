@@ -28,6 +28,8 @@ import type { LiteraturePaper } from '../../types/library';
 import type { UiLanguage } from '../../types/reader';
 import type { AgentChatMessage, AgentToolCallView } from './AgentWorkspace.types';
 import AgentMarkdown from './AgentMarkdown';
+import AgentCitationEvidence from './AgentCitationEvidence';
+import { usedVerifiedAgentCitations } from './agentCitationRendering.ts';
 import { PlanDiffCard, ToolCallCard, TraceTimeline } from './AgentExecutionCards';
 import { loadLocalAssetDataUrl } from '../../services/assets';
 import { formatFileSize } from '../../utils/files';
@@ -291,6 +293,7 @@ function AgentRagCitationChips({
 
   return (
     <div className="mt-4 space-y-2">
+      <div className="text-xs font-medium text-[var(--pq-text-muted)]">{l('已核验证据', 'Verified evidence')}</div>
       <div className="flex flex-wrap items-start gap-2">
         {visibleGroups.map((group) => {
           const isExpanded = expandedPaperIds.has(group.paperId);
@@ -566,6 +569,7 @@ export function AssistantMessageCard({
   onContinueWithSelectedPapers,
   onForkFromMessage,
   onOpenRagCitation,
+  onVerifyCitations,
   onInspectPlanItem,
   onTogglePlanItem,
   onToggleStep,
@@ -602,6 +606,7 @@ export function AssistantMessageCard({
   onContinueWithSelectedPapers: (instruction: string, paperIds: string[]) => void;
   onForkFromMessage: (messageId: string) => void;
   onOpenRagCitation?: (citation: LibraryAgentRagCitation) => void;
+  onVerifyCitations?: (message: AgentChatMessage) => Promise<void>;
   onInspectPlanItem: (itemId: string, paperTitle: string) => void;
   onTogglePlanItem: (itemId: string) => void;
   onToggleStep: (stepKey: string) => void;
@@ -639,29 +644,23 @@ export function AssistantMessageCard({
               <AgentMarkdown
                 content={message.content}
                 citations={message.ragCitations}
+                citationBindings={message.citationBindings}
                 papers={papers}
                 onCitationClick={onOpenRagCitation}
               />
             </div>
-            {message.evidenceStats ? (
-              <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] font-medium text-slate-500 dark:text-chrome-400">
-                <span className="text-slate-400 dark:text-chrome-500">{l('证据绑定：', 'Evidence:')}</span>
-                <span className="inline-flex items-center gap-1 rounded-md bg-emerald-50 px-2 py-0.5 text-emerald-700 dark:bg-emerald-300/10 dark:text-emerald-300">
-                  <span>✓</span> {message.evidenceStats.supported ?? 0} {l('支持', 'supported')}
-                </span>
-                <span className="inline-flex items-center gap-1 rounded-md bg-amber-50 px-2 py-0.5 text-amber-700 dark:bg-amber-300/10 dark:text-amber-300">
-                  <span>~</span> {message.evidenceStats.partial ?? 0} {l('部分支持', 'partial')}
-                </span>
-                <span className="inline-flex items-center gap-1 rounded-md bg-slate-100 px-2 py-0.5 text-slate-600 dark:bg-white/10 dark:text-chrome-300">
-                  <span>?</span> {message.evidenceStats['not-in-library'] ?? 0} {l('库内未查到', 'not in library')}
-                </span>
-              </div>
-            ) : null}
+            <AgentCitationEvidence message={message} disabled={activeSessionRunning} onVerify={onVerifyCitations} l={l} />
             <AgentRagCitationChips
-              citations={message.ragCitations}
+              citations={usedVerifiedAgentCitations(message.content, message.ragCitations, message.citationBindings)}
               l={l}
               onOpenCitation={onOpenRagCitation}
             />
+            {message.ragCitations?.length ? <details className="mt-2 text-xs text-[var(--pq-text-muted)]">
+              <summary className="cursor-pointer">{l(`本轮检索材料（${message.ragCitations.length}）`, `Retrieved materials (${message.ragCitations.length})`)}</summary>
+              <ul className="mt-2 space-y-1">{message.ragCitations.map((citation) => <li key={citation.id} className="break-words">
+                {citation.paperTitle}{citation.pageIndex == null ? '' : ` · ${l('第', 'Page')} ${citation.pageIndex + 1} ${l('页', '')}`}
+              </li>)}</ul>
+            </details> : null}
             <AgentFigureReferences figures={message.ragFigures} l={l} />
             {message.visionNotice ? (
               <div className="mt-3 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs leading-5 text-sky-700 dark:border-sky-300/20 dark:bg-sky-300/10 dark:text-sky-200">

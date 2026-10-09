@@ -26,8 +26,8 @@ import {
 } from './agentCapabilityRegistry';
 import { resolveAgentCapabilityRoute } from './agentCapabilityRoute';
 import { classifyAgentCapabilityRoute } from './agentCapabilityClassifier';
-import { bindAnswerEvidence, type AnswerEvidenceStatus } from './agentAnswerEvidence.ts';
-import { AgentCitationRegistry, rewriteAgentCitationSourceLabels } from './agentCitationRegistry.ts';
+import { citationBindingStats, verifyAgentCitationBindings, type AgentCitationBinding, type AnswerEvidenceStatus } from './agentAnswerEvidence.ts';
+import { AGENT_CITATION_PROTOCOL, AgentCitationRegistry, formatCitationEvidenceToken, rewriteAgentCitationSourceLabels } from './agentCitationRegistry.ts';
 import { buildWorkingMemoryInjection } from './agentMemoryContract.ts';
 import { isComparativeSurveyInstruction } from './agentCapabilityTrigger';
 import {
@@ -288,6 +288,7 @@ export type LibraryAgentRunResult =
     /** RAG 检索失败时的用户可见提示（已回退到全文/摘要上下文）。 */
     ragNotice?: string | null;
     evidenceStats?: Record<AnswerEvidenceStatus, number>;
+    citationBindings?: AgentCitationBinding[];
   }
   | {
     kind: 'choice';
@@ -299,6 +300,7 @@ export type LibraryAgentRunResult =
     visionNotice?: string | null;
     ragNotice?: string | null;
     evidenceStats?: Record<AnswerEvidenceStatus, number>;
+    citationBindings?: AgentCitationBinding[];
   }
   | {
     kind: 'paper-selection';
@@ -315,6 +317,7 @@ export type LibraryAgentRunResult =
     visionNotice?: string | null;
     ragNotice?: string | null;
     evidenceStats?: Record<AnswerEvidenceStatus, number>;
+    citationBindings?: AgentCitationBinding[];
   }
   | {
     kind: 'memory-plan';
@@ -457,9 +460,10 @@ export interface LibraryAgentStreamHandlers {
   onCapabilityRoute?: (event:
     | { kind: 'capability_route'; capabilityId: AgentCapabilityId | null; source: string; reason: string }
     | { kind: 'capability_route_failed'; reason: string }) => void;
-  onCapabilityUsage?: (usage: { promptTokens: number; completionTokens: number; capabilityId: AgentCapabilityId | 'classifier' }) => void;
+  onCapabilityUsage?: (usage: { promptTokens: number; completionTokens: number; capabilityId: AgentCapabilityId | 'classifier' | 'citation-verifier' }) => void;
+  onCitationVerification?: (bindings: AgentCitationBinding[]) => void;
   onCapabilityCheckpoint?: (artifacts: ComparativeSurveyArtifacts) => void;
-  onRecoveryCheckpoint?: (messages: AgentLoopMessage[], turn: number) => void;
+  onRecoveryCheckpoint?: (messages: AgentLoopMessage[], turn: number, citations?: LibraryAgentRagCitation[]) => void;
   onDone?: () => void;
   onError?: (message: string) => void;
 }
@@ -734,7 +738,7 @@ function buildReActAgentMessages({
     {
       role: 'system',
       content: [
-        'Use the PaperQuay tools as needed. 证据与引用硬性约束：实质陈述句末尾必须附带本次工具结果中的 [n] 引用编号；正文只写 [n]，绝不手写、转述或猜测引用的论文标题、页码、block 或来源，因为 PaperQuay 会从 [n] 生成唯一的可点击来源；不要在正文写 paper_ / category_ 开头的内部 ID (cite papers only with [n] numbers; never hand-write a citation title/page/block or raw paper_ / category_ internal ID)；若当前库内未查到对应片段，必须明确写明「当前库内没有查到」，严禁凭参数知识把句子补完；若包含模型推断，必须明确写成「我的推断」，并且推断内容绝不能放入 excerpt 或 synthesis 笔记。',
+        AGENT_CITATION_PROTOCOL,
         'For write requests, call exactly one matching write tool with reviewable items. The user must approve before application.',
         'Notebook workflows: to turn scattered excerpts into a close-reading card, first use search_notes with pageKind="excerpt" and the target paperId; to turn cross-paper excerpts into a concept page, use pageKind="excerpt" plus the topic keyword or tag. Create the result with write_notes using pageKind="paper-card" or "concept". Every substantive point must link back to the exact excerpt title with [[title]].',
         'Notebook citation rule: paper citations in generated notes must be paperReference nodes reconstructed by the shared Markdown parser from [n] plus a unique ## 参考文献 entry containing the real paper title or DOI. Never hand-write citation prose or citation numbers as a substitute for paperReference. Do not alter source excerpt anchors, snapshots, or “我的想法”; aggregation is additive and reviewable through write_notes.',
@@ -1954,6 +1958,9 @@ function recordAgentCitations(
   citations: LibraryAgentRagCitation[] | undefined,
 ) {
   for (const citation of citations ?? []) {
+    artifacts.citationTokens ??= [];
+    const token = formatCitationEvidenceToken(citation);
+    if (!artifacts.citationTokens.includes(token)) artifacts.citationTokens.push(token);
     const page = citation.pageIndex === null || citation.pageIndex === undefined
       ? citation.paperId
       : `${citation.paperId}#${citation.pageIndex + 1}`;
@@ -1977,6 +1984,35 @@ function recordToolPaperIds(artifacts: AgentSessionArtifacts, args: Record<strin
   }
 }
 
+export async function verifyLibraryAgentAnswerCitations(input: {
+  answer: string;
+  citations: LibraryAgentRagCitation[];
+  preset: LibraryAgentModelPreset;
+  signal?: AbortSignal;
+  streamHandlers?: LibraryAgentStreamHandlers;
+}) {
+  let enabled = true;
+  try { enabled = localStorage.getItem('pq.agentCitationVerifier') !== 'off'; } catch { /* Non-browser runtime. */ }
+  const citationBindings = await verifyAgentCitationBindings({
+    answer: input.answer, citations: input.citations, signal: input.signal, model: input.preset.model,
+    callModel: enabled ? async ({ system, user, signal }) => {
+      const response = await runOpenAiCompatibleAgentChatTurn({
+        options: { baseUrl: input.preset.baseUrl, apiKey: input.preset.apiKey, model: input.preset.model,
+          apiMode: input.preset.apiMode, reasoningEffort: 'low', temperature: 0, maxOutputTokens: 512 },
+        messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
+        toolChoice: 'none', stream: false, signal,
+      });
+      input.streamHandlers?.onCapabilityUsage?.({
+        capabilityId: 'citation-verifier', promptTokens: response.usage?.promptTokens ?? 0,
+        completionTokens: response.usage?.completionTokens ?? 0,
+      });
+      return { content: response.content };
+    } : undefined,
+  });
+  input.streamHandlers?.onCitationVerification?.(citationBindings);
+  return { citationBindings, evidenceStats: citationBindingStats(citationBindings) };
+}
+
 export async function runConversationalLibraryAgent({
   papers,
   categories = [],
@@ -1992,6 +2028,7 @@ export async function runConversationalLibraryAgent({
   signal,
   capabilityResume,
   loopResumeMessages,
+  loopResumeCitations,
   pinnedCapabilityId,
 }: {
   papers: LiteraturePaper[];
@@ -2008,6 +2045,7 @@ export async function runConversationalLibraryAgent({
   signal?: AbortSignal;
   capabilityResume?: Partial<ComparativeSurveyArtifacts>;
   loopResumeMessages?: AgentLoopMessage[];
+  loopResumeCitations?: LibraryAgentRagCitation[];
   pinnedCapabilityId?: AgentCapabilityId | 'auto' | null;
 }): Promise<LibraryAgentRunResult> {
   if (!preset.baseUrl.trim() || !preset.apiKey.trim() || !preset.model.trim()) {
@@ -2033,6 +2071,23 @@ export async function runConversationalLibraryAgent({
   // citation-audit 的 retrieve、note-distill 的 RAG 兜底都向同一个数组追加（方案第 3.3 节）。
   const citations: LibraryAgentRagCitation[] = [];
   const citationRegistry = new AgentCitationRegistry(citations);
+  citationRegistry.register(loopResumeCitations);
+  for (const message of loopResumeMessages ?? []) {
+    if (message.role !== 'tool') continue;
+    try {
+      const payload = JSON.parse(message.content);
+      for (const context of payload.papers ?? []) citationRegistry.register(context.citations);
+      for (const chunk of payload.chunks ?? []) {
+        if (!chunk.citationId || !chunk.paperId) continue;
+        citationRegistry.register([{
+          id: chunk.citationId, label: '', paperId: chunk.paperId,
+          paperTitle: chunk.paperTitle || papers.find((p) => p.id === chunk.paperId)?.title || chunk.paperId,
+          sourceType: chunk.sourceType ?? 'pdf-text', pageIndex: chunk.page == null ? null : chunk.page - 1,
+          blockId: chunk.blockId ?? null, previewText: chunk.snippet ?? '',
+        }]);
+      }
+    } catch { /* Most messages are prose rather than tool JSON. */ }
+  }
   const ragErrors: string[] = [];
   const ragSettings = normalizeStoredReaderSettings(persisted.settings);
   const ragReady = Boolean(
@@ -2094,6 +2149,9 @@ export async function runConversationalLibraryAgent({
       const chunks = rawResults.map((chunk) => {
         const paper = chunk.documentKey ? paperById.get(chunk.documentKey) : undefined;
         return {
+          citationId: `agent-rag:${chunk.documentKey}:${chunk.sourceType ?? 'pdf-text'}:${chunk.chunkId}`,
+          evidenceToken: formatCitationEvidenceToken({ id: `agent-rag:${chunk.documentKey}:${chunk.sourceType ?? 'pdf-text'}:${chunk.chunkId}` }),
+          sourceType: chunk.sourceType ?? 'pdf-text',
           paperId: chunk.documentKey || '',
           paperTitle: paper?.title,
           page: chunk.pageIndex === null || chunk.pageIndex === undefined ? null : chunk.pageIndex + 1,
@@ -2114,7 +2172,7 @@ export async function runConversationalLibraryAgent({
           sourceType: chunk.sourceType ?? 'pdf-text',
           pageIndex: chunk.pageIndex ?? null,
           blockId: chunk.blockId ?? null,
-          previewText: chunk.text?.slice(0, 300) ?? '',
+          previewText: chunk.text ?? '',
           paperId: paper.id,
           paperTitle: paper.title,
         }]);
@@ -2349,7 +2407,7 @@ export async function runConversationalLibraryAgent({
               };
             });
             const response = await callModel(
-              'Synthesize evidence for one comparative-survey subquestion. Preserve paper IDs and source citation labels. Return compact research notes, not a final report.',
+              `Synthesize evidence for one comparative-survey subquestion. Return compact research notes. ${AGENT_CITATION_PROTOCOL}`,
               JSON.stringify({
                 subquestion,
                 papers: papers.map((paper, paperIndex) => ({
@@ -2382,7 +2440,7 @@ export async function runConversationalLibraryAgent({
         },
         async report({ question, subquestions, researchNotes }) {
           const response = await callModel(
-            'Write a comparative academic survey in Markdown. Start with the conclusion, compare methods and evidence, cite available [n] labels, state limitations and research gaps, and do not invent sources.',
+            `Write a comparative academic survey in Markdown. Start with the conclusion, compare methods and evidence, state limitations and research gaps. ${AGENT_CITATION_PROTOCOL}`,
             JSON.stringify({ question, subquestions, researchNotes }),
           );
           return { markdown: response.content, usage: response.usage };
@@ -2412,10 +2470,11 @@ export async function runConversationalLibraryAgent({
     streamHandlers?.onDelta?.(survey.markdown, survey.markdown);
     streamHandlers?.onDone?.();
 
-    const evidenceStats = survey.evidenceStats ?? bindAnswerEvidence({
+    const bindingResult = await verifyLibraryAgentAnswerCitations({
       answer: survey.markdown,
       citations: citationAccumulator,
-    }).counts;
+      preset, signal, streamHandlers,
+    });
 
     return {
       kind: 'capability',
@@ -2428,7 +2487,7 @@ export async function runConversationalLibraryAgent({
       figures: [],
       visionNotice: preset.supportsVision === true ? null : '当前模型未标记为支持视觉，调研阶段未发送论文图片。',
       ragNotice: buildAgentRagNotice(ragErrors),
-      evidenceStats,
+      ...bindingResult,
     };
   } else if (route.capabilityId) {
     const definition = getAgentCapability(route.capabilityId);
@@ -2493,10 +2552,11 @@ export async function runConversationalLibraryAgent({
             paperId: citation.paperId,
             paperTitle: citation.paperTitle,
           }));
-          const evidenceStats = bindAnswerEvidence({
+          const bindingResult = await verifyLibraryAgentAnswerCitations({
             answer: answerMarkdown,
             citations: graphCitations,
-          }).counts;
+            preset, signal, streamHandlers,
+          });
 
           return {
             kind: 'capability',
@@ -2506,13 +2566,13 @@ export async function runConversationalLibraryAgent({
             figures: [],
             visionNotice: null,
             ragNotice: null,
-            evidenceStats,
+            ...bindingResult,
           };
         }
 
         if (capabilityResult.kind === 'note-plan') {
           // 笔记蒸馏的 collect 证据（收集到的笔记 + RAG 兜底片段）挂到消息引用区；
-          // 证据门禁已在 plan 阶段通过 assertEvidenceForNoteDraft，这里不再重复判定。
+          // 笔记写入门禁与回答引用核验独立，后者仅决定回答中哪些引用可点击。
           const distillCitations: LibraryAgentRagCitation[] = (capabilityResult.citations ?? [])
             .filter((citation) => citation.paperId && !citation.paperId.startsWith('note:'))
             .map((citation, index) => ({
@@ -2534,12 +2594,12 @@ export async function runConversationalLibraryAgent({
             figures: [],
             visionNotice: null,
             ragNotice: null,
-            evidenceStats: { supported: 0, partial: 0, 'not-in-library': 0 },
+            ...await verifyLibraryAgentAnswerCitations({ answer: answerMarkdown, citations: distillCitations, preset, signal, streamHandlers }),
           };
         }
 
         // citation-audit：retrieve 复用 rag_search 检索，片段已累积进当次引用数组；
-        // 判定状态由审计结果表格承担，不再跑本地绑定（方案第 3.5 节分工）。
+        // 审计表格保留自己的判定；回答中的引用另行核验，旧数字引用不放行。
         return {
           kind: 'capability',
           capabilityId: routedCapabilityId,
@@ -2548,7 +2608,7 @@ export async function runConversationalLibraryAgent({
           figures: [],
           visionNotice: null,
           ragNotice: null,
-          evidenceStats: { supported: 0, partial: 0, 'not-in-library': 0 },
+          ...await verifyLibraryAgentAnswerCitations({ answer: answerMarkdown, citations, preset, signal, streamHandlers }),
         };
       }
       // capabilityResult 为 null：分类器选中的能力失败，继续走下方 ReAct 主循环。
@@ -2567,6 +2627,7 @@ export async function runConversationalLibraryAgent({
     categoryPayload.categoryPathById,
   ));
   const artifacts = emptyAgentSessionArtifacts();
+  recordAgentCitations(artifacts, citations);
   const contexts = new Map<string, PaperContextPayload>();
   const contextModes = new Map<string, LibraryAgentContextRequest['mode']>();
   if (currentPaperScopeIds.length > 0) {
@@ -2742,6 +2803,7 @@ export async function runConversationalLibraryAgent({
     },
     messages: loopResumeMessages?.length
       ? [
+        { role: 'system', content: AGENT_CITATION_PROTOCOL },
         ...loopResumeMessages,
         { role: 'user', content: normalizedInstruction, attachments },
       ]
@@ -2784,6 +2846,7 @@ export async function runConversationalLibraryAgent({
                 '- 引用的论文与页码:',
                 '- 下一步:',
                 'Do not include hidden reasoning or credentials.',
+                AGENT_CITATION_PROTOCOL,
               ].join('\n'),
             },
             {
@@ -2835,7 +2898,7 @@ export async function runConversationalLibraryAgent({
       }
     },
     onCheckpoint(checkpoint) {
-      streamHandlers?.onRecoveryCheckpoint?.(checkpoint.messages, checkpoint.turn);
+      streamHandlers?.onRecoveryCheckpoint?.(checkpoint.messages, checkpoint.turn, citations.map((citation) => ({ ...citation })));
     },
   });
 
@@ -2858,6 +2921,7 @@ export async function runConversationalLibraryAgent({
   if (result.kind === 'answer') {
     return {
       ...result,
+      ...await verifyLibraryAgentAnswerCitations({ answer: result.answer, citations, preset, signal, streamHandlers }),
       citations,
       figures: figureReferences,
       visionNotice,

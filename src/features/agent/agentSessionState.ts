@@ -78,6 +78,7 @@ function cloneForkMessage(message: AgentChatMessage): AgentChatMessage {
     attachments: stripAttachmentData(message.attachments),
     paperScopeIds: message.paperScopeIds ? [...message.paperScopeIds] : undefined,
     ragCitations: message.ragCitations ? message.ragCitations.map((citation) => ({ ...citation })) : undefined,
+    citationBindings: message.citationBindings?.map((binding) => ({ ...binding })),
     trace: message.trace ? message.trace.map((step) => ({ ...step })) : undefined,
     plan: message.plan
       ? { ...message.plan, items: message.plan.items.map((item) => ({ ...item, updateRequest: item.updateRequest ? { ...item.updateRequest } : undefined })) }

@@ -2,6 +2,7 @@ import type { AgentRunEventRecord } from '../../services/agentRuns';
 import type { ComparativeSurveyArtifacts } from '../../services/agentCapability';
 import type { AgentLoopMessage } from '../../services/agentLoop';
 import type { AgentChatMessage } from './AgentWorkspace.types';
+import type { LibraryAgentRagCitation } from '../../services/libraryAgent';
 import { newMessageId } from './AgentWorkspace.model.ts';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -110,6 +111,8 @@ export function latestComparativeSurveyCheckpoint(
               return [];
             }
             return [{
+              ...(typeof value.id === 'string' ? { id: value.id } : {}),
+              ...(typeof value.label === 'string' ? { label: value.label } : {}),
               paperId: value.paperId,
               paperTitle: value.paperTitle,
               pageIndex: typeof value.pageIndex === 'number' || value.pageIndex === null ? value.pageIndex : undefined,
@@ -151,6 +154,18 @@ export function latestAgentRecoveryCheckpoint(events: AgentRunEventRecord[]): Ag
   }
 
   return null;
+}
+
+export function latestAgentRecoveryCitations(events: AgentRunEventRecord[]): LibraryAgentRagCitation[] {
+  const checkpoint = [...events].reverse().find((event) => event.kind === 'checkpoint' && Array.isArray(event.payload.messages));
+  if (!Array.isArray(checkpoint?.payload.citations)) return [];
+  return checkpoint.payload.citations.filter((value): value is LibraryAgentRagCitation =>
+    isRecord(value) && typeof value.id === 'string' && typeof value.label === 'string' &&
+    typeof value.paperId === 'string' && typeof value.paperTitle === 'string' &&
+    (value.sourceType === 'pdf-text' || value.sourceType === 'mineru-markdown') &&
+    (value.pageIndex === null || (typeof value.pageIndex === 'number' && Number.isInteger(value.pageIndex) && value.pageIndex >= 0)) &&
+    (value.blockId == null || typeof value.blockId === 'string') &&
+    (value.previewText === undefined || typeof value.previewText === 'string'));
 }
 
 export function recoveryCheckpointToChatMessages(messages: AgentLoopMessage[]): AgentChatMessage[] {
