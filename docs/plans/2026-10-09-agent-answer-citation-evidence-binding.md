@@ -2,6 +2,7 @@
 
 - 日期：2026-10-09
 - 状态：**已实施，自动化检查通过，用户确认人工核验通过**（2026-10-09；发布版本 0.4.6）
+- 后续调整（2026-10-09，0.4.8）：来源身份决定编号与跳转，内容核验改为主动触发的提示；用户已确认该调整人工验证通过。本计划的自动核验及跳转门禁为历史设计，现行行为和验收范围见[来源跳转与可选内容检查变更记录](../changes/2026-10-09-agent-local-citation-navigation.md)，笔记证据门禁继续独立执行。
 - 触发：Agent 的一段回答文字中插入了可跳转的 `[n]`，但点击后打开的文献片段并不是该段文字实际依赖或能够支撑的文献。此问题不同于链接跳转到错误页面：跳转会忠实使用 `[n]` 对应的 citation 对象，问题出在模型为句子选择了不相关的 `[n]`，而现有程序没有在展示前阻止它成为有效链接。
 - 范围：`src/services/libraryAgent.ts`、`src/services/agentCitationRegistry.ts`、`src/services/agentAnswerEvidence.ts`、`src/features/agent/AgentMarkdown.tsx`、`src/features/agent/AgentWorkspaceMessages.tsx`、Agent 消息类型与持久化、对应测试、`docs/changes/`。
 - 前置方案：`docs/plans/2026-10-02-agent-citation-network-ui-mcp-skill-remediation.md` 已实施的“运行内 label 唯一化”和“重复 label 不取第一项”仍然有效；本计划补足其未覆盖的“句子和证据是否真正相关”问题，不回退该方案。

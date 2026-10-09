@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.3.0-2563eb?style=flat-square" alt="Version v0.3.0">
+  <img src="https://img.shields.io/badge/version-v0.4.8-2563eb?style=flat-square" alt="Version v0.4.8">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-4b5563?style=flat-square" alt="Windows macOS Linux">
   <img src="https://img.shields.io/badge/built%20with-Electron-47848f?style=flat-square" alt="Electron">
   <img src="https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-0f766e?style=flat-square" alt="React TypeScript">
@@ -54,6 +54,15 @@
 ---
 
 ## Latest Update
+
+### v0.4.8 - Ordered fragment references and optional content checks
+
+- **Matching body and reference order**: each answer starts at `[1]` in first-use order. Repeated uses of a fragment share a number; different fragments from the same paper and page retain separate entries. References show available local titles, authors, years, venues, PDF page numbers and expandable excerpts. Body markers and reference titles open the same source.
+- **Immediate source access**: normal generation no longer calls the AI citation verifier. Locally resolved sources are available directly; Check content requests an advisory assessment. Insufficient support, contradiction or a failed check does not hide valid references. A resolved source does not prove a claim, and note writes still undergo independent evidence checks.
+- **Answer-focused layout**: source and content details and full execution traces start collapsed. Recommendation prompts request real paper titles, available years and specific relevance. Missing blocks explicitly fall back to PDF page navigation; unknown, ambiguous and incomplete citations cannot enable navigation.
+- **Validation and downloads**: the user confirmed manual validation on October 9, 2026; all 695 automated tests and packaging for four platform targets passed. Download [v0.4.8](https://github.com/Dongyurocket/PaperQuay/releases/tag/app-v0.4.8); see the [Agent user guide (Chinese)](./docs/USER_MANUAL.zh-CN.md#6-agent-工作区) and [change and acceptance record (Chinese)](./docs/changes/2026-10-09-agent-local-citation-navigation.md) for usage and validation scope.
+
+Versions v0.4.0–v0.4.5 also introduced Agent capability routing, claim verification, note distillation and read-only graph exploration, with fixes for note math rendering and vault math preservation, Agent network diagnostics and composer layout. See [CHANGELOG.md](./CHANGELOG.md) for each release.
 
 ### v0.3.0 - Semantic note search, distill preview, and vault conflict protection
 
@@ -183,6 +192,8 @@ PaperQuay can build an independent local library with PDF import, a configurable
 
 The agent workspace is designed for library operations, not just conversation. It can assist with batch renaming, metadata completion, smart tagging, tag cleanup, automatic classification, and paper summarization while exposing tool calls and results for user review.
 
+Library-grounded answers share sequential numbers with a fragment-level reference list, providing direct source access. Check content is optional and execution traces start collapsed. Complex tasks support automatic capability routing or manual pinning for claim verification, note distillation and graph exploration; library and note writes require approval plans.
+
 ---
 
 ## Core Workflow
@@ -244,7 +255,7 @@ These items are implemented in the current desktop app.
 | Translation       | Full-text translation, cached block translations, and selection translation through OpenAI-compatible models, plus batch paper title translation; Chinese-dominant papers skip translation automatically and Chinese titles are adopted directly; centralized translated PDF storage |
 | Citation export   | Batch Bib export for selected papers as one merged .bib file or one file per paper, with deduplicated citation keys and heuristic entry types       |
 | Paper overview    | AI-generated screening fields for background, research questions, methods, experiment setup, findings, conclusions, and limitations              |
-| Agent workspace   | Conversation UI with execution traces, tool call cards, paper selection, metadata tools, rename tools, tagging, classification, and summaries    |
+| Agent workspace   | Conversation UI with collapsed execution traces, tool cards, paper selection, metadata, rename, tagging, classification and summaries; capability routing and pinning, ordered fragment references, optional content checks and approval plans for writes |
 | Zotero import & sync | Full import of local Zotero collections, tags, and available PDF attachments from `zotero.sqlite`; selective on-demand synchronization with collection browsing, conditional search, diff preview, and triple deduplication |
 | MCP knowledge base | Built-in standard stdio MCP server (`bin/paperquay-mcp.cjs`) directly querying local SQLite; `search_knowledge_base` upgraded to vector hybrid retrieval (KNN + FTS5 + RRF) with mode options and channel attribution; full literature, chunk, note, and Zotero sync toolchain |
 | Backup            | WebDAV backup and restore for the library database, notes database, and local RAG SQLite database                                                |

@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.3.0-2563eb?style=flat-square" alt="Version v0.3.0">
+  <img src="https://img.shields.io/badge/version-v0.4.8-2563eb?style=flat-square" alt="Version v0.4.8">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-4b5563?style=flat-square" alt="Windows macOS Linux">
   <img src="https://img.shields.io/badge/built%20with-Electron-47848f?style=flat-square" alt="Electron">
   <img src="https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-0f766e?style=flat-square" alt="React TypeScript">
@@ -55,6 +55,15 @@
 ---
 
 ## 近期更新
+
+### v0.4.8 - Agent 片段引用与可选内容检查
+
+- **正文与参考文献同序**：每条回答按首次引用顺序从 `[1]` 编号，同一片段复用编号，同篇同页的不同片段分别列出。文末显示本地题名、作者、年份、刊物、PDF 页序和可展开的原文片段；正文编号与列表题名打开同一来源。
+- **直接查看来源**：正常生成不再自动请求 AI 引用核验；本地来源身份可解析即可查看。点击「检查内容」才进行提示性评估，支撑不足、冲突或检查失败不隐藏有效引用。来源可查看不表示主张已被证实，笔记写入仍执行独立证据检查。
+- **回答优先**：来源与内容检查明细、完整执行轨迹默认折叠；推荐提示要求列出真实文献题名、可用年份与具体相关性。失效结构块明确降级为 PDF 页定位，未知、歧义或未完成引用不生成跳转。
+- **验证与下载**：2026-10-09 用户确认人工验证通过；695 项自动测试及四个平台安装包构建通过。下载 [v0.4.8](https://github.com/Dongyurocket/PaperQuay/releases/tag/app-v0.4.8)，用法见[用户手册 Agent 章节](./docs/USER_MANUAL.zh-CN.md#6-agent-工作区)，验收范围见[变更记录](./docs/changes/2026-10-09-agent-local-citation-navigation.md)。
+
+v0.4.0–v0.4.5 还引入了 Agent 能力路由、引用核对与笔记蒸馏、图谱只读探索，并修复笔记公式显示与 vault 公式保真、Agent 网络诊断及输入栏布局。各版本详情见 [CHANGELOG.md](./CHANGELOG.md)。
 
 ### v0.3.0 - 笔记语义检索、提炼预览与 vault 冲突保护
 
@@ -193,6 +202,8 @@ PaperQuay 可以独立建立本地文献库，支持 PDF 导入、默认文献�
 
 Agent 工作区不是普通聊天框，而是面向文献库操作设计。它可以辅助批量重命名、元数据补全、智能标签、标签清洗、自动分类和论文总结，并展示工具调用过程和执行结果，方便用户确认。
 
+围绕文献库提问时，回答正文与片段级参考文献共享顺序编号，可直接查看原文来源；「检查内容」是可选操作，执行轨迹默认折叠。复杂任务支持自动能力路由或手动钉选引用核对、笔记蒸馏、图谱探索，文库和笔记写操作先生成审批计划。
+
 ---
 
 ## 核心工作流
@@ -255,7 +266,7 @@ Agent 工作区不是普通聊天框，而是面向文献库操作设计。它�
 | 翻译与译文管理 | 支持全文翻译、块级翻译缓存和划词翻译，模型使用 OpenAI 兼容接口；支持批量翻译文献标题；中文文献自动跳过翻译、中文标题直填入库；支持统一译文 PDF 集中存放与平滑迁移 |
 | 引用导出 | 支持多选文献批量导出 Bib：合并为单个 .bib 或每篇一个文件，自动生成去重 citation key，支持期刊、书籍、学位论文、报告等标准条目类型 |
 | 论文概览 | 支持背景、研究问题、方法、实验设置、主要发现、结论和局限等速读概览字段 |
-| Agent 工作区 | 支持对话、执行轨迹、工具调用卡片、文献选择、元数据工具、重命名、打标签、分类和总结 |
+| Agent 工作区 | 支持对话、默认折叠的执行轨迹、工具调用卡片、文献选择、元数据工具、重命名、打标签、分类和总结；能力路由与钉选、正文顺序编号和片段级参考文献、可选内容检查，写操作经审批 |
 | Zotero 导入与同步 | 支持从 `zotero.sqlite` 全量导入分类、标签和可用 PDF；新增支持基于分类树浏览、条件模糊检索、差量预检与三层防重校验的选择性精准同步 |
 | MCP 知识库服务 | 内置标准 MCP stdio 服务（`bin/paperquay-mcp.cjs`），直连本地 SQLite；`search_knowledge_base` 支持向量 KNN + FTS5 + RRF 混合检索（支持 auto/hybrid/keyword 模式与 channels 来源标记及自动降级）；提供完整的文献检索、详情、正文切片以及笔记检索与写入（创建/更新/软删除、标签与分类树维护）、Zotero 本地库浏览、检索、差量预检与选择性同步工具链，全部写工具带运行护栏 |
 | 备份 | 支持通过 WebDAV 备份和恢复文献库数据库、笔记数据库和本地 RAG SQLite 数据库 |
