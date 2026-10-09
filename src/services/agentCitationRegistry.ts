@@ -4,6 +4,12 @@ function normalizedLabel(label: string): string {
   return label.replace(/[\[\]]/g, '').trim();
 }
 
+export function formatCitationEvidenceToken(citation: { id: string }): string {
+  return `[[cite:${citation.id}]]`;
+}
+
+export const AGENT_CITATION_PROTOCOL = 'For factual answer sentences, copy only exact [[cite:<id>]] tokens supplied with evidence in this run. Never generate numeric [n] citations or invent tokens. Do not hand-write source titles/pages/blocks or raw paper_/category_ IDs. If no evidence token supports a claim, say 当前库内没有查到. Label model inferences 我的推断 and never put them in excerpt or synthesis notes. Preserve tokens verbatim when summarizing or compressing context.';
+
 /**
  * Maintains one canonical citation list for a single Agent run. Labels are
  * assigned once, in discovery order, and never reused by a later tool result.
@@ -52,7 +58,7 @@ export function rewriteAgentCitationSourceLabels(
   canonical: LibraryAgentRagCitation[],
 ): string {
   if (!text || !source?.length || source.length !== canonical.length) {
-    return text;
+    return text.replace(/# Source \[(?!\[)[^\]\n]+\]/g, '# Source (unavailable evidence)');
   }
 
   const labels = new Map<string, string>();
@@ -60,17 +66,17 @@ export function rewriteAgentCitationSourceLabels(
 
   source.forEach((citation, index) => {
     const from = normalizedLabel(citation.label);
-    const to = canonical[index]?.label;
+    const to = canonical[index] ? formatCitationEvidenceToken(canonical[index]) : undefined;
     if (!from || !to) return;
     if (labels.has(from)) duplicateSourceLabels.add(from);
     labels.set(from, to);
   });
 
-  return text.replace(/# Source \[([^\]]+)\]/g, (match, rawLabel: string) => {
+  return text.replace(/# Source \[(?!\[)([^\]\n]+)\]/g, (_match, rawLabel: string) => {
     const label = normalizedLabel(rawLabel);
-    if (!label || duplicateSourceLabels.has(label)) return match;
+    if (!label || duplicateSourceLabels.has(label)) return '# Source (unavailable evidence)';
     const nextLabel = labels.get(label);
-    return nextLabel ? `# Source [${nextLabel}]` : match;
+    return nextLabel ? `# Source ${nextLabel}` : '# Source (unavailable evidence)';
   });
 }
 
