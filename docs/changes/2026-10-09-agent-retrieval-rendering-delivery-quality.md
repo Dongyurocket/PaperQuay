@@ -79,4 +79,6 @@
 
 从本次 NSIS 安装包提取应用载荷，在临时目录和独立 userData 中完成核心回归：启动后 174 篇文库就绪，已有论文正常显示 1/15 页，笔记中的公式与表格正常，设置页正常。合成临时 PDF 经界面确认导入，新增 1、重复 0、失败 0，文库变为 175 篇；文件复制至临时文献目录，阅读器显示 1/1 页及原文。点击关闭后主进程 exitCode=0，窗口消失。此回归覆盖安装包载荷，不代表执行安装向导覆盖生产应用；未更新生产安装。
 
-发布使用 `app-v0.4.9` 标签触发现有 GitHub Actions，四个平台构建及正式 Release 状态在发布完成后补记。
+提交 `985a174` 已推送至 origin/main，发布标签为 `app-v0.4.9`。main 的 [Build 工作流](https://github.com/Dongyurocket/PaperQuay/actions/runs/37968128034)通过；[Release 工作流](https://github.com/Dongyurocket/PaperQuay/actions/runs/37968135889)的 Windows x64、Linux x64、macOS x64、macOS arm64 构建及发布步骤全部成功。北京时间 2026-10-10 01:48:45 正式发布 [PaperQuay v0.4.9](https://github.com/Dongyurocket/PaperQuay/releases/tag/app-v0.4.9)，latest Release API 已返回该版本，draft/prerelease 均为 false。
+
+正式 Release 共 12 项资源：Windows 安装包及 blockmap，两个 macOS 架构的 DMG 及 blockmap，Linux AppImage/DEB/tar.gz，以及 stable、stable-linux、stable-mac 三份更新元数据。元数据版本、资源名称和大小已与发布资源核对；本地 Windows 安装包另验证 SHA-512 与本地 stable.yml 一致。CI 与本地安装包由不同构建生成，未声称二者字节相同。macOS 沿用现有手动更新方式。
