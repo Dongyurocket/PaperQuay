@@ -1,11 +1,13 @@
 # PaperQuay v{{VERSION}}
 
-This release fixes Agent citation integrity, model error reporting, and composer controls on narrow windows:
+This release verifies the relationship between each Agent answer sentence and its cited evidence before enabling citation navigation.
 
-- Agent answers no longer let model-written paper titles/pages diverge from what a `[n]` citation actually opens. Citation labels are unique per run, ambiguous labels are rejected, and explicit title/page conflicts are flagged as mismatches.
-- Model connection failures now report an actionable Chinese message instead of a bare `fetch failed`, and one failure no longer renders duplicate error cards in the execution trace.
-- The Agent composer toolbar wraps by available width, so the model picker, reasoning effort, and Send stay visible and clickable on small screens; the reasoning picker gains keyboard support and viewport-aware placement.
-- MCP maintenance: server version now tracks the app version, stale schema fields were cleaned up, desktop write protection also covers development instances, and three repo-managed Agent skill guides were added.
+- Answers copy structured citation tokens; displayed numbers and navigation targets come from canonical sources. Unknown, ambiguous, conflicting, and unverified citations remain visibly unavailable.
+- The selected Agent model checks each sentence/source pair. Only a valid supported verdict enables navigation; timeouts, invalid responses, and failures remain unverified. Verification adds model latency and usage cost, and readers should still check the original source.
+- Verification results persist across saved conversations, forks, and recovery. Citations can be checked again with the current model, with run and token usage recorded.
+- The verified-evidence footer lists only sources actually verified for the answer. Other retrieved materials are collapsed separately; legacy numeric citations remain unverified.
+
+Validation: build and all 678 tests passed; the user confirmed manual acceptance on 2026-10-09.
 
 ## Downloads
 
@@ -15,12 +17,14 @@ Choose the installer for your system from Assets: Windows `.exe`, macOS `.dmg`, 
 
 # PaperQuay v{{VERSION}} 中文说明
 
-本版修复 Agent 引用一致性、模型错误提示与小屏下 Composer 控件可用性：
+本版在开放 Agent 引用跳转前，逐条核验回答句子与所引证据的关系。
 
-- Agent 正文中模型手写的文献题名/页码不再可能与 `[n]` 实际跳转的文献不一致：每次运行的引用编号全局唯一，歧义编号拒绝跳转，题名/页码冲突会标记为引用不匹配并受笔记门禁拦截。
-- 模型连接失败不再只显示 `fetch failed`，而是给出可操作的中文排障提示；同一失败在执行轨迹中只保留一条错误卡片。
-- Composer 工具栏按实际宽度换行，窄窗口或高缩放下模型选择、思考强度与发送按钮保持可见可点；思考强度控件支持键盘操作与视口内菜单定位。
-- MCP 维护：服务版本与应用版本对齐，清理失效 schema 字段，开发模式下的外部写入同样受运行护栏保护，并新增三个仓库管理的 Agent 作业技能。
+- 回答复制结构化引用 token，显示编号与跳转目标来自 canonical 来源；未知、歧义、元数据冲突和未验证引用保留可见状态且不可跳转。
+- 当前 Agent 模型逐对核验句子与来源，仅有效的支持判定可放行；超时、非法响应及失败保持未验证。二次核验会增加延迟和模型费用，判断仍须以原文为准。
+- 核验结果随会话保存，分叉及恢复保留完整证据；支持使用当前模型重新核验，并记录运行和 token 用量。
+- 底部已核验证据仅列回答实际通过核验的来源，其他检索材料单独折叠；历史数字引用保持未验证。
+
+验证：构建与全部 678 项测试通过；2026-10-09 用户确认人工核验通过。
 
 ## 下载
 

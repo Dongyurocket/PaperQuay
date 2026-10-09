@@ -1,7 +1,7 @@
 # Agent 回答句子与可跳转引用的证据绑定修复计划
 
 - 日期：2026-10-09
-- 状态：**代码与自动化检查已实施；deepseek-flash 开发桌面验收待用户确认**（2026-10-09）
+- 状态：**已实施，自动化检查通过，用户确认人工核验通过**（2026-10-09；发布版本 0.4.6）
 - 触发：Agent 的一段回答文字中插入了可跳转的 `[n]`，但点击后打开的文献片段并不是该段文字实际依赖或能够支撑的文献。此问题不同于链接跳转到错误页面：跳转会忠实使用 `[n]` 对应的 citation 对象，问题出在模型为句子选择了不相关的 `[n]`，而现有程序没有在展示前阻止它成为有效链接。
 - 范围：`src/services/libraryAgent.ts`、`src/services/agentCitationRegistry.ts`、`src/services/agentAnswerEvidence.ts`、`src/features/agent/AgentMarkdown.tsx`、`src/features/agent/AgentWorkspaceMessages.tsx`、Agent 消息类型与持久化、对应测试、`docs/changes/`。
 - 前置方案：`docs/plans/2026-10-02-agent-citation-network-ui-mcp-skill-remediation.md` 已实施的“运行内 label 唯一化”和“重复 label 不取第一项”仍然有效；本计划补足其未覆盖的“句子和证据是否真正相关”问题，不回退该方案。
@@ -248,4 +248,4 @@ interface AgentCitationBinding {
 - B 已完成：逐出现位置绑定、规则预筛、当前模型受限 JSON 核验；最多 48 对、并发 3、单次 15 秒超时，异常与取消均保持不可点击。默认启用；保留停用开关。
 - C 已完成：只有 verified occurrence 可跳转，核验明细与重新核验、消息持久化与分叉、仅已用已核验证据页按钮、检索材料折叠展示。
 - 自动化检查已完成：`npm run build` 通过；`npm test` 678/678 通过；`git diff --check` 通过。实际 ReactMarkdown/消息卡片组件测试覆盖可信按钮、canonical 对象回调、流式未核验状态、伪造链接和底部证据过滤。
-- 开发桌面真实模型的语义质量、延迟/成本、阅读器跳转及重开工作区验收尚未完成，不宣称全部验收通过。编号步骤与截图要求见 [变更记录](../changes/2026-10-09-agent-answer-citation-evidence-binding.md)。
+- 人工核验已完成：2026-10-09 用户确认“经测试，通过人工核验”，授权提交、推送、构建及发布 0.4.6。未收到逐项截图记录，延迟/成本及误拒绝率尚未量化。验收步骤留档见 [变更记录](../changes/2026-10-09-agent-answer-citation-evidence-binding.md)。
