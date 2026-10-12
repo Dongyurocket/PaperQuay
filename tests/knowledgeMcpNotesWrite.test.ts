@@ -186,6 +186,25 @@ test('update_note 局部更新并重建富文本 JSON', () => {
   }
 });
 
+test('update_note 支持更新与清空 pageKind（白名单校验）', () => {
+  const { dir, service } = setup();
+  try {
+    const created = service.createNote({ title: '概念页', content: '内容', pageKind: 'concept' });
+    const updated = service.updateNote({ noteId: created.noteId, pageKind: 'qa' });
+    assert.equal(updated.note.pageKind, 'qa');
+
+    const cleared = service.updateNote({ noteId: created.noteId, pageKind: '' });
+    assert.equal(cleared.note.pageKind ?? null, null);
+
+    assert.throws(
+      () => service.updateNote({ noteId: created.noteId, pageKind: 'bad-kind' }),
+      /Unsupported note page kind/,
+    );
+  } finally {
+    cleanupDir(dir);
+  }
+});
+
 test('delete_note 软删除并移出 FTS 与搜索', () => {
   const { dir, service } = setup();
   try {

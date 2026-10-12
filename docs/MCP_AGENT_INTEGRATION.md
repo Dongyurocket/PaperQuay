@@ -58,8 +58,8 @@ PaperQuay 提供了基于标准 **Model Context Protocol (MCP)** 的知识库服
 
 | 工具名称 | 说明 | 核心参数 |
 | :--- | :--- | :--- |
-| `create_note` | 新建笔记 | `title` / `content`（至少一个非空，正文为 Markdown/纯文本）、`tags`（去 `#` 前缀，上限 30）、`paperId`（缺省为全局笔记）、`type`（`highlight`/`area`/`standalone`/`ai-chat`）、`folderId` |
-| `update_note` | 局部更新 | `noteId`（必填）+ `title`/`content`/`tags`/`folderId` 至少一项；`folderId` 传空串移动到未分类 |
+| `create_note` | 新建笔记 | `title` / `content`（至少一个非空，正文为 Markdown/纯文本）、`tags`（去 `#` 前缀，上限 30）、`paperId`（缺省为全局笔记）、`type`（`highlight`/`area`/`standalone`/`ai-chat`）、`pageKind`（8 值白名单）、`folderId` |
+| `update_note` | 局部更新 | `noteId`（必填）+ `title`/`content`/`tags`/`pageKind`/`folderId` 至少一项；`pageKind` 与 `folderId` 传空串分别清除页面类型 / 移动到未分类 |
 | `delete_note` | 软删除（标记删除并移出全文索引） | `noteId`（必填） |
 | `create_note_folder` | 新建分类（可嵌套） | `name`（必填）、`parentId`（可选） |
 | `rename_note_folder` | 重命名分类 | `folderId`、`name` |
@@ -68,7 +68,8 @@ PaperQuay 提供了基于标准 **Model Context Protocol (MCP)** 的知识库服
 笔记写入的语义约定：
 
 - 正文中的 `[[笔记标题]]` 会被解析为双链（仅当目标笔记已存在），`#标签` 自动归一化为标签。
-- 替换 `content` 会清空富文本缓存（`contentJson`/`contentHtml`），编辑器按纯文本重建——**不要用 MCP 覆盖含锚点块、文献引用或表格的笔记**，这类笔记请在应用内编辑或只用 MCP 改标题/标签/分类。
+- 替换 `content` 时，正文由共享 Markdown → Tiptap 解析器在**写入边界**解析并重建富文本 JSON（`contentJson`），`contentHtml` 缓存清除后由编辑器重渲染；标题、列表、基础内联格式、代码块、引用块、表格、公式、双链与标签可重建，只有已知的锚点 ID 与本地文库唯一匹配的 `[n]` 文献引用恢复为专用节点，未知值保留为普通文本。
+- **不要用 MCP 覆盖含摘录卡来源锚点的笔记正文**：锚点块与原文快照无法从普通 Markdown 重建，覆盖后正文中的锚点引用丢失展示，且编辑器再次保存时会按正文同步清理对应锚点数据。含文献引用或表格的笔记，覆盖时须保留规范 Markdown 格式（`[n]` + 文末参考文献列表 / 表格语法），否则对应节点会退化为纯文本；这类笔记更稳妥的做法是在应用内编辑，或只用 MCP 改标题/标签/分类。
 - 批量删除前建议先让 Agent 列出待删清单并人工确认。
 
 ---

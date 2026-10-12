@@ -489,7 +489,9 @@ function normalizeNoteInput(input, existing = null) {
     linkedPaperId ||
     GLOBAL_NOTES_PAPER_ID;
   const type = normalizeNoteType(input?.type ?? existing?.type);
-  const pageKind = normalizePageKind(input?.pageKind ?? existing?.pageKind);
+  const pageKind = input?.pageKind === undefined
+    ? normalizePageKind(existing?.pageKind)
+    : normalizePageKind(input.pageKind);
   const title = cleanString(input?.title ?? existing?.title) || 'Untitled Note';
   const pdfLocation = input?.pdfLocation === undefined
     ? existing?.pdfLocation ?? null

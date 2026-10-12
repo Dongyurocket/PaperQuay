@@ -35,14 +35,14 @@ description: 通过 PaperQuay Knowledge MCP 维护 PaperQuay 论文阅读器的�
 | `list_note_tags` | 标签列表（只读） |
 | `list_note_folders` / `create_note_folder` / `rename_note_folder` / `delete_note_folder` | 文件夹树 |
 | `create_note` | 新建；`title`/`content` 必填；`type ∈ highlight/area/standalone/ai-chat`；`tags` 去 `#` 前缀、上限 30；可带 `folderId` |
-| `update_note` | 局部更新；替换 `content` 会清空富文本缓存由编辑器重建 |
+| `update_note` | 局部更新；替换 `content` 时正文在写入时经共享解析器重建为富文本（已知锚点/可匹配引用恢复为专用节点） |
 | `delete_note` | 软删除 |
 
 完整参数契约以 `docs/MCP_AGENT_INTEGRATION.md` 为准。笔记正文中的 `[[笔记标题]]` 会被解析为双链（仅当目标已存在），`#标签` 自动归一化。
 
 ## 笔记宪章（红线）
 
-1. **Tiptap JSON 是唯一事实源**——MCP 写入的是 Markdown 纯文本，富文本由桌面编辑器重建。
+1. **Tiptap JSON 是唯一事实源**——MCP 写入 Markdown，正文在写入时经共享解析器重建为富文本 JSON；无法从 Markdown 还原的内容（摘录卡锚点块与原文快照）不要覆盖。
 2. **锚点 ID 不可丢**——摘录卡的来源锚点只增不改；不可伪造锚点。
 3. **提炼可以自由，证据必须保真**——可改写提炼正文，不得改写原文快照。
 

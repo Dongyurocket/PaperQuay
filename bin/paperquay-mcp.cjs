@@ -227,14 +227,19 @@ const TOOLS = [
   {
     name: 'update_note',
     description:
-      'Update an existing note by noteId. Only the provided fields change: title, content (Markdown/plain text; replacing content clears the stored rich-text JSON so the editor rebuilds it), tags (full replacement, leading # stripped), and/or folderId (pass an empty string to move the note to uncategorized). At least one field is required. Refused while the PaperQuay desktop app is running unless allowWhileAppRunning is true.',
+      'Update an existing note by noteId. Only the provided fields change: title, content (Markdown/plain text; at write time the shared Markdown parser rebuilds the stored rich-text JSON and clears the HTML cache, reconstructing wiki-links, tags, known anchor IDs and uniquely matched [n] references while unknown values stay plain text), tags (full replacement, leading # stripped), pageKind (pass an empty string to clear it), and/or folderId (pass an empty string to move the note to uncategorized). Do not replace the body of excerpt cards or other notes with anchor blocks: source anchors and snapshots cannot be rebuilt from plain Markdown. At least one field is required. Refused while the PaperQuay desktop app is running unless allowWhileAppRunning is true.',
     inputSchema: {
       type: 'object',
       properties: {
         noteId: { type: 'string', description: 'The unique ID of the note (see search_notes).' },
         title: { type: 'string' },
-        content: { type: 'string', description: 'New note body as Markdown/plain text.' },
+        content: { type: 'string', description: 'New note body as Markdown/plain text; rebuilt into rich-text JSON at write time.' },
         tags: { type: 'array', items: { type: 'string' }, description: 'Full tag list, replacing the existing one.' },
+        pageKind: {
+          type: 'string',
+          enum: ['paper-card', 'concept', 'synthesis', 'qa', 'excerpt', 'index', 'log', 'overview'],
+          description: 'Structural page kind; pass an empty string to clear it.',
+        },
         folderId: { type: 'string', description: 'Move the note into this folder (see list_note_folders); empty string moves it to uncategorized.' },
         allowWhileAppRunning: ALLOW_WHILE_APP_RUNNING_SCHEMA,
       },

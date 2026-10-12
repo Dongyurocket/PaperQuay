@@ -287,6 +287,18 @@ test('paperquay-mcp stdio server handles JSON-RPC 2.0 requests', async () => {
     assert.equal(detailsSchema.properties.pageKind, undefined);
     const createNoteSchema = listRes.result.tools.find((tool: any) => tool.name === 'create_note').inputSchema;
     assert.equal(createNoteSchema.properties.pageKind.type, 'string');
+    const updateNoteSchema = listRes.result.tools.find((tool: any) => tool.name === 'update_note').inputSchema;
+    assert.equal(updateNoteSchema.properties.pageKind.type, 'string');
+    assert.deepEqual(updateNoteSchema.properties.pageKind.enum, [
+      'paper-card',
+      'concept',
+      'synthesis',
+      'qa',
+      'excerpt',
+      'index',
+      'log',
+      'overview',
+    ]);
 
     // 3. tools/call search_knowledge_base
     const callRes = (await call(3, 'tools/call', {
