@@ -1,13 +1,12 @@
 # PaperQuay v{{VERSION}}
 
-Settings number fields accept multi-digit values, Responses sessions report completion and truncation correctly, and the MCP service ships with the installer.
+The installed MCP service now includes `sqlite-vec`, so the packaged entry can start without a manual `node_modules` copy.
 
-- Context window, max output, and temperature are drafted locally and saved on blur or Enter. Values below the allowed range are clamped only when committed.
-- Responses `completed` maps to a normal stop. Output truncated by `max_output_tokens` or `max_tool_calls` maps to `length`. Failed or cancelled responses surface an error instead of an empty answer. Non-streaming tool calls use `call_id`.
-- The installer places the knowledge MCP service at `resources/paperquay-mcp/server.cjs`, outside the asar archive. Installed apps launch it with the bundled Electron binary and `ELECTRON_RUN_AS_NODE=1`; a separate Node.js install is not required. The settings page copies Proma, Claude, and Codex config, including `--data-dir`.
-- External agents can attach or remove a translated PDF. A page-count mismatch is returned as a warning and does not block the attach. Desktop and MCP share one attachment implementation.
+- 0.4.10 shipped `resources/paperquay-mcp/server.cjs` and the wasm file, but electron-builder dropped the sibling `node_modules` directory. The official entry exited before the MCP handshake with `Cannot find module 'sqlite-vec'`.
+- The installer now copies `sqlite-vec` and the current platform extension beside `server.cjs`. Packaging fails if `vec0.dll`, `vec0.dylib`, or `vec0.so` is missing for the target platform.
+- Reinstalling or upgrading no longer removes a manually added copy, because the directory is part of the installer.
 
-Validation: frontend build and automated tests are recorded in the changelog. This release was not manually regressed on a clean installed desktop before tagging. `ELECTRON_RUN_AS_NODE` can read the application data directory, but it cannot write the Windows temp directory.
+Validation: the packaging filter regression test passed. Installers are built by the `app-v{{VERSION}}` release workflow.
 
 ## Downloads
 
@@ -17,14 +16,13 @@ Choose the matching system and architecture from Assets: Windows `.exe`, macOS `
 
 # PaperQuay v{{VERSION}} 中文说明
 
-设置页可以连续输入数值，Responses 会话能正确区分完成和截断，MCP 知识库服务随安装包发布。
+安装版 MCP 现在自带 `sqlite-vec`，官方入口不再需要手工补 `node_modules`。
 
-- 「上下文窗口」「最大输出」和「温度」在失焦或回车后才保存。低于合法范围的值只在提交时夹取，输入过程中不再跳变。
-- Responses 的 `completed` 视为正常结束；因 `max_output_tokens` 或 `max_tool_calls` 截断时视为长度截断。失败或取消会显示错误，而不是空回答。非流式工具调用使用 `call_id`。
-- 安装包把 MCP 服务放在 asar 之外的 `resources/paperquay-mcp/server.cjs`。安装版用应用自带的 Electron 加 `ELECTRON_RUN_AS_NODE=1` 启动，不需要另装 Node.js。设置页可复制 Proma、Claude 和 Codex 配置，并带上 `--data-dir`。
-- 外部 Agent 可以附加或移除翻译版 PDF。页数不一致只返回警告，不拒绝附加。桌面端与 MCP 共用同一套附件实现。
+- 0.4.10 的 `resources/paperquay-mcp/` 只有 `server.cjs` 和 wasm。electron-builder 丢掉了旁边的 `node_modules`，官方入口在握手前退出，报 `Cannot find module 'sqlite-vec'`。
+- 安装包现在会把 `sqlite-vec` 和当前平台扩展放到 `server.cjs` 旁边。目标平台缺少 `vec0.dll`、`vec0.dylib` 或 `vec0.so` 时，打包直接失败。
+- 重装或覆盖升级不会再清掉一份需要手工补回的目录，因为该目录已包含在安装包中。
 
-验证：前端构建和自动化测试结果见更新日志。打标签前没有在干净安装版上完成桌面手工回归。`ELECTRON_RUN_AS_NODE` 可以读取应用数据目录，但不能写 Windows 临时目录。
+验证：打包过滤回归测试通过。安装包由 `app-v{{VERSION}}` Release 工作流构建。
 
 ## 下载
 

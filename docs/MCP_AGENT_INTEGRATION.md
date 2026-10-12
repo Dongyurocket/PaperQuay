@@ -97,7 +97,7 @@ Zotero 同步工具（`paperquay_sync_from_zotero`）同样受该护栏保护。
 
 ### 已安装桌面版
 
-安装包把 MCP 服务放在 asar 之外，路径为 `resources/paperquay-mcp/server.cjs`。不要再从源码仓库取 `bin/paperquay-mcp.cjs`，也不要直接执行 asar 内的文件。
+安装包把 MCP 服务放在 asar 之外，路径为 `resources/paperquay-mcp/server.cjs`。同目录下必须有 `node_modules/sqlite-vec` 和当前平台的 `sqlite-vec-<os>-<arch>/vec0.*`；缺少时入口会在握手前报 `Cannot find module 'sqlite-vec'`。不要再从源码仓库取 `bin/paperquay-mcp.cjs`，也不要直接执行 asar 内的文件。
 
 首选启动方式是应用自带的 Electron 二进制，并设置 `ELECTRON_RUN_AS_NODE=1`。Electron 42 内嵌 Node.js 24，满足 `node:sqlite` 的 Node 22.5 要求，安装版用户不需要另装 Node。设置页「MCP 服务」会按当前安装路径生成可复制的 Proma / Claude / Codex 片段，并带上 `--data-dir`。
 

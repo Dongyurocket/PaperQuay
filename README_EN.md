@@ -268,7 +268,7 @@ These items are implemented in the current desktop app.
 
 ## MCP Server & External Agent Integration
 
-PaperQuay includes a built-in server adhering to the standard **Model Context Protocol (MCP)** (entry point: `bin/paperquay-mcp.cjs`). External AI Agents (such as Proma, Claude Desktop, Cursor, Pi Agent, and Codex) can connect via stdio to access the local PaperQuay SQLite knowledge base with millisecond read latency, retrieve grounded citations with page numbers, perform selective Zotero library imports, and execute guarded library writes (PDF import, metadata updates, category management, paper deletion).
+PaperQuay includes a built-in server adhering to the standard **Model Context Protocol (MCP)** (entry point: `bin/paperquay-mcp.cjs`). Installed apps ship it at `resources/paperquay-mcp/server.cjs` with `node_modules/sqlite-vec` and the current platform extension. External AI Agents (such as Proma, Claude Desktop, Cursor, Pi Agent, and Codex) can connect via stdio to access the local PaperQuay SQLite knowledge base with millisecond read latency, retrieve grounded citations with page numbers, perform selective Zotero library imports, and execute guarded library writes (PDF import, metadata updates, category management, paper deletion).
 
 ### Highlights
 

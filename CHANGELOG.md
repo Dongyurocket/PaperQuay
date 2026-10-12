@@ -6,6 +6,16 @@
 
 ## [Unreleased]
 
+## [0.4.11] - 2026-10-12
+
+### 修复
+
+- **安装版 MCP 缺少 sqlite-vec**：0.4.10 的 `resources/paperquay-mcp/` 只有 `server.cjs` 和 wasm，官方入口启动时报 `Cannot find module 'sqlite-vec'`。electron-builder 会丢弃 extraResources 源目录下名为 `node_modules` 的子目录；现改为单独复制该目录，并在打包后检查当前平台的 `vec0` 扩展。覆盖升级不再需要手工补目录。
+
+### 验证
+
+- 前端构建通过；全部 846 项测试通过。Windows x64 目录包的 `resources/paperquay-mcp/node_modules` 含 `sqlite-vec` 与 `sqlite-vec-windows-x64/vec0.dll`，打包后检查通过。正式安装包由 `app-v0.4.11` Release 工作流构建。详见[变更记录](docs/changes/2026-10-12-mcp-sqlite-vec-packaging.md)。
+
 ## [0.4.10] - 2026-10-12
 
 ### 新增

@@ -279,7 +279,7 @@ Agent 工作区不是普通聊天框，而是面向文献库操作设计。它�
 
 ## MCP 服务与外部 Agent 接入
 
-PaperQuay 内置了基于标准 **Model Context Protocol (MCP)** 的独立服务。开发模式入口是 `bin/paperquay-mcp.cjs`；安装包把自包含服务放在 `resources/paperquay-mcp/server.cjs`，设置页「MCP 服务」会生成外部 Agent 配置。外部 AI Agent 可以通过 stdio 直连本地 SQLite 知识库，完成文献检索、带页码证据定位、Zotero 选择性同步，以及带运行护栏的文库写入（含附加/移除翻译版 PDF）。当前工具清单以 [MCP 接入指南](./docs/MCP_AGENT_INTEGRATION.md) 为准。
+PaperQuay 内置了基于标准 **Model Context Protocol (MCP)** 的独立服务。开发模式入口是 `bin/paperquay-mcp.cjs`；安装包把自包含服务放在 `resources/paperquay-mcp/server.cjs`，同目录包含 `node_modules/sqlite-vec` 和当前平台扩展。设置页「MCP 服务」会生成外部 Agent 配置。外部 AI Agent 可以通过 stdio 直连本地 SQLite 知识库，完成文献检索、带页码证据定位、Zotero 选择性同步，以及带运行护栏的文库写入（含附加/移除翻译版 PDF）。当前工具清单以 [MCP 接入指南](./docs/MCP_AGENT_INTEGRATION.md) 为准。
 
 ### 核心特性
 
