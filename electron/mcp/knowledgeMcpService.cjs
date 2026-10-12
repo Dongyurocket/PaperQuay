@@ -288,14 +288,41 @@ function ragResultKey(row) {
 
 // 返回 true（在运行）/ false（未运行）/ null（无法检测）。
 // 注意：仅覆盖已安装的桌面应用（PaperQuay.exe / PaperQuay）；开发模式（electron .）无法可靠识别。
-function detectDesktopAppRunning() {
+// ELECTRON_RUN_AS_NODE=1 以 PaperQuay.exe 启动的 MCP 服务进程映像名同为 PaperQuay.exe，
+// 必须排除自身 PID，并按命令行剔除其他 MCP 进程，否则桌面端关闭后写工具会把自己
+// 误判为桌面端而恒被拒绝（桌面端运行状态由 desktopRunMarker 主路径覆盖，本函数是回退）。
+// deps 仅用于测试注入：execFileSync / selfPid / platform。
+function detectDesktopAppRunning(deps = {}) {
+  const exec = typeof deps.execFileSync === 'function' ? deps.execFileSync : execFileSync;
+  const selfPid = String(deps.selfPid ?? process.pid);
+  const platform = deps.platform ?? process.platform;
   try {
-    if (process.platform === 'win32') {
-      const output = execFileSync('tasklist', ['/FI', 'IMAGENAME eq PaperQuay.exe', '/NH'], { encoding: 'utf8' });
-      return /PaperQuay\.exe/i.test(output);
+    if (platform === 'win32') {
+      const output = exec('tasklist', ['/FI', 'IMAGENAME eq PaperQuay.exe', '/NH', '/FO', 'CSV'], { encoding: 'utf8' });
+      const otherPids = output
+        .split(/\r?\n/)
+        .map((line) => /^"PaperQuay\.exe","(\d+)"/i.exec(line.trim())?.[1])
+        .filter((pid) => pid && pid !== selfPid);
+      if (otherPids.length === 0) return false;
+
+      // 其余 PaperQuay.exe 可能是 ELECTRON_RUN_AS_NODE 模式的其他 MCP 服务进程：
+      // 命令行含 paperquay-mcp 入口的不视为桌面端；CommandLine 读不到（跨用户/提权）
+      // 时按桌面端处理，保持保守拒绝方向。
+      const script = "Get-CimInstance Win32_Process -Filter \"Name='PaperQuay.exe'\""
+        + " | Where-Object { $_.CommandLine -notmatch 'paperquay-mcp' }"
+        + ' | Select-Object -ExpandProperty ProcessId';
+      const desktopPids = exec(
+        'powershell',
+        ['-NoProfile', '-NonInteractive', '-Command', script],
+        { encoding: 'utf8' },
+      );
+      return desktopPids
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .some((pid) => pid && pid !== selfPid);
     }
-    execFileSync('pgrep', ['-x', 'PaperQuay'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
-    return true;
+    const output = exec('pgrep', ['-x', 'PaperQuay'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    return output.split(/\s+/).some((pid) => pid && pid !== selfPid);
   } catch (error) {
     // pgrep 无匹配时退出码为 1，视为未运行；其它错误（命令缺失等）视为无法检测。
     if (error && typeof error === 'object' && error.status === 1) return false;
@@ -2311,4 +2338,6 @@ module.exports = {
   PaperQuayKnowledgeService,
   resolveAppPaths,
   resolveDefaultDataDir,
+  // 导出供测试注入 fake execFileSync 验证护栏进程过滤。
+  detectDesktopAppRunning,
 };

@@ -6,6 +6,16 @@
 
 ## [Unreleased]
 
+## [0.4.12] - 2026-10-13
+
+### 修复
+
+- **MCP 写护栏把自身误判为桌面端**：以官方推荐方式（`PaperQuay.exe` + `ELECTRON_RUN_AS_NODE=1`）启动的 MCP 服务进程映像名同为 `PaperQuay.exe`；桌面端关闭后运行标记被移除，护栏回退到 `tasklist` 映像名匹配时会命中 MCP 进程自身，导致全部写工具恒被拒绝。现在 Windows 下按 CSV 输出解析 PID、排除自身，并对剩余同名进程用命令行区分（入口含 `paperquay-mcp` 的 MCP 进程不视为桌面端）；Linux/macOS 的 `pgrep` 结果同样排除自身 PID，且 MCP 入口启动时改写 `process.title` 使 `pgrep -x PaperQuay` 天然不匹配。桌面端运行中的拒绝语义、检测失败时的保守拒绝方向均不变。
+
+### 验证
+
+- 前端构建通过；全部 854 项测试通过（含 8 项新增的护栏进程过滤注入式测试，覆盖仅自身进程、自身+真桌面端、自身+其他 MCP 客户端、无进程、检测失败及 pgrep 各分支）。本机真实调用 `detectDesktopAppRunning()` 在桌面端关闭时返回 `false`。详见[变更记录](docs/changes/2026-10-13-mcp-write-guard-self-match.md)。
+
 ## [0.4.11] - 2026-10-12
 
 ### 修复

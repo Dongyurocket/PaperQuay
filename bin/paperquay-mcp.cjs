@@ -13,6 +13,15 @@
 const readline = require('node:readline');
 const { PaperQuayKnowledgeService } = require('../electron/mcp/knowledgeMcpService.cjs');
 
+// ELECTRON_RUN_AS_NODE 模式下本进程的映像名仍是 PaperQuay.exe。改写进程标题让
+// Linux/macOS 的 pgrep -x PaperQuay 不匹配本服务进程（写护栏自误报防护的一环；
+// Windows 映像名不受 process.title 影响，由 detectDesktopAppRunning 按 PID/命令行排除）。
+try {
+  process.title = 'paperquay-mcp';
+} catch {
+  // 部分平台不支持改写进程标题，忽略。
+}
+
 // 解析 CLI 参数
 function parseArgs() {
   const args = process.argv.slice(2);

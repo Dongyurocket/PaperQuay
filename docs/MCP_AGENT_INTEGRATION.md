@@ -77,7 +77,7 @@ PaperQuay 提供了基于标准 **Model Context Protocol (MCP)** 的知识库服
 
 文库数据库采用「应用内存态 + 整体落盘」的持久化模型：**桌面应用运行时持有文库的内存副本，其任何保存动作都会全量覆盖数据库**。因此 MCP 写工具默认遵循以下规则：
 
-1. 每次写入前检查应用运行标记，并补充检测 `PaperQuay.exe`（Windows）或 `PaperQuay` 进程（macOS/Linux）；运行标记同时覆盖 `electron` 开发模式；
+1. 每次写入前检查应用运行标记，并补充检测 `PaperQuay.exe`（Windows）或 `PaperQuay` 进程（macOS/Linux）；运行标记同时覆盖 `electron` 开发模式。进程检测会排除 MCP 服务自身及其他 `paperquay-mcp` 入口进程，因此官方推荐的 `PaperQuay.exe` + `ELECTRON_RUN_AS_NODE=1` 启动方式不会误触发护栏；
 2. 检测到运行时，写入被**拒绝**并返回明确错误提示（引导先关闭桌面应用），数据库不产生任何修改；
 3. 明确知道风险时可传 `allowWhileAppRunning: true` 强制写入（桌面应用随后的保存可能覆盖本次写入）；
 4. 运行标记损坏或无法读取时按应用运行处理，避免开发期出现无保护的外部写入；进程探测失败但无运行标记时写入放行，并在返回结果中附带 `warning`；
