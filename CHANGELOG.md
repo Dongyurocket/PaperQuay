@@ -6,6 +6,8 @@
 
 ## [Unreleased]
 
+## [0.4.13] - 2026-10-13
+
 ### 修复
 
 - **MCP `update_note` 契约对齐**：描述与文档不再称「清空富文本 JSON、由编辑器重建」，改为写入边界重建 `contentJson`（已知锚点与唯一匹配的引用恢复为专用节点），风险提示收窄到无法从 Markdown 重建的摘录卡锚点块与需保留格式的引用/表格；同时补回未声明的 `pageKind` 参数（8 值白名单，与 `create_note` 及内置 Agent 对齐），并新增契约测试。详见[变更记录](docs/changes/2026-10-13-mcp-update-note-contract-alignment.md)。

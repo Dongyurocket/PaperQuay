@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.4.12-2563eb?style=flat-square" alt="Version v0.4.12">
+  <img src="https://img.shields.io/badge/version-v0.4.13-2563eb?style=flat-square" alt="Version v0.4.13">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-4b5563?style=flat-square" alt="Windows macOS Linux">
   <img src="https://img.shields.io/badge/built%20with-Electron-47848f?style=flat-square" alt="Electron">
   <img src="https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-0f766e?style=flat-square" alt="React TypeScript">
@@ -55,13 +55,14 @@
 
 ## Latest Update
 
-### v0.4.10–v0.4.12 - MCP ships with the installer, and install-build fixes
+### v0.4.10–v0.4.13 - MCP ships with the installer, and contract alignment
 
 - **MCP ships with the app**: the installer bundles the self-contained knowledge-base service at `resources/paperquay-mcp/` (with `sqlite-vec` and the platform extension). Start it with the app's own Electron binary plus `ELECTRON_RUN_AS_NODE=1` — no separate Node.js install. Settings → MCP server generates ready-to-copy Proma / Claude / Codex snippets with the current install paths.
 - **Translated-PDF tools**: `attach_translated_pdf` and `remove_translated_pdf` join the guarded toolset, sharing the desktop attachment pipeline; each paper keeps a single translated copy, and a page-count mismatch returns a warning instead of rejecting the attach.
 - **Install-build fixes**: v0.4.11 fixed `sqlite-vec` missing from the packaged service; v0.4.12 fixed the write guard misidentifying the MCP process itself (`PaperQuay.exe` launched with `ELECTRON_RUN_AS_NODE=1`) as the desktop app, which had made every write tool fail while the desktop app was closed.
+- **MCP contract alignment (v0.4.13)**: the `update_note` description now matches the write-time rich-text rebuild, its documented `pageKind` parameter (8-value whitelist, empty string clears) is restored, and clearing a page kind now actually persists; README and the Chinese user manual refreshed.
 - **Settings and Responses fixes**: numeric settings (context window, max output, temperature) now commit on blur or Enter so values can be typed continuously; Responses `completed` maps to `stop`, and truncated or failed states report diagnosable errors.
-- **Download**: latest installers on the [v0.4.12 release](https://github.com/Dongyurocket/PaperQuay/releases/tag/app-v0.4.12).
+- **Download**: latest installers on the [v0.4.13 release](https://github.com/Dongyurocket/PaperQuay/releases/tag/app-v0.4.13).
 
 ### v0.4.9 - Survey coverage, delivery quality checks, and budgeted continuation
 

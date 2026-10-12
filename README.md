@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.4.12-2563eb?style=flat-square" alt="Version v0.4.12">
+  <img src="https://img.shields.io/badge/version-v0.4.13-2563eb?style=flat-square" alt="Version v0.4.13">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-4b5563?style=flat-square" alt="Windows macOS Linux">
   <img src="https://img.shields.io/badge/built%20with-Electron-47848f?style=flat-square" alt="Electron">
   <img src="https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-0f766e?style=flat-square" alt="React TypeScript">
@@ -56,13 +56,14 @@
 
 ## 近期更新
 
-### v0.4.10–v0.4.12 - MCP 随安装包发布与安装版修复
+### v0.4.10–v0.4.13 - MCP 随安装包发布与契约对齐
 
 - **MCP 随安装包发布**：安装包把知识库服务放在 asar 之外的 `resources/paperquay-mcp/`（含 `sqlite-vec` 与当前平台扩展），用应用自带的 Electron 加 `ELECTRON_RUN_AS_NODE=1` 启动，不再需要另装 Node.js；设置页「MCP 服务」按当前安装路径生成 Proma / Claude / Codex 配置片段。
 - **翻译版 PDF 工具**：MCP 新增 `attach_translated_pdf` 与 `remove_translated_pdf`，与桌面端共用同一套附件实现；同一文献只保留一份翻译版，页数与原版不一致时返回警告而非拒绝。
 - **安装版修复**：v0.4.11 修复了 0.4.10 安装包中服务缺少 `sqlite-vec` 的问题；v0.4.12 修复了以 `PaperQuay.exe` 启动的 MCP 进程被写护栏误判为桌面端的问题——桌面端关闭时文库与笔记写工具不再被恒定拒绝。
+- **MCP 契约对齐（v0.4.13）**：`update_note` 描述改为与实现一致的写入边界重建富文本，补回 `pageKind` 参数（8 值白名单、空串清除）并修复页面类型清除不生效的问题；README 与用户手册同步刷新。
 - **设置与模型修复**：设置页「上下文窗口」「最大输出」「温度」改为失焦或回车后归一化保存，可连续输入；Responses 接口的完成态正确映射为 `stop`，截断与失败态给出可诊断错误。
-- **下载**：最新安装包见 [v0.4.12 Release](https://github.com/Dongyurocket/PaperQuay/releases/tag/app-v0.4.12)。
+- **下载**：最新安装包见 [v0.4.13 Release](https://github.com/Dongyurocket/PaperQuay/releases/tag/app-v0.4.13)。
 
 ### v0.4.9 - 综述覆盖与继续、交付质量检查
 
