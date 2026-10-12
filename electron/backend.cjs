@@ -5,6 +5,7 @@ const { createFileCommands } = require('./backend/fileCommands.cjs');
 const { createIntegrationCommands } = require('./backend/integrationCommands.cjs');
 const { createKnowledgeGraphCommands } = require('./backend/knowledgeGraphCommands.cjs');
 const { createLibraryCommands } = require('./backend/libraryCommands.cjs');
+const { createMcpClientConfigCommands } = require('./backend/mcpClientConfig.cjs');
 const { createMineruCacheCommands } = require('./backend/mineruCacheCommands.cjs');
 const { createNoteCommands } = require('./backend/noteCommands.cjs');
 const { createNoteStore } = require('./backend/noteStore.cjs');
@@ -145,6 +146,7 @@ function createBackend({ app }) {
     ...createIntegrationCommands(context),
     ...createReviewCommands(context),
     ...createUpdateCommands(context),
+    ...createMcpClientConfigCommands(context),
   };
 
   return {

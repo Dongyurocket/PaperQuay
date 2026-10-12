@@ -279,7 +279,7 @@ Agent 工作区不是普通聊天框，而是面向文献库操作设计。它�
 
 ## MCP 服务与外部 Agent 接入
 
-PaperQuay 内置了基于标准 **Model Context Protocol (MCP)** 的独立服务（入口文件：`bin/paperquay-mcp.cjs`）。外部 AI Agent（如 Proma、Claude Desktop、Cursor、Pi Agent、Codex 等）可以通过 stdio 协议免侵入直连 PaperQuay 本地 SQLite 知识库，完成学术文献检索、带页码证据定位、与本地 Zotero 的精准选择性同步，以及带运行护栏的文库写入与分类管理（导入 PDF、更新元数据、调整分类、删除文献）。
+PaperQuay 内置了基于标准 **Model Context Protocol (MCP)** 的独立服务。开发模式入口是 `bin/paperquay-mcp.cjs`；安装包把自包含服务放在 `resources/paperquay-mcp/server.cjs`，设置页「MCP 服务」会生成外部 Agent 配置。外部 AI Agent 可以通过 stdio 直连本地 SQLite 知识库，完成文献检索、带页码证据定位、Zotero 选择性同步，以及带运行护栏的文库写入（含附加/移除翻译版 PDF）。当前工具清单以 [MCP 接入指南](./docs/MCP_AGENT_INTEGRATION.md) 为准。
 
 ### 核心特性
 
@@ -291,7 +291,7 @@ PaperQuay 内置了基于标准 **Model Context Protocol (MCP)** 的独立服务
 
 ### 提供的 MCP 工具清单
 
-服务内置 15 个标准 MCP 工具，涵盖知识库检索、Zotero 同步与文库写入管理三大领域：
+下面列出常用工具。当前完整清单（25 个，含 `attach_translated_pdf` / `remove_translated_pdf`）以 [MCP 接入指南](./docs/MCP_AGENT_INTEGRATION.md) 为准：
 
 #### 1. 知识库只读检索工具（5 项）
 | 工具名称 | 功能说明 | 核心参数 | 返回关键字段 |
@@ -310,7 +310,7 @@ PaperQuay 内置了基于标准 **Model Context Protocol (MCP)** 的独立服务
 | `zotero_preview_sync` | **入库前差量比对与去重预检** | `itemKeys`、`collectionKey`、`dataDir` | 差量清单：`ready`（可同步）、`alreadyExists`（已存在去重）、`missingPdf`（缺本地 PDF） |
 | `paperquay_sync_from_zotero` | **精准安全入库** | `itemKeys`、`collectionKey`、`targetCategoryId`、`createCollectionCategory` | 同步报告：成功篇数、跳过篇数、自动创建/关联的分类名称 |
 
-#### 3. 文库写入与管理工具（6 项，带运行护栏）
+#### 3. 文库写入与管理工具（带运行护栏）
 
 以下工具会修改本地文库数据库，执行前自动检测桌面应用运行状态，检测到运行时**显式拒绝**（可传 `allowWhileAppRunning: true` 覆盖；`PAPERQUAY_MCP_WRITE=off` 可全局禁用写入）。
 
@@ -322,6 +322,8 @@ PaperQuay 内置了基于标准 **Model Context Protocol (MCP)** 的独立服务
 | `set_paper_categories` | 批量调整文献分类归属 | `paperIds`、`add`/`remove` 或 `replace` | 每篇更新后的 `categoryIds`（失败整体拒绝） |
 | `update_paper` | 更新文献元数据（白名单字段） | `paperId` + `title`/`authors`/`tags`/`isFavorite` 等 | 更新后的文献对象 |
 | `delete_papers` | 批量删除文献 | `paperIds`、`deleteFiles`（默认 `false`） | 删除报告（`deletedFileCount`、`fileErrors`） |
+| `attach_translated_pdf` | 附加翻译版 PDF，同文献只保留一份 | `paperId`、`sourcePath` | `attachmentId`、`storedPath`、`pageCountMismatch` |
+| `remove_translated_pdf` | 移除翻译版 PDF | `paperId`、`deleteFile`（默认 `true`） | 已移除的 `attachmentId` |
 
 ### 向量混合检索与模式说明
 
@@ -334,7 +336,9 @@ PaperQuay 内置了基于标准 **Model Context Protocol (MCP)** 的独立服务
 
 ### 客户端接入配置指南
 
-#### 1. Proma Agent
+已安装桌面版不要指向源码仓库。在设置页复制配置，或按下面的形式把 `command` 设为 `PaperQuay.exe`，`args` 指向 `resources/paperquay-mcp/server.cjs`，并设置 `ELECTRON_RUN_AS_NODE=1`。需要指定数据目录时在 args 末尾加 `--data-dir` 和绝对路径。开发模式才使用系统 `node` 与 `bin/paperquay-mcp.cjs`。
+
+#### 1. Proma Agent（开发模式）
 在 Proma 工作区设置或 `mcp.json` 中添加：
 ```json
 {

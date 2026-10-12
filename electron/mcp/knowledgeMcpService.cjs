@@ -19,6 +19,10 @@ const { createNoteStore } = require('../backend/noteStore.cjs');
 const { parseMarkdownToTiptap } = require('../../src/shared/markdownToTiptap.cjs');
 const { desktopRunMarkerState } = require('../backend/desktopRunMarker.cjs');
 const { id, now, safeFileName, fileNameFromPath, hashBytes, isPdf } = require('../backend/utils.cjs');
+const {
+  addTranslatedPdfAttachment,
+  removeTranslatedPdfAttachment,
+} = require('../backend/translatedPdfAttachments.cjs');
 
 function cleanString(value) {
   return typeof value === 'string' ? value.trim() : '';
@@ -533,7 +537,8 @@ class PaperQuayKnowledgeService {
       `).all(id).map((r) => r.category_id);
 
       const attachments = db.prepare(`
-        SELECT id, kind, stored_path AS storedPath, file_name AS fileName, file_size AS fileSize, missing
+        SELECT id, kind, stored_path AS storedPath, relative_path AS relativePath,
+          file_name AS fileName, file_size AS fileSize, missing
         FROM attachments WHERE paper_id = ? ORDER BY created_at
       `).all(id).map((att) => ({
         ...att,
@@ -2224,6 +2229,81 @@ class PaperQuayKnowledgeService {
       fileErrors,
       ...(result.warning ? { warning: result.warning } : {}),
     };
+  }
+
+  async attachTranslatedPdf({ paperId = '', sourcePath = '', allowWhileAppRunning = false } = {}) {
+    const guard = this.assertWritable(allowWhileAppRunning);
+    const targetId = cleanString(paperId);
+    if (!targetId) throw new Error('paperId is required');
+    const cleanSource = cleanString(sourcePath);
+    if (!cleanSource) throw new Error('sourcePath is required');
+
+    const store = createLibraryStore(this.appPaths);
+    try {
+      const library = store.load();
+      const paper = library.papers.find((item) => item.id === targetId);
+      if (!paper) throw new Error(`Paper does not exist: ${targetId}`);
+
+      const result = await addTranslatedPdfAttachment({
+        paper,
+        sourcePath: cleanSource,
+        settings: library.settings || {},
+        appPaths: this.appPaths,
+        persist: async () => {
+          store.save(library);
+        },
+        listAttachmentsByStoredPath: (storedPath) => store.findAttachmentsByStoredPath(storedPath),
+      });
+
+      return {
+        paperId: paper.id,
+        attachmentId: result.attachment.id,
+        storedPath: result.attachment.storedPath,
+        relativePath: result.attachment.relativePath,
+        fileName: result.attachment.fileName,
+        replaced: result.replaced,
+        pageCountMismatch: result.pageCountMismatch,
+        ...(guard.warning ? { warning: guard.warning } : {}),
+      };
+    } finally {
+      store.close();
+    }
+  }
+
+  async removeTranslatedPdf({ paperId = '', deleteFile = true, allowWhileAppRunning = false } = {}) {
+    const guard = this.assertWritable(allowWhileAppRunning);
+    const targetId = cleanString(paperId);
+    if (!targetId) throw new Error('paperId is required');
+
+    const store = createLibraryStore(this.appPaths);
+    try {
+      const library = store.load();
+      const paper = library.papers.find((item) => item.id === targetId);
+      if (!paper) throw new Error(`Paper does not exist: ${targetId}`);
+      const attachment = (paper.attachments || []).find((item) => item.kind === 'translated-pdf');
+      if (!attachment) throw new Error('Translated PDF attachment does not exist');
+
+      const result = await removeTranslatedPdfAttachment({
+        paper,
+        attachmentId: attachment.id,
+        deleteFile,
+        settings: library.settings || {},
+        appPaths: this.appPaths,
+        persist: async () => {
+          store.save(library);
+        },
+        listAttachmentsByStoredPath: (storedPath) => store.findAttachmentsByStoredPath(storedPath),
+      });
+
+      return {
+        paperId: paper.id,
+        attachmentId: result.attachment.id,
+        deletedFile: deleteFile !== false,
+        ...(guard.warning ? { warning: guard.warning } : {}),
+      };
+    } finally {
+      store.close();
+    }
   }
 }
 

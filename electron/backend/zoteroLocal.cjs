@@ -7,10 +7,21 @@ const { yearFromDate } = require('./zoteroApi.cjs');
 
 let sqlModulePromise = null;
 
+function resolveSqlJsWasm() {
+  const besideBundle = path.join(__dirname, 'sql-wasm.wasm');
+  if (fs.existsSync(besideBundle)) {
+    return besideBundle;
+  }
+
+  // Keep the specifier non-literal so the MCP bundle does not bake a machine-local path.
+  const specifier = ['sql.js', 'dist', 'sql-wasm.wasm'].join('/');
+  return require.resolve(specifier);
+}
+
 function getSqlModule() {
   if (!sqlModulePromise) {
     const initSqlJs = require('sql.js');
-    const wasmPath = require.resolve('sql.js/dist/sql-wasm.wasm');
+    const wasmPath = resolveSqlJsWasm();
     sqlModulePromise = initSqlJs({
       locateFile: (file) => file.endsWith('.wasm') ? wasmPath : file,
     });

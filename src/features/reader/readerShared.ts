@@ -34,6 +34,7 @@ export type PreferencesSectionKey =
   | 'models'
   | 'embedding'
   | 'summaryQa'
+  | 'mcp'
   | 'updates';
 
 export const DEFAULT_QA_PRESET_ID = 'default';

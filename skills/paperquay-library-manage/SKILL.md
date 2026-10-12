@@ -11,8 +11,9 @@ Use the `paperquay` MCP server. Refer to `docs/MCP_AGENT_INTEGRATION.md` for the
 
 1. Discover target papers and categories using `search_papers`, `get_paper_details`, and `list_categories`.
 2. Before any destructive or broad operation, present the proposed paper IDs, metadata/category changes, and file consequences for confirmation.
-3. Use `import_pdfs`, `manage_category`, `set_paper_categories`, or `update_paper` only after confirmation.
-4. Use `delete_papers` only after an explicit second confirmation. Keep `deleteFiles` false unless the user expressly requests permanent file deletion.
+3. Use `import_pdfs`, `manage_category`, `set_paper_categories`, `update_paper`, or `attach_translated_pdf` only after confirmation.
+4. Use `delete_papers` or `remove_translated_pdf` only after an explicit second confirmation. Keep `deleteFiles` false unless the user expressly requests permanent file deletion. `remove_translated_pdf` defaults to deleting the stored translation copy, not the user's source file.
+5. Before attaching a translation, read `get_paper_details` and tell the user if the result includes `pageCountMismatch`. A mismatch warns but does not reject the attach.
 
 ## Guardrails
 

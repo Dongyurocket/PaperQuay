@@ -6,6 +6,22 @@
 
 ## [Unreleased]
 
+## [0.4.10] - 2026-10-12
+
+### 新增
+
+- **MCP 随安装包发布**：构建时把知识库服务打成 asar 外的 `resources/paperquay-mcp/`。安装版用应用自带的 Electron 加 `ELECTRON_RUN_AS_NODE=1` 启动，不需要另装 Node.js。设置页「MCP 服务」可复制 Proma、Claude 和 Codex 配置，并带上当前 `--data-dir`。
+- **附加与移除翻译版 PDF**：MCP 新增 `attach_translated_pdf` 和 `remove_translated_pdf`，与桌面端共用同一套附件实现。同一文献只保留一份翻译版；页数与原版不一致时返回警告，不拒绝附加。
+
+### 修复
+
+- **设置页数字无法连续输入**：「上下文窗口」「最大输出」和「温度」改为本地草稿，失焦或回车后才归一化保存。切换预设会丢弃未提交的草稿。
+- **Responses 完成态与工具调用 ID**：`completed` 映射为 `stop`，输出被 `max_output_tokens` 或 `max_tool_calls` 截断时映射为 `length`；`failed` / `cancelled` 会报出可诊断错误。非流式 function call 优先使用 `call_id`。
+
+### 验证
+
+- 前端构建通过；全部 844 项测试通过。打标签前没有在干净安装版上完成桌面手工回归。安装包由 Release 工作流构建。
+
 ## [0.4.9] - 2026-10-10
 
 ### 新增

@@ -27,6 +27,7 @@ coverage/
 *.tsbuildinfo
 
 # Electron / desktop packaging output
+packaging/mcp/
 builder-debug.yml
 builder-effective-config.yaml
 *.asar

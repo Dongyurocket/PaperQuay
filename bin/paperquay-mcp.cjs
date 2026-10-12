@@ -74,7 +74,7 @@ const TOOLS = [
   {
     name: 'get_paper_details',
     description:
-      'Get complete bibliographic metadata, abstract, notes, citations, and attachments for a specific paper by its paperId.',
+      'Get complete bibliographic metadata, abstract, notes, citations, and attachments for a specific paper by its paperId. attachments include id, kind, storedPath, relativePath, fileName, fileSize, and missing. kind "translated-pdf" is the single translated PDF attached for side-by-side reading; kind "pdf" is the original file.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -574,6 +574,38 @@ const TOOLS = [
       required: ['paperIds'],
     },
   },
+  {
+    name: 'attach_translated_pdf',
+    description:
+      'Attach a local translated PDF to a paper. Copies the file into the library translated-pdf directory and replaces any existing translated-pdf attachment for that paper. Returns attachmentId, storedPath, relativePath, replaced, and pageCountMismatch when the translated page count differs from the original. Does not reject on a page-count mismatch. Refused while the desktop app is running unless allowWhileAppRunning is true.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        paperId: { type: 'string', description: 'The unique ID of the paper in PaperQuay.' },
+        sourcePath: { type: 'string', description: 'Absolute path of the translated PDF to attach.' },
+        allowWhileAppRunning: ALLOW_WHILE_APP_RUNNING_SCHEMA,
+      },
+      required: ['paperId', 'sourcePath'],
+    },
+  },
+  {
+    name: 'remove_translated_pdf',
+    description:
+      'Remove the translated-pdf attachment from a paper. By default also deletes the stored copy after the database commit. Refused while the desktop app is running unless allowWhileAppRunning is true.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        paperId: { type: 'string', description: 'The unique ID of the paper in PaperQuay.' },
+        deleteFile: {
+          type: 'boolean',
+          description: 'Also delete the stored translated PDF (default true).',
+          default: true,
+        },
+        allowWhileAppRunning: ALLOW_WHILE_APP_RUNNING_SCHEMA,
+      },
+      required: ['paperId'],
+    },
+  },
 ];
 
 function sendJsonRpc(response) {
@@ -648,6 +680,10 @@ async function handleToolCall(name, args) {
       return service.updatePaper(args || {});
     case 'delete_papers':
       return service.deletePapers(args || {});
+    case 'attach_translated_pdf':
+      return service.attachTranslatedPdf(args || {});
+    case 'remove_translated_pdf':
+      return service.removeTranslatedPdf(args || {});
     default:
       throw new Error(`Unknown tool: ${name}`);
   }

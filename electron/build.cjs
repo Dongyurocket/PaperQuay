@@ -44,16 +44,26 @@ const env = {
   NODE_OPTIONS: withNoDeprecationWarning(process.env.NODE_OPTIONS),
 };
 
-const child = spawn(process.execPath, [require.resolve('electron-builder/out/cli/cli.js'), ...process.argv.slice(2)], {
-  stdio: 'inherit',
-  env,
-});
+async function main() {
+  const { bundleMcp } = require('../scripts/bundle-mcp.cjs');
+  await bundleMcp();
 
-child.on('exit', (code, signal) => {
-  if (signal) {
-    process.kill(process.pid, signal);
-    return;
-  }
+  const child = spawn(process.execPath, [require.resolve('electron-builder/out/cli/cli.js'), ...process.argv.slice(2)], {
+    stdio: 'inherit',
+    env,
+  });
 
-  process.exit(code ?? 1);
+  child.on('exit', (code, signal) => {
+    if (signal) {
+      process.kill(process.pid, signal);
+      return;
+    }
+
+    process.exit(code ?? 1);
+  });
+}
+
+main().catch((error) => {
+  console.error(error instanceof Error ? error.stack || error.message : error);
+  process.exit(1);
 });

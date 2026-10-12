@@ -1,7 +1,7 @@
 {
   "name": "paperquay",
   "private": true,
-  "version": "0.4.9",
+  "version": "0.4.10",
   "description": "AI-assisted desktop literature reader and library manager.",
   "author": {
     "name": "PaperQuay Developers",
@@ -15,6 +15,7 @@
     "dev": "node electron/dev.cjs",
     "electron:dev": "node electron/dev.cjs",
     "mcp": "node bin/paperquay-mcp.cjs",
+    "mcp:bundle": "node scripts/bundle-mcp.cjs",
     "build": "tsc && vite build",
     "test": "node --test \"tests/*.test.ts\"",
     "check": "npm run build && npm test",
@@ -100,6 +101,12 @@
       }
     ],
     "npmRebuild": false,
+    "extraResources": [
+      {
+        "from": "packaging/mcp",
+        "to": "paperquay-mcp"
+      }
+    ],
     "asar": true,
     "asarUnpack": [
       "node_modules/sql.js/dist/sql-wasm.wasm",
@@ -142,6 +149,7 @@
       "node_modules/debug/**/*",
       "node_modules/ms/**/*",
       "node_modules/sax/**/*",
+      "node_modules/eventsource-parser/**/*",
       "node_modules/sql.js/**/*",
       "node_modules/sqlite-vec/**/*",
       "node_modules/sqlite-vec-*/*",

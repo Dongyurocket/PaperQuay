@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { normalizeQaModelPreset } from '../src/features/reader/readerShared.ts';
 import utils from '../electron/backend/utils.cjs';
 
-const { openAiChat } = utils;
+const { normalizeResponsesFinishStatus, openAiChat } = utils;
 
 test('normalizeQaModelPreset normalizes maxOutputTokens correctly', () => {
   // 正常范围
@@ -94,4 +94,41 @@ test('openAiChat builds max_tokens for chat_completions and max_output_tokens fo
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test('normalizeResponsesFinishStatus maps truncation and success onto chat finish reasons', () => {
+  assert.equal(normalizeResponsesFinishStatus({ status: 'completed' }), 'stop');
+  assert.equal(normalizeResponsesFinishStatus({}), 'stop');
+  assert.equal(
+    normalizeResponsesFinishStatus({
+      status: 'incomplete',
+      incomplete_details: { reason: 'max_output_tokens' },
+    }),
+    'length',
+  );
+  assert.equal(
+    normalizeResponsesFinishStatus({
+      status: 'incomplete',
+      incomplete_details: { reason: 'max_tool_calls' },
+    }),
+    'length',
+  );
+  assert.equal(
+    normalizeResponsesFinishStatus({
+      status: 'incomplete',
+      incomplete_details: { reason: 'content_filter' },
+    }),
+    'incomplete:content_filter',
+  );
+  assert.throws(
+    () => normalizeResponsesFinishStatus({
+      status: 'failed',
+      error: { message: 'upstream failed' },
+    }),
+    /upstream failed/,
+  );
+  assert.throws(
+    () => normalizeResponsesFinishStatus({ status: 'cancelled' }),
+    /Responses request cancelled/,
+  );
 });

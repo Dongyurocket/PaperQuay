@@ -30,6 +30,8 @@ const SKILL_TOOLS: Record<string, string[]> = {
     'set_paper_categories',
     'update_paper',
     'delete_papers',
+    'attach_translated_pdf',
+    'remove_translated_pdf',
   ],
   'paperquay-notes': [
     'search_notes',
@@ -45,7 +47,7 @@ const SKILL_TOOLS: Record<string, string[]> = {
 };
 
 test('repo skills cover the planned set and every referenced tool exists in MCP', () => {
-  assert.deepEqual([...new Set(mcpToolNames)].length, 23, 'MCP must expose exactly 23 unique tools');
+  assert.equal(new Set(mcpToolNames).size, 25, 'MCP must expose exactly 25 unique tools');
 
   const skillDirs = readdirSync(path.join(repoRoot, 'skills'), { withFileTypes: true })
     .filter((entry) => entry.isDirectory())

@@ -19,6 +19,11 @@ const {
   readRequestJson,
   safeFileName,
 } = require('./utils.cjs');
+const {
+  addTranslatedPdfAttachment,
+  removeTranslatedPdfAttachment,
+  resolveTranslatedPdfStorageDir,
+} = require('./translatedPdfAttachments.cjs');
 
 const OPENALEX_API_BASE = 'https://api.openalex.org';
 const LIBRARY_REFERENCE_PROGRESS_EVENT = 'paperquay://library-reference-progress';
@@ -36,38 +41,6 @@ function isSamePath(left, right) {
 function isSubPath(root, candidate) {
   const relative = path.relative(path.resolve(root), path.resolve(candidate));
   return Boolean(relative) && !relative.startsWith('..') && !path.isAbsolute(relative);
-}
-
-function canDeleteLibraryOwnedFile(store, attachment, allowedDirs) {
-  if (!attachment?.storedPath) {
-    return false;
-  }
-
-  const dirs = (Array.isArray(allowedDirs) ? allowedDirs : [allowedDirs])
-    .filter(Boolean)
-    .map(cleanString)
-    .filter(Boolean);
-
-  const isInsideAllowed = dirs.some((dir) => isSubPath(dir, attachment.storedPath));
-  if (!isInsideAllowed) {
-    return false;
-  }
-
-  // SQL 预筛同路径（大小写不敏感），再用 comparablePath 精确判定（P2-1：
-  // 不再为删除判定加载全库）。
-  return !store
-    .findAttachmentsByStoredPath(attachment.storedPath)
-    .some((other) => other.id !== attachment.id && isSamePath(other.storedPath, attachment.storedPath));
-}
-
-function resolveTranslatedPdfStorageDir(settings, appPaths) {
-  const custom = cleanString(settings?.translatedPdfDir);
-  if (custom) {
-    return path.resolve(custom);
-  }
-
-  const base = cleanString(settings?.storageDir) || path.join(appPaths.dataDir, 'paperquay-data');
-  return path.join(base, 'translated-pdfs');
 }
 
 function pathExists(filePath) {
@@ -902,101 +875,38 @@ function createLibraryCommands(context) {
       const paper = store.getPaper(request.paperId);
       if (!paper) throw new Error('Paper does not exist');
 
-      const sourcePath = cleanString(request.sourcePath);
-      const kind = cleanString(request.kind) || 'translated-pdf';
-      if (!sourcePath) throw new Error('Missing source path');
-      if (kind !== 'translated-pdf') throw new Error('Only translated-pdf attachments are supported');
-      if (!isPdf(sourcePath)) throw new Error('Only PDF files can be attached');
-      await ensureFile(sourcePath);
-
       const settings = store.loadSettings();
-      const storageDir = settings.storageDir || path.join(appPaths.dataDir, 'paperquay-data');
-      const targetDir = resolveTranslatedPdfStorageDir(settings, appPaths);
-      await fsp.mkdir(targetDir, { recursive: true });
-
-      const bytes = await fsp.readFile(sourcePath);
-      const contentHash = hashBytes(bytes);
-      const fileName = safeFileName(fileNameFromPath(sourcePath));
-      const attachmentId = id('att');
-      const storedPath = path.join(targetDir, `${paper.id}-translated-${attachmentId}-${fileName}`);
-      const replaced = paper.attachments.filter((attachment) => attachment.kind === kind);
-      const copiedToLibrary = !isSamePath(sourcePath, storedPath);
-
-      try {
-        if (copiedToLibrary) {
-          await fsp.copyFile(sourcePath, storedPath);
-        }
-        const stat = await fsp.stat(storedPath);
-
-        paper.attachments = paper.attachments.filter((attachment) => attachment.kind !== kind);
-        paper.attachments.push({
-          id: attachmentId,
-          paperId: paper.id,
-          kind,
-          originalPath: sourcePath,
-          storedPath,
-          relativePath: isSubPath(storageDir, storedPath)
-            ? path.relative(storageDir, storedPath).replace(/\\/g, '/')
-            : null,
-          fileName,
-          mimeType: 'application/pdf',
-          fileSize: stat.size,
-          contentHash,
-          createdAt: now(),
-          missing: false,
-        });
-        paper.updatedAt = now();
-
-        store.savePaper(paper);
-      } catch (error) {
-        if (copiedToLibrary) {
-          await fsp.rm(storedPath, { force: true }).catch(() => {});
-        }
-        throw error;
-      }
-
-      // Commit metadata before deleting superseded copies. A cleanup failure may leave an
-      // orphaned file, but it cannot leave the database pointing at a file removed early.
-      const allowedDirs = [storageDir, targetDir];
-      for (const attachment of replaced) {
-        if (
-          attachment.storedPath &&
-          !isSamePath(attachment.storedPath, storedPath) &&
-          canDeleteLibraryOwnedFile(store, attachment, allowedDirs)
-        ) {
-          await fsp.rm(attachment.storedPath, { force: true }).catch(() => {});
-        }
-      }
-
+      await addTranslatedPdfAttachment({
+        paper,
+        sourcePath: request.sourcePath,
+        kind: request.kind,
+        settings,
+        appPaths,
+        persist: async () => {
+          store.savePaper(paper);
+        },
+        listAttachmentsByStoredPath: (storedPath) => store.findAttachmentsByStoredPath(storedPath),
+      });
       return paper;
     },
 
     async library_remove_attachment({ request }) {
       const settings = store.loadSettings();
-      const storageDir = settings.storageDir || path.join(appPaths.dataDir, 'paperquay-data');
-      const targetDir = resolveTranslatedPdfStorageDir(settings, appPaths);
       const paperId = store.getPaperIdByAttachment(request.attachmentId);
       const paper = paperId ? store.getPaper(paperId) : null;
       if (!paper) throw new Error('Attachment does not exist');
 
-      const attachment = paper.attachments.find((item) => item.id === request.attachmentId);
-      if (attachment.kind !== 'translated-pdf') {
-        throw new Error('Only translated-pdf attachments can be removed');
-      }
-
-      paper.attachments = paper.attachments.filter((item) => item.id !== request.attachmentId);
-      paper.updatedAt = now();
-
-      store.savePaper(paper);
-
-      const allowedDirs = [storageDir, targetDir];
-      if (
-        request.deleteFile !== false &&
-        canDeleteLibraryOwnedFile(store, attachment, allowedDirs)
-      ) {
-        await fsp.rm(attachment.storedPath, { force: true }).catch(() => {});
-      }
-
+      await removeTranslatedPdfAttachment({
+        paper,
+        attachmentId: request.attachmentId,
+        deleteFile: request.deleteFile,
+        settings,
+        appPaths,
+        persist: async () => {
+          store.savePaper(paper);
+        },
+        listAttachmentsByStoredPath: (storedPath) => store.findAttachmentsByStoredPath(storedPath),
+      });
       return paper;
     },
 

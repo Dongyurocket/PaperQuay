@@ -22,7 +22,7 @@ PaperQuay 提供了基于标准 **Model Context Protocol (MCP)** 的知识库服
 | 工具名称 | 说明 | 核心参数 | 返回内容 |
 | :--- | :--- | :--- | :--- |
 | `search_papers` | 检索文献库元数据 | `query`（关键词）、`tag`（标签）、`categoryId`（分类过滤，含后代分类）、`limit` | 匹配文献列表（ID、中英文标题、作者、年份、DOI、标签） |
-| `get_paper_details` | 读取单篇文献完整详情 | `paperId`（必填） | 完整元数据、摘要、用户笔记、AI 概览、文献类型、出版物、所属分类 ID 等 |
+| `get_paper_details` | 读取单篇文献完整详情 | `paperId`（必填） | 完整元数据、摘要、用户笔记、AI 概览、分类 ID，以及 `attachments`。`kind: "pdf"` 是原版，`kind: "translated-pdf"` 是唯一一份翻译版 PDF（含 `storedPath`、`relativePath`） |
 | `search_knowledge_base` | 向量 + 全文混合检索 RAG 知识库证据 | `query`（必填）、`paperId`（可选）、`limit`、`mode`（`auto`/`hybrid`/`keyword`） | 带文献标题、页码、段落预览、匹配分数与命中通道（`vector`/`fts`）的证据切片 |
 | `read_paper_content` | 读取文献在知识库中的分块正文 | `paperId`（必填）、`pageIndex`（可选）、`limit` | 按页面或顺序排列的结构化正文内容 |
 | `search_notes` | 混合检索用户的阅读笔记与批注摘录 | `query`（可选）、`paperId`（可选）、`pageKind`（可选）、`limit`、`mode`（`auto`/`hybrid`/`keyword`） | 笔记内容与 `retrievalMode`、每条 `channels`、降级 `warning` |
@@ -49,6 +49,8 @@ PaperQuay 提供了基于标准 **Model Context Protocol (MCP)** 的知识库服
 | `set_paper_categories` | 批量调整文献的分类归属 | `paperIds`（必填）、`add`/`remove`（可与 `remove` 组合）或 `replace`（互斥） | 每篇文献更新后的 `categoryIds`；任一文献或分类不存在则整体拒绝，不留部分写入 |
 | `update_paper` | 更新文献元数据（白名单字段） | `paperId`（必填）+ `title`/`titleZh`/`authors`/`keywords`/`tags`/`isFavorite` 等可更新字段 | 更新后的文献对象；未知字段显式报错 |
 | `delete_papers` | 批量删除文献 | `paperIds`（必填）、`deleteFiles`（默认 `false`，为 `true` 时同时删除已入库的 PDF 文件） | 删除报告（`deleted`、`deletedFileCount`、`fileErrors`）；数据库先提交再删文件 |
+| `attach_translated_pdf` | 把本地翻译版 PDF 附加到一篇文献 | `paperId`、`sourcePath`（必填） | 复制到统一的 `translated-pdfs` 目录并替换该文献已有翻译版；返回 `attachmentId`、`storedPath`、`relativePath`、`replaced`。页数与原版不一致时返回 `pageCountMismatch`，不拒绝附加 |
+| `remove_translated_pdf` | 移除一篇文献的翻译版 PDF | `paperId`（必填）、`deleteFile`（默认 `true`） | 先提交数据库再删除已入库副本。找不到翻译版附件时报错 |
 
 ### 笔记维护工具（带运行护栏）
 
@@ -93,7 +95,37 @@ Zotero 同步工具（`paperquay_sync_from_zotero`）同样受该护栏保护。
 
 ## 客户端配置指南
 
-### 1. Proma Agent 配置
+### 已安装桌面版
+
+安装包把 MCP 服务放在 asar 之外，路径为 `resources/paperquay-mcp/server.cjs`。不要再从源码仓库取 `bin/paperquay-mcp.cjs`，也不要直接执行 asar 内的文件。
+
+首选启动方式是应用自带的 Electron 二进制，并设置 `ELECTRON_RUN_AS_NODE=1`。Electron 42 内嵌 Node.js 24，满足 `node:sqlite` 的 Node 22.5 要求，安装版用户不需要另装 Node。设置页「MCP 服务」会按当前安装路径生成可复制的 Proma / Claude / Codex 片段，并带上 `--data-dir`。
+
+```json
+{
+  "servers": {
+    "paperquay": {
+      "type": "stdio",
+      "command": "C:/Program Files/PaperQuay/PaperQuay.exe",
+      "args": [
+        "C:/Program Files/PaperQuay/resources/paperquay-mcp/server.cjs",
+        "--data-dir",
+        "C:/Users/<you>/AppData/Roaming/PaperQuay/PaperQuay"
+      ],
+      "env": {
+        "ELECTRON_RUN_AS_NODE": "1"
+      },
+      "enabled": true
+    }
+  }
+}
+```
+
+路径以设置页或实际安装目录为准。`ELECTRON_RUN_AS_NODE` 不能写 Windows 临时目录；数据目录、文献库目录和翻译版 PDF 目录不受这个限制。若该启动方式不可用，可用系统 Node.js 22.5 或更高版本直接执行同一个 `server.cjs`。
+
+开发模式仍使用源码入口 `bin/paperquay-mcp.cjs`，由系统 Node 启动。下面的示例是开发配置。
+
+### 1. Proma Agent 配置（开发模式）
 
 在 Proma 工作区配置文件（例如 `mcp.json`）中添加 `paperquay` 服务：
 

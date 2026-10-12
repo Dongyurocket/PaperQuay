@@ -43,6 +43,7 @@ import {
 import { ReaderPreferencesBackupSection } from './readerPreferencesBackupSection';
 import { AgentMemorySettingsSection } from './AgentMemorySettingsSection';
 import { ReaderPreferencesModelsSection } from './readerPreferencesModelsSection';
+import { ReaderPreferencesMcpSection } from './readerPreferencesMcpSection';
 import { ReaderPreferencesUpdateSection } from './readerPreferencesUpdateSection';
 import type {
   ReaderPreferencesLocalizer,
@@ -202,6 +203,15 @@ export function buildReaderPreferencesSections(
         'Overview input, batch overview, and QA context',
       ),
       icon: <Database className="h-4 w-4" strokeWidth={1.8} />,
+    },
+    {
+      key: 'mcp',
+      title: l('MCP 服务', 'MCP Service'),
+      description: l(
+        '安装版知识库服务路径与外部 Agent 配置',
+        'Installed knowledge service path and external agent config',
+      ),
+      icon: <Wrench className="h-4 w-4" strokeWidth={1.8} />,
     },
     {
       key: 'updates',
@@ -1085,6 +1095,11 @@ export function ReaderPreferencesContent({
 
       <ReaderPreferencesBackupSection
         active={activeSection === 'backup'}
+        l={l}
+      />
+
+      <ReaderPreferencesMcpSection
+        active={activeSection === 'mcp'}
         l={l}
       />
 

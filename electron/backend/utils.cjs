@@ -280,6 +280,55 @@ function mergeChatCompletionChunks(chunks) {
   return base;
 }
 
+function responsesTerminalStatus(eventType) {
+  switch (cleanString(eventType).toLowerCase()) {
+    case 'response.completed':
+    case 'response.done':
+      return 'completed';
+    case 'response.incomplete':
+      return 'incomplete';
+    case 'response.failed':
+      return 'failed';
+    case 'response.cancelled':
+      return 'cancelled';
+    default:
+      return '';
+  }
+}
+
+function responsesFailureMessage(data, status) {
+  const error = data?.error;
+  if (typeof error === 'string' && error.trim()) {
+    return error.trim();
+  }
+  if (error && typeof error === 'object') {
+    const message = cleanString(error.message);
+    if (message) return message;
+  }
+  return `Responses request ${status}`;
+}
+
+/**
+ * Map an OpenAI Responses payload status onto chat-completions finish_reason.
+ * failed/cancelled throw so callers surface a diagnosable error instead of an empty answer.
+ */
+function normalizeResponsesFinishStatus(data) {
+  const status = cleanString(data?.status).toLowerCase();
+  if (!status) return 'stop';
+  if (status === 'completed') return 'stop';
+  if (status === 'incomplete') {
+    const reason = cleanString(data?.incomplete_details?.reason);
+    if (reason === 'max_output_tokens' || reason === 'max_tool_calls') return 'length';
+    return reason ? `incomplete:${reason}` : 'incomplete';
+  }
+  if (status === 'failed' || status === 'cancelled') {
+    const error = new Error(responsesFailureMessage(data, status));
+    error.status = status;
+    throw error;
+  }
+  return status;
+}
+
 function mergeResponsesChunks(chunks) {
   const outputParts = [];
   const reasoningSummaryParts = [];
@@ -385,12 +434,22 @@ function mergeResponsesChunks(chunks) {
       }
     }
 
-    if ((chunk.type === 'response.completed' || chunk.type === 'response.done') && chunk.response) {
-      base = {
-        ...chunk.response,
-        id: chunk.response.id || base?.id,
-        usage: chunk.response.usage || base?.usage,
-      };
+    const terminalStatus = responsesTerminalStatus(eventType);
+    if (terminalStatus) {
+      const response = chunk.response && typeof chunk.response === 'object' ? chunk.response : null;
+      if (response || terminalStatus === 'failed' || terminalStatus === 'cancelled') {
+        base = {
+          ...(response || base || { object: 'response', output: [] }),
+          id: response?.id || base?.id,
+          usage: response?.usage || chunk.usage || base?.usage,
+          status: cleanString(response?.status) || terminalStatus,
+          incomplete_details: response?.incomplete_details || chunk.incomplete_details || base?.incomplete_details,
+          error: response?.error || chunk.error || base?.error,
+          output: Array.isArray(response?.output)
+            ? response.output
+            : (Array.isArray(base?.output) ? base.output : []),
+        };
+      }
     }
   }
 
@@ -923,7 +982,7 @@ function pickToolCalls(data) {
 
     if (type === 'function_call' && name) {
       calls.push({
-        id: cleanString(outputItem?.id || outputItem?.call_id),
+        id: cleanString(outputItem?.call_id || outputItem?.id),
         type,
         name,
         arguments: parseToolArguments(rawArguments),
@@ -938,7 +997,7 @@ function pickToolCalls(data) {
 
       if (contentType === 'function_call' && contentName) {
         calls.push({
-          id: cleanString(contentItem?.id || contentItem?.call_id),
+          id: cleanString(contentItem?.call_id || contentItem?.id),
           type: contentType,
           name: contentName,
           arguments: parseToolArguments(contentRawArguments),
@@ -1357,6 +1416,7 @@ module.exports = {
   pickChatThinking,
   pickChatText,
   pickStreamThinkingDelta,
+  normalizeResponsesFinishStatus,
   pickToolCalls,
   pickStreamTextDelta,
   readOpenAiStreamResponse,

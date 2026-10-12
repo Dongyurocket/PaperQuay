@@ -10,6 +10,7 @@ const {
   openAiChat,
   parseJsonObject,
   pickChatThinking,
+  normalizeResponsesFinishStatus,
   pickChatText,
   pickStreamThinkingDelta,
   pickToolCalls,
@@ -630,11 +631,10 @@ function normalizeAgentTokenUsage(data) {
 }
 
 function agentChatTurnResult(data) {
-  const finishReason = typeof data?.choices?.[0]?.finish_reason === 'string'
-    ? data.choices[0].finish_reason
-    : typeof data?.status === 'string'
-      ? data.status
-      : 'stop';
+  const chatFinishReason = data?.choices?.[0]?.finish_reason;
+  const finishReason = typeof chatFinishReason === 'string'
+    ? chatFinishReason
+    : normalizeResponsesFinishStatus(data);
 
   return {
     content: pickChatText(data),

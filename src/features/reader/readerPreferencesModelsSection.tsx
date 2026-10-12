@@ -1,6 +1,6 @@
 import clsx from 'clsx';
 import { Plus, RefreshCw, Settings2, TestTube2, Trash2 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import type {
   ModelReasoningEffort,
@@ -19,7 +19,13 @@ import {
   normalizeModelRuntimeConfig,
   normalizeModelTemperature,
   resolveModelPreset,
+  createQaPreset,
 } from './readerShared';
+import {
+  createPresetNumberDraft,
+  reducePresetNumberDraft,
+  type PresetNumberDraft,
+} from './presetNumberDraft';
 import {
   SettingsField,
   SettingsInput,
@@ -30,6 +36,95 @@ import type {
   ReaderPreferencesLocalizer,
   ReaderSettingsChangeHandler,
 } from './readerPreferencesTypes';
+
+function PresetNumberField({
+  value,
+  resetKey,
+  min,
+  max,
+  step,
+  placeholder,
+  hint,
+  adjustedLabel,
+  normalize,
+  onCommit,
+}: {
+  value: number | undefined;
+  resetKey: string;
+  min?: number;
+  max?: number;
+  step?: number;
+  placeholder?: string;
+  hint: string;
+  adjustedLabel: (value: number) => string;
+  normalize: (value: number | undefined) => number | undefined;
+  onCommit: (value: number | undefined) => void;
+}) {
+  const [draft, setDraft] = useState<PresetNumberDraft>(() => createPresetNumberDraft(value));
+  const [clampNote, setClampNote] = useState('');
+  const editingRef = useRef(false);
+  const valueRef = useRef(value);
+  valueRef.current = value;
+
+  useEffect(() => {
+    editingRef.current = false;
+    setDraft(createPresetNumberDraft(valueRef.current));
+    setClampNote('');
+  }, [resetKey]);
+
+  useEffect(() => {
+    if (editingRef.current) return;
+    setDraft((current) => reducePresetNumberDraft(current, { type: 'sync', value }).state);
+  }, [value]);
+
+  function commit(text: string) {
+    const next = reducePresetNumberDraft(
+      { text, editing: true },
+      { type: 'commit', normalize },
+    );
+    editingRef.current = false;
+    setDraft(next.state);
+    const raw = text.trim() ? Number(text) : undefined;
+    const adjusted = typeof raw === 'number'
+      && Number.isFinite(raw)
+      && raw !== next.committed
+      && typeof next.committed === 'number';
+    setClampNote(adjusted ? adjustedLabel(next.committed as number) : '');
+    onCommit(next.committed);
+  }
+
+  return (
+    <>
+      <SettingsInput
+        type="number"
+        min={min}
+        max={max}
+        step={step}
+        value={draft.text}
+        placeholder={placeholder}
+        onFocus={() => {
+          editingRef.current = true;
+          setDraft((current) => ({ ...current, editing: true }));
+          setClampNote('');
+        }}
+        onChange={(event) => {
+          const text = event.target.value;
+          editingRef.current = true;
+          setDraft((current) => reducePresetNumberDraft(current, { type: 'change', text }).state);
+        }}
+        onBlur={(event) => commit(event.currentTarget.value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') {
+            event.currentTarget.blur();
+          }
+        }}
+      />
+      <div className="text-[11px] leading-5 text-slate-400 dark:text-[var(--pq-text-faint)]">
+        {hint}{clampNote ? ` · ${clampNote}` : ''}
+      </div>
+    </>
+  );
+}
 
 type ModelPresetSettingKey =
   | 'translationModelPresetId'
@@ -418,32 +513,34 @@ export function ReaderPreferencesModelsSection({
                   <div className="text-xs font-medium text-slate-500">
                     {l('上下文窗口', 'Context Window')}
                   </div>
-                  <SettingsInput
-                    type="number"
+                  <PresetNumberField
+                    value={preset.contextWindow}
+                    resetKey={`${preset.id}:contextWindow`}
                     min={4096}
                     max={2000000}
                     step={1024}
-                    value={preset.contextWindow ?? ''}
-                    onChange={(event) => onQaModelPresetChange(preset.id, {
-                      contextWindow: event.target.value ? Number(event.target.value) : undefined,
-                    })}
                     placeholder="128000"
+                    hint={l('合法范围 4096–2,000,000，失焦或回车后保存', 'Valid range 4096–2,000,000. Saved on blur or Enter.')}
+                    adjustedLabel={(next) => l(`已调整为 ${next}`, `Adjusted to ${next}`)}
+                    normalize={(next) => createQaPreset({ contextWindow: next }).contextWindow}
+                    onCommit={(next) => onQaModelPresetChange(preset.id, { contextWindow: next })}
                   />
                 </div>
                 <div className="space-y-2">
                   <div className="text-xs font-medium text-slate-500">
                     {l('最大输出', 'Max Output Tokens')}
                   </div>
-                  <SettingsInput
-                    type="number"
+                  <PresetNumberField
+                    value={preset.maxOutputTokens}
+                    resetKey={`${preset.id}:maxOutputTokens`}
                     min={256}
                     max={200000}
                     step={256}
-                    value={preset.maxOutputTokens ?? ''}
-                    onChange={(event) => onQaModelPresetChange(preset.id, {
-                      maxOutputTokens: event.target.value ? Number(event.target.value) : undefined,
-                    })}
                     placeholder="8192"
+                    hint={l('合法范围 256–200,000，失焦或回车后保存', 'Valid range 256–200,000. Saved on blur or Enter.')}
+                    adjustedLabel={(next) => l(`已调整为 ${next}`, `Adjusted to ${next}`)}
+                    normalize={(next) => createQaPreset({ maxOutputTokens: next }).maxOutputTokens}
+                    onCommit={(next) => onQaModelPresetChange(preset.id, { maxOutputTokens: next })}
                   />
                 </div>
                 <div className="space-y-2">
@@ -585,23 +682,23 @@ export function ReaderPreferencesModelsSection({
                       <div className="text-xs font-medium text-slate-500 dark:text-[var(--pq-text-faint)]">
                         {l('温度', 'Temperature')}
                       </div>
-                      <SettingsInput
-                        type="number"
+                      <PresetNumberField
+                        value={runtimeConfig.temperature}
+                        resetKey={`${binding.key}:temperature`}
                         min={0}
                         max={2}
                         step={0.05}
-                        value={runtimeConfig.temperature ?? ''}
-                        onChange={(event) =>
-                          handleModelRuntimeConfigChange(binding.runtimeRole, {
-                            temperature: normalizeModelTemperature(event.target.value),
-                          })
-                        }
                         placeholder={l('默认', 'Default')}
-                      />
-                      <div className="text-[11px] leading-5 text-slate-400 dark:text-[var(--pq-text-faint)]">
-                        {l('Leave blank to use each feature default; 0.1-0.3 is recommended for translation/overview.', 'Leave blank to use each feature default; 0.1-0.3 is recommended for translation/overview.',
+                        hint={l(
+                          '留空使用各功能默认值；翻译/概览建议 0.1–0.3。合法范围 0–2，失焦或回车后保存。',
+                          'Leave blank to use each feature default; 0.1–0.3 is recommended for translation/overview. Valid range 0–2. Saved on blur or Enter.',
                         )}
-                      </div>
+                        adjustedLabel={(next) => l(`已调整为 ${next}`, `Adjusted to ${next}`)}
+                        normalize={normalizeModelTemperature}
+                        onCommit={(next) => handleModelRuntimeConfigChange(binding.runtimeRole, {
+                          temperature: next,
+                        })}
+                      />
                     </div>
                     <div className="space-y-2">
                       <div className="text-xs font-medium text-slate-500 dark:text-[var(--pq-text-faint)]">

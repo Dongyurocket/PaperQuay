@@ -280,7 +280,9 @@ test('paperquay-mcp stdio server handles JSON-RPC 2.0 requests', async () => {
     assert.ok(toolNames.includes('set_paper_categories'));
     assert.ok(toolNames.includes('update_paper'));
     assert.ok(toolNames.includes('delete_papers'));
-    assert.equal(toolNames.length, 23);
+    assert.ok(toolNames.includes('attach_translated_pdf'));
+    assert.ok(toolNames.includes('remove_translated_pdf'));
+    assert.equal(toolNames.length, 25);
     const detailsSchema = listRes.result.tools.find((tool: any) => tool.name === 'get_paper_details').inputSchema;
     assert.equal(detailsSchema.properties.pageKind, undefined);
     const createNoteSchema = listRes.result.tools.find((tool: any) => tool.name === 'create_note').inputSchema;

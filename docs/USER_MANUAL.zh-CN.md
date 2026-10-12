@@ -493,10 +493,10 @@ PaperQuay 内置标准的 MCP stdio 服务（`bin/paperquay-mcp.cjs`），Codex�
 
 ## 10. MCP 与外部 Agent 接入
 
-- 服务入口：`bin/paperquay-mcp.cjs`（stdio），直连本地 SQLite，不需要桌面应用保持运行。
-- 能力：文献检索与详情、知识库混合检索与正文切片、Zotero 浏览/检索/差量预检/选择性同步、文库写入（导入 PDF、分类管理、元数据、删除）、**笔记维护**（检索、创建、更新、软删除、标签与分类树）。
+- 已安装桌面版的服务在 `resources/paperquay-mcp/server.cjs`，不在 asar 里。设置页「MCP 服务」会生成外部 Agent 配置；安装版用应用自带的 Electron 加 `ELECTRON_RUN_AS_NODE=1` 启动，不需要另装 Node.js。开发模式入口仍是 `bin/paperquay-mcp.cjs`。
+- 能力：文献检索与详情、知识库混合检索与正文切片、Zotero 浏览/检索/差量预检/选择性同步、文库写入（导入 PDF、分类管理、元数据、删除、附加/移除翻译版 PDF）、**笔记维护**（检索、创建、更新、软删除、标签与分类树）。
 - 安全边界：所有写工具默认在检测到桌面应用运行时拒绝写入，`allowWhileAppRunning` 可覆盖，`PAPERQUAY_MCP_WRITE=off` 全局只读。
-- 完整工具清单、客户端配置示例（Proma / Pi / Codex / Claude）与自定义数据目录说明见 [MCP 接入指南](./MCP_AGENT_INTEGRATION.md)。
+- 完整工具清单、已安装版与开发模式配置示例见 [MCP 接入指南](./MCP_AGENT_INTEGRATION.md)。
 
 ## 11. 数据、备份与隐私
 

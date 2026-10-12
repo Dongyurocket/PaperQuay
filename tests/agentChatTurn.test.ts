@@ -245,3 +245,165 @@ test('agent_chat_turn_cancel aborts an in-flight provider request', async (t) =>
   assert.equal(fetchSignal?.aborted, true);
   await assert.rejects(run, (error: unknown) => error instanceof Error && error.name === 'AbortError');
 });
+
+function jsonResponse(body: unknown) {
+  return new Response(JSON.stringify(body), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  });
+}
+
+const responsesTool = [{
+  type: 'function',
+  function: {
+    name: 'search_library',
+    description: 'Search',
+    parameters: { type: 'object', properties: { query: { type: 'string' } } },
+  },
+}];
+
+test('agent_chat_turn prefers responses function_call call_id over item id', async (t) => {
+  t.mock.method(globalThis, 'fetch', async () => jsonResponse({
+    id: 'resp-nonstream',
+    object: 'response',
+    status: 'completed',
+    output: [{
+      id: 'fc_1',
+      call_id: 'call_1',
+      type: 'function_call',
+      name: 'search_library',
+      arguments: '{"query":"nonstream"}',
+    }],
+  }));
+
+  const commands = createAiCommands(context());
+  const result = await commands.agent_chat_turn({
+    request: {
+      requestId: 'request-responses-nonstream',
+      options: {
+        baseUrl: 'https://example.test/v1',
+        apiKey: 'test-key',
+        model: 'test-model',
+        apiMode: 'responses',
+      },
+      messages: [{ role: 'user', content: 'Search something.' }],
+      tools: responsesTool,
+      toolChoice: 'auto',
+      stream: false,
+    },
+  }, { sender: { send() {} } });
+
+  assert.equal(result.finishReason, 'stop');
+  assert.equal(result.toolCalls.length, 1);
+  assert.equal(result.toolCalls[0]?.id, 'call_1');
+  assert.equal(result.toolCalls[0]?.name, 'search_library');
+  assert.deepEqual(result.toolCalls[0]?.arguments, { query: 'nonstream' });
+});
+
+test('agent_chat_turn maps a truncated responses stream to finishReason length', async (t) => {
+  t.mock.method(globalThis, 'fetch', async () => sseResponse([
+    {
+      type: 'response.output_text.delta',
+      delta: 'partial answer',
+    },
+    {
+      type: 'response.incomplete',
+      response: {
+        id: 'resp-trunc',
+        status: 'incomplete',
+        incomplete_details: { reason: 'max_output_tokens' },
+        output: [{
+          type: 'message',
+          content: [{ type: 'output_text', text: 'partial answer' }],
+        }],
+      },
+    },
+  ]));
+
+  const commands = createAiCommands(context());
+  const result = await commands.agent_chat_turn({
+    request: {
+      requestId: 'request-responses-incomplete',
+      options: {
+        baseUrl: 'https://example.test/v1',
+        apiKey: 'test-key',
+        model: 'test-model',
+        apiMode: 'responses',
+      },
+      messages: [{ role: 'user', content: 'Write a long answer.' }],
+      toolChoice: 'none',
+      stream: true,
+    },
+  }, { sender: { send() {} } });
+
+  assert.equal(result.finishReason, 'length');
+  assert.equal(result.content, 'partial answer');
+});
+
+test('agent_chat_turn maps a completed responses stream to finishReason stop', async (t) => {
+  t.mock.method(globalThis, 'fetch', async () => sseResponse([
+    {
+      type: 'response.output_text.delta',
+      delta: 'done',
+    },
+    {
+      type: 'response.completed',
+      response: {
+        id: 'resp-done',
+        status: 'completed',
+        output: [{
+          type: 'message',
+          content: [{ type: 'output_text', text: 'done' }],
+        }],
+      },
+    },
+  ]));
+
+  const commands = createAiCommands(context());
+  const result = await commands.agent_chat_turn({
+    request: {
+      requestId: 'request-responses-completed',
+      options: {
+        baseUrl: 'https://example.test/v1',
+        apiKey: 'test-key',
+        model: 'test-model',
+        apiMode: 'responses',
+      },
+      messages: [{ role: 'user', content: 'Finish.' }],
+      toolChoice: 'none',
+      stream: true,
+    },
+  }, { sender: { send() {} } });
+
+  assert.equal(result.finishReason, 'stop');
+  assert.equal(result.content, 'done');
+});
+
+test('agent_chat_turn surfaces a failed responses status instead of an empty answer', async (t) => {
+  t.mock.method(globalThis, 'fetch', async () => jsonResponse({
+    id: 'resp-failed',
+    object: 'response',
+    status: 'failed',
+    error: { message: 'provider overloaded' },
+    output: [],
+  }));
+
+  const commands = createAiCommands(context());
+  await assert.rejects(
+    commands.agent_chat_turn({
+      request: {
+        requestId: 'request-responses-failed',
+        options: {
+          baseUrl: 'https://example.test/v1',
+          apiKey: 'test-key',
+          model: 'test-model',
+          apiMode: 'responses',
+        },
+        messages: [{ role: 'user', content: 'Fail.' }],
+        toolChoice: 'none',
+        stream: false,
+      },
+    }, { sender: { send() {} } }),
+    /provider overloaded/,
+  );
+});
