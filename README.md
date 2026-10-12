@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.4.8-2563eb?style=flat-square" alt="Version v0.4.8">
+  <img src="https://img.shields.io/badge/version-v0.4.12-2563eb?style=flat-square" alt="Version v0.4.12">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-4b5563?style=flat-square" alt="Windows macOS Linux">
   <img src="https://img.shields.io/badge/built%20with-Electron-47848f?style=flat-square" alt="Electron">
   <img src="https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-0f766e?style=flat-square" alt="React TypeScript">
@@ -56,6 +56,22 @@
 
 ## 近期更新
 
+### v0.4.10–v0.4.12 - MCP 随安装包发布与安装版修复
+
+- **MCP 随安装包发布**：安装包把知识库服务放在 asar 之外的 `resources/paperquay-mcp/`（含 `sqlite-vec` 与当前平台扩展），用应用自带的 Electron 加 `ELECTRON_RUN_AS_NODE=1` 启动，不再需要另装 Node.js；设置页「MCP 服务」按当前安装路径生成 Proma / Claude / Codex 配置片段。
+- **翻译版 PDF 工具**：MCP 新增 `attach_translated_pdf` 与 `remove_translated_pdf`，与桌面端共用同一套附件实现；同一文献只保留一份翻译版，页数与原版不一致时返回警告而非拒绝。
+- **安装版修复**：v0.4.11 修复了 0.4.10 安装包中服务缺少 `sqlite-vec` 的问题；v0.4.12 修复了以 `PaperQuay.exe` 启动的 MCP 进程被写护栏误判为桌面端的问题——桌面端关闭时文库与笔记写工具不再被恒定拒绝。
+- **设置与模型修复**：设置页「上下文窗口」「最大输出」「温度」改为失焦或回车后归一化保存，可连续输入；Responses 接口的完成态正确映射为 `stop`，截断与失败态给出可诊断错误。
+- **下载**：最新安装包见 [v0.4.12 Release](https://github.com/Dongyurocket/PaperQuay/releases/tag/app-v0.4.12)。
+
+### v0.4.9 - 综述覆盖与继续、交付质量检查
+
+- **综述覆盖与继续**：分别记录候选、摘要筛选、正文检索、重点摘段、引用及未解决问题；取消后保留已完成工作与 checkpoint，继续时沿用原范围，并按实际 token 与耗时控制预算。
+- **交付质量检查**：检查章节、正式段落与未完成输出；主动内容检查优先核验数字、比较、因果、条件及强研究空白，模型响应无效时保持未知。
+- **正文预算续取**：工具结果保持合法 JSON 与完整引用 token；长正文支持按版本和 offset 绑定续取，RAG 采用确定性 topK 批次与来源去重。
+- **范围与渲染修复**：统一本轮有效文献范围并拒绝越界 ID；四个 Markdown 入口保留单波浪号数值范围，公式内引用正确呈现，按 turn 隔离草稿，流式终态不再被排队更新覆盖。
+- **验证**：构建及全部 828 项测试通过；详见[变更记录](./docs/changes/2026-10-09-agent-retrieval-rendering-delivery-quality.md)。
+
 ### v0.4.8 - Agent 片段引用与可选内容检查
 
 - **正文与参考文献同序**：每条回答按首次引用顺序从 `[1]` 编号，同一片段复用编号，同篇同页的不同片段分别列出。文末显示本地题名、作者、年份、刊物、PDF 页序和可展开的原文片段；正文编号与列表题名打开同一来源。
@@ -63,7 +79,7 @@
 - **回答优先**：来源与内容检查明细、完整执行轨迹默认折叠；推荐提示要求列出真实文献题名、可用年份与具体相关性。失效结构块明确降级为 PDF 页定位，未知、歧义或未完成引用不生成跳转。
 - **验证与下载**：2026-10-09 用户确认人工验证通过；695 项自动测试及四个平台安装包构建通过。下载 [v0.4.8](https://github.com/Dongyurocket/PaperQuay/releases/tag/app-v0.4.8)，用法见[用户手册 Agent 章节](./docs/USER_MANUAL.zh-CN.md#6-agent-工作区)，验收范围见[变更记录](./docs/changes/2026-10-09-agent-local-citation-navigation.md)。
 
-v0.4.0–v0.4.5 还引入了 Agent 能力路由、引用核对与笔记蒸馏、图谱只读探索，并修复笔记公式显示与 vault 公式保真、Agent 网络诊断及输入栏布局。各版本详情见 [CHANGELOG.md](./CHANGELOG.md)。
+v0.4.0 起还陆续引入了 Agent 能力路由、引用核对与笔记蒸馏、图谱只读探索，并修复了笔记公式显示与 vault 公式保真、Agent 网络诊断及输入栏布局。各版本详情见 [CHANGELOG.md](./CHANGELOG.md)。
 
 ### v0.3.0 - 笔记语义检索、提炼预览与 vault 冲突保护
 
@@ -268,11 +284,11 @@ Agent 工作区不是普通聊天框，而是面向文献库操作设计。它�
 | 论文概览 | 支持背景、研究问题、方法、实验设置、主要发现、结论和局限等速读概览字段 |
 | Agent 工作区 | 支持对话、默认折叠的执行轨迹、工具调用卡片、文献选择、元数据工具、重命名、打标签、分类和总结；能力路由与钉选、正文顺序编号和片段级参考文献、可选内容检查，写操作经审批 |
 | Zotero 导入与同步 | 支持从 `zotero.sqlite` 全量导入分类、标签和可用 PDF；新增支持基于分类树浏览、条件模糊检索、差量预检与三层防重校验的选择性精准同步 |
-| MCP 知识库服务 | 内置标准 MCP stdio 服务（`bin/paperquay-mcp.cjs`），直连本地 SQLite；`search_knowledge_base` 支持向量 KNN + FTS5 + RRF 混合检索（支持 auto/hybrid/keyword 模式与 channels 来源标记及自动降级）；提供完整的文献检索、详情、正文切片以及笔记检索与写入（创建/更新/软删除、标签与分类树维护）、Zotero 本地库浏览、检索、差量预检与选择性同步工具链，全部写工具带运行护栏 |
+| MCP 知识库服务 | 内置标准 MCP stdio 服务（开发模式 `bin/paperquay-mcp.cjs`，安装包内置 `resources/paperquay-mcp/`），直连本地 SQLite；`search_knowledge_base` 支持向量 KNN + FTS5 + RRF 混合检索（支持 auto/hybrid/keyword 模式与 channels 来源标记及自动降级）；提供文献检索、详情、正文切片、笔记检索与写入（创建/更新/软删除、标签与分类树维护）、Zotero 本地库浏览/检索/差量预检/选择性同步，以及文库写入与翻译版 PDF 附件工具（共 25 个），全部写工具带运行护栏 |
 | 备份 | 支持通过 WebDAV 备份和恢复文献库数据库、笔记数据库和本地 RAG SQLite 数据库 |
 | 软件更新 | 支持应用内检查更新、Windows 和 Linux 自动更新流程，以及 macOS 打开发布页手动下载 |
 | 知识图谱 | 支持文献、笔记、标签、分类和引用节点，语义相似边、Crossref 参考文献同步、共同作者关系、自定义与 AI 关系，fcose 力导向全局布局、局部同心圆视图和 PNG/JSON 导出 |
-| 综述写作 | 支持大纲蓝图、分段并发写作、RAG 检索上下文、失败任务独立上报与续跑，以及 Word 导出（OMML 公式、中英文标题、参考文献和正文插图） |
+| 综述写作 | 支持大纲蓝图、分段并发写作、RAG 检索上下文、逐文献覆盖记录与取消后 checkpoint 继续、交付质量检查，以及 Word 导出（OMML 公式、中英文标题、参考文献和正文插图） |
 | 主题 | 支持浅色和深色主题，面向桌面端长时间阅读优化 |
 
 ---
@@ -287,11 +303,11 @@ PaperQuay 内置了基于标准 **Model Context Protocol (MCP)** 的独立服务
 2. **并发安全与无锁访问**：SQLite 数据库开启 WAL 模式，外部 Agent 的只读检索与桌面端用户的读写操作完全互不阻塞、零锁冲突。
 3. **向量 + 全文混合检索（KNN + FTS5 + RRF）**：当 PaperQuay 阅读器设置中配置了 Embedding API 时，`search_knowledge_base` 自动将查询向量化，在本地 `sqlite-vec` 向量索引与 FTS5 BM25 候选池间双通道召回，经倒数排名融合（RRF）输出高质量证据；配置缺失或网络异常时自动降级为关键词检索。
 4. **精准到页码与结构块的学术证据链**：检索结果直接携带文献标题、1-based 绝对页码（`pageNumber`）、结构块 ID（`blockId`）及命中的检索通道（`channels: ['vector', 'fts']`），便于 Agent 输出严谨真实的学术引用。
-5. **写入安全护栏**：写工具执行前自动检测 PaperQuay 桌面应用运行状态——检测到运行时显式拒绝写入（桌面端的内存态保存会整体覆盖外部写入），可传 `allowWhileAppRunning: true` 强制覆盖；设 `PAPERQUAY_MCP_WRITE=off` 可将服务切换为全局只读。
+5. **写入安全护栏**：写工具执行前自动检测 PaperQuay 桌面应用运行状态——检测到运行时显式拒绝写入（桌面端的内存态保存会整体覆盖外部写入），可传 `allowWhileAppRunning: true` 强制覆盖；设 `PAPERQUAY_MCP_WRITE=off` 可将服务切换为全局只读。进程检测会排除 MCP 服务自身，官方推荐的 `PaperQuay.exe` + `ELECTRON_RUN_AS_NODE=1` 启动方式不会误触发。
 
 ### 提供的 MCP 工具清单
 
-下面列出常用工具。当前完整清单（25 个，含 `attach_translated_pdf` / `remove_translated_pdf`）以 [MCP 接入指南](./docs/MCP_AGENT_INTEGRATION.md) 为准：
+服务共注册 25 个工具，按四类划分如下；完整参数、语义与护栏细节以 [MCP 接入指南](./docs/MCP_AGENT_INTEGRATION.md) 为准。
 
 #### 1. 知识库只读检索工具（5 项）
 | 工具名称 | 功能说明 | 核心参数 | 返回关键字段 |
@@ -310,7 +326,7 @@ PaperQuay 内置了基于标准 **Model Context Protocol (MCP)** 的独立服务
 | `zotero_preview_sync` | **入库前差量比对与去重预检** | `itemKeys`、`collectionKey`、`dataDir` | 差量清单：`ready`（可同步）、`alreadyExists`（已存在去重）、`missingPdf`（缺本地 PDF） |
 | `paperquay_sync_from_zotero` | **精准安全入库** | `itemKeys`、`collectionKey`、`targetCategoryId`、`createCollectionCategory` | 同步报告：成功篇数、跳过篇数、自动创建/关联的分类名称 |
 
-#### 3. 文库写入与管理工具（带运行护栏）
+#### 3. 文库写入与管理工具（8 项，带运行护栏）
 
 以下工具会修改本地文库数据库，执行前自动检测桌面应用运行状态，检测到运行时**显式拒绝**（可传 `allowWhileAppRunning: true` 覆盖；`PAPERQUAY_MCP_WRITE=off` 可全局禁用写入）。
 
@@ -324,6 +340,21 @@ PaperQuay 内置了基于标准 **Model Context Protocol (MCP)** 的独立服务
 | `delete_papers` | 批量删除文献 | `paperIds`、`deleteFiles`（默认 `false`） | 删除报告（`deletedFileCount`、`fileErrors`） |
 | `attach_translated_pdf` | 附加翻译版 PDF，同文献只保留一份 | `paperId`、`sourcePath` | `attachmentId`、`storedPath`、`pageCountMismatch` |
 | `remove_translated_pdf` | 移除翻译版 PDF | `paperId`、`deleteFile`（默认 `true`） | 已移除的 `attachmentId` |
+
+#### 4. 笔记维护工具（8 项，带运行护栏）
+
+笔记库采用逐条 SQL 写入，但应用界面持有内存快照，外部写入后需重新加载界面才能看到，因此同样使用「默认拒绝 + `allowWhileAppRunning` 可覆盖」护栏。
+
+| 工具名称 | 功能说明 | 核心参数 | 返回关键字段 |
+| :--- | :--- | :--- | :--- |
+| `list_note_tags` | 列出笔记标签及使用次数（只读） | `paperId`（可选） | 标签列表（`tag`、`count`） |
+| `list_note_folders` | 读取笔记分类（文件夹）树（只读） | 无 | 分类列表（`id`、`name`、`parentId`、`sortOrder`） |
+| `create_note` | 新建笔记（Markdown / 纯文本） | `title` / `content`（至少一项）、`tags`、`paperId`、`type`、`folderId` | 新笔记的 `noteId` 与元数据 |
+| `update_note` | 局部更新标题 / 正文 / 标签 / 分类 | `noteId`（必填） | 更新后的笔记 |
+| `delete_note` | 软删除（标记删除并移出全文索引） | `noteId`（必填） | 删除结果 |
+| `create_note_folder` | 新建分类，支持嵌套 | `name`、`parentId`（可选） | 新分类对象 |
+| `rename_note_folder` | 重命名分类 | `folderId`、`name` | 更新后的分类 |
+| `delete_note_folder` | 删除分类及子分类；其中笔记移动到未分类（不删除笔记） | `folderId` | 删除结果 |
 
 ### 向量混合检索与模式说明
 
@@ -571,12 +602,10 @@ PaperQuay 是本地优先。文献库、笔记和本地 RAG 索引保存在 SQLi
 下面这些是还没完全落地、或需要继续深化的方向；已经实现的笔记、阅读时间图、WebDAV 备份和软件更新能力已放在“当前功能”中。
 
 - 从 PDF 首页提取更稳定的元数据。
-- 增加 DOI / arXiv / Semantic Scholar 补全来源。
+- 增加 arXiv / Semantic Scholar 等 DOI 之外的补全来源。
 - 深化 PDF 区域、批注和独立笔记之间的双向绑定。
-- 增加引用格式生成和导出。
 - 增加文件夹监听和自动导入队列。
-- 增加跨论文和笔记的 RAG 知识库问答。
-- 支持一键生成综述、Word / LaTeX 草稿等研究写作能力。
+- 支持 LaTeX 草稿导出与更多研究写作能力。
 - 完善签名后的 macOS 发布流程，让安装和更新检查更顺畅。
 - 本地优先模型稳定后，再考虑可选云同步。
 

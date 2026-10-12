@@ -1,7 +1,7 @@
 # PaperQuay 用户手册
 
-> 适用版本：**v0.4.8**（笔记章节主体对应 v0.2.0 的笔记系统改造，后续笔记修复及 Agent 片段引用、可选内容检查已同步）。
-> 更新日期：2026-10-09。
+> 适用版本：**v0.4.12**（笔记章节主体对应 v0.2.0 的笔记系统改造，后续笔记修复、Agent 片段引用与可选内容检查、综述覆盖与继续、MCP 安装版发布已同步）。
+> 更新日期：2026-10-13。
 > 相关文档：[README](../README.md)（项目概览与能力清单）、[笔记宪章](./notes-charter.md)（页面类型、命名规范、摘录卡红线）、[MCP 接入指南](./MCP_AGENT_INTEGRATION.md)、[开发手册](./DEVELOPMENT.zh-CN.md)。
 
 本手册面向**使用者**：怎么导入论文、怎么读、怎么写笔记、怎么把笔记维护成一个长期可用的知识体系。开发、构建、上游同步和发布流程见[开发手册](./DEVELOPMENT.zh-CN.md)。
@@ -346,14 +346,14 @@ Agent 工作区可以直接读写笔记（需在本地文库模式下）：
 
 注意几点：
 
-- Agent 创建的笔记正文是纯文本，编辑器会重建富文本；新建笔记默认落在未分类（Agent 不指定分类）。
-- 更新操作会把新正文替换原正文并清空富文本结构；对**摘录卡**这类含锚点块和引用节点的笔记，不要让 Agent 整篇重写，最多追加或改标签。
+- Agent 创建的笔记正文是 Markdown/纯文本，写入时由共享解析器重建富文本（双链、标签、已知锚点与可匹配的文献引用恢复为专用节点）；新建笔记默认落在未分类（Agent 不指定分类）。
+- 更新操作会用新正文在写入时重建富文本结构；对**摘录卡**这类含锚点块的笔记，不要让 Agent 整篇重写——锚点块与原文快照无法从普通 Markdown 重建，重写后正文中的锚点引用会丢失展示，并在编辑器后续保存时被同步清理；最多追加或改标签。
 - 删除是软删除（可恢复），但计划卡上仍会逐条列出，请核对清单再确认。
 - 一批操作部分失败时不会整体回滚，计划卡会给出成功/失败计数与错误明细。
 
 ### 5.5 用外部 Agent（MCP）维护笔记
 
-PaperQuay 内置标准的 MCP stdio 服务（`bin/paperquay-mcp.cjs`），Codex、Pi、Proma、Claude 等外部 Agent 无需打开桌面应用即可连接本地笔记库。配置方式见 [MCP 接入指南](./MCP_AGENT_INTEGRATION.md)。仓库同时提供 `skills/paperquay-knowledge-search/SKILL.md`（证据检索）、`skills/paperquay-notes/SKILL.md`（笔记维护）、`skills/paperquay-zotero-sync/SKILL.md`（选择性同步）和 `skills/paperquay-library-manage/SKILL.md`（文库管理）作为外部 Agent 的作业规范。
+PaperQuay 内置标准的 MCP stdio 服务（开发模式入口 `bin/paperquay-mcp.cjs`；安装包内置 `resources/paperquay-mcp/`，用应用自带的 Electron 加 `ELECTRON_RUN_AS_NODE=1` 启动），Codex、Pi、Proma、Claude 等外部 Agent 无需打开桌面应用即可连接本地笔记库。配置方式见 [MCP 接入指南](./MCP_AGENT_INTEGRATION.md)。仓库同时提供 `skills/paperquay-knowledge-search/SKILL.md`（证据检索）、`skills/paperquay-notes/SKILL.md`（笔记维护）、`skills/paperquay-zotero-sync/SKILL.md`（选择性同步）和 `skills/paperquay-library-manage/SKILL.md`（文库管理）作为外部 Agent 的作业规范。
 
 笔记相关工具：
 
@@ -369,14 +369,15 @@ PaperQuay 内置标准的 MCP stdio 服务（`bin/paperquay-mcp.cjs`），Codex�
 写操作护栏（与文库写工具同一套）：
 
 1. `PAPERQUAY_MCP_WRITE=off` 时全局只读，优先级最高；
-2. 检测到 PaperQuay 桌面应用在运行则**显式拒绝**写入，提示先关闭应用；
+2. 检测到 PaperQuay 桌面应用在运行则**显式拒绝**写入，提示先关闭应用（进程检测已排除 MCP 服务自身，官方启动方式不会误触发）；
 3. 确需并行写入时可传 `allowWhileAppRunning: true`；写入后需要重新加载应用界面才能看到（界面持有内存快照）；
 4. 开发模式也由应用运行标记保护；运行标记损坏或无法读取时按应用仍在运行处理，避免无保护写入。
 
 使用边界：
 
 - 正文用 Markdown/纯文本；`[[笔记标题]]` 会被解析为双链（目标笔记需已存在），`#标签` 自动归一化并与界面一致地写入标签表。
-- 替换 `content` 会清空富文本缓存，编辑器按纯文本重建——**不要用 MCP 覆盖含锚点块、文献引用或表格的笔记**；这类笔记请在应用内编辑，或只用 MCP 改标题/标签/分类。
+- 替换 `content` 时正文在写入时重新解析为富文本（标题、列表、表格、公式、代码块、引用块、双链与标签可重建；已知锚点与可匹配的文献引用恢复为专用节点，未知值保留为普通文本），`contentHtml` 缓存清除后由编辑器重渲染。
+- **不要用 MCP 覆盖含摘录卡来源锚点的笔记正文**：锚点块与原文快照无法从普通 Markdown 重建，覆盖后会丢失展示并在编辑器下次保存时被同步清理。含文献引用或表格的笔记，覆盖时须保留规范 Markdown 格式；这类笔记更稳妥的做法是在应用内编辑，或只用 MCP 改标题/标签/分类。
 - 批量删除前先让 Agent 列出待删清单并人工确认。
 
 ### 5.6 Markdown vault 与 Obsidian 双向同步
@@ -480,6 +481,8 @@ PaperQuay 内置标准的 MCP stdio 服务（`bin/paperquay-mcp.cjs`），Codex�
 ## 8. 综述写作
 
 - 流程：检索上下文 → 生成写作蓝图（章节、段落数、核心论点、图表插入点）→ 分段并发写作 → 失败任务可独立续跑 → 选择导出位置 → 导出 Word。
+- **覆盖与继续**：分别记录候选文献、摘要筛选、正文检索、重点摘段、引用及未解决问题；取消写作会保留已完成工作与 checkpoint，继续时沿用原范围，并按实际 token 与耗时控制预算。
+- **交付质量检查**：完成后检查章节完整性、正式段落与未完成输出；主动运行内容检查时优先核验数字、比较、因果、条件与强研究空白，模型响应无效的内容保持未知。
 - Word 导出支持 OMML 公式、中英文标题、参考文献与正文插图。
 - 蓝图与段落任务都可手工调整，写作过程中的引用来自本地 RAG。
 
@@ -495,7 +498,7 @@ PaperQuay 内置标准的 MCP stdio 服务（`bin/paperquay-mcp.cjs`），Codex�
 
 - 已安装桌面版的服务在 `resources/paperquay-mcp/server.cjs`，不在 asar 里，同目录还必须有 `node_modules/sqlite-vec` 和当前平台扩展。设置页「MCP 服务」会生成外部 Agent 配置；安装版用应用自带的 Electron 加 `ELECTRON_RUN_AS_NODE=1` 启动，不需要另装 Node.js。开发模式入口仍是 `bin/paperquay-mcp.cjs`。
 - 能力：文献检索与详情、知识库混合检索与正文切片、Zotero 浏览/检索/差量预检/选择性同步、文库写入（导入 PDF、分类管理、元数据、删除、附加/移除翻译版 PDF）、**笔记维护**（检索、创建、更新、软删除、标签与分类树）。
-- 安全边界：所有写工具默认在检测到桌面应用运行时拒绝写入，`allowWhileAppRunning` 可覆盖，`PAPERQUAY_MCP_WRITE=off` 全局只读。
+- 安全边界：所有写工具默认在检测到桌面应用运行时拒绝写入，`allowWhileAppRunning` 可覆盖，`PAPERQUAY_MCP_WRITE=off` 全局只读。进程检测会排除 MCP 服务自身进程（官方推荐的 `PaperQuay.exe` + `ELECTRON_RUN_AS_NODE=1` 启动方式不会误触发护栏），桌面应用关闭后即可正常写入。
 - 完整工具清单、已安装版与开发模式配置示例见 [MCP 接入指南](./MCP_AGENT_INTEGRATION.md)。
 
 ## 11. 数据、备份与隐私
