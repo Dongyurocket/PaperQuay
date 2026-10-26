@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.4.14-2563eb?style=flat-square" alt="Version v0.4.14">
+  <img src="https://img.shields.io/badge/version-v0.4.15-2563eb?style=flat-square" alt="Version v0.4.15">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-4b5563?style=flat-square" alt="Windows macOS Linux">
   <img src="https://img.shields.io/badge/built%20with-Electron-47848f?style=flat-square" alt="Electron">
   <img src="https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-0f766e?style=flat-square" alt="React TypeScript">
@@ -54,6 +54,11 @@
 ---
 
 ## Latest Update
+
+### v0.4.15 - Hybrid rebuilds finish an interrupted pdf-text index
+
+- **The badge no longer sticks on a partial index**: a paper stayed on "RAG pending" when MinerU was already indexed and pdf-text had stopped mid-batch. Manual and batch rebuilds now read the PDF text and finish pdf-text.
+- **Download**: latest installers on the [v0.4.15 release](https://github.com/Dongyurocket/PaperQuay/releases/tag/app-v0.4.15).
 
 ### v0.4.14 - Per-paper RAG index opt-out
 

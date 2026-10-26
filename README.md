@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.4.14-2563eb?style=flat-square" alt="Version v0.4.14">
+  <img src="https://img.shields.io/badge/version-v0.4.15-2563eb?style=flat-square" alt="Version v0.4.15">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-4b5563?style=flat-square" alt="Windows macOS Linux">
   <img src="https://img.shields.io/badge/built%20with-Electron-47848f?style=flat-square" alt="Electron">
   <img src="https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-0f766e?style=flat-square" alt="React TypeScript">
@@ -55,6 +55,11 @@
 ---
 
 ## 近期更新
+
+### v0.4.15 - hybrid 重建会补齐中断的 pdf-text 索引
+
+- **角标不再被半成品卡住**：MinerU 已索引完成时，中断的 `pdf-text` 仍会让整篇显示「RAG 待索引」。手动和批量重建现在会读取 PDF 文本并补完 `pdf-text`。
+- **下载**：最新安装包见 [v0.4.15 Release](https://github.com/Dongyurocket/PaperQuay/releases/tag/app-v0.4.15)。
 
 ### v0.4.14 - 文献级 RAG 索引开关
 

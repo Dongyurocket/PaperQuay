@@ -1,14 +1,12 @@
 # PaperQuay v{{VERSION}}
 
-Per-paper opt-out for the local RAG index.
+Manual and batch RAG rebuilds now finish an interrupted pdf-text index.
 
-- A paper can be excluded from the local knowledge base from the details panel, context menu, or batch bar. Exclusion deletes that paper’s index and keeps the PDF, parsed content, and notes.
-- Rejoining does not rebuild the index. Build it again manually or in batch.
-- Reader QA and single-paper Agent context still fall back to the full text. Excluded papers no longer appear in knowledge-base search or document similarity.
-- The library list can filter all, included, or excluded papers. The index overview counts excluded papers.
-- MCP `search_papers` and `get_paper_details` return `ragEnabled`. Excluded papers do not appear in `search_knowledge_base` or `read_paper_content`.
+- In hybrid mode, a paper stayed on "RAG pending" when MinerU was already indexed and a pdf-text index had stopped mid-batch.
+- Library rebuild only rewrote the MinerU source, so the badge did not change.
+- Forced rebuilds now read the PDF text layer and resume the missing pdf-text chunks. Automatic indexing after parsing still writes MinerU only.
 
-Validation: frontend build passed; all 861 tests passed. Desktop installers were not hand-regressed before tagging. Installers are built by the `app-v{{VERSION}}` release workflow.
+Validation: the local library was checked; one paper had a ready MinerU index and a pending pdf-text index at 48/178. The full test suite was not re-run before tagging, and desktop installers were not hand-regressed. Installers are built by the `app-v{{VERSION}}` release workflow.
 
 ## Downloads
 
@@ -18,15 +16,13 @@ Choose the matching system and architecture from Assets: Windows `.exe`, macOS `
 
 # PaperQuay v{{VERSION}} 中文说明
 
-文献级 RAG 索引开关。
+手动和批量重建 RAG 索引时，会把中断的 pdf-text 索引补完。
 
-- 详情、右键和批量栏可以把单篇或一批文献移出本地知识库。移出删除该文献已有索引，PDF、解析结果和笔记保留。
-- 重新加入后不会自动重建索引，需要再手动或批量建立。
-- 阅读器问答和 Agent 单篇上下文仍回退全文。已排除文献不再进入知识库检索和文献相似度。
-- 列表可按全部 / 已加入 / 已排除筛选。索引概览统计已排除篇数。
-- MCP `search_papers` 与 `get_paper_details` 返回 `ragEnabled`。已排除文献不会出现在 `search_knowledge_base` 和 `read_paper_content`。
+- hybrid 模式下，MinerU 已经索引完成，但 pdf-text 停在半成品时，文献卡会一直显示「RAG 待索引」。
+- 文献库重建以前只重写 MinerU，角标不会变化。
+- 现在手动和批量重建会读取 PDF 文本层，并补上缺失的 pdf-text 分块。解析后的自动索引仍只写 MinerU。
 
-验证：前端构建通过；全部 861 项测试通过。打标签前没有在干净安装版上完成桌面手工回归。安装包由 `app-v{{VERSION}}` Release 工作流构建。
+验证：已核对本机文献库，一篇文献的 MinerU 为 ready、pdf-text 停在 pending 48/178。打标签前没有重跑完整测试，也没有做干净安装版手工回归。安装包由 `app-v{{VERSION}}` Release 工作流构建。
 
 ## 下载
 
