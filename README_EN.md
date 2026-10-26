@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.4.13-2563eb?style=flat-square" alt="Version v0.4.13">
+  <img src="https://img.shields.io/badge/version-v0.4.14-2563eb?style=flat-square" alt="Version v0.4.14">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-4b5563?style=flat-square" alt="Windows macOS Linux">
   <img src="https://img.shields.io/badge/built%20with-Electron-47848f?style=flat-square" alt="Electron">
   <img src="https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-0f766e?style=flat-square" alt="React TypeScript">
@@ -54,6 +54,13 @@
 ---
 
 ## Latest Update
+
+### v0.4.14 - Per-paper RAG index opt-out
+
+- **Exclude from the local knowledge base**: the details panel, context menu, and batch bar can remove one paper or a selection from the index. Exclusion deletes that paper's index and keeps the PDF, parsed content, and notes. Rejoining does not rebuild the index.
+- **Retrieval boundary**: excluded papers drop out of knowledge-base search and similarity. Reader QA and single-paper Agent context still fall back to the full text. The list can filter all / included / excluded.
+- **MCP**: `search_papers` and `get_paper_details` return `ragEnabled`. Excluded papers do not appear in `search_knowledge_base` or `read_paper_content`.
+- **Download**: latest installers on the [v0.4.14 release](https://github.com/Dongyurocket/PaperQuay/releases/tag/app-v0.4.14).
 
 ### v0.4.10–v0.4.13 - MCP ships with the installer, and contract alignment
 

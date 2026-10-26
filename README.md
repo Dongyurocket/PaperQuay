@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.4.13-2563eb?style=flat-square" alt="Version v0.4.13">
+  <img src="https://img.shields.io/badge/version-v0.4.14-2563eb?style=flat-square" alt="Version v0.4.14">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-4b5563?style=flat-square" alt="Windows macOS Linux">
   <img src="https://img.shields.io/badge/built%20with-Electron-47848f?style=flat-square" alt="Electron">
   <img src="https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-0f766e?style=flat-square" alt="React TypeScript">
@@ -55,6 +55,13 @@
 ---
 
 ## 近期更新
+
+### v0.4.14 - 文献级 RAG 索引开关
+
+- **移出本地知识库**：详情、右键和批量栏可以把单篇或一批文献移出索引。移出删除该文献已有索引，PDF、解析结果和笔记保留；重新加入后不会自动重建索引。
+- **检索边界**：已排除文献不再进入知识库检索和相似度；阅读器问答和 Agent 打开这一篇时仍可用全文。列表可按全部 / 已加入 / 已排除筛选。
+- **MCP**：`search_papers` 与 `get_paper_details` 返回 `ragEnabled`。已排除文献不会出现在 `search_knowledge_base` 和 `read_paper_content`。
+- **下载**：最新安装包见 [v0.4.14 Release](https://github.com/Dongyurocket/PaperQuay/releases/tag/app-v0.4.14)。
 
 ### v0.4.10–v0.4.13 - MCP 随安装包发布与契约对齐
 
