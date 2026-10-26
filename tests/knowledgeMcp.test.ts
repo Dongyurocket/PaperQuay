@@ -48,7 +48,8 @@ function setupTestEnvironment() {
       ai_summary TEXT,
       citation TEXT,
       source TEXT NOT NULL,
-      sort_order INTEGER NOT NULL
+      sort_order INTEGER NOT NULL,
+      rag_enabled INTEGER NOT NULL DEFAULT 1
     );
     CREATE TABLE authors (
       id TEXT NOT NULL,
@@ -97,6 +98,7 @@ function setupTestEnvironment() {
     VALUES
       ('paper-1', 'Attention Is All You Need', '注意力即所需', '2017', 'NeurIPS', '10.1000/transformer', 'The dominant sequence transduction models are based on complex recurrent or convolutional neural networks.', 'journalArticle', 1, 1, 0.5, 1, 'local', 0),
       ('paper-2', 'Deep Residual Learning for Image Recognition', '用于图像识别的深度残差学习', '2016', 'CVPR', '10.1000/resnet', 'Deeper neural networks are more difficult to train.', 'conferencePaper', 2, 2, 0.1, 0, 'local', 1);
+    UPDATE papers SET rag_enabled = 0 WHERE id = 'paper-2';
     INSERT INTO authors (id, paper_id, name, sort_order) VALUES ('a1', 'paper-1', 'Ashish Vaswani', 0), ('a2', 'paper-2', 'Kaiming He', 0);
     INSERT INTO tags (id, paper_id, name, sort_order) VALUES ('t1', 'paper-1', 'transformer', 0), ('t2', 'paper-2', 'vision', 0);
   `);
@@ -175,12 +177,14 @@ test('PaperQuayKnowledgeService searches papers and reads details', () => {
     const searchByTitle = service.searchPapers({ query: 'Transformer' });
     assert.equal(searchByTitle.total, 1);
     assert.equal(searchByTitle.papers[0].id, 'paper-1');
+    assert.equal(searchByTitle.papers[0].ragEnabled, true);
     assert.equal(searchByTitle.papers[0].titleZh, '注意力即所需');
     assert.deepEqual(searchByTitle.papers[0].tags, ['transformer']);
 
     const searchByZh = service.searchPapers({ query: '残差' });
     assert.equal(searchByZh.total, 1);
     assert.equal(searchByZh.papers[0].id, 'paper-2');
+    assert.equal(searchByZh.papers[0].ragEnabled, false);
 
     // 读取详情
     const details = service.getPaperDetails({ paperId: 'paper-1' });
@@ -188,6 +192,8 @@ test('PaperQuayKnowledgeService searches papers and reads details', () => {
     assert.equal(details.title, 'Attention Is All You Need');
     assert.deepEqual(details.authors, ['Ashish Vaswani']);
     assert.equal(details.isFavorite, true);
+    assert.equal(details.ragEnabled, true);
+    assert.equal(service.getPaperDetails({ paperId: 'paper-2' }).ragEnabled, false);
   } finally {
     cleanupDir(dataDir);
   }

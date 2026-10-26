@@ -35,7 +35,8 @@ export interface LocalRagResolutionSkipped {
     | 'missing-embedding-config'
     | 'no-sources'
     | 'indexing'
-    | 'empty';
+    | 'empty'
+    | 'excluded';
   indexedChunkCount?: number;
   totalChunkCount?: number;
   errorMessage?: string | null;
@@ -71,6 +72,8 @@ function toQaContextState(kind: LocalRagResolution['kind']): DocumentChatQaConte
       return 'empty';
     case 'failed':
       return 'failed';
+    case 'excluded':
+      return 'excluded';
   }
 }
 
@@ -180,7 +183,7 @@ export function getQaContextBadgeTone(
     return 'success';
   }
 
-  if (context.retrievalState === 'disabled') {
+  if (context.retrievalState === 'disabled' || context.retrievalState === 'excluded') {
     return 'neutral';
   }
 
@@ -199,6 +202,10 @@ export function formatQaContextBadge(
     return hasRetrievedChunks(context)
       ? l(`本地 RAG · ${context.retrievedChunkCount} 组`, `Local RAG · ${context.retrievedChunkCount} groups`)
       : l('本地 RAG', 'Local RAG');
+  }
+
+  if (context.retrievalState === 'excluded') {
+    return l('该文献已移出本地知识库', 'Excluded from the local knowledge base');
   }
 
   if (context.retrievalState !== 'disabled') {
@@ -263,6 +270,11 @@ export function formatQaContextHint(
         `本次未命中本地 RAG：未检索到相关片段，已回退到${originLabel}。`,
         `RAG was attempted, but no relevant chunks were retrieved. Fell back to ${originLabel}.`,
       );
+    case 'excluded':
+      return l(
+        `该文献已移出本地知识库，本次改用${originLabel}回答。`,
+        `This paper is excluded from the local knowledge base. This answer uses ${originLabel}.`,
+      );
     case 'failed': {
       const rawError = context.errorMessage?.trim() ?? '';
       const is404 = /\b404\b/.test(rawError);
@@ -312,6 +324,13 @@ export function formatQaContextStatus(
     return l(
       `文档问答已完成，使用${originLabel}`,
       `Document QA completed using ${originLabel}`,
+    );
+  }
+
+  if (context.retrievalState === 'excluded') {
+    return l(
+      '文档问答已完成，该文献已移出本地知识库',
+      'Document QA completed; this paper is excluded from the local knowledge base',
     );
   }
 

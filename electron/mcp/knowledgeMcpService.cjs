@@ -463,6 +463,7 @@ class PaperQuayKnowledgeService {
       const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
       const titleZhSelect = paperCols.has('title_zh') ? 'p.title_zh AS titleZh,' : 'NULL AS titleZh,';
       const itemTypeSelect = paperCols.has('item_type') ? 'p.item_type AS itemType,' : "'journalArticle' AS itemType,";
+      const ragEnabledSelect = paperCols.has('rag_enabled') ? 'p.rag_enabled AS ragEnabled,' : '1 AS ragEnabled,';
 
       const sql = `
         SELECT
@@ -474,6 +475,7 @@ class PaperQuayKnowledgeService {
           p.doi,
           p.url,
           ${itemTypeSelect}
+          ${ragEnabledSelect}
           p.is_favorite AS isFavorite,
           p.updated_at AS updatedAt
         FROM papers p
@@ -520,6 +522,7 @@ class PaperQuayKnowledgeService {
         itemType: row.itemType || 'journalArticle',
         tags: tagsByPaper.get(row.id) || [],
         isFavorite: Boolean(row.isFavorite),
+        ragEnabled: row.ragEnabled !== 0 && row.ragEnabled !== false,
       }));
 
       return { papers, total: papers.length };
@@ -598,6 +601,7 @@ class PaperQuayKnowledgeService {
         aiSummary: paper.ai_summary || null,
         citation: paper.citation || null,
         isFavorite: Boolean(paper.is_favorite),
+        ragEnabled: paper.rag_enabled == null ? true : paper.rag_enabled !== 0,
         attachments,
       };
     } finally {

@@ -34,6 +34,7 @@ import {
   removeLibraryAttachment,
   reorderLibraryPapers,
   selectLibraryPdfFiles,
+  setLibraryRagMembership,
   updateLibraryPaper,
   updateLibraryCategory,
   updateLibrarySettings,
@@ -73,6 +74,7 @@ import LiteraturePaperDetails from './components/LiteraturePaperDetails';
 import LiteraturePaperList, {
   type LiteraturePaperListStatus,
   type LiteraturePaperRagStatus,
+  type LiteratureRagMembershipFilter,
 } from './components/LiteraturePaperList';
 import { flattenCategories, paperPdfPath, paperTranslatedPdfAttachment } from './literatureUi';
 import {
@@ -264,6 +266,8 @@ type LibraryConfirmDialogState =
   | { kind: 'delete-category'; category: LiteratureCategory }
   | { kind: 'delete-paper'; paper: LiteraturePaper; deleteFiles: boolean }
   | { kind: 'delete-papers'; paperIds: string[]; deleteFiles: boolean }
+  | { kind: 'exclude-rag-paper'; paper: LiteraturePaper }
+  | { kind: 'exclude-rag-papers'; paperIds: string[]; indexedCount: number }
   | { kind: 'remove-translated-pdf'; paper: LiteraturePaper; attachmentId: string; fileName: string };
 
 type LiteraturePaperSortBy = NonNullable<ListPapersRequest['sortBy']>;
@@ -366,11 +370,16 @@ export default function LiteratureLibraryView({
   const [selectedPaperId, setSelectedPaperId] = useState<string | null>(null);
   const [paperSelection, setPaperSelection] = useState<PaperSelection>(EMPTY_PAPER_SELECTION);
   const paperSelectionRef = useRef(paperSelection);
-  const selectionFilterRef = useRef<{ categoryId: string | null; search: string } | null>(null);
+  const selectionFilterRef = useRef<{
+    categoryId: string | null;
+    search: string;
+    ragMembershipFilter: LiteratureRagMembershipFilter;
+  } | null>(null);
   const [selectionAnchorId, setSelectionAnchorId] = useState<string | null>(null);
   const [batchWorking, setBatchWorking] = useState(false);
   const [bibExportMenuOpen, setBibExportMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [ragMembershipFilter, setRagMembershipFilter] = useState<LiteratureRagMembershipFilter>('all');
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState(false);
   const [metadataWorking, setMetadataWorking] = useState(false);
@@ -447,12 +456,16 @@ export default function LiteratureLibraryView({
   );
 
   useEffect(() => {
-    const nextFilter = { categoryId: selectedCategoryId, search: searchQuery };
+    const nextFilter = { categoryId: selectedCategoryId, search: searchQuery, ragMembershipFilter };
     const previousFilter = selectionFilterRef.current;
     selectionFilterRef.current = nextFilter;
     if (
       !previousFilter
-      || (previousFilter.categoryId === nextFilter.categoryId && previousFilter.search === nextFilter.search)
+      || (
+        previousFilter.categoryId === nextFilter.categoryId
+        && previousFilter.search === nextFilter.search
+        && previousFilter.ragMembershipFilter === nextFilter.ragMembershipFilter
+      )
       || paperSelectionRef.current.ids.length === 0
     ) {
       return;
@@ -462,7 +475,7 @@ export default function LiteratureLibraryView({
     setStatusMessage(
       l('筛选条件已变化，选择已清空。', 'The filter changed, so the selection was cleared.'),
     );
-  }, [l, searchQuery, selectedCategoryId]);
+  }, [l, ragMembershipFilter, searchQuery, selectedCategoryId]);
 
   const clearMultiSelection = useCallback(() => {
     setPaperSelection(EMPTY_PAPER_SELECTION);
@@ -527,6 +540,11 @@ export default function LiteratureLibraryView({
           search: searchQuery,
           sortBy: paperSort.sortBy,
           sortDirection: paperSort.sortDirection,
+          ragEnabled: ragMembershipFilter === 'included'
+            ? true
+            : ragMembershipFilter === 'excluded'
+              ? false
+              : null,
           limit: pageSize,
           offset,
         });
@@ -556,9 +574,13 @@ export default function LiteratureLibraryView({
         return [];
       }
 
-      return filterDemoPapers(demoLibrary, nextCategoryId, searchQuery);
+      return filterDemoPapers(demoLibrary, nextCategoryId, searchQuery).filter((paper) => {
+        if (ragMembershipFilter === 'included') return paper.ragEnabled !== false;
+        if (ragMembershipFilter === 'excluded') return paper.ragEnabled === false;
+        return true;
+      });
     },
-    [demoLibrary, searchQuery, selectedCategoryId],
+    [demoLibrary, ragMembershipFilter, searchQuery, selectedCategoryId],
   );
 
   const handleToggleSelectAll = useCallback(async () => {
@@ -576,6 +598,11 @@ export default function LiteratureLibraryView({
         : await listAllLibraryPaperIds({
           categoryId: selectedCategoryId,
           search: searchQuery,
+          ragEnabled: ragMembershipFilter === 'included'
+            ? true
+            : ragMembershipFilter === 'excluded'
+              ? false
+              : null,
         });
 
       setPaperSelection(capturePaperSelection(ids));
@@ -596,7 +623,7 @@ export default function LiteratureLibraryView({
     } finally {
       setBatchWorking(false);
     }
-  }, [demoLibrary, l, papersTotal, resolveDemoPapers, searchQuery, selectedCategoryId]);
+  }, [demoLibrary, l, papersTotal, ragMembershipFilter, resolveDemoPapers, searchQuery, selectedCategoryId]);
 
   const showDemoLockedMessage = useCallback(() => {
     setStatusMessage(
@@ -770,6 +797,11 @@ export default function LiteratureLibraryView({
         search: searchQuery,
         sortBy: paperSort.sortBy,
         sortDirection: paperSort.sortDirection,
+        ragEnabled: ragMembershipFilter === 'included'
+          ? true
+          : ragMembershipFilter === 'excluded'
+            ? false
+            : null,
         limit: PAPER_PAGE_SIZE,
         offset: 0,
       });
@@ -783,7 +815,7 @@ export default function LiteratureLibraryView({
       setSelectedPaperId((current) => resolveSelectedPaperId(current, nextPapers));
       return nextPapers;
     },
-    [demoLibrary, paperSort.sortBy, paperSort.sortDirection, resolveDemoPapers, searchQuery, selectedCategoryId],
+    [demoLibrary, paperSort.sortBy, paperSort.sortDirection, ragMembershipFilter, resolveDemoPapers, searchQuery, selectedCategoryId],
   );
 
   // 滚动接近底部时按当前筛选追加下一页；按 id 去重防止翻页期间并发写入造成重复行。
@@ -799,6 +831,11 @@ export default function LiteratureLibraryView({
         search: searchQuery,
         sortBy: paperSort.sortBy,
         sortDirection: paperSort.sortDirection,
+        ragEnabled: ragMembershipFilter === 'included'
+          ? true
+          : ragMembershipFilter === 'excluded'
+            ? false
+            : null,
         limit: PAPER_PAGE_SIZE,
         offset: snapshot.length,
       });
@@ -824,6 +861,7 @@ export default function LiteratureLibraryView({
     paperSort.sortBy,
     paperSort.sortDirection,
     papersLoadingMore,
+    ragMembershipFilter,
     searchQuery,
     selectedCategoryId,
   ]);
@@ -2060,6 +2098,11 @@ export default function LiteratureLibraryView({
         search: searchQuery,
         sortBy: paperSort.sortBy,
         sortDirection: paperSort.sortDirection,
+        ragEnabled: ragMembershipFilter === 'included'
+          ? true
+          : ragMembershipFilter === 'excluded'
+            ? false
+            : null,
         limit: PAPER_PAGE_SIZE,
         offset: 0,
       }),
@@ -2291,6 +2334,80 @@ export default function LiteratureLibraryView({
       setBatchWorking(false);
       setDialogBusy(false);
     }
+  };
+
+  const applyRagMembership = async (paperIds: string[], enabled: boolean) => {
+    if (demoMode) {
+      showDemoLockedMessage();
+      return;
+    }
+
+    if (paperIds.length === 0) return;
+
+    setBatchWorking(true);
+    setDialogBusy(true);
+    setError('');
+
+    try {
+      const result = await setLibraryRagMembership(paperIds, enabled);
+      await refreshAll();
+      const failedCount = result.failures.length;
+      const successCount = result.papers.length;
+      setStatusMessage(
+        failedCount > 0
+          ? enabled
+            ? l(
+              `已加入 ${successCount} 篇，${failedCount} 篇失败。`,
+              `Included ${successCount} papers; ${failedCount} failed.`,
+            )
+            : l(
+              `已移出 ${successCount} 篇，${failedCount} 篇失败。`,
+              `Excluded ${successCount} papers; ${failedCount} failed.`,
+            )
+          : enabled
+            ? l(
+              `已加入 ${successCount} 篇。未自动建立索引。`,
+              `Included ${successCount} papers. Indexes were not rebuilt.`,
+            )
+            : l(
+              `已移出 ${successCount} 篇。`,
+              `Excluded ${successCount} papers.`,
+            ),
+      );
+      setConfirmDialog(null);
+      setPaperContextMenu(null);
+    } catch (nextError) {
+      const message = nextError instanceof Error
+        ? nextError.message
+        : enabled
+          ? l('加入本地知识库失败', 'Failed to include papers in the local knowledge base')
+          : l('移出本地知识库失败', 'Failed to exclude papers from the local knowledge base');
+      setError(message);
+      setStatusMessage(message);
+    } finally {
+      setBatchWorking(false);
+      setDialogBusy(false);
+    }
+  };
+
+  const handleBatchIncludeRag = () => {
+    void applyRagMembership(paperSelectionRef.current.ids, true);
+  };
+
+  const handleBatchExcludeRag = () => {
+    if (demoMode) {
+      showDemoLockedMessage();
+      return;
+    }
+
+    const paperIds = paperSelectionRef.current.ids;
+    if (paperIds.length === 0) return;
+
+    const indexedCount = paperIds.filter((id) => {
+      const status = ragBadgeByDocumentKey?.[id];
+      return status === 'ready' || status === 'pending' || status === 'failed';
+    }).length;
+    setConfirmDialog({ kind: 'exclude-rag-papers', paperIds, indexedCount });
   };
 
   const handleBatchSetFavorite = async (favorite: boolean) => {
@@ -2710,6 +2827,11 @@ export default function LiteratureLibraryView({
           search: searchQuery,
           sortBy: paperSort.sortBy,
           sortDirection: paperSort.sortDirection,
+          ragEnabled: ragMembershipFilter === 'included'
+            ? true
+            : ragMembershipFilter === 'excluded'
+              ? false
+              : null,
           limit: PAPER_PAGE_SIZE,
           offset: 0,
         }),
@@ -2892,6 +3014,22 @@ export default function LiteratureLibraryView({
             </select>
             <button
               type="button"
+              disabled={batchWorking || demoMode}
+              onClick={handleBatchIncludeRag}
+              className="pq-button px-2.5 py-1 text-xs disabled:opacity-50"
+            >
+              {l('加入知识库', 'Include in Library')}
+            </button>
+            <button
+              type="button"
+              disabled={batchWorking || demoMode}
+              onClick={handleBatchExcludeRag}
+              className="pq-button px-2.5 py-1 text-xs disabled:opacity-50"
+            >
+              {l('移出知识库', 'Exclude from Library')}
+            </button>
+            <button
+              type="button"
               disabled={batchWorking}
               onClick={() => void handleBatchSetFavorite(true)}
               className="pq-button px-2.5 py-1 text-xs disabled:opacity-50"
@@ -2954,6 +3092,8 @@ export default function LiteratureLibraryView({
           ragBadgeByDocumentKey={ragBadgeByDocumentKey}
           ragIndexingDocumentKey={ragIndexingDocumentKey}
           ragIndexAvailable={ragIndexAvailable}
+          ragMembershipFilter={ragMembershipFilter}
+          onRagMembershipFilterChange={setRagMembershipFilter}
         />
         </div>
       </div>
@@ -3028,6 +3168,17 @@ export default function LiteratureLibraryView({
             onAttachTranslatedPdf={(paper) => void handleAttachTranslatedPdf(paper)}
             onRemoveTranslatedPdf={handleRemoveTranslatedPdf}
             onGenerateSummary={onGenerateSummary}
+            ragStatus={
+              selectedPaper?.ragEnabled === false
+                ? 'excluded'
+                : selectedPaper
+                  ? ragBadgeByDocumentKey?.[selectedPaper.id] ?? 'none'
+                  : 'none'
+            }
+            ragMembershipBusy={batchWorking}
+            onSetRagMembership={(paper, enabled) => {
+              void applyRagMembership([paper.id], enabled);
+            }}
           />
         )}
       </div>
@@ -3122,11 +3273,33 @@ export default function LiteratureLibraryView({
               <Sparkles className="mr-2 h-4 w-4 text-violet-600 dark:text-violet-200" strokeWidth={1.9} />
               {l('解析元数据', 'Parse Metadata')}
             </button>
+            <button
+              type="button"
+              onClick={() => {
+                const paper = paperContextMenu.paper;
+                setPaperContextMenu(null);
+                if (paper.ragEnabled === false) {
+                  void applyRagMembership([paper.id], true);
+                  return;
+                }
+                setConfirmDialog({ kind: 'exclude-rag-paper', paper });
+              }}
+              disabled={paperSaving || batchWorking}
+              className="mt-1 flex w-full items-center rounded-xl px-3 py-2 text-left text-sm font-medium text-slate-700 transition hover:bg-slate-100 disabled:opacity-60 dark:text-[#e0e0e0] dark:hover:bg-white/[0.06]"
+            >
+              <Database className="mr-2 h-4 w-4 text-slate-500 dark:text-slate-300" strokeWidth={1.9} />
+              {paperContextMenu.paper.ragEnabled === false
+                ? l('加入本地知识库', 'Include in Local Knowledge Base')
+                : l('移出本地知识库', 'Exclude from Local Knowledge Base')}
+            </button>
             {ragIndexAvailable && onIndexPaperRag ? (
               <button
                 type="button"
                 onClick={handleIndexPaperRagFromContextMenu}
-                disabled={ragIndexingDocumentKey === paperContextMenu.paper.id}
+                disabled={
+                  ragIndexingDocumentKey === paperContextMenu.paper.id
+                  || paperContextMenu.paper.ragEnabled === false
+                }
                 className="mt-1 flex w-full items-center rounded-xl px-3 py-2 text-left text-sm font-medium text-slate-700 transition hover:bg-slate-100 disabled:opacity-60 dark:text-[#e0e0e0] dark:hover:bg-white/[0.06]"
               >
                 <Database className="mr-2 h-4 w-4 text-teal-600 dark:text-teal-200" strokeWidth={1.9} />
@@ -3322,7 +3495,9 @@ export default function LiteratureLibraryView({
               ? l('移除翻译版 PDF', 'Remove Translated PDF')
               : confirmDialog?.kind === 'delete-papers'
                 ? l('批量删除文献', 'Delete Selected Papers')
-                : l('删除文献', 'Delete Paper')
+                : confirmDialog?.kind === 'exclude-rag-papers' || confirmDialog?.kind === 'exclude-rag-paper'
+                  ? l('移出本地知识库', 'Exclude from Local Knowledge Base')
+                  : l('删除文献', 'Delete Paper')
         }
         description={
           confirmDialog?.kind === 'delete-category'
@@ -3343,9 +3518,25 @@ export default function LiteratureLibraryView({
               : confirmDialog?.kind === 'remove-translated-pdf'
                 ? l(`移除“${confirmDialog.paper.title}”的翻译版 PDF（${confirmDialog.fileName}）？文献库中的副本文件会被删除，原始 PDF 不受影响。`, `Remove the translated PDF (${confirmDialog.fileName}) for "${confirmDialog.paper.title}"? The stored copy will be deleted. The original PDF is not affected.`,
                   )
-              : ''
+                : confirmDialog?.kind === 'exclude-rag-papers'
+                  ? l(
+                    `移出选中的 ${confirmDialog.paperIds.length} 篇，其中 ${confirmDialog.indexedCount} 篇已有索引。将删除这些索引；PDF、解析结果和笔记保留；之后需要重新建立索引才能再被检索。`,
+                    `Exclude the selected ${confirmDialog.paperIds.length} papers, ${confirmDialog.indexedCount} of which already have an index. Those indexes will be deleted. PDFs, parsed content, and notes stay. Index them again before they can be retrieved.`,
+                  )
+                  : confirmDialog?.kind === 'exclude-rag-paper'
+                    ? l(
+                      '将删除该文献已建立的索引；PDF、解析结果和笔记保留；之后需要重新建立索引才能再被检索。',
+                      'This deletes the paper’s existing index. The PDF, parsed content, and notes stay. It must be indexed again before it can be retrieved.',
+                    )
+                    : ''
         }
-        confirmLabel={confirmDialog?.kind === 'remove-translated-pdf' ? l('移除', 'Remove') : l('删除', 'Delete')}
+        confirmLabel={
+          confirmDialog?.kind === 'exclude-rag-papers' || confirmDialog?.kind === 'exclude-rag-paper'
+            ? l('移出', 'Exclude')
+            : confirmDialog?.kind === 'remove-translated-pdf'
+              ? l('移除', 'Remove')
+              : l('删除', 'Delete')
+        }
         cancelLabel={l('取消', 'Cancel')}
         busy={dialogBusy}
         danger
@@ -3371,6 +3562,16 @@ export default function LiteratureLibraryView({
 
           if (confirmDialog.kind === 'delete-papers') {
             void deletePapersAfterConfirm(confirmDialog.paperIds, confirmDialog.deleteFiles);
+            return;
+          }
+
+          if (confirmDialog.kind === 'exclude-rag-papers') {
+            void applyRagMembership(confirmDialog.paperIds, false);
+            return;
+          }
+
+          if (confirmDialog.kind === 'exclude-rag-paper') {
+            void applyRagMembership([confirmDialog.paper.id], false);
             return;
           }
 

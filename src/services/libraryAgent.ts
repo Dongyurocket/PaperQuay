@@ -827,6 +827,7 @@ function paperToWorkspaceItem(paper: LiteraturePaper): WorkspaceItem | null {
     source: 'native-library',
     workspaceId: `native-library:${paper.id}`,
     groupKey: `native-library:${paper.id}`,
+    ragEnabled: paper.ragEnabled,
   };
 }
 
@@ -1117,6 +1118,9 @@ async function loadPaperContext(
           ragError = ragResolution.errorMessage?.trim() || '本地 RAG 检索失败';
         } else if (ragResolution.kind === 'empty') {
           retrievalOutcome = 'empty';
+        } else if (ragResolution.kind === 'excluded') {
+          // 移出知识库不是检索失败，也不再调度后台索引；下面仍回退整篇文本。
+          retrievalOutcome = 'unavailable';
         }
       } catch (error) {
         if (options?.signal?.aborted || (error instanceof Error && error.name === 'AbortError')) throw error;

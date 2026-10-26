@@ -75,6 +75,12 @@ function buildLibraryFilter(db, request = {}) {
     }
   }
 
+  if (request.ragEnabled === true) {
+    where.push('COALESCE(p.rag_enabled, 1) != 0');
+  } else if (request.ragEnabled === false) {
+    where.push('p.rag_enabled = 0');
+  }
+
   const tagId = cleanString(request.tagId);
   if (tagId) {
     where.push('EXISTS (SELECT 1 FROM tags t WHERE t.paper_id = p.id AND t.id = ?)');

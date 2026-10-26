@@ -130,8 +130,12 @@ function filterRelevantRetrievals(
 }
 
 export interface RagIndexEnsureResult {
-  outcome: 'ready' | 'skipped' | 'failed';
+  outcome: 'ready' | 'skipped' | 'failed' | 'excluded';
   errorMessage?: string;
+}
+
+function isRagIndexExcludedMessage(message: string) {
+  return message.includes('rag_index_excluded');
 }
 
 export async function ensurePreparedSourceIndexed(input: {
@@ -292,6 +296,10 @@ export async function ensurePreparedSourceIndexed(input: {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
 
+    if (isRagIndexExcludedMessage(message)) {
+      return { outcome: 'excluded', errorMessage: message };
+    }
+
     setCachedRagIndexFailure(
       input.documentKey,
       input.sourceType,
@@ -359,6 +367,10 @@ export async function resolveLocalRag(input: {
     throw error;
   }
 
+  if (input.item.ragEnabled === false) {
+    return { kind: 'excluded' };
+  }
+
   if (!input.settings.localRagEnabled || input.settings.ragSourceMode === 'off') {
     return {
       kind: 'disabled',
@@ -401,7 +413,7 @@ export async function resolveLocalRag(input: {
           error.name = 'AbortError';
           throw error;
         }
-        await ensurePreparedSourceIndexed({
+        const ensured = await ensurePreparedSourceIndexed({
           documentKey: preparedDocument.documentKey,
           title: preparedDocument.title,
           sourceType: source.sourceType,
@@ -411,6 +423,9 @@ export async function resolveLocalRag(input: {
           batchSize: Math.max(1, input.settings.embeddingBatchSize || 24),
           signal: input.signal,
         });
+        if (ensured.outcome === 'excluded') {
+          return { kind: 'excluded' };
+        }
       }
     }
   } catch (error) {

@@ -2087,7 +2087,9 @@ function DocumentReaderTab({
             kind: 'disabled' as const,
           };
 
-    if (
+    if (currentDocument?.ragEnabled === false) {
+      ragResolution = { kind: 'excluded' };
+    } else if (
       ragEnabledForQa &&
       currentDocument &&
       embeddingApiKey.trim() &&

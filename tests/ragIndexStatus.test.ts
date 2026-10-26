@@ -179,5 +179,28 @@ test('summarizeRagIndexOverview counts parsed papers by aggregate status', () =>
     },
   });
 
-  assert.deepEqual(overview, { ready: 1, pending: 1, failed: 1, unindexed: 1 });
+  assert.deepEqual(overview, { ready: 1, pending: 1, failed: 1, unindexed: 1, excluded: 0 });
+});
+
+test('excluded papers skip indexing candidates and are counted separately', () => {
+  const items = [
+    { documentKey: 'kept', workspaceId: 'w1', title: 'A', ragEnabled: true },
+    { documentKey: 'out', workspaceId: 'w2', title: 'B', ragEnabled: false },
+  ];
+  const candidates = selectRagIndexCandidates({
+    items,
+    mineruParsedByWorkspaceId: { w1: true, w2: true },
+    statusByDocumentKey: {
+      out: [makeStatus({ documentKey: 'out', status: 'failed' })],
+    },
+  });
+  assert.deepEqual(candidates.map((item) => item.documentKey), ['kept']);
+
+  const overview = summarizeRagIndexOverview({
+    items,
+    mineruParsedByWorkspaceId: { w1: true, w2: true },
+    statusByDocumentKey: {},
+  });
+  assert.equal(overview.excluded, 1);
+  assert.equal(overview.unindexed, 1);
 });

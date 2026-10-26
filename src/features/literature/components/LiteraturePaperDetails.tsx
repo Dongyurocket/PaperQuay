@@ -43,6 +43,8 @@ import {
   type PaperTitleDisplayMode,
 } from '../titleDisplay';
 import LiteratureReadingTimeChart from './LiteratureReadingTimeChart';
+import LibraryConfirmDialog from './LibraryConfirmDialog';
+import type { LiteraturePaperRagStatus } from './LiteraturePaperList';
 
 interface LiteraturePaperDetailsProps {
   selectedPaper: LiteraturePaper | null;
@@ -57,6 +59,9 @@ interface LiteraturePaperDetailsProps {
   onAttachTranslatedPdf?: (paper: LiteraturePaper) => void;
   onRemoveTranslatedPdf?: (paper: LiteraturePaper) => void;
   onGenerateSummary?: (paper: LiteraturePaper) => void;
+  ragStatus?: LiteraturePaperRagStatus;
+  ragMembershipBusy?: boolean;
+  onSetRagMembership?: (paper: LiteraturePaper, enabled: boolean) => void;
 }
 
 interface PaperEditDraft {
@@ -524,6 +529,9 @@ export default function LiteraturePaperDetails({
   onAttachTranslatedPdf,
   onRemoveTranslatedPdf,
   onGenerateSummary,
+  ragStatus = 'none',
+  ragMembershipBusy = false,
+  onSetRagMembership,
 }: LiteraturePaperDetailsProps) {
   const l = useLocaleText();
   const locale = useAppLocale();
@@ -536,6 +544,7 @@ export default function LiteraturePaperDetails({
   const [readingHeatmap, setReadingHeatmap] = useState<PdfReadingHeatmap | null>(() =>
     latestReadingHeatmapForPaper(selectedPaper?.id),
   );
+  const [ragExcludeConfirmOpen, setRagExcludeConfirmOpen] = useState(false);
 
   useEffect(() => {
     setEditing(false);
@@ -631,7 +640,7 @@ export default function LiteraturePaperDetails({
     <aside
       ref={rootRef}
       onWheelCapture={handleWheelCapture}
-      className="pq-library-pane flex h-full min-h-0 flex-col overflow-hidden border-l"
+      className="pq-library-pane relative flex h-full min-h-0 flex-col overflow-hidden border-l"
     >
       <header className="pq-toolbar px-4 py-3">
         <div className="flex items-center justify-between gap-3">
@@ -706,6 +715,43 @@ export default function LiteraturePaperDetails({
               >
                 {l('打开阅读', 'Open Reader')}
               </ActionButton>
+
+              <section className="pq-card p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-xs font-bold uppercase tracking-[0.16em] text-slate-400 dark:text-[#8d8d8d]">
+                      {l('本地知识库', 'Local Knowledge Base')}
+                    </div>
+                    <div className="mt-1 text-[11px] leading-5 text-slate-500 dark:text-[#a0a0a0]">
+                      {selectedPaper.ragEnabled === false
+                        ? l('已排除。重新加入后需要手动建立索引。', 'Excluded. Include it again, then build the index manually.')
+                        : ragStatus === 'ready'
+                          ? l('已加入，索引可用。', 'Included. The index is ready.')
+                          : ragStatus === 'failed'
+                            ? l('已加入，索引失败。', 'Included. Indexing failed.')
+                            : ragStatus === 'pending'
+                              ? l('已加入，索引尚未完成。', 'Included. Indexing is not finished.')
+                              : l('已加入，尚未建立索引。', 'Included. Not indexed yet.')}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={!onSetRagMembership || saving || ragMembershipBusy}
+                    onClick={() => {
+                      if (selectedPaper.ragEnabled === false) {
+                        onSetRagMembership?.(selectedPaper, true);
+                        return;
+                      }
+                      setRagExcludeConfirmOpen(true);
+                    }}
+                    className="pq-button shrink-0 px-3 py-2 text-xs disabled:opacity-60"
+                  >
+                    {selectedPaper.ragEnabled === false
+                      ? l('加入', 'Include')
+                      : l('移出', 'Exclude')}
+                  </button>
+                </div>
+              </section>
 
               <section className="pq-card p-3">
                 <div className="mb-2.5 flex items-center justify-between gap-3 px-1">
@@ -1268,6 +1314,26 @@ export default function LiteraturePaperDetails({
           </div>
         )}
       </div>
+      <LibraryConfirmDialog
+        open={ragExcludeConfirmOpen && Boolean(selectedPaper)}
+        title={l('移出本地知识库', 'Exclude from Local Knowledge Base')}
+        description={l(
+          '将删除该文献已建立的索引；PDF、解析结果和笔记保留；之后需要重新建立索引才能再被检索。',
+          'This deletes the paper’s existing index. The PDF, parsed content, and notes stay. It must be indexed again before it can be retrieved.',
+        )}
+        confirmLabel={l('移出', 'Exclude')}
+        cancelLabel={l('取消', 'Cancel')}
+        busy={ragMembershipBusy}
+        danger
+        onClose={() => {
+          if (!ragMembershipBusy) setRagExcludeConfirmOpen(false);
+        }}
+        onConfirm={() => {
+          if (!selectedPaper) return;
+          setRagExcludeConfirmOpen(false);
+          onSetRagMembership?.(selectedPaper, false);
+        }}
+      />
     </aside>
   );
 }

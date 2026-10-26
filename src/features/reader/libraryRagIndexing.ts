@@ -19,7 +19,7 @@ import { prepareReaderRagDocument } from './readerRag';
  */
 
 export interface LibraryRagIndexResult {
-  outcome: 'indexed' | 'skipped' | 'failed';
+  outcome: 'indexed' | 'skipped' | 'failed' | 'excluded';
   errorMessage?: string;
 }
 
@@ -78,6 +78,10 @@ export async function indexLibraryPaperMineruSource(input: {
   force?: boolean;
   l: <T>(zh: T, en: T) => T;
 }): Promise<LibraryRagIndexResult> {
+  if (input.item.ragEnabled === false) {
+    return { outcome: 'excluded' };
+  }
+
   const embedding = resolveLibraryRagEmbeddingOptions(input.settings, input.embeddingApiKey);
 
   if (!embedding) {
@@ -124,7 +128,13 @@ export async function indexLibraryPaperMineruSource(input: {
     force: input.force,
   });
 
-  return result.outcome === 'failed'
-    ? { outcome: 'failed', errorMessage: result.errorMessage }
-    : { outcome: result.outcome === 'ready' ? 'indexed' : 'skipped' };
+  if (result.outcome === 'failed') {
+    return { outcome: 'failed', errorMessage: result.errorMessage };
+  }
+
+  if (result.outcome === 'excluded') {
+    return { outcome: 'excluded', errorMessage: result.errorMessage };
+  }
+
+  return { outcome: result.outcome === 'ready' ? 'indexed' : 'skipped' };
 }

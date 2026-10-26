@@ -1,4 +1,5 @@
 import { invoke } from '../platform/electron/core';
+import { RAG_INDEX_STATUS_UPDATED_EVENT } from './ragIndexStatus';
 import { listen } from '../platform/electron/event';
 import type {
   AddAttachmentRequest,
@@ -224,6 +225,34 @@ export async function updateLibraryPaper(
     return await invoke<LiteraturePaper>('library_update_paper', { request });
   } catch (error) {
     throw new Error(toErrorMessage(error, '更新文献信息失败'));
+  }
+}
+
+export interface LibraryRagMembershipResult {
+  papers: Array<{ paperId: string; enabled: boolean; removed: boolean }>;
+  failures: Array<{ paperId: string; error: string }>;
+}
+
+export async function setLibraryRagMembership(
+  paperIds: string[],
+  enabled: boolean,
+): Promise<LibraryRagMembershipResult> {
+  try {
+    const result = await invoke<LibraryRagMembershipResult>('library_set_rag_membership', {
+      request: { paperIds, enabled },
+    });
+
+    if (typeof window !== 'undefined') {
+      for (const paper of result.papers) {
+        window.dispatchEvent(
+          new CustomEvent(RAG_INDEX_STATUS_UPDATED_EVENT, { detail: { documentKey: paper.paperId } }),
+        );
+      }
+    }
+
+    return result;
+  } catch (error) {
+    throw new Error(toErrorMessage(error, enabled ? '加入本地知识库失败' : '移出本地知识库失败'));
   }
 }
 

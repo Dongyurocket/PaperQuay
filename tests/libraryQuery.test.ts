@@ -214,6 +214,16 @@ test('SQL query matches JS filter sets and keeps a stable page order', () => {
       store.listPaperIds({ categoryId: 'system-all', sortBy: 'manual', sortDirection: 'asc', limit: 5000 }),
       manual,
     );
+
+    store.setPapersRagEnabled(['p01'], false);
+    const excluded = library.papers.find((paper: { id: string }) => paper.id === 'p01');
+    excluded.ragEnabled = false;
+    assert.deepEqual(sqlIds(store, { ragEnabled: false }), ['p01']);
+    assert.equal(sqlIds(store, { ragEnabled: true }).includes('p01'), false);
+    assert.deepEqual(
+      sqlIds(store, { ragEnabled: false }).sort(),
+      oracleIds(library, { ragEnabled: false }).sort(),
+    );
   } finally {
     store.close();
     rmSync(appPaths.dataDir, { recursive: true, force: true });

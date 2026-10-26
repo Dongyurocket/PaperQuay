@@ -9,7 +9,7 @@ import type { RagDocumentIndexStatus } from '../types/reader';
 /** 索引状态发生变化（批量/单篇/自动索引完成）后派发的事件，供各工作区刷新角标。 */
 export const RAG_INDEX_STATUS_UPDATED_EVENT = 'paperquay:rag-index-status-updated';
 
-export type RagAggregateStatus = 'ready' | 'pending' | 'failed' | 'none';
+export type RagAggregateStatus = 'ready' | 'pending' | 'failed' | 'none' | 'excluded';
 
 /** 同一文献可能有 mineru-markdown / pdf-text 两个来源：任一失败视为失败，否则任一待建视为待建。 */
 export function aggregateRagIndexStatus(
@@ -47,6 +47,8 @@ export interface RagIndexCandidateItem {
   documentKey: string;
   workspaceId: string;
   title: string;
+  /** false 表示已移出本地知识库，不参与自动/批量索引。 */
+  ragEnabled?: boolean;
 }
 
 /**
@@ -62,6 +64,10 @@ export function selectRagIndexCandidates<
   onlyFailed?: boolean;
 }): T[] {
   return input.items.filter((item) => {
+    if (item.ragEnabled === false) {
+      return false;
+    }
+
     if (input.mineruParsedByWorkspaceId[item.workspaceId] !== true) {
       return false;
     }
@@ -81,6 +87,7 @@ export interface RagIndexOverview {
   pending: number;
   failed: number;
   unindexed: number;
+  excluded: number;
 }
 
 /** 管理面板统计：在 MinerU 已解析的文献集合上按聚合状态计数。 */
@@ -89,9 +96,14 @@ export function summarizeRagIndexOverview(input: {
   mineruParsedByWorkspaceId: Record<string, boolean | undefined>;
   statusByDocumentKey: Record<string, RagDocumentIndexStatus[]>;
 }): RagIndexOverview {
-  const overview: RagIndexOverview = { ready: 0, pending: 0, failed: 0, unindexed: 0 };
+  const overview: RagIndexOverview = { ready: 0, pending: 0, failed: 0, unindexed: 0, excluded: 0 };
 
   for (const item of input.items) {
+    if (item.ragEnabled === false) {
+      overview.excluded += 1;
+      continue;
+    }
+
     if (input.mineruParsedByWorkspaceId[item.workspaceId] !== true) {
       continue;
     }

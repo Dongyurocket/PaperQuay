@@ -415,7 +415,8 @@ export type DocumentChatQaContextState =
   | "no-sources"
   | "indexing"
   | "empty"
-  | "failed";
+  | "failed"
+  | "excluded";
 
 export interface DocumentChatQaContext {
   origin: DocumentChatQaContextOrigin;
@@ -582,6 +583,8 @@ export interface WorkspaceItem extends ZoteroLibraryItem {
   source: WorkspaceItemSource;
   workspaceId: string;
   groupKey: string;
+  /** 文献级 RAG 成员。false 表示已移出本地知识库；缺省按可能加入处理。 */
+  ragEnabled?: boolean;
 }
 
 export interface ReaderSettings {

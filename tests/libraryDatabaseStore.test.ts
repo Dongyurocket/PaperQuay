@@ -349,6 +349,7 @@ test('library SQLite store upgrades early author and tag tables with global ids'
     const library = store.load();
     const paper = library.papers.find((item: { id: string }) => item.id === 'paper-old');
     assert.ok(paper);
+    assert.equal(paper.ragEnabled, true);
     assert.equal(paper.titleZh, null);
     assert.equal(paper.authors[0].id, 'author-shared');
     assert.equal(paper.tags[0].id, 'tag-shared');
@@ -507,6 +508,68 @@ test('library SQLite store persists and reloads extended academic citation field
     assert.equal(report.itemType, 'report');
     assert.equal(report.institution, 'Safety Institute');
     assert.equal(report.reportNumber, 'NIST-AI-100-2');
+  } finally {
+    store?.close();
+    rmSync(appPaths.dataDir, { recursive: true, force: true });
+  }
+});
+
+test('rag_enabled survives savePaper and full save, and can be toggled', () => {
+  const appPaths = createAppPaths();
+  let store: ReturnType<typeof createLibraryStore> | null = null;
+
+  try {
+    store = createLibraryStore(appPaths);
+    const library = store.load();
+    library.papers.push({
+      id: 'paper-rag',
+      title: 'Indexed Paper',
+      titleZh: null,
+      year: null,
+      publication: null,
+      doi: null,
+      url: null,
+      abstractText: null,
+      keywords: [],
+      importedAt: 1,
+      updatedAt: 1,
+      lastReadAt: null,
+      readingProgress: 0,
+      isFavorite: false,
+      userNote: null,
+      aiSummary: null,
+      citation: null,
+      source: 'local',
+      sortOrder: 0,
+      authors: [],
+      tags: [],
+      categoryIds: [],
+      attachments: [],
+    });
+    store.save(library);
+
+    assert.equal(store.getPaper('paper-rag').ragEnabled, true);
+    store.setPapersRagEnabled(['paper-rag'], false);
+    assert.equal(store.getPaper('paper-rag').ragEnabled, false);
+
+    const excluded = store.getPaper('paper-rag');
+    store.savePaper({ ...excluded, title: 'Renamed Paper', ragEnabled: true });
+    const afterSavePaper = store.getPaper('paper-rag');
+    assert.equal(afterSavePaper.title, 'Renamed Paper');
+    assert.equal(afterSavePaper.ragEnabled, false);
+
+    const snapshot = store.load();
+    const memoryPaper = snapshot.papers.find((paper: { id: string }) => paper.id === 'paper-rag');
+    memoryPaper.ragEnabled = true;
+    memoryPaper.title = 'Saved Again';
+    store.save(snapshot);
+    const afterFullSave = store.getPaper('paper-rag');
+    assert.equal(afterFullSave.title, 'Saved Again');
+    assert.equal(afterFullSave.ragEnabled, false);
+
+    store.setPapersRagEnabled(['paper-rag'], true);
+    assert.equal(store.getPaper('paper-rag').ragEnabled, true);
+    assert.deepEqual(store.listRagDisabledPaperIds(), []);
   } finally {
     store?.close();
     rmSync(appPaths.dataDir, { recursive: true, force: true });

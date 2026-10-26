@@ -6,6 +6,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 const require = createRequire(import.meta.url);
+const { DatabaseSync } = require('../electron/backend/nodeSqlite.cjs');
+const sqliteVec = require('sqlite-vec');
 const { buildFtsMatchQuery, createRagStore, rrfFuse } = require('../electron/backend/ragStore.cjs');
 
 function createStore(options = {}) {
@@ -1073,6 +1075,80 @@ test('RAG worker answers chunk context from its own thread', async () => {
     assert.deepEqual(context.slices.map((slice) => slice.chunkId), ['w-0', 'w-1']);
   } finally {
     await store.close();
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('removeDocumentIndex deletes paper index rows and keeps note indexes', () => {
+  const { dataDir, store } = createStore();
+  const dbPath = path.join(dataDir, 'paperquay-rag.sqlite');
+
+  try {
+    const chunk = (chunkId: string, text: string) => ({
+      chunkId,
+      chunkIndex: 0,
+      pageIndex: 0,
+      text,
+      embedding: [0.2, 0.4, 0.6, 0.8],
+    });
+    store.indexDocument({
+      documentKey: 'paper-1',
+      title: 'Paper',
+      sourceType: 'mineru-markdown',
+      sourceSignature: 'sig-m',
+      embeddingModelKey: 'embedding-test',
+      totalChunkCount: 1,
+      chunks: [chunk('m-1', 'mineru body')],
+    });
+    store.indexDocument({
+      documentKey: 'paper-1',
+      title: 'Paper',
+      sourceType: 'pdf-text',
+      sourceSignature: 'sig-p',
+      embeddingModelKey: 'embedding-test',
+      totalChunkCount: 1,
+      chunks: [chunk('p-1', 'pdf body')],
+    });
+    store.indexDocument({
+      documentKey: 'note:keep',
+      title: 'Note',
+      sourceType: 'note',
+      sourceSignature: 'sig-n',
+      embeddingModelKey: 'embedding-test',
+      totalChunkCount: 1,
+      chunks: [chunk('n-1', 'note body')],
+    });
+
+    const first = store.removeDocumentIndex({ documentKey: 'paper-1' });
+    assert.equal(first.removed, true);
+    assert.equal(store.getDocumentIndexStatus({ documentKey: 'paper-1', sourceType: 'mineru-markdown' }), null);
+    assert.equal(store.getDocumentIndexStatus({ documentKey: 'paper-1', sourceType: 'pdf-text' }), null);
+    assert.equal(store.getDocumentIndexStatus({ documentKey: 'note:keep', sourceType: 'note' })?.status, 'ready');
+
+    const second = store.removeDocumentIndex({ documentKey: 'paper-1' });
+    assert.equal(second.removed, false);
+    store.close();
+
+    const db = new DatabaseSync(dbPath, { allowExtension: true });
+    db.enableLoadExtension(true);
+    sqliteVec.load(db);
+    db.enableLoadExtension(false);
+    try {
+      const count = (sql: string, key: string) => Number(db.prepare(sql).get(key).count);
+      assert.equal(count('SELECT COUNT(*) AS count FROM rag_chunks WHERE document_key = ?', 'paper-1'), 0);
+      assert.equal(count('SELECT COUNT(*) AS count FROM rag_indexes WHERE document_key = ?', 'paper-1'), 0);
+      assert.equal(count('SELECT COUNT(*) AS count FROM rag_document_vectors WHERE document_key = ?', 'paper-1'), 0);
+      assert.equal(count('SELECT COUNT(*) AS count FROM rag_chunks WHERE document_key = ?', 'note:keep'), 1);
+      const dimensions = db.prepare('SELECT dimension FROM rag_vec_dimensions').all() as Array<{ dimension: number }>;
+      assert.ok(dimensions.length > 0);
+      for (const { dimension } of dimensions) {
+        const row = db.prepare(`SELECT COUNT(*) AS count FROM rag_vec_${Number(dimension)}`).get() as { count: number };
+        assert.equal(Number(row.count), 1);
+      }
+    } finally {
+      db.close();
+    }
+  } finally {
     rmSync(dataDir, { recursive: true, force: true });
   }
 });

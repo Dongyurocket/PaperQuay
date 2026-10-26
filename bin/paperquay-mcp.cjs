@@ -56,7 +56,7 @@ const TOOLS = [
   {
     name: 'search_papers',
     description:
-      'Search papers in the PaperQuay literature library by title, Chinese title, authors, publication, DOI, tags, or keywords.',
+      'Search papers in the PaperQuay literature library by title, Chinese title, authors, publication, DOI, tags, or keywords. Each paper includes ragEnabled: false means the paper is excluded from the local RAG index.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -83,7 +83,7 @@ const TOOLS = [
   {
     name: 'get_paper_details',
     description:
-      'Get complete bibliographic metadata, abstract, notes, citations, and attachments for a specific paper by its paperId. attachments include id, kind, storedPath, relativePath, fileName, fileSize, and missing. kind "translated-pdf" is the single translated PDF attached for side-by-side reading; kind "pdf" is the original file.',
+      'Get complete bibliographic metadata, abstract, notes, citations, and attachments for a specific paper by its paperId. Includes ragEnabled (false means excluded from the local RAG index). attachments include id, kind, storedPath, relativePath, fileName, fileSize, and missing. kind "translated-pdf" is the single translated PDF attached for side-by-side reading; kind "pdf" is the original file.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -98,7 +98,7 @@ const TOOLS = [
   {
     name: 'search_knowledge_base',
     description:
-      'Hybrid semantic + full-text search across the PaperQuay RAG knowledge base. When an embedding API is configured in PaperQuay reader settings, the query is vectorized and fused with FTS5 keyword results via reciprocal rank fusion; otherwise it falls back to keyword-only search. Returns grounded text snippets with paper title, page number, block ID, relevance score, and the retrieval channels that matched each snippet.',
+      'Hybrid semantic + full-text search across the PaperQuay RAG knowledge base. Papers excluded from the local RAG index do not appear. When an embedding API is configured in PaperQuay reader settings, the query is vectorized and fused with FTS5 keyword results via reciprocal rank fusion; otherwise it falls back to keyword-only search. Returns grounded text snippets with paper title, page number, block ID, relevance score, and the retrieval channels that matched each snippet.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -129,7 +129,7 @@ const TOOLS = [
   {
     name: 'read_paper_content',
     description:
-      'Read structured content chunks from a paper in the knowledge base, optionally filtered by page index.',
+      'Read structured content chunks from a paper in the knowledge base, optionally filtered by page index. Papers excluded from the local RAG index return no chunks.',
     inputSchema: {
       type: 'object',
       properties: {

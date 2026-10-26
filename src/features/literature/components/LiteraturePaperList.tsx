@@ -48,7 +48,9 @@ export interface LiteraturePaperListStatus {
 }
 
 /** 本地 RAG 索引聚合状态（与 src/services/ragIndexStatus.ts 的 RagAggregateStatus 对齐）。 */
-export type LiteraturePaperRagStatus = 'ready' | 'pending' | 'failed' | 'none';
+export type LiteraturePaperRagStatus = 'ready' | 'pending' | 'failed' | 'none' | 'excluded';
+
+export type LiteratureRagMembershipFilter = 'all' | 'included' | 'excluded';
 
 export type LiteraturePaperListSortBy = NonNullable<ListPapersRequest['sortBy']>;
 export type LiteraturePaperListSortDirection = NonNullable<ListPapersRequest['sortDirection']>;
@@ -103,6 +105,8 @@ interface LiteraturePaperListProps {
   ragIndexingDocumentKey?: string;
   /** 本地 RAG 可用（启用且 embedding 配置完整）时才展示角标。 */
   ragIndexAvailable?: boolean;
+  ragMembershipFilter?: LiteratureRagMembershipFilter;
+  onRagMembershipFilterChange?: (value: LiteratureRagMembershipFilter) => void;
 }
 
 export default function LiteraturePaperList({
@@ -140,6 +144,8 @@ export default function LiteraturePaperList({
   ragBadgeByDocumentKey,
   ragIndexingDocumentKey = '',
   ragIndexAvailable = false,
+  ragMembershipFilter = 'all',
+  onRagMembershipFilterChange,
 }: LiteraturePaperListProps) {
   const l = useLocaleText();
   const locale = useAppLocale();
@@ -540,6 +546,19 @@ export default function LiteraturePaperList({
           </select>
 
           <select
+            value={ragMembershipFilter}
+            onChange={(event) => {
+              onRagMembershipFilterChange?.(event.target.value as LiteratureRagMembershipFilter);
+            }}
+            className="pq-input h-9 w-[132px] px-3 text-sm"
+            title={l('本地知识库', 'Local knowledge base')}
+          >
+            <option value="all">{l('知识库：全部', 'Library: All')}</option>
+            <option value="included">{l('知识库：已加入', 'Library: Included')}</option>
+            <option value="excluded">{l('知识库：已排除', 'Library: Excluded')}</option>
+          </select>
+
+          <select
             value={titleDisplayMode}
             onChange={(event) => {
               const nextMode = event.target.value as PaperTitleDisplayMode;
@@ -621,6 +640,13 @@ export default function LiteraturePaperList({
               const mineruParsed = status?.mineruParsed ?? false;
               const overviewGenerated =
                 status?.overviewGenerated ?? Boolean(paper.aiSummary?.trim());
+              const indexingRag = ragIndexingDocumentKey === paper.id;
+              const storedRagStatus = ragBadgeByDocumentKey?.[paper.id];
+              const ragStatus: LiteraturePaperRagStatus = paper.ragEnabled === false
+                ? 'excluded'
+                : storedRagStatus === 'excluded'
+                  ? 'none'
+                  : storedRagStatus ?? 'none';
 
               return (
                 <div key={paper.id} className="pq-paper-row relative">
@@ -754,33 +780,39 @@ export default function LiteraturePaperList({
                               ? l('MinerU 已解析', 'MinerU Parsed')
                               : l('MinerU 未解析', 'MinerU Not Parsed')}
                         </span>
-                        {ragIndexAvailable ? (
+                        {ragIndexAvailable || ragStatus === 'excluded' ? (
                           <span
                             title={
-                              ragIndexingDocumentKey === paper.id
+                              indexingRag
                                 ? l('正在建立 RAG 索引', 'Building RAG index')
-                                : ragBadgeByDocumentKey?.[paper.id] === 'failed'
+                                : ragStatus === 'failed'
                                   ? l('RAG 索引失败，可在设置中重建', 'RAG indexing failed; rebuild it in settings')
-                                  : undefined
+                                  : ragStatus === 'excluded'
+                                    ? l('该文献已移出本地知识库', 'This paper is excluded from the local knowledge base')
+                                    : undefined
                             }
                             className={clsx(
                               'rounded-full border px-2 py-0.5 text-[10px] font-semibold',
-                              ragIndexingDocumentKey === paper.id
+                              indexingRag && ragStatus !== 'excluded'
                                 ? 'border-indigo-300/55 bg-indigo-50 text-indigo-700 dark:border-indigo-300/20 dark:bg-indigo-300/10 dark:text-indigo-100'
-                                : ragBadgeByDocumentKey?.[paper.id] === 'ready'
+                                : ragStatus === 'ready'
                                   ? 'border-teal-300/55 bg-teal-50 text-teal-700 dark:border-teal-300/20 dark:bg-teal-300/10 dark:text-teal-100'
-                                  : ragBadgeByDocumentKey?.[paper.id] === 'failed'
+                                  : ragStatus === 'failed'
                                     ? 'border-rose-300/55 bg-rose-50 text-rose-700 dark:border-rose-300/20 dark:bg-rose-300/10 dark:text-rose-100'
                                     : 'border-slate-300 bg-slate-100 text-slate-500 dark:border-white/10 dark:bg-white/[0.06] dark:text-[#a0a0a0]',
                             )}
                           >
-                            {ragIndexingDocumentKey === paper.id
+                            {indexingRag && ragStatus !== 'excluded'
                               ? l('RAG 索引中', 'RAG Indexing')
-                              : ragBadgeByDocumentKey?.[paper.id] === 'ready'
-                                ? l('RAG 已索引', 'RAG Indexed')
-                                : ragBadgeByDocumentKey?.[paper.id] === 'failed'
-                                  ? l('RAG 索引失败', 'RAG Index Failed')
-                                  : l('RAG 未索引', 'RAG Not Indexed')}
+                              : ragStatus === 'excluded'
+                                ? l('已排除', 'Excluded')
+                                : ragStatus === 'ready'
+                                  ? l('RAG 已索引', 'RAG Indexed')
+                                  : ragStatus === 'failed'
+                                    ? l('RAG 索引失败', 'RAG Index Failed')
+                                    : ragStatus === 'pending'
+                                      ? l('RAG 待索引', 'RAG Pending')
+                                      : l('RAG 未索引', 'RAG Not Indexed')}
                           </span>
                         ) : null}
                         <span

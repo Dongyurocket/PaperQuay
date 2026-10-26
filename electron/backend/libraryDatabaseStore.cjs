@@ -195,6 +195,7 @@ function createSchema(db) {
   ensureColumn(db, 'papers', 'pages', 'TEXT');
   ensureColumn(db, 'papers', 'isbn', 'TEXT');
   ensureColumn(db, 'papers', 'issn', 'TEXT');
+  ensureColumn(db, 'papers', 'rag_enabled', 'INTEGER NOT NULL DEFAULT 1');
 }
 
 function ensureColumn(db, tableName, columnName, columnDefinition) {
@@ -302,13 +303,15 @@ const PAPER_SELECT_COLUMNS = `
   ai_summary AS aiSummary,
   citation,
   source,
-  sort_order AS sortOrder
+  sort_order AS sortOrder,
+  rag_enabled AS ragEnabled
 `;
 
 function mapPaperRows(paperRows, { keywordRows, authorRows, tagRows, categoryRows, attachmentRows }) {
   return paperRows.map((paper) => ({
     ...paper,
     isFavorite: Boolean(paper.isFavorite),
+    ragEnabled: paper.ragEnabled !== 0 && paper.ragEnabled !== false,
     keywords: (keywordRows.get(paper.id) ?? []).map((row) => row.keyword),
     authors: (authorRows.get(paper.id) ?? []).map(({ paper_id: _paperId, ...author }) => author),
     tags: (tagRows.get(paper.id) ?? []).map(({ paper_id: _paperId, ...tag }) => tag),
@@ -701,6 +704,47 @@ function saveReferenceRows(db, paperId, refs) {
   return normalizedRefs;
 }
 
+function loadRagEnabledCache(db) {
+  return db.prepare('SELECT id, rag_enabled AS ragEnabled FROM papers').all();
+}
+
+function restoreRagEnabledRows(db, rows, paperIds) {
+  if (!Array.isArray(rows) || rows.length === 0) return;
+
+  const update = db.prepare('UPDATE papers SET rag_enabled = ? WHERE id = ?');
+  for (const row of rows) {
+    const paperId = cleanString(row.id);
+    if (!paperId || !paperIds.has(paperId)) continue;
+    const enabled = row.ragEnabled !== 0 && row.ragEnabled !== false;
+    update.run(enabled ? 1 : 0, paperId);
+  }
+}
+
+function setPapersRagEnabled(db, paperIds, enabled) {
+  const ids = [];
+  const seen = new Set();
+  for (const raw of paperIds ?? []) {
+    const id = cleanString(raw);
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    ids.push(id);
+  }
+
+  const value = enabled ? 1 : 0;
+  withTransaction(db, () => {
+    const update = db.prepare('UPDATE papers SET rag_enabled = ? WHERE id = ?');
+    for (const id of ids) update.run(value, id);
+  });
+  return ids.length;
+}
+
+function listRagDisabledPaperIds(db) {
+  return db
+    .prepare('SELECT id FROM papers WHERE rag_enabled = 0 ORDER BY id')
+    .all()
+    .map((row) => row.id);
+}
+
 function restoreReferenceRows(db, refs, paperIds) {
   if (!Array.isArray(refs) || refs.length === 0) {
     return;
@@ -914,6 +958,7 @@ function saveLibraryToDb(db, appPaths, normalizeLibrary, library) {
 
   withTransaction(db, () => {
     const referenceCache = loadReferenceRows(db);
+    const ragEnabledCache = loadRagEnabledCache(db);
     clearData(db);
     saveKeyValueTable(db, 'library_settings', normalized.settings);
     saveKeyValueTable(db, 'webdav_settings', normalized.webdav);
@@ -956,11 +1001,9 @@ function saveLibraryToDb(db, appPaths, normalizeLibrary, library) {
       writers.insertRelations(paper);
     }
 
-    restoreReferenceRows(
-      db,
-      referenceCache,
-      new Set(normalized.papers.map((paper) => paper.id)),
-    );
+    const survivingPaperIds = new Set(normalized.papers.map((paper) => paper.id));
+    restoreReferenceRows(db, referenceCache, survivingPaperIds);
+    restoreRagEnabledRows(db, ragEnabledCache, survivingPaperIds);
   });
 
   return normalized;
@@ -1040,6 +1083,14 @@ function createLibraryDatabaseStore(appPaths, helpers) {
 
     savePaper(paper) {
       return savePaperToDb(db, paper);
+    },
+
+    setPapersRagEnabled(paperIds, enabled) {
+      return setPapersRagEnabled(db, paperIds, enabled);
+    },
+
+    listRagDisabledPaperIds() {
+      return listRagDisabledPaperIds(db);
     },
 
     deletePaper(paperId) {

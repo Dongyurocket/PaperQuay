@@ -2174,6 +2174,30 @@ function createRagStore(appPaths, options = {}) {
         rebuildDocumentVectors(db, `note:${id}`);
       });
     },
+    removeDocumentIndex({ documentKey }) {
+      const key = cleanString(documentKey);
+      if (!key) return { removed: false };
+
+      return withTransaction(db, () => {
+        const indexCount = Number(
+          db.prepare(
+            `SELECT COUNT(*) AS count FROM rag_indexes
+             WHERE document_key = ? AND source_type != 'note'`,
+          ).get(key)?.count,
+        ) || 0;
+        const chunkCount = Number(
+          db.prepare(
+            `SELECT COUNT(*) AS count FROM rag_chunks
+             WHERE document_key = ? AND source_type != 'note'`,
+          ).get(key)?.count,
+        ) || 0;
+
+        deleteDocumentSourceData(db, key, 'mineru-markdown');
+        deleteDocumentSourceData(db, key, 'pdf-text');
+        rebuildDocumentVectors(db, key);
+        return { removed: indexCount > 0 || chunkCount > 0 };
+      });
+    },
     snapshotTo(targetPath) {
       fs.mkdirSync(path.dirname(targetPath), { recursive: true });
       fs.rmSync(targetPath, { force: true });

@@ -1007,6 +1007,7 @@ export function createNativeLibraryWorkspaceItem(
     source: 'native-library',
     workspaceId,
     groupKey: workspaceId,
+    ragEnabled: paper.ragEnabled,
   };
 }
 

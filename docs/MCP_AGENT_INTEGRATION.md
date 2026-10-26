@@ -21,10 +21,10 @@ PaperQuay 提供了基于标准 **Model Context Protocol (MCP)** 的知识库服
 ### 知识库只读检索工具
 | 工具名称 | 说明 | 核心参数 | 返回内容 |
 | :--- | :--- | :--- | :--- |
-| `search_papers` | 检索文献库元数据 | `query`（关键词）、`tag`（标签）、`categoryId`（分类过滤，含后代分类）、`limit` | 匹配文献列表（ID、中英文标题、作者、年份、DOI、标签） |
-| `get_paper_details` | 读取单篇文献完整详情 | `paperId`（必填） | 完整元数据、摘要、用户笔记、AI 概览、分类 ID，以及 `attachments`。`kind: "pdf"` 是原版，`kind: "translated-pdf"` 是唯一一份翻译版 PDF（含 `storedPath`、`relativePath`） |
-| `search_knowledge_base` | 向量 + 全文混合检索 RAG 知识库证据 | `query`（必填）、`paperId`（可选）、`limit`、`mode`（`auto`/`hybrid`/`keyword`） | 带文献标题、页码、段落预览、匹配分数与命中通道（`vector`/`fts`）的证据切片 |
-| `read_paper_content` | 读取文献在知识库中的分块正文 | `paperId`（必填）、`pageIndex`（可选）、`limit` | 按页面或顺序排列的结构化正文内容 |
+| `search_papers` | 检索文献库元数据 | `query`（关键词）、`tag`（标签）、`categoryId`（分类过滤，含后代分类）、`limit` | 匹配文献列表（ID、中英文标题、作者、年份、DOI、标签、`ragEnabled`） |
+| `get_paper_details` | 读取单篇文献完整详情 | `paperId`（必填） | 完整元数据、摘要、用户笔记、AI 概览、分类 ID、`ragEnabled`，以及 `attachments`。`kind: "pdf"` 是原版，`kind: "translated-pdf"` 是唯一一份翻译版 PDF（含 `storedPath`、`relativePath`） |
+| `search_knowledge_base` | 向量 + 全文混合检索 RAG 知识库证据 | `query`（必填）、`paperId`（可选）、`limit`、`mode`（`auto`/`hybrid`/`keyword`） | 带文献标题、页码、段落预览、匹配分数与命中通道（`vector`/`fts`）的证据切片。已移出本地知识库的文献不会出现 |
+| `read_paper_content` | 读取文献在知识库中的分块正文 | `paperId`（必填）、`pageIndex`（可选）、`limit` | 按页面或顺序排列的结构化正文内容。已移出本地知识库的文献返回空 |
 | `search_notes` | 混合检索用户的阅读笔记与批注摘录 | `query`（可选）、`paperId`（可选）、`pageKind`（可选）、`limit`、`mode`（`auto`/`hybrid`/`keyword`） | 笔记内容与 `retrievalMode`、每条 `channels`、降级 `warning` |
 | `list_note_tags` | 列出笔记标签及使用次数 | `paperId`（可选，只看某篇文献的笔记） | 标签列表（`tag`、`count`），供写入前发现现有标签 |
 | `list_note_folders` | 读取笔记分类（文件夹）树 | 无 | 分类列表（`id`、`name`、`parentId`、`sortOrder`） |

@@ -14,6 +14,12 @@ const { createPaddleOcrCommands } = require('./backend/paddleOcrCommands.cjs');
 const { createReviewCommands } = require('./backend/reviewCommands.cjs');
 const { createUpdateCommands } = require('./backend/updateCommands.cjs');
 const { perfMark, perfMeasure } = require('./perfTrace.cjs');
+const {
+  createPaperRagLock,
+  guardRagIndexCommands,
+  scheduleExcludedRagIndexReconciliation,
+  setLibraryRagMembership,
+} = require('./backend/ragMembership.cjs');
 
 function toErrorMessage(error) {
   return error instanceof Error ? error.message : String(error);
@@ -51,6 +57,7 @@ function createUnavailableRagStore(error) {
     listAgentRunUsageBySession: fail,
     snapshotTo: fail,
     replaceWithSnapshot: fail,
+    removeDocumentIndex: fail,
   };
 }
 
@@ -135,6 +142,7 @@ function createBackend({ app }) {
   const fileCommands = createFileCommands(context);
   context.fileCommands = fileCommands;
 
+  const paperRagLock = createPaperRagLock();
   const commands = {
     ...fileCommands,
     ...createMineruCacheCommands(context),
@@ -148,6 +156,20 @@ function createBackend({ app }) {
     ...createUpdateCommands(context),
     ...createMcpClientConfigCommands(context),
   };
+  guardRagIndexCommands(commands, {
+    store,
+    withPaperRagLock: paperRagLock.withPaperRagLock,
+  });
+  commands.library_set_rag_membership = (args) => setLibraryRagMembership({
+    store,
+    ragStore,
+    withPaperRagLock: paperRagLock.withPaperRagLock,
+  }, args);
+  scheduleExcludedRagIndexReconciliation({
+    store,
+    ragStore,
+    withPaperRagLock: paperRagLock.withPaperRagLock,
+  });
 
   return {
     appPaths,

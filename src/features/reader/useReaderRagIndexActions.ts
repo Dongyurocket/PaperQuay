@@ -122,6 +122,7 @@ export function useReaderRagIndexActions({
           documentKey: item.itemKey,
           workspaceId: item.workspaceId,
           title: item.title,
+          ragEnabled: item.ragEnabled,
           item,
         })),
     [allKnownItems],
@@ -130,8 +131,10 @@ export function useReaderRagIndexActions({
   const ragBadgeByDocumentKey = useMemo(() => {
     const badges: Record<string, RagAggregateStatus> = {};
 
-    for (const { documentKey } of indexableItems) {
-      badges[documentKey] = aggregateRagIndexStatus(ragStatusByDocumentKey[documentKey]);
+    for (const entry of indexableItems) {
+      badges[entry.documentKey] = entry.ragEnabled === false
+        ? 'excluded'
+        : aggregateRagIndexStatus(ragStatusByDocumentKey[entry.documentKey]);
     }
 
     return badges;
@@ -261,7 +264,7 @@ export function useReaderRagIndexActions({
             if (result.outcome === 'failed') {
               progress.failed += 1;
               firstFailureMessage ||= result.errorMessage ?? '';
-            } else if (result.outcome === 'skipped') {
+            } else if (result.outcome === 'skipped' || result.outcome === 'excluded') {
               progress.skipped += 1;
             } else {
               progress.succeeded += 1;
@@ -342,6 +345,13 @@ export function useReaderRagIndexActions({
             l(
               `《${entry.title}》索引失败：${result.errorMessage ?? '未知错误'}`,
               `Failed to index "${entry.title}": ${result.errorMessage ?? 'unknown error'}`,
+            ),
+          );
+        } else if (result.outcome === 'excluded') {
+          setStatusMessage(
+            l(
+              `《${entry.title}》已移出本地知识库，请先加入后再建立索引。`,
+              `"${entry.title}" is excluded from the local knowledge base. Include it before indexing.`,
             ),
           );
         } else if (result.outcome === 'skipped') {

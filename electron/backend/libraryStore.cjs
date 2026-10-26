@@ -197,6 +197,9 @@ function paperMatches(paper, request, library) {
     }
   }
 
+  if (request?.ragEnabled === true && paper.ragEnabled === false) return false;
+  if (request?.ragEnabled === false && paper.ragEnabled !== false) return false;
+
   if (request?.tagId && !paper.tags.some((tag) => tag.id === request.tagId)) return false;
 
   const search = typeof request?.search === 'string' ? request.search.trim().toLowerCase() : '';

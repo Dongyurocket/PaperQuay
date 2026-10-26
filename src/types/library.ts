@@ -101,6 +101,8 @@ export interface LiteraturePaper {
   tags: LiteratureTag[];
   categoryIds: string[];
   attachments: LiteratureAttachment[];
+  /** 为 false 时不参与本地 RAG 索引。缺省视为加入。 */
+  ragEnabled: boolean;
 }
 
 export interface PaperReference {
@@ -158,6 +160,8 @@ export interface ListPapersRequest {
   sortDirection?: 'asc' | 'desc';
   limit?: number;
   offset?: number;
+  /** true 只看已加入，false 只看已排除，null/缺省为全部。 */
+  ragEnabled?: boolean | null;
 }
 
 /** SQL 分页查询结果（P2-1）：total 为当前筛选的完整匹配数，不受 offset/limit 限制。 */

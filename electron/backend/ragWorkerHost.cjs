@@ -23,6 +23,7 @@ const RAG_WORKER_METHODS = [
   'retrieveDocumentChunks',
   'retrieveNoteVectors',
   'removeNoteIndex',
+  'removeDocumentIndex',
   'snapshotTo',
   'stepVectorBackfill',
   'vectorBackfillStatus',

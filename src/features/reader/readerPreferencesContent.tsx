@@ -1663,8 +1663,8 @@ export function ReaderPreferencesContent({
                     {ragIndexOverview ? (
                       <div className="text-[11px] leading-5 text-slate-400">
                         {l(
-                          `已索引 ${ragIndexOverview.ready} · 待索引 ${ragIndexOverview.pending + ragIndexOverview.unindexed} · 失败 ${ragIndexOverview.failed}`,
-                          `Indexed ${ragIndexOverview.ready} · Pending ${ragIndexOverview.pending + ragIndexOverview.unindexed} · Failed ${ragIndexOverview.failed}`,
+                          `已索引 ${ragIndexOverview.ready} · 待索引 ${ragIndexOverview.pending + ragIndexOverview.unindexed} · 失败 ${ragIndexOverview.failed} · 已排除 ${ragIndexOverview.excluded}`,
+                          `Indexed ${ragIndexOverview.ready} · Pending ${ragIndexOverview.pending + ragIndexOverview.unindexed} · Failed ${ragIndexOverview.failed} · Excluded ${ragIndexOverview.excluded}`,
                         )}
                       </div>
                     ) : null}
