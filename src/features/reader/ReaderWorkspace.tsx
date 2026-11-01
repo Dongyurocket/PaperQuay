@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import type { PointerEvent as ReactPointerEvent } from 'react';
 import { Minimize2 } from 'lucide-react';
 import BlockViewer from '../blocks/BlockViewer';
 import PdfViewer from '../pdf/PdfViewer';
@@ -96,7 +97,9 @@ interface ReaderWorkspaceProps {
   hidePageDecorationsInBlockView: boolean;
   leftPaneWidthRatio: number;
   layoutRef: RefObject<HTMLDivElement>;
-  onStartResize: () => void;
+  /** 拖拽调整 PDF / 翻译分栏宽度中：关闭分栏过渡 */
+  resizingSplit?: boolean;
+  onStartResize: (event: ReactPointerEvent<HTMLDivElement>) => void;
   onResetLayout: () => void;
   onPdfBlockHover: (block: PositionedMineruBlock | null) => void;
   onPdfBlockSelect: (block: PositionedMineruBlock, context?: PdfBlockSelectContext) => void;
@@ -197,6 +200,7 @@ function ReadingStage(props: ReaderWorkspaceProps & { immersiveReading: boolean 
     hidePageDecorationsInBlockView,
     leftPaneWidthRatio,
     layoutRef,
+    resizingSplit = false,
     pdfSource,
     pdfData,
     pdfScrollPosition,
@@ -444,7 +448,9 @@ function ReadingStage(props: ReaderWorkspaceProps & { immersiveReading: boolean 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <div ref={layoutRef} className="flex min-h-0 flex-1">
           <section
-            className="min-h-0 min-w-0 bg-[#eef3f9] transition-all duration-300"
+            className={`min-h-0 min-w-0 bg-[#eef3f9] ${
+              resizingSplit ? 'transition-none' : 'transition-all duration-300'
+            }`}
             style={{
               width: showDualPane ? `calc(${(leftPaneWidthRatio * 100).toFixed(2)}% - 4px)` : '100%',
             }}
@@ -497,17 +503,19 @@ function ReadingStage(props: ReaderWorkspaceProps & { immersiveReading: boolean 
                 aria-orientation="vertical"
                 aria-label={l('调整阅读分栏', 'Resize reading split')}
                 onDoubleClick={onResetLayout}
-                onPointerDown={(event) => {
-                  event.preventDefault();
-                  onStartResize();
-                }}
+                onPointerDown={onStartResize}
                 className="group relative z-20 w-2 shrink-0 cursor-col-resize bg-transparent transition-all duration-200"
               >
                 <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-slate-300/80 transition-all duration-200 group-hover:w-[3px] group-hover:bg-indigo-300" />
                 <div className="absolute left-1/2 top-1/2 h-14 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-slate-300 transition-all duration-200 group-hover:w-1.5 group-hover:bg-indigo-400" />
               </div>
 
-              <section data-tour="block-translation" className="min-h-0 min-w-0 flex-1 bg-[#f7f9fc] transition-all duration-300">
+              <section
+                data-tour="block-translation"
+                className={`min-h-0 min-w-0 flex-1 bg-[#f7f9fc] ${
+                  resizingSplit ? 'transition-none' : 'transition-all duration-300'
+                }`}
+              >
                 {pdfCompareMode ? (
                   <TranslatedPdfPane
                     translatedPdfPath={translatedPdfPath}

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useLocaleText } from '../../i18n/uiLanguage';
 import { ChatWorkspacePanel, type ChatWorkspacePanelProps } from './assistantSidebarChat';
+import { usePointerDragResize } from './usePointerDragResize';
 
 function clampFloatingPosition(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
@@ -32,54 +33,8 @@ export function FloatingAssistantPanel({
 }: FloatingAssistantPanelProps) {
   const l = useLocaleText();
   const panelRef = useRef<HTMLDivElement | null>(null);
-  const dragRef = useRef<{
-    startX: number;
-    startY: number;
-    panelX: number;
-    panelY: number;
-  } | null>(null);
+  const startPanelDrag = usePointerDragResize();
   const [panelPosition, setPanelPosition] = useState(getInitialFloatingAssistantPosition);
-  const [dragging, setDragging] = useState(false);
-
-  useEffect(() => {
-    if (!dragging) {
-      return undefined;
-    }
-
-    const handlePointerMove = (event: PointerEvent) => {
-      const dragState = dragRef.current;
-
-      if (!dragState) {
-        return;
-      }
-
-      const panelRect = panelRef.current?.getBoundingClientRect();
-      const panelWidth = panelRect?.width ?? 960;
-      const panelHeight = panelRect?.height ?? 720;
-      const nextX = dragState.panelX + event.clientX - dragState.startX;
-      const nextY = dragState.panelY + event.clientY - dragState.startY;
-      const maxX = Math.max(12, window.innerWidth - panelWidth - 12);
-      const maxY = Math.max(12, window.innerHeight - panelHeight - 12);
-
-      setPanelPosition({
-        x: clampFloatingPosition(nextX, 12, maxX),
-        y: clampFloatingPosition(nextY, 12, maxY),
-      });
-    };
-
-    const handlePointerUp = () => {
-      dragRef.current = null;
-      setDragging(false);
-    };
-
-    window.addEventListener('pointermove', handlePointerMove);
-    window.addEventListener('pointerup', handlePointerUp);
-
-    return () => {
-      window.removeEventListener('pointermove', handlePointerMove);
-      window.removeEventListener('pointerup', handlePointerUp);
-    };
-  }, [dragging]);
 
   useEffect(() => {
     const handleResize = () => {
@@ -120,13 +75,28 @@ export function FloatingAssistantPanel({
           }
 
           const panelRect = panelRef.current?.getBoundingClientRect();
-          dragRef.current = {
-            startX: event.clientX,
-            startY: event.clientY,
-            panelX: panelRect?.left ?? panelPosition.x,
-            panelY: panelRect?.top ?? panelPosition.y,
-          };
-          setDragging(true);
+          const startX = event.clientX;
+          const startY = event.clientY;
+          const startPanelX = panelRect?.left ?? panelPosition.x;
+          const startPanelY = panelRect?.top ?? panelPosition.y;
+
+          startPanelDrag(event, {
+            cursor: 'move',
+            onMove: (moveEvent) => {
+              const currentRect = panelRef.current?.getBoundingClientRect();
+              const currentWidth = currentRect?.width ?? 960;
+              const currentHeight = currentRect?.height ?? 720;
+              const nextX = startPanelX + moveEvent.clientX - startX;
+              const nextY = startPanelY + moveEvent.clientY - startY;
+              const maxX = Math.max(12, window.innerWidth - currentWidth - 12);
+              const maxY = Math.max(12, window.innerHeight - currentHeight - 12);
+
+              setPanelPosition({
+                x: clampFloatingPosition(nextX, 12, maxX),
+                y: clampFloatingPosition(nextY, 12, maxY),
+              });
+            },
+          });
         }}
       >
         <div className="min-w-0">

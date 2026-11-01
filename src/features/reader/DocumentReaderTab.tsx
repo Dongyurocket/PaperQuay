@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { PointerEvent as ReactPointerEvent } from 'react';
 import ReaderWorkspace from './ReaderWorkspace';
 import { getDocumentParseTask, subscribeDocumentParseTasks } from '../../services/documentParseTasks';
 import { shouldShowParseTask, toPaperParseTaskState } from './documentParseTaskState';
@@ -172,6 +173,7 @@ import {
 import type { LocalRagResolution } from './readerQaContext';
 import { buildQaContext, formatQaContextStatus } from './readerQaContext';
 import { useDocumentTranslation } from './useDocumentTranslation';
+import { usePointerDragResize } from './usePointerDragResize';
 import {
   buildPendingNoteAnchorInsert,
   buildNoteAnchorJumpDetail,
@@ -445,7 +447,9 @@ function DocumentReaderTab({
   const [pdfHighlightSignal, setPdfHighlightSignal] = useState(0);
   const [blockScrollSignal, setBlockScrollSignal] = useState(0);
   const [leftPaneWidthRatio, setLeftPaneWidthRatio] = useState(loadPaneRatio);
+  const latestPaneWidthRatioRef = useRef(leftPaneWidthRatio);
   const [isDraggingSplitter, setIsDraggingSplitter] = useState(false);
+  const startSplitResize = usePointerDragResize();
   const [workspaceStage, setWorkspaceStage] = useState<WorkspaceStage>('reading');
   const [readingViewMode, setReadingViewMode] = useState<ReaderViewMode>('dual-pane');
   const [loading, setLoading] = useState(false);
@@ -1251,10 +1255,17 @@ function DocumentReaderTab({
     setStatusMessage(lRef.current('已清除当前选中块', 'Cleared the current block selection'));
   }, []);
 
-  const resetLayout = useCallback(() => {
-    setLeftPaneWidthRatio(0.5);
-    setStatusMessage(lRef.current('已重置为默认布局', 'Restored the default layout'));
+  const persistPaneWidthRatio = useCallback((ratio: number) => {
+    latestPaneWidthRatioRef.current = ratio;
+    setLeftPaneWidthRatio(ratio);
+    // 只在比例确定时写一次，避免拖动过程中每帧同步写 localStorage。
+    localStorage.setItem(PANE_RATIO_STORAGE_KEY, String(ratio));
   }, []);
+
+  const resetLayout = useCallback(() => {
+    persistPaneWidthRatio(0.5);
+    setStatusMessage(lRef.current('已重置为默认布局', 'Restored the default layout'));
+  }, [persistPaneWidthRatio]);
 
   const restorePdfScrollPositionsForSource = useCallback(
     (workspaceId: string, source: Exclude<PdfSource, null>, fallback: string) => {
@@ -3995,10 +4006,6 @@ function DocumentReaderTab({
     };
   }, [currentDocument.workspaceId, isActive]);
 
-  useEffect(() => {
-    localStorage.setItem(PANE_RATIO_STORAGE_KEY, String(leftPaneWidthRatio));
-  }, [leftPaneWidthRatio]);
-
   const assistantSidebarProps = useMemo(
     () =>
       buildReaderAssistantSidebarProps({
@@ -4246,41 +4253,30 @@ function DocumentReaderTab({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [clearSelection, handleClearSelectedExcerpt, isActive]);
 
-  useEffect(() => {
-    if (!isDraggingSplitter) {
-      return undefined;
-    }
+  const handleSplitResizeStart = (event: ReactPointerEvent<HTMLDivElement>) => {
+    startSplitResize(event, {
+      onStart: () => setIsDraggingSplitter(true),
+      onMove: (moveEvent) => {
+        const layoutRect = layoutRef.current?.getBoundingClientRect();
 
-    const handlePointerMove = (event: PointerEvent) => {
-      const layoutRect = layoutRef.current?.getBoundingClientRect();
+        if (!layoutRect || layoutRect.width <= 0) {
+          return;
+        }
 
-      if (!layoutRect || layoutRect.width <= 0) {
-        return;
-      }
+        const nextRatio = clampPaneRatio(
+          (moveEvent.clientX - layoutRect.left) / layoutRect.width,
+        );
 
-      setLeftPaneWidthRatio(clampPaneRatio((event.clientX - layoutRect.left) / layoutRect.width));
-    };
-
-    const handlePointerUp = () => {
-      setIsDraggingSplitter(false);
-    };
-
-    const previousUserSelect = globalThis.document.body.style.userSelect;
-    const previousCursor = globalThis.document.body.style.cursor;
-
-    globalThis.document.body.style.userSelect = 'none';
-    globalThis.document.body.style.cursor = 'col-resize';
-
-    window.addEventListener('pointermove', handlePointerMove);
-    window.addEventListener('pointerup', handlePointerUp);
-
-    return () => {
-      globalThis.document.body.style.userSelect = previousUserSelect;
-      globalThis.document.body.style.cursor = previousCursor;
-      window.removeEventListener('pointermove', handlePointerMove);
-      window.removeEventListener('pointerup', handlePointerUp);
-    };
-  }, [isDraggingSplitter]);
+        latestPaneWidthRatioRef.current = nextRatio;
+        setLeftPaneWidthRatio(nextRatio);
+      },
+      onEnd: () => {
+        setIsDraggingSplitter(false);
+        // 拖拽结束才落盘，拖动过程中不再逐帧写 localStorage。
+        localStorage.setItem(PANE_RATIO_STORAGE_KEY, String(latestPaneWidthRatioRef.current));
+      },
+    });
+  };
 
   const handleBridgeTranslate = useCallback(() => {
     void handleTranslateDocument();
@@ -4397,7 +4393,8 @@ function DocumentReaderTab({
         hidePageDecorationsInBlockView={settings.hidePageDecorationsInBlockView}
         leftPaneWidthRatio={leftPaneWidthRatio}
         layoutRef={layoutRef}
-        onStartResize={() => setIsDraggingSplitter(true)}
+        resizingSplit={isDraggingSplitter}
+        onStartResize={handleSplitResizeStart}
         onResetLayout={resetLayout}
         onPdfBlockHover={handlePdfBlockHover}
         onPdfBlockSelect={handlePdfBlockSelect}

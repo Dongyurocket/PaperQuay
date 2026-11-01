@@ -109,6 +109,8 @@ export interface AssistantSidebarCoreProps {
 
 export interface AssistantSidebarChromeProps {
   panelWidth?: number;
+  /** 拖拽调整宽度中：关闭宽度过渡，避免宽度滞后于鼠标 */
+  resizing?: boolean;
   chatLayoutMode?: 'compact' | 'workspace';
   onDetach?: () => void;
   onAttachBack?: () => void;
@@ -120,6 +122,7 @@ function AssistantSidebar({
   activePanel,
   onActivePanelChange,
   panelWidth = 408,
+  resizing = false,
   documentTitle,
   documentMeta,
   documentSource,
@@ -227,7 +230,8 @@ function AssistantSidebar({
     <div className="pq-saas-scope pq-reader-assistant paperquay-assistant flex h-full min-h-0 overflow-hidden">
       <div
         className={cn(
-          'pq-reader-pane overflow-hidden border-l transition-[width] duration-300 ease-in-out',
+          'pq-reader-pane overflow-hidden border-l',
+          resizing ? 'transition-none' : 'transition-[width] duration-300 ease-in-out',
           !activePanel && 'border-transparent',
         )}
         style={{ width: activePanel ? panelWidth : 0 }}

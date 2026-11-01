@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import type { PointerEvent as ReactPointerEvent } from 'react';
 import { getCurrentWindow } from '../../platform/electron/window';
 
 import {
@@ -47,6 +48,7 @@ import type {
 import DocumentReaderTab from './DocumentReaderTab';
 import { chooseMountedReaderTabIds } from './readerResourceBudget';
 import { AssistantSidebar } from './AssistantSidebar';
+import { usePointerDragResize } from './usePointerDragResize';
 import LiteratureLibraryView from '../literature/LiteratureLibraryView';
 import {
   emitLibraryMetadataEnrichRequest,
@@ -188,6 +190,8 @@ function Reader({ workspaceActive = true }: ReaderProps) {
     loadStoredNumber(ASSISTANT_PANEL_WIDTH_STORAGE_KEY, 408),
   );
   const [readerAssistantPanelResizing, setReaderAssistantPanelResizing] = useState(false);
+  const latestAssistantPanelWidthRef = useRef(readerAssistantPanelWidth);
+  const startAssistantPanelResize = usePointerDragResize();
   const [readerQaSessions, setReaderQaSessions] = useState<DocumentChatSession[]>(() => [
     createQaSession(settings.uiLanguage),
   ]);
@@ -388,59 +392,40 @@ function Reader({ workspaceActive = true }: ReaderProps) {
     activeAssistantSidebarProps && !readerAssistantDetached,
   );
 
-  useEffect(() => {
-    localStorage.setItem(
-      ASSISTANT_PANEL_WIDTH_STORAGE_KEY,
-      String(Math.round(readerAssistantPanelWidth)),
-    );
-  }, [readerAssistantPanelWidth]);
+  const handleAssistantPanelResizeStart = (event: ReactPointerEvent<HTMLDivElement>) => {
+    startAssistantPanelResize(event, {
+      onStart: () => setReaderAssistantPanelResizing(true),
+      onMove: (moveEvent) => {
+        const mainRect = readerMainRef.current?.getBoundingClientRect();
 
-  useEffect(() => {
-    if (!readerAssistantPanelResizing) {
-      return undefined;
-    }
+        if (!mainRect) {
+          return;
+        }
 
-    const handlePointerMove = (event: PointerEvent) => {
-      const mainRect = readerMainRef.current?.getBoundingClientRect();
+        const boundedMaxWidth = Math.min(
+          MAX_ASSISTANT_PANEL_WIDTH,
+          Math.max(MIN_ASSISTANT_PANEL_WIDTH, mainRect.width - 120),
+        );
+        const nextWidth = Math.round(
+          Math.min(
+            boundedMaxWidth,
+            Math.max(MIN_ASSISTANT_PANEL_WIDTH, mainRect.right - moveEvent.clientX),
+          ),
+        );
 
-      if (!mainRect) {
-        return;
-      }
-
-      const boundedMaxWidth = Math.min(
-        MAX_ASSISTANT_PANEL_WIDTH,
-        Math.max(MIN_ASSISTANT_PANEL_WIDTH, mainRect.width - 120),
-      );
-      const nextWidth = Math.round(
-        Math.min(
-          boundedMaxWidth,
-          Math.max(MIN_ASSISTANT_PANEL_WIDTH, mainRect.right - event.clientX),
-        ),
-      );
-
-      setReaderAssistantPanelWidth(nextWidth);
-    };
-
-    const handlePointerUp = () => {
-      setReaderAssistantPanelResizing(false);
-    };
-
-    const previousUserSelect = globalThis.document.body.style.userSelect;
-    const previousCursor = globalThis.document.body.style.cursor;
-
-    globalThis.document.body.style.userSelect = 'none';
-    globalThis.document.body.style.cursor = 'col-resize';
-
-    window.addEventListener('pointermove', handlePointerMove);
-    window.addEventListener('pointerup', handlePointerUp);
-
-    return () => {
-      globalThis.document.body.style.userSelect = previousUserSelect;
-      globalThis.document.body.style.cursor = previousCursor;
-      window.removeEventListener('pointermove', handlePointerMove);
-      window.removeEventListener('pointerup', handlePointerUp);
-    };
-  }, [readerAssistantPanelResizing]);
+        latestAssistantPanelWidthRef.current = nextWidth;
+        setReaderAssistantPanelWidth(nextWidth);
+      },
+      onEnd: () => {
+        setReaderAssistantPanelResizing(false);
+        // 只在拖拽结束时写一次，避免拖动过程中每帧同步写 localStorage。
+        localStorage.setItem(
+          ASSISTANT_PANEL_WIDTH_STORAGE_KEY,
+          String(Math.round(latestAssistantPanelWidthRef.current)),
+        );
+      },
+    });
+  };
 
   const {
     findExistingMineruJson,
@@ -1161,10 +1146,7 @@ function Reader({ workspaceActive = true }: ReaderProps) {
                     role="separator"
                     aria-orientation="vertical"
                     aria-label={l('调整问答侧栏宽度', 'Resize assistant sidebar')}
-                    onPointerDown={(event) => {
-                      event.preventDefault();
-                      setReaderAssistantPanelResizing(true);
-                    }}
+                    onPointerDown={handleAssistantPanelResizeStart}
                     className="group relative z-20 ml-auto w-2 shrink-0 cursor-col-resize bg-transparent transition-all duration-200"
                   >
                     <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-slate-300/90 transition-all duration-200 group-hover:w-[3px] group-hover:bg-slate-400" />
@@ -1172,10 +1154,15 @@ function Reader({ workspaceActive = true }: ReaderProps) {
                   </div>
                 ) : null}
 
-                <aside className="flex min-h-0 shrink-0 self-stretch transition-all duration-300">
+                <aside
+                  className={`flex min-h-0 shrink-0 self-stretch ${
+                    readerAssistantPanelResizing ? 'transition-none' : 'transition-all duration-300'
+                  }`}
+                >
                   <AssistantSidebar
                     {...activeAssistantSidebarProps}
                     panelWidth={readerAssistantPanelWidth}
+                    resizing={readerAssistantPanelResizing}
                     chatLayoutMode="compact"
                     onDetach={activeReaderBridge?.onDetachAssistant}
                   />

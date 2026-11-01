@@ -1647,3 +1647,13 @@ textarea,
     animation: none;
   }
 }
+
+/* 分隔条拖拽期间的全局兜底：防止 iframe 吞掉指针事件、避免误选中文本。
+   类名由 src/features/reader/usePointerDragResize.ts 增删。 */
+body.pq-resizing {
+  user-select: none;
+}
+
+body.pq-resizing iframe {
+  pointer-events: none;
+}
