@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.4.15-2563eb?style=flat-square" alt="Version v0.4.15">
+  <img src="https://img.shields.io/badge/version-v0.4.16-2563eb?style=flat-square" alt="Version v0.4.16">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-4b5563?style=flat-square" alt="Windows macOS Linux">
   <img src="https://img.shields.io/badge/built%20with-Electron-47848f?style=flat-square" alt="Electron">
   <img src="https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-0f766e?style=flat-square" alt="React TypeScript">
@@ -55,6 +55,12 @@
 ---
 
 ## 近期更新
+
+### v0.4.16 - 阅读界面拖拽松手后不再跟随鼠标
+
+- **侧栏宽度能固定了**：问答侧栏的 HTML 回答在 `iframe` 内，之前在其上松开鼠标时父窗口收不到 `pointerup`，侧栏会一直跟随鼠标。分隔条改用 Pointer Capture，并以指针取消、捕获丢失、窗口失焦、左键已松开四路兜底结束；拖动期间关闭宽度过渡，松手即停。PDF / 翻译分栏与浮动问答面板同样修复。
+- **尺寸只在松手后写盘**：侧栏宽度与分栏比例不再在拖动中每帧写 `localStorage`。
+- **下载**：最新安装包见 [v0.4.16 Release](https://github.com/Dongyurocket/PaperQuay/releases/tag/app-v0.4.16)。
 
 ### v0.4.15 - hybrid 重建会补齐中断的 pdf-text 索引
 

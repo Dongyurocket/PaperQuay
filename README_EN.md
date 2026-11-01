@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.4.15-2563eb?style=flat-square" alt="Version v0.4.15">
+  <img src="https://img.shields.io/badge/version-v0.4.16-2563eb?style=flat-square" alt="Version v0.4.16">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-4b5563?style=flat-square" alt="Windows macOS Linux">
   <img src="https://img.shields.io/badge/built%20with-Electron-47848f?style=flat-square" alt="Electron">
   <img src="https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-0f766e?style=flat-square" alt="React TypeScript">
@@ -54,6 +54,12 @@
 ---
 
 ## Latest Update
+
+### v0.4.16 - Reader panels stop following the mouse after you release
+
+- **The sidebar width sticks now**: HTML answers in the assistant sidebar render in an `iframe`, and releasing the drag over one never reached the parent window, so the panel kept following the mouse. Separators now use Pointer Capture and also end on pointer cancel, lost pointer capture, window blur, or a move with no button held; width transitions are off while dragging, so it stops where you release it. The PDF/translation split and the floating chat panel are fixed the same way.
+- **Sizes are saved once on release**: sidebar width and split ratio no longer write `localStorage` on every mouse move.
+- **Download**: latest installers on the [v0.4.16 release](https://github.com/Dongyurocket/PaperQuay/releases/tag/app-v0.4.16).
 
 ### v0.4.15 - Hybrid rebuilds finish an interrupted pdf-text index
 

@@ -1,12 +1,14 @@
 # PaperQuay v{{VERSION}}
 
-Manual and batch RAG rebuilds now finish an interrupted pdf-text index.
+Resizing the reader panels no longer keeps following the mouse after you release it.
 
-- In hybrid mode, a paper stayed on "RAG pending" when MinerU was already indexed and a pdf-text index had stopped mid-batch.
-- Library rebuild only rewrote the MinerU source, so the badge did not change.
-- Forced rebuilds now read the PDF text layer and resume the missing pdf-text chunks. Automatic indexing after parsing still writes MinerU only.
+- Releasing the drag over an HTML answer (rendered in an `iframe`) never reached the parent window, so the assistant sidebar stayed in resize mode and its width kept tracking the pointer.
+- Separators now capture the pointer, so `pointerup` always arrives even over an `iframe`, outside the window, or after Alt+Tab. The drag also ends on pointer cancel, lost pointer capture, window blur, or a move with no button held.
+- Width transitions are disabled while dragging, so the panel stops exactly where you release it instead of sliding for another 300 ms.
+- The PDF/translation split and the floating chat panel use the same mechanism.
+- Assistant sidebar width and PDF split ratio are now saved once on release instead of on every mouse move.
 
-Validation: the local library was checked; one paper had a ready MinerU index and a pending pdf-text index at 48/178. The full test suite was not re-run before tagging, and desktop installers were not hand-regressed. Installers are built by the `app-v{{VERSION}}` release workflow.
+Validation: typecheck and the production build pass; all 865 tests pass, including 4 new separator-drag cases. Desktop installers were not hand-regressed before tagging. Installers are built by the `app-v{{VERSION}}` release workflow.
 
 ## Downloads
 
@@ -16,13 +18,15 @@ Choose the matching system and architecture from Assets: Windows `.exe`, macOS `
 
 # PaperQuay v{{VERSION}} 中文说明
 
-手动和批量重建 RAG 索引时，会把中断的 pdf-text 索引补完。
+阅读界面拖动分隔条后，松手即停，宽度不再继续跟随鼠标。
 
-- hybrid 模式下，MinerU 已经索引完成，但 pdf-text 停在半成品时，文献卡会一直显示「RAG 待索引」。
-- 文献库重建以前只重写 MinerU，角标不会变化。
-- 现在手动和批量重建会读取 PDF 文本层，并补上缺失的 pdf-text 分块。解析后的自动索引仍只写 MinerU。
+- 问答侧栏的 HTML 回答渲染在 `iframe` 内，之前在其上松开鼠标时父窗口收不到 `pointerup`，侧栏会一直停留在拖拽状态，宽度继续跟随指针。
+- 分隔条现在使用 Pointer Capture，即使鼠标在 `iframe` 上松开、移出窗口后松开或 Alt+Tab 打断，`pointerup` 也必定送达；同时以指针取消、捕获丢失、窗口失焦、左键已松开四路兜底结束。
+- 拖动期间关闭宽度过渡，松手后不再额外滑动 300ms。
+- PDF / 翻译分栏与浮动问答面板使用同一套实现，一并修复。
+- 侧栏宽度与 PDF 分栏比例改为松手后写一次，不再拖动过程中每帧写 `localStorage`。
 
-验证：已核对本机文献库，一篇文献的 MinerU 为 ready、pdf-text 停在 pending 48/178。打标签前没有重跑完整测试，也没有做干净安装版手工回归。安装包由 `app-v{{VERSION}}` Release 工作流构建。
+验证：类型检查与生产构建通过；全部 865 项测试通过，含 4 项新增的分隔条拖拽用例。打标签前没有在干净安装版上完成桌面手工回归。安装包由 `app-v{{VERSION}}` Release 工作流构建。
 
 ## 下载
 
