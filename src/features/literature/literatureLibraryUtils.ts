@@ -28,11 +28,6 @@ export interface LiteratureLibraryDemoState {
   paperStatuses?: Record<string, LiteraturePaperListStatus>;
 }
 
-export interface FloatingMenuPosition {
-  x: number;
-  y: number;
-}
-
 export type PathExists = (path: string) => Promise<boolean>;
 
 export const DETAILS_PANEL_WIDTH_STORAGE_KEY = 'paperquay-literature-details-width-v1';
@@ -88,20 +83,6 @@ export function resolveSelectedPaperId(
   return currentPaperId && papers.some((paper) => paper.id === currentPaperId)
     ? currentPaperId
     : papers[0]?.id ?? null;
-}
-
-export function clampFloatingMenuPosition(
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-): FloatingMenuPosition {
-  if (typeof window === 'undefined') return { x, y };
-
-  return {
-    x: Math.max(8, Math.min(x, window.innerWidth - width - 8)),
-    y: Math.max(8, Math.min(y, window.innerHeight - height - 8)),
-  };
 }
 
 export function clampDetailsPanelWidth(width: number): number {

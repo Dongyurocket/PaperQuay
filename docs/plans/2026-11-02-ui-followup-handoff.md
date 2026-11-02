@@ -126,7 +126,7 @@ src/features/reader/ReaderPreferencesWindow.tsx
 
 **做法**：以 `components/ContextMenu.tsx` 为基础扩展（它已有位置钳制与分隔符支持），把笔记侧的特有项（块操作、锚点）作为 entries 传入；统一后迁到 `src/ui/menu.tsx` 并与 `docs/ui-design-system.md` 的组件表对齐。
 
-**验收**：不要用 `grep clampPosition` 当唯一标准。那个命令只证明「有人写了这个函数名」，不做钳制的实现搜不到，分类侧栏因此漏过上一轮审计。也不要只用 `contextMenu.(x|y)|position: 'fixed'`：调用点把坐标传给 `Menu` 也会命中，而 `paperContextMenu` 和 Tailwind `fixed` 又会漏掉。
+**验收**：不要用 `grep clampPosition` 当通过条件。这个命令只证明「有人写了这个函数名」。不做钳制的实现搜不到，分类侧栏因此漏过上一轮审计。文献行以前用的是另一个函数名 `clampFloatingMenuPosition`，同样会被漏掉。也不要只用 `contextMenu.(x|y)|position: 'fixed'`：调用点把坐标传给 `Menu` 也会命中，而 `paperContextMenu` 和 Tailwind `fixed` 又会漏掉。
 
 本轮采用两条，合起来才覆盖自建菜单定位：
 
@@ -140,6 +140,8 @@ git grep -n -E "Math\.min\(contextMenu\.(x|y)" -- "src/*.tsx" "src/**/*.tsx"
 **完成情况（2026-11-02）**：两套复制品实现合并为 `src/ui/menu.tsx` 的 `Menu` / `MenuItem` / `MenuEntry`，`x`/`y`/`title`/`entries`/`onClose`/`width` 语义与分隔符、危险/强调色、贴边钳制、点外部关闭全部保持不变；`isEditableContextTarget` / `hasActiveTextSelection` 抽到 `features/notes/noteContextMenuTargets.ts`。与原计划的差异：**没有同时改 7 个调用点**，而是把 `components/ContextMenu.tsx` 与 `features/notes/NotesContextMenu.tsx` 改成薄 re-export（含类型与两个辅助函数），调用点 import 零改动；下一步可改为直接 import 新模块后删除两个 shim。同一提交删除了 T4 遗留的死代码 `LibrarySettingsDialog`（全仓零引用，13 个设置字段已在 `readerPreferencesContent` 中）。实机验证：标签栏与笔记块菜单在浅色/深色下各截一张，打开、危险项红色、禁用态、点外部关闭均通过；笔记块长菜单实测到向上钳制。**当时未覆盖**：文库分类右键仍是侧栏内的独立实现。详见 `docs/changes/2026-11-02-ui-menu-merge.md`。
 
 **完成情况（2026-11-02 收尾）**：`LiteratureCategorySidebar` 的右键改为 `Menu` / `MenuEntry`（文案、顺序、图标、system 不显示「新建子分类」、展开/折叠动态文案均保持）。可见变化只有 acrylic 面板换成菜单面板、硬编码深色值换成令牌、贴边改由 `clampPosition` 负责（删掉 `openContextMenu` 里 12px/232/168 的手写钳制）。删除零引用的 `PdfAnnotationWorkspace.tsx`。`npm run build` 通过，`npm test` 869/869。审计输出见 `docs/changes/2026-11-02-ui-category-menu.md`。分类菜单不再是自建定位；文献行右键（`paperContextMenu` + `clampFloatingMenuPosition`）和图谱节点菜单仍是自建实现，不在本轮范围。
+
+**完成情况（2026-11-02 文献行）**：文献行右键改为 `Menu` / `MenuEntry`。菜单标题用 `Menu` 的 `title`（文献标题）。动作项是 6 个，不是 8 个：收藏、自定义标签、解析元数据、本地知识库加入或移出、条件出现的 RAG 索引、删除文献记录。翻译版 PDF 的附加和移除在文献详情里，不在这个右键菜单。文案、顺序、图标、disabled 和「删除文献记录」的 `tone: 'danger'` 保持原样。「移出本地知识库」原来不是红色，迁移后也不是。删掉只服务这一处的 `clampFloatingMenuPosition`，坐标原样交给 `clampPosition`。图谱节点菜单仍不迁移，理由写在 `docs/ui-design-system.md` 的「浮层与菜单清单」。`npm run build` 通过，`npm test` 869/869。文献库 SHA256 前后都是 `24E68F64…`。审计输出与实机结果见 `docs/changes/2026-11-02-ui-paper-row-menu.md`。
 
 ### T6　把翻译与 RAG 长任务接入 `TaskCenter`（中风险）
 

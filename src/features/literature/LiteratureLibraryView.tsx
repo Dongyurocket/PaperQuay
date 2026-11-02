@@ -110,7 +110,6 @@ import { useDesktopPdfDrop } from './useDesktopPdfDrop';
 import {
   categorySignature,
   clampDetailsPanelWidth,
-  clampFloatingMenuPosition,
   DETAILS_PANEL_DEFAULT_WIDTH,
   DETAILS_PANEL_WIDTH_STORAGE_KEY,
   CATEGORY_SIDEBAR_DEFAULT_WIDTH,
@@ -133,6 +132,7 @@ import {
   type LiteratureLibraryDemoState,
 } from './literatureLibraryUtils';
 import { confirmAction } from '../../ui/confirmHost';
+import { Menu, type MenuEntry } from '../../ui/menu';
 import { toast } from '../../ui/toast';
 
 interface LiteratureLibraryViewProps {
@@ -2597,11 +2597,10 @@ export default function LiteratureLibraryView({
     event.preventDefault();
     event.stopPropagation();
     setSelectedPaperId(paper.id);
-    const position = clampFloatingMenuPosition(event.clientX, event.clientY, 240, 220);
     setPaperContextMenu({
       paper,
-      x: position.x,
-      y: position.y,
+      x: event.clientX,
+      y: event.clientY,
     });
   };
 
@@ -2892,6 +2891,93 @@ export default function LiteratureLibraryView({
     }
 
     await assignPaperToCategory(paperId, category);
+  };
+
+  const paperContextMenuEntries = (): MenuEntry[] => {
+    if (!paperContextMenu) {
+      return [];
+    }
+
+    const paper = paperContextMenu.paper;
+    const entries: MenuEntry[] = [
+      {
+        id: 'toggle-favorite',
+        label: paper.isFavorite
+          ? l('取消收藏', 'Remove from Favorites')
+          : l('加入收藏', 'Add to Favorites'),
+        disabled: paperSaving,
+        icon: (
+          <Star
+            className="h-4 w-4 text-[var(--pq-warning)]"
+            fill={paper.isFavorite ? 'currentColor' : 'none'}
+            strokeWidth={1.9}
+          />
+        ),
+        onSelect: () => {
+          void handleToggleFavoriteFromContextMenu();
+        },
+      },
+      {
+        id: 'add-tag',
+        label: l('添加自定义标签', 'Add Custom Tag'),
+        icon: <Tag className="h-4 w-4 text-[var(--pq-info)]" strokeWidth={1.9} />,
+        onSelect: handleOpenTagDialogFromContextMenu,
+      },
+      {
+        id: 'parse-metadata',
+        label: l('解析元数据', 'Parse Metadata'),
+        icon: <Sparkles className="h-4 w-4 text-[var(--pq-accent)]" strokeWidth={1.9} />,
+        onSelect: () => {
+          void handleOpenMetadataDialogFromContextMenu();
+        },
+      },
+      {
+        id: 'rag-membership',
+        label: paper.ragEnabled === false
+          ? l('加入本地知识库', 'Include in Local Knowledge Base')
+          : l('移出本地知识库', 'Exclude from Local Knowledge Base'),
+        disabled: paperSaving || batchWorking,
+        icon: (
+          <Database
+            className="h-4 w-4 text-[var(--pq-text-muted)] dark:text-[var(--pq-text-faint)]"
+            strokeWidth={1.9}
+          />
+        ),
+        onSelect: () => {
+          setPaperContextMenu(null);
+          if (paper.ragEnabled === false) {
+            void applyRagMembership([paper.id], true);
+            return;
+          }
+          setConfirmDialog({ kind: 'exclude-rag-paper', paper });
+        },
+      },
+    ];
+
+    if (ragIndexAvailable && onIndexPaperRag) {
+      entries.push({
+        id: 'rag-index',
+        label: ragIndexingDocumentKey === paper.id
+          ? l('RAG 索引中…', 'Indexing…')
+          : l('建立/重建 RAG 索引', 'Build/Rebuild RAG Index'),
+        disabled: ragIndexingDocumentKey === paper.id || paper.ragEnabled === false,
+        icon: <Database className="h-4 w-4 text-[var(--pq-accent)]" strokeWidth={1.9} />,
+        onSelect: handleIndexPaperRagFromContextMenu,
+      });
+    }
+
+    entries.push(
+      { type: 'separator', id: 'delete-paper-separator' },
+      {
+        id: 'delete-paper',
+        label: l('删除文献记录', 'Delete Paper Record'),
+        tone: 'danger',
+        icon: <Trash2 className="h-4 w-4" strokeWidth={1.9} />,
+        onSelect: handleDeletePaperFromContextMenu,
+      },
+    );
+
+    return entries;
   };
 
   return (
@@ -3229,104 +3315,14 @@ export default function LiteratureLibraryView({
         </div>
       ) : null}
 
-      {paperContextMenu ? createPortal(
-        <div
-          className="fixed inset-0 z-[10000]"
-          onClick={() => setPaperContextMenu(null)}
-          onContextMenu={(event) => {
-            event.preventDefault();
-            setPaperContextMenu(null);
-          }}
-        >
-          <div
-            className="pq-acrylic fixed w-60 p-1.5"
-            style={{
-              left: paperContextMenu.x,
-              top: paperContextMenu.y,
-            }}
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="border-b border-[var(--pq-border)] px-3 py-2 text-xs text-[var(--pq-text-muted)] dark:border-white/10 dark:text-[#a0a0a0]">
-              {paperContextMenu.paper.title}
-            </div>
-            <button
-              type="button"
-              onClick={() => void handleToggleFavoriteFromContextMenu()}
-              disabled={paperSaving}
-              className="mt-1 flex w-full items-center rounded-xl px-3 py-2 text-left text-sm font-medium text-[var(--pq-text-muted)] transition hover:bg-[var(--pq-surface-2)] disabled:opacity-60 dark:text-[#e0e0e0] dark:hover:bg-white/[0.06]"
-            >
-              <Star
-                className="mr-2 h-4 w-4 text-[var(--pq-warning)]"
-                fill={paperContextMenu.paper.isFavorite ? 'currentColor' : 'none'}
-                strokeWidth={1.9}
-              />
-              {paperContextMenu.paper.isFavorite
-                ? l('取消收藏', 'Remove from Favorites')
-                : l('加入收藏', 'Add to Favorites')}
-            </button>
-            <button
-              type="button"
-              onClick={handleOpenTagDialogFromContextMenu}
-              className="mt-1 flex w-full items-center rounded-xl px-3 py-2 text-left text-sm font-medium text-[var(--pq-text-muted)] transition hover:bg-[var(--pq-surface-2)] dark:text-[#e0e0e0] dark:hover:bg-white/[0.06]"
-            >
-              <Tag className="mr-2 h-4 w-4 text-[var(--pq-info)] " strokeWidth={1.9} />
-              {l('添加自定义标签', 'Add Custom Tag')}
-            </button>
-            <button
-              type="button"
-              onClick={() => void handleOpenMetadataDialogFromContextMenu()}
-              className="mt-1 flex w-full items-center rounded-xl px-3 py-2 text-left text-sm font-medium text-[var(--pq-text-muted)] transition hover:bg-[var(--pq-surface-2)] dark:text-[#e0e0e0] dark:hover:bg-white/[0.06]"
-            >
-              <Sparkles className="mr-2 h-4 w-4 text-[var(--pq-accent)] dark:text-violet-200" strokeWidth={1.9} />
-              {l('解析元数据', 'Parse Metadata')}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                const paper = paperContextMenu.paper;
-                setPaperContextMenu(null);
-                if (paper.ragEnabled === false) {
-                  void applyRagMembership([paper.id], true);
-                  return;
-                }
-                setConfirmDialog({ kind: 'exclude-rag-paper', paper });
-              }}
-              disabled={paperSaving || batchWorking}
-              className="mt-1 flex w-full items-center rounded-xl px-3 py-2 text-left text-sm font-medium text-[var(--pq-text-muted)] transition hover:bg-[var(--pq-surface-2)] disabled:opacity-60 dark:text-[#e0e0e0] dark:hover:bg-white/[0.06]"
-            >
-              <Database className="mr-2 h-4 w-4 text-[var(--pq-text-muted)] dark:text-[var(--pq-text-faint)]" strokeWidth={1.9} />
-              {paperContextMenu.paper.ragEnabled === false
-                ? l('加入本地知识库', 'Include in Local Knowledge Base')
-                : l('移出本地知识库', 'Exclude from Local Knowledge Base')}
-            </button>
-            {ragIndexAvailable && onIndexPaperRag ? (
-              <button
-                type="button"
-                onClick={handleIndexPaperRagFromContextMenu}
-                disabled={
-                  ragIndexingDocumentKey === paperContextMenu.paper.id
-                  || paperContextMenu.paper.ragEnabled === false
-                }
-                className="mt-1 flex w-full items-center rounded-xl px-3 py-2 text-left text-sm font-medium text-[var(--pq-text-muted)] transition hover:bg-[var(--pq-surface-2)] disabled:opacity-60 dark:text-[#e0e0e0] dark:hover:bg-white/[0.06]"
-              >
-                <Database className="mr-2 h-4 w-4 text-[var(--pq-accent)] " strokeWidth={1.9} />
-                {ragIndexingDocumentKey === paperContextMenu.paper.id
-                  ? l('RAG 索引中…', 'Indexing…')
-                  : l('建立/重建 RAG 索引', 'Build/Rebuild RAG Index')}
-              </button>
-            ) : null}
-            <div className="my-1 border-t border-[var(--pq-border)] dark:border-white/10" />
-            <button
-              type="button"
-              onClick={handleDeletePaperFromContextMenu}
-              className="flex w-full items-center rounded-xl px-3 py-2 text-left text-sm font-medium text-[var(--pq-danger)] transition hover:bg-[var(--pq-danger-bg)] "
-            >
-              <Trash2 className="mr-2 h-4 w-4" strokeWidth={1.9} />
-              {l('删除文献记录', 'Delete Paper Record')}
-            </button>
-          </div>
-        </div>,
-        document.body,
+      {paperContextMenu ? (
+        <Menu
+          x={paperContextMenu.x}
+          y={paperContextMenu.y}
+          title={paperContextMenu.paper.title}
+          entries={paperContextMenuEntries()}
+          onClose={() => setPaperContextMenu(null)}
+        />
       ) : null}
 
       {metadataDialog ? createPortal(

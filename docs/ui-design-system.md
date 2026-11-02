@@ -98,6 +98,19 @@
 | `src/ui/taskCenter.tsx` | 长任务全局进度条 |
 | `src/ui/commandPalette.tsx` + `commands.ts` | 命令面板与快捷键注册表 |
 
+### 浮层与菜单清单
+
+右键菜单、模态、命令面板只使用下表里的实现。之后新增菜单或浮层必须复用这些实现。确需例外时，先把坐标空间和理由写进本表，再写代码。
+
+| 种类 | 实现 | 说明 |
+| --- | --- | --- |
+| 右键菜单 | `src/ui/menu.tsx` 的 `Menu` | 唯一菜单实现。贴边用 `clampPosition`，坐标是视口坐标，边距 8px。过渡期 `src/components/ContextMenu.tsx` 与 `src/features/notes/NotesContextMenu.tsx` 只 re-export，不另写定位。 |
+| 模态 | `src/ui/dialog.tsx` 的 `Dialog` / `ConfirmDialog` | Portal、焦点陷阱、Esc、滚动锁。 |
+| 命令面板 | `src/ui/commandPalette.tsx` | 与 `src/ui/commands.ts` 的快捷键注册表一起用。 |
+| 图谱节点菜单 | `src/features/graph/KnowledgeGraphWorkspace.tsx`（约 1789 行） | 已登记例外，本轮不改实现。菜单在画布容器内 `absolute` 定位，坐标属于容器，并按容器宽高钳制。`Menu` 走 Portal 和视口坐标，两套坐标空间不同。迁到 `Menu` 会跟画布平移、缩放错位。 |
+
+阅读器工具栏溢出、笔记表格网格、模型选择是锚点弹出层，不是右键菜单，不要改成 `Menu`，也不要当成漏迁的菜单。
+
 ## 三、字号与间距
 
 - 正文 13–14px；标题 15–16px；元信息/徽标 **不小于 11px**（曾有 50 处 `text-[10px]`，已统一提升）。
