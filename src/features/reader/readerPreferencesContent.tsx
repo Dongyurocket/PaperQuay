@@ -390,31 +390,44 @@ export function ReaderPreferencesContent({
               checked={settings.notesVaultAutoSyncEnabled}
               onChange={(checked) => onSettingChange('notesVaultAutoSyncEnabled', checked)}
             />
-            <div className="mt-3 flex items-center gap-2">
-              <SettingsInput
-                type="number"
-                min={15}
-                max={60}
-                step={5}
-                value={settings.notesVaultAutoSyncIntervalMinutes}
-                onChange={(event) =>
-                  onSettingChange('notesVaultAutoSyncIntervalMinutes', Number(event.target.value))
-                }
-                className="w-24"
-              />
-              <span className="text-xs text-slate-500">{l('分钟', 'minutes')}</span>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              <label className="block">
+                <span className="mb-1.5 block text-xs font-medium text-[var(--pq-text-muted)]">
+                  {l('同步间隔', 'Sync interval')}
+                </span>
+                <span className="flex items-center rounded-xl border border-slate-200 bg-slate-50 px-3 focus-within:border-indigo-300 dark:border-white/10 dark:bg-[var(--pq-surface-2)]">
+                  <input
+                    type="number"
+                    min={15}
+                    max={60}
+                    step={5}
+                    value={settings.notesVaultAutoSyncIntervalMinutes}
+                    onChange={(event) =>
+                      onSettingChange('notesVaultAutoSyncIntervalMinutes', Number(event.target.value))
+                    }
+                    className="min-w-0 flex-1 appearance-none bg-transparent py-2.5 text-sm text-slate-900 outline-none [&::-webkit-inner-spin-button]:hidden [&::-webkit-outer-spin-button]:hidden dark:text-[var(--pq-text)]"
+                  />
+                  <span className="shrink-0 pl-1 text-xs text-slate-500 dark:text-[var(--pq-text-muted)]">
+                    {l('分钟', 'min')}
+                  </span>
+                </span>
+              </label>
+              <label className="block">
+                <span className="mb-1.5 block text-xs font-medium text-[var(--pq-text-muted)]">
+                  {l('引用格式', 'Citation style')}
+                </span>
+                <SettingsSelect
+                  value={settings.noteCitationStyle}
+                  onChange={(event) =>
+                    onSettingChange('noteCitationStyle', event.target.value as ReaderSettings['noteCitationStyle'])
+                  }
+                >
+                  <option value="gbt7714">GB/T 7714</option>
+                  <option value="apa7">APA 7</option>
+                  <option value="ieee">IEEE</option>
+                </SettingsSelect>
+              </label>
             </div>
-            <SettingsSelect
-              className="mt-3"
-              value={settings.noteCitationStyle}
-              onChange={(event) =>
-                onSettingChange('noteCitationStyle', event.target.value as ReaderSettings['noteCitationStyle'])
-              }
-            >
-              <option value="gbt7714">GB/T 7714</option>
-              <option value="apa7">APA 7</option>
-              <option value="ieee">IEEE</option>
-            </SettingsSelect>
           </SettingsField>
         </>
       ) : null}

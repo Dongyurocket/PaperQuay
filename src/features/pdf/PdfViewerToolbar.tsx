@@ -301,7 +301,7 @@ export function PdfViewerToolbar({
             title={l('删除当前选中的 PDF 批注', 'Delete the selected PDF annotation')}
           >
             <Trash2 className="mr-2 h-4 w-4" strokeWidth={1.8} />
-            {l('Delete Selected', 'Delete Selected')}
+            {l('删除所选', 'Delete Selected')}
           </button>
           <button
             type="button"

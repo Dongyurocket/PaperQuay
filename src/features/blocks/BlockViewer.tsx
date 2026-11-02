@@ -524,7 +524,7 @@ function BlockViewer({
     },
     {
       mode: 'bilingual',
-      label: l('双栏对照', 'Bilingual'),
+      label: l('原文 + 译文', 'Original + Translation'),
       disabled: !hasAnyTranslations,
     },
   ];

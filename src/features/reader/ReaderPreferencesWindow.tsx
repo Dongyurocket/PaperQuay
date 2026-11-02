@@ -76,9 +76,6 @@ export default function ReaderPreferencesWindow({
           className="flex min-h-0 w-64 shrink-0 flex-col border-r border-[var(--pq-border)] bg-[var(--pq-sidebar)] px-4 py-4 backdrop-blur-xl"
         >
           <div className="shrink-0 px-3 pb-4">
-            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--pq-text-faint)]">
-              {l('设置', 'Settings')}
-            </div>
             <div className="mt-2 text-2xl font-semibold tracking-tight text-[var(--pq-text)]">
               {l('设置', 'Settings')}
             </div>

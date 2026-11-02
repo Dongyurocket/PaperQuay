@@ -106,8 +106,8 @@ function HeaderReadingModeTabs({
   return (
     <div className="inline-flex shrink-0 whitespace-nowrap rounded-2xl border border-slate-200 bg-slate-50 p-1 dark:border-white/10 dark:bg-[var(--pq-surface-1)]">
       {[
-        { key: 'pdf-only' as const, label: l('PDF 阅读', 'PDF Only') },
-        { key: 'dual-pane' as const, label: l('双栏对照', 'Dual Pane') },
+        { key: 'pdf-only' as const, label: l('单栏 PDF', 'Single PDF') },
+        { key: 'dual-pane' as const, label: l('PDF 双栏', 'PDF Dual Pane') },
         {
           key: 'pdf-compare' as const,
           disabled: !pdfCompareAvailable,
