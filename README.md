@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.4.16-2563eb?style=flat-square" alt="Version v0.4.16">
+  <img src="https://img.shields.io/badge/version-v0.4.17-2563eb?style=flat-square" alt="Version v0.4.17">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-4b5563?style=flat-square" alt="Windows macOS Linux">
   <img src="https://img.shields.io/badge/built%20with-Electron-47848f?style=flat-square" alt="Electron">
   <img src="https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-0f766e?style=flat-square" alt="React TypeScript">
@@ -55,6 +55,16 @@
 ---
 
 ## 近期更新
+
+### v0.4.17 - 全应用界面一致性与文库卡片修复
+
+- **文库卡片不再丢失标题**：卡片列原本用固定宽度，降级断点却写成了 Catch 视口媒体查询，而该区域宽度由三栏拖拽决定。把侧栏拉宽后断点永不命中，445px 宽的列表里标题列只剩 41~73px，标题、作者、路径全被截断不可见。改用容器查询按实际宽度降级，标题列回到 354px，卡片高度从约 300px 降到 165px。
+- **深色模式与状态色可区分**：浅色下品牌色与「成功」色相只差 13°，「MinerU 已解析」与「RAG 已索引」看起来是同一种绿；深色品牌色又是饱和度 16% 的灰绿。现两者已分开（成功移到纯绿，深色品牌色改为同色相），四处深色下不可读的文字一并修正。
+- **知识图谱可读了**：191 个节点的全量标签互相重叠，现只标注重点节点，选中强制标注，放大后全部恢复；窗口变大时会自动重排，画布内补了缩放按钮与图例。
+- **新增命令面板**：`Ctrl/Cmd+K` 可搜索并执行导航、标签、设置等操作；`Ctrl/Cmd+W` 关标签、`Ctrl/Cmd+,` 开设置。
+- **长任务跨标签可见**：翻译与 RAG 索引进度现在在全局任务条显示，切走标签页也能看到。
+- **鼠标不再能误删历史**：Agent「清空历史记录」与「删除单个会话」现在都有确认。
+- **下载**：最新安装包见 [v0.4.17 Release](https://github.com/Dongyurocket/PaperQuay/releases/tag/app-v0.4.17)。
 
 ### v0.4.16 - 阅读界面拖拽松手后不再跟随鼠标
 

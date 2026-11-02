@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.4.16-2563eb?style=flat-square" alt="Version v0.4.16">
+  <img src="https://img.shields.io/badge/version-v0.4.17-2563eb?style=flat-square" alt="Version v0.4.17">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-4b5563?style=flat-square" alt="Windows macOS Linux">
   <img src="https://img.shields.io/badge/built%20with-Electron-47848f?style=flat-square" alt="Electron">
   <img src="https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-0f766e?style=flat-square" alt="React TypeScript">
@@ -54,6 +54,16 @@
 ---
 
 ## Latest Update
+
+### v0.4.17 - UI consistency pass and a library card fix
+
+- **Paper cards keep their titles**: the card grid used fixed columns with a *viewport* breakpoint, but the list column is sized by the three-pane layout. Widening a side panel left the title column with 41–73px, truncating titles, authors and paths to nothing. Cards now use container queries; the title column is back to 354px and cards are 165px instead of ~300px.
+- **Dark mode and status colours are distinguishable**: in the light theme the accent and success greens were 13° apart, so "MinerU parsed" and "RAG indexed" badges looked identical; the dark accent was a desaturated grey-green. Both fixed, along with four unreadable elements in dark mode.
+- **The knowledge graph is readable**: all 191 node labels used to overlap; now only hubs are labelled at overview, the selected node is always labelled, and everything returns when you zoom in. The graph re-fits when the window changes, and gained zoom buttons plus a legend.
+- **Command palette**: `Ctrl/Cmd+K` searches and runs navigation, tab and settings actions; `Ctrl/Cmd+W` closes a tab, `Ctrl/Cmd+,` opens settings.
+- **Long tasks are visible across tabs**: translation and RAG indexing progress now report into a global task bar.
+- **History can no longer be wiped by accident**: clearing agent history and deleting a session now ask for confirmation.
+- **Download**: latest installers on the [v0.4.17 release](https://github.com/Dongyurocket/PaperQuay/releases/tag/app-v0.4.17).
 
 ### v0.4.16 - Reader panels stop following the mouse after you release
 

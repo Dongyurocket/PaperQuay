@@ -1,33 +1,54 @@
 # PaperQuay v{{VERSION}}
 
-Resizing the reader panels no longer keeps following the mouse after you release it.
+A UI consistency pass across the whole app, plus a fix for a library bug that made paper titles disappear.
 
-- Releasing the drag over an HTML answer (rendered in an `iframe`) never reached the parent window, so the assistant sidebar stayed in resize mode and its width kept tracking the pointer.
-- Separators now capture the pointer, so `pointerup` always arrives even over an `iframe`, outside the window, or after Alt+Tab. The drag also ends on pointer cancel, lost pointer capture, window blur, or a move with no button held.
-- Width transitions are disabled while dragging, so the panel stops exactly where you release it instead of sliding for another 300 ms.
-- The PDF/translation split and the floating chat panel use the same mechanism.
-- Assistant sidebar width and PDF split ratio are now saved once on release instead of on every mouse move.
+## Library
 
-Validation: typecheck and the production build pass; all 865 tests pass, including 4 new separator-drag cases. Desktop installers were not hand-regressed before tagging. Installers are built by the `app-v{{VERSION}}` release workflow.
+- **Paper cards no longer lose their title.** The card grid used a fixed-column layout whose fallback breakpoint was a *viewport* media query, but the list column is sized by the three-pane layout, not the viewport. After widening the category or details panel the breakpoint never fired, the fixed columns ate 372–404px, and in a 445px list the title column was left with 41–73px — titles, authors and file paths were truncated to nothing while badges stacked vertically and each card grew to ~300px of mostly empty space. Cards now use container queries and drop secondary columns as space shrinks; the title column is back to 354px and cards are 165px tall. Narrowing the window to its minimum width no longer collapses the list either.
 
-## Downloads
+## Reading
 
-Choose the matching system and architecture from Assets: Windows `.exe`, macOS `.dmg`, or Linux `.AppImage` / `.deb` / `.tar.gz`.
+- Assistant sidebar, Q&A sessions and notes state moved out of the reader shell into their own stores. `DocumentReaderTab` went from 62 props to 11. No visible change intended — this is groundwork for keeping the reader maintainable.
+- The bridge registry was **not** migrated: extracting it reproduced a real-desktop React "maximum update depth" loop, so it keeps its original lifecycle semantics.
+- The reader's two different "dual pane" controls were renamed apart: the PDF layout switch is now "Single PDF / PDF dual pane", and the text column switch is "Original + Translation".
 
----
+## Knowledge graph
 
-# PaperQuay v{{VERSION}} 中文说明
+- Node labels are thinned out by importance. Previously every node drew a 9px label, so a 191-node graph turned into overlapping text noise; now only the top ~20% hubs are labelled at the overview level, the selected node is always labelled, and all labels return once you zoom past 1.15×.
+- Resizing the window (or maximizing) re-fits the graph instead of leaving it stranded in the corner, and the canvas gained zoom / fit buttons plus a node-type legend.
 
-阅读界面拖动分隔条后，松手即停，宽度不再继续跟随鼠标。
+## Notes
 
-- 问答侧栏的 HTML 回答渲染在 `iframe` 内，之前在其上松开鼠标时父窗口收不到 `pointerup`，侧栏会一直停留在拖拽状态，宽度继续跟随指针。
-- 分隔条现在使用 Pointer Capture，即使鼠标在 `iframe` 上松开、移出窗口后松开或 Alt+Tab 打断，`pointerup` 也必定送达；同时以指针取消、捕获丢失、窗口失焦、左键已松开四路兜底结束。
-- 拖动期间关闭宽度过渡，松手后不再额外滑动 300ms。
-- PDF / 翻译分栏与浮动问答面板使用同一套实现，一并修复。
-- 侧栏宽度与 PDF 分栏比例改为松手后写一次，不再拖动过程中每帧写 `localStorage`。
+- The graph toggle no longer covers the note title.
+- Untranslated English labels (`Saved`, `Backlinks`, `No backlinks`, `Template`, `Search`) now follow the interface language.
+- The word count reports characters for Chinese notes instead of a meaningless "67 words".
+- The always-visible "Saved" text and "Save" button no longer compete; the button only appears when there is something to save.
 
-验证：类型检查与生产构建通过；全部 865 项测试通过，含 4 项新增的分隔条拖拽用例。打标签前没有在干净安装版上完成桌面手工回归。安装包由 `app-v{{VERSION}}` Release 工作流构建。
+## Agent
 
-## 下载
+- **Clearing history now asks for confirmation.** It used to delete every session on a single click, and deleting one session had no confirmation either.
+- The session list gained search, date grouping (today / yesterday / previous 7 days / earlier), two-line titles, and a localized usage figure instead of `585k tok`.
 
-请在 Assets 中选择对应系统和架构的安装包：Windows `.exe`、macOS `.dmg`、Linux `.AppImage` / `.deb` / `.tar.gz`。
+## Settings
+
+- Removed the duplicated "Settings" heading, moved the sync interval unit inside its input, and labelled the citation-format dropdown.
+
+## Under the hood
+
+- **Design tokens are enforced.** 1181 hardcoded Tailwind palette classes were replaced with semantic tokens, and the `.pq-saas-scope` selector-patching layer was deleted — it had been forcing hardcoded classes back to token values in CSS, hiding the drift from code review.
+- **Brand and status colours are now distinguishable.** In the light theme the accent (`#0d9488`) and success (`#059669`) greens were 13° apart in hue with nearly identical lightness, so "MinerU parsed" and "RAG indexed" badges looked like the same colour. Success moved to a true green (142°), and the dark theme accent is now the same hue family as the light one instead of a desaturated grey-green.
+- **Shared UI primitives**: toast notifications (with screen-reader announcements), a global long-task bar, `Dialog`/`ConfirmDialog`, a promise-based confirm host, a single context-menu implementation, and a command palette. All six `window.confirm` call sites are gone.
+- **Long tasks are visible outside their panel**: translation and RAG indexing now report into the global task bar, so switching tabs no longer hides progress. Translation shows real percentages; RAG indexing only has status-level events, so it shows an indeterminate state rather than a fake percentage.
+- **Keyboard focus is visible**: `:focus-visible` had no rule at all before, so tabbing through controls gave no feedback.
+- **Dead code removed**: `LibrarySettingsDialog` (unreferenced; all 13 of its settings live in the unified settings panel) and `PdfAnnotationWorkspace` (806 lines superseded by the reader's inline annotation UI).
+
+## New
+
+- **Command palette** on `Ctrl/Cmd+K` — search and run navigation, tab, settings and theme actions. Shortcuts use a registry: `Ctrl/Cmd+W` closes the current tab, `Ctrl/Cmd+,` opens settings.
+- `docs/ui-design-system.md` documents the token tables, component contracts, the sanctioned overlay/menu inventory, and the constraints new UI must respect.
+
+## Verification
+
+- Build passes, 901 tests pass (36 new).
+- Verified on the real desktop build: library card layout at three container widths, graph label thinning and zoom-in, notes and settings changes, three migrated modals (Esc / focus trap / scroll lock), three context menus, translation progress in the task bar, and keyboard operation of the palette and focus ring.
+- **Not individually re-verified**: the reader's four core flows (RAG Q&A, note saving, translation switching, sidebar drag-resize). The store refactor directly touches the state ownership of the first three; opening a paper with PDF, structured text and the assistant sidebar was confirmed working.
