@@ -1,7 +1,8 @@
 import { useRef } from 'react';
 import { RefreshCw, X } from 'lucide-react';
-import { useAppLocale, useLocaleText } from '../../../i18n/uiLanguage';
 import { useWheelScrollDelegate } from '../../../hooks/useWheelScrollDelegate';
+import { useAppLocale, useLocaleText } from '../../../i18n/uiLanguage';
+import { Dialog } from '../../../ui/dialog';
 import type { LiteratureCategory } from '../../../types/library';
 import { getFileNameFromPath, truncateMiddle } from '../../../utils/text';
 import type { ImportDraftItem } from '../importTypes';
@@ -93,19 +94,27 @@ export default function ImportConfirmationDialog({
     return null;
   }
 
+  const requestClose = () => {
+    if (!working) onClose();
+  };
+
   return (
-    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/42 px-4 py-6 backdrop-blur-sm dark:bg-black/56">
-      <div
-        ref={panelRef}
-        onWheelCapture={handleWheelCapture}
-        className="flex max-h-[min(760px,calc(100vh-32px))] w-[min(1120px,calc(100vw-32px))] flex-col overflow-hidden rounded-[var(--pq-radius-lg)] border border-[var(--pq-border)] bg-[var(--pq-surface-1)] text-[var(--pq-text)] shadow-[var(--pq-shadow-dialog)]"
-      >
+    <Dialog
+      open
+      onClose={requestClose}
+      overlay="strong"
+      dismissOnBackdrop={false}
+      labelledBy="pq-import-confirm-title"
+      className="flex max-h-[min(760px,calc(100vh-32px))] max-w-[min(1120px,calc(100vw-32px))] flex-col bg-[var(--pq-surface-1)] text-[var(--pq-text)]"
+    >
+      {/* 滚轮委派需要一个「包含滚动目标」的根元素；contents 让这层不参与布局。 */}
+      <div ref={panelRef} onWheelCapture={handleWheelCapture} className="contents">
         <header className="flex items-start justify-between gap-4 border-b border-[var(--pq-border)] px-6 py-5">
           <div>
             <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--pq-text-faint)]">
               {l('导入确认', 'Import Confirmation')}
             </div>
-            <h2 className="mt-1 text-2xl font-semibold tracking-tight">
+            <h2 id="pq-import-confirm-title" className="mt-1 text-2xl font-semibold tracking-tight">
               {l('确认 PDF 元数据后再加入文献库', 'Confirm PDF metadata before adding to the library')}
             </h2>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-[var(--pq-text-muted)]">
@@ -279,6 +288,6 @@ export default function ImportConfirmationDialog({
           </div>
         </footer>
       </div>
-    </div>
+    </Dialog>
   );
 }

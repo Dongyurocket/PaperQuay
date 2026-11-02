@@ -1,7 +1,7 @@
 # UI 收尾计划（交接用）
 
 - 日期：2026-11-02
-- 状态：**进行中**（T1、T2、T3 已于 2026-11-02 完成，其余待办）
+- 状态：**进行中**（T1、T2、T3、T4、T7 已于 2026-11-02 完成，其余待办）
 - 前置：三阶段主线已完成并推送（`main` = `925ac14`，即 `fe18016` 加上本交接文档的提交）。本文件只记录**尚未完成**的部分。
 - 关联：
   - 主线方案：`docs/plans/2026-11-02-ui-logic-and-visual-refinement.md`
@@ -17,7 +17,7 @@
 | 测试 | `npm test` 869 项全绿 |
 | 令牌引用 | 2824 处 `var(--pq-*)` |
 | 剩余硬编码色 | 中性色 115 处、状态色 351 处 |
-| 自建模态遮罩残留 | 11 个文件（`src/ui/` 的 2 处是合法实现，不计入） |
+| 自建模态遮罩残留 | 8 个文件（T4 于 2026-11-02 迁走 3 个；`src/ui/` 的 2 处是合法实现，不计入） |
 | `window.confirm` 残留 | 0 |
 | 阅读器组件规模 | `DocumentReaderTab` 62 props / 4503 行；`Reader.tsx` 1252 行 / 15 个 `useState`（其中 20 个 reader 前缀状态） |
 
@@ -115,6 +115,8 @@ src/features/reader/ReaderPreferencesWindow.tsx
 
 **验收**：每个迁移后的浮层验证四点——Esc 关闭、Tab 不跑到背后界面、背景可滚动元素被锁、关闭后焦点回到触发按钮。
 
+**完成情况（2026-11-02）**：`LibrarySettingsDialog`、`ImportConfirmationDialog`、`BlockReparseModal` 三个真模态已迁到 `Dialog`（内部滚动结构、宽度、文案、令牌与 props 均未改，调用点零改动），四项行为与 Tab 正反循环在浅色/深色下实机验证通过。迁移同时暴露并修掉 `Dialog` 两个缺陷：`onClose` 内联导致每次重渲染都重建监听并重新聚焦首个元素（阅读器计时器持续渲染时 Tab 焦点会被打回顶部），以及无 DOM 环境下 `createPortal` 抛错。z-index 统一为 `z-[120]`，顺带修掉块预览（`z-90`）盖住重识别模态的旧遮挡。细节见 `docs/changes/2026-11-02-ui-dialog-modals.md`。遗留：`LibrarySettingsDialog` 全仓无挂载点，本轮用临时探针验收（探针已删除），是否删除该组件或补回入口待定。
+
 ### T5　合并两套 ContextMenu（低到中风险）
 
 | 文件 | 规模 |
@@ -148,6 +150,8 @@ src/features/reader/ReaderPreferencesWindow.tsx
 **代码位置**：`src/ui/dialog.tsx` 的 `FOCUSABLE` 选择器与 `handleKeyDown` 的循环逻辑。
 
 **验收**：Tab 循环正反各走一轮，截图或录屏留证。
+
+**完成情况（2026-11-02）**：在三个新迁入 `Dialog` 的模态上各走一轮——首个可聚焦元素按 Shift+Tab 跳到末位（导入确认「确认导入」、块重识别「开始重新识别」、库设置「保存设置」），末位按 Tab 回到首个「关闭」；焦点始终在 `role="dialog"` 内，未漏到遮罩背后。验证方式为临时探针 + UIA 读取焦点元素标签，浅色/深色各截图。过程中发现 `Dialog` 在父级重渲染时会重新聚焦首个元素、导致循环失效，已修复（见 T4 完成情况）。
 
 ### T8　阅读器 store 分片（高风险，建议单独一轮）
 

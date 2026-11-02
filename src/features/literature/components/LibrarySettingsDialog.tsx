@@ -3,6 +3,7 @@ import { Database, FolderOpen, RefreshCw, X } from 'lucide-react';
 
 import { useWheelScrollDelegate } from '../../../hooks/useWheelScrollDelegate';
 import { useLocaleText } from '../../../i18n/uiLanguage';
+import { Dialog } from '../../../ui/dialog';
 import type {
   LibraryImportMode,
   LibrarySettings,
@@ -89,20 +90,27 @@ export default function LibrarySettingsDialog({
   }
 
   const patch = (partial: Partial<LibrarySettings>) => onChange({ ...settings, ...partial });
+  const requestClose = () => {
+    if (!saving) onClose();
+  };
 
   return (
-    <div className="fixed inset-0 z-[82] flex items-center justify-center bg-slate-950/42 px-4 py-6 backdrop-blur-sm dark:bg-black/56">
-      <div
-        ref={panelRef}
-        onWheelCapture={handleWheelCapture}
-        className="flex max-h-[min(720px,calc(100vh-32px))] w-[min(820px,calc(100vw-32px))] flex-col overflow-hidden rounded-[var(--pq-radius-lg)] border border-[var(--pq-border)] bg-[var(--pq-surface-1)] text-[var(--pq-text)] shadow-[var(--pq-shadow-dialog)]"
-      >
+    <Dialog
+      open
+      onClose={requestClose}
+      overlay="strong"
+      dismissOnBackdrop={false}
+      labelledBy="pq-library-settings-title"
+      className="flex max-h-[min(720px,calc(100vh-32px))] max-w-[min(820px,calc(100vw-32px))] flex-col bg-[var(--pq-surface-1)] text-[var(--pq-text)]"
+    >
+      {/* 滚轮委派需要一个「包含滚动目标」的根元素；contents 让这层不参与布局。 */}
+      <div ref={panelRef} onWheelCapture={handleWheelCapture} className="contents">
         <header className="flex items-start justify-between gap-4 border-b border-[var(--pq-border)] px-6 py-5">
           <div>
             <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--pq-text-faint)]">
               {l('文库设置', 'Library Settings')}
             </div>
-            <h2 className="mt-1 text-2xl font-semibold tracking-tight">
+            <h2 id="pq-library-settings-title" className="mt-1 text-2xl font-semibold tracking-tight">
               {l('本地文献与 Zotero 导入', 'Local Library and Zotero Import')}
             </h2>
             <p className="mt-2 text-sm leading-6 text-[var(--pq-text-muted)]">
@@ -399,6 +407,6 @@ export default function LibrarySettingsDialog({
           </button>
         </footer>
       </div>
-    </div>
+    </Dialog>
   );
 }

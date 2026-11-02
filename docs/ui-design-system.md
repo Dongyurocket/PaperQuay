@@ -91,7 +91,7 @@
 
 | 模块 | 用途 |
 | --- | --- |
-| `src/ui/dialog.tsx` | `Dialog`（Portal + 焦点陷阱 + Esc + 滚动锁）、`ConfirmDialog` |
+| `src/ui/dialog.tsx` | `Dialog`（Portal + 焦点陷阱 + Esc + 滚动锁；已在 `LibrarySettingsDialog`、`ImportConfirmationDialog`、`BlockReparseModal` 使用）、`ConfirmDialog` |
 | `src/ui/confirmHost.tsx` | 命令式 `confirmAction()`；**禁止再用 `window.confirm`** |
 | `src/ui/toast.tsx` | 一次性反馈 `toast.success/error/info/progress` |
 | `src/ui/taskCenter.tsx` | 长任务全局进度条 |

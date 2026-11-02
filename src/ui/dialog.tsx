@@ -61,11 +61,18 @@ export function Dialog({
 }: DialogProps) {
   const panelRef = useRef<HTMLDivElement | null>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
+  const onCloseRef = useRef(onClose);
+
+  // 调用方普遍传入内联 onClose。若直接进依赖数组，父级每次重渲染都会重建监听、
+  // 重跑下面的打开副作用并重新聚焦第一个元素——模态里刚 Tab 走的焦点会被打回去。
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
 
   const handleKeyDown = useCallback((event: KeyboardEvent) => {
     if (event.key === 'Escape') {
       event.stopPropagation();
-      onClose();
+      onCloseRef.current();
       return;
     }
 
@@ -101,10 +108,12 @@ export function Dialog({
       event.preventDefault();
       last.focus();
     }
-  }, [onClose]);
+  }, []);
 
   useEffect(() => {
     if (!open) return undefined;
+    // 无 DOM 环境（Node 里用 renderToStaticMarkup 合成渲染）不建立副作用。
+    if (typeof document === 'undefined') return undefined;
 
     previousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const previousOverflow = document.body.style.overflow;
@@ -130,7 +139,7 @@ export function Dialog({
 
   if (!open) return null;
 
-  return createPortal(
+  const panel = (
     <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
       <div
         className={cn(
@@ -157,9 +166,13 @@ export function Dialog({
       >
         {children}
       </div>
-    </div>,
-    document.body,
+    </div>
   );
+
+  // 没有 DOM 时无法建 Portal，退化为内联渲染，保证合成渲染路径仍能拿到面板内容。
+  if (typeof document === 'undefined') return panel;
+
+  return createPortal(panel, document.body);
 }
 
 interface ConfirmDialogProps {
