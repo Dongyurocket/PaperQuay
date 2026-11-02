@@ -35,7 +35,6 @@ import type {
   LiteraturePaperTaskState,
 } from '../../types/library';
 import { ATTACHMENT_KIND_TRANSLATED_PDF } from '../../utils/libraryPaper';
-import type { Note } from '../../types/notes';
 import type {
   TranslationDisplayMode,
   WorkspaceItem,
@@ -196,11 +195,6 @@ function Reader({ workspaceActive = true }: ReaderProps) {
   const setReaderSelectedQaSessionId = useReaderQaStore((state) => state.setSelectedQaSessionId);
   const readerSelectedQaPresetId = useReaderQaStore((state) => state.selectedQaPresetId);
   const setReaderSelectedQaPresetId = useReaderQaStore((state) => state.setSelectedQaPresetId);
-  const [readerNotes, setReaderNotes] = useState<Note[]>([]);
-  const [readerActiveNoteId, setReaderActiveNoteId] = useState<string | null>(null);
-  const [readerNotesLoading, setReaderNotesLoading] = useState(false);
-  const [readerNotesSaving, setReaderNotesSaving] = useState(false);
-  const [readerNotesError, setReaderNotesError] = useState('');
   const [allLibraryPapers, setAllLibraryPapers] = useState<LiteraturePaper[]>([]);
   const [libraryPaperStatuses, setLibraryPaperStatuses] = useState<Record<string, { mineruParsed?: boolean }>>({});
   const notePaperCandidates = allLibraryPapers;
@@ -1077,16 +1071,6 @@ function Reader({ workspaceActive = true }: ReaderProps) {
                     onBridgeStateChange={handleBridgeStateChange}
                     onTranslationDisplayModeChange={handleReaderTranslationDisplayModeChange}
                     translationTargetLanguageLabel={translationTargetLanguageLabel}
-                    notes={readerNotes}
-                    setNotes={setReaderNotes}
-                    activeNoteId={readerActiveNoteId}
-                    setActiveNoteId={setReaderActiveNoteId}
-                    notesLoading={readerNotesLoading}
-                    setNotesLoading={setReaderNotesLoading}
-                    notesSaving={readerNotesSaving}
-                    setNotesSaving={setReaderNotesSaving}
-                    notesError={readerNotesError}
-                    setNotesError={setReaderNotesError}
                     notePaperCandidates={notePaperCandidates}
                     onNotePaperClick={handleNotePaperClick}
                     pendingNoteAnchorJump={

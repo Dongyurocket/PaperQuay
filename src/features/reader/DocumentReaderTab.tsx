@@ -175,6 +175,7 @@ import { useDocumentTranslation } from './useDocumentTranslation';
 import { usePointerDragResize } from './usePointerDragResize';
 import { useReaderLayoutStore } from '../../stores/useReaderLayoutStore';
 import { useReaderQaStore } from '../../stores/useReaderQaStore';
+import { useReaderNotesStore } from '../../stores/useReaderNotesStore';
 import {
   buildPendingNoteAnchorInsert,
   buildNoteAnchorJumpDetail,
@@ -268,16 +269,6 @@ interface DocumentReaderTabProps {
   onBridgeStateChange: (tabId: string, bridge: ReaderTabBridgeState | null) => void;
   onTranslationDisplayModeChange: (mode: TranslationDisplayMode) => void;
   translationTargetLanguageLabel: string;
-  notes: Note[];
-  setNotes: StateSetter<Note[]>;
-  activeNoteId: string | null;
-  setActiveNoteId: StateSetter<string | null>;
-  notesLoading: boolean;
-  setNotesLoading: StateSetter<boolean>;
-  notesSaving: boolean;
-  setNotesSaving: StateSetter<boolean>;
-  notesError: string;
-  setNotesError: StateSetter<string>;
   notePaperCandidates?: LiteraturePaper[];
   onNotePaperClick?: (paperId: string) => void;
   pendingNoteAnchorJump?: JumpToNoteAnchorEventDetail | null;
@@ -310,16 +301,6 @@ function DocumentReaderTab({
   onBridgeStateChange,
   onTranslationDisplayModeChange,
   translationTargetLanguageLabel,
-  notes,
-  setNotes,
-  activeNoteId,
-  setActiveNoteId,
-  notesLoading,
-  setNotesLoading,
-  notesSaving,
-  setNotesSaving,
-  notesError,
-  setNotesError,
   notePaperCandidates = [],
   onNotePaperClick,
   pendingNoteAnchorJump = null,
@@ -350,6 +331,16 @@ function DocumentReaderTab({
   const setQaRunningSessionIds = useReaderQaStore((state) => state.setQaRunningSessionIds);
   const qaError = useReaderQaStore((state) => state.qaError);
   const setQaError = useReaderQaStore((state) => state.setQaError);
+  const notes = useReaderNotesStore((state) => state.notes);
+  const setNotes = useReaderNotesStore((state) => state.setNotes);
+  const activeNoteId = useReaderNotesStore((state) => state.activeNoteId);
+  const setActiveNoteId = useReaderNotesStore((state) => state.setActiveNoteId);
+  const notesLoading = useReaderNotesStore((state) => state.notesLoading);
+  const setNotesLoading = useReaderNotesStore((state) => state.setNotesLoading);
+  const notesSaving = useReaderNotesStore((state) => state.notesSaving);
+  const setNotesSaving = useReaderNotesStore((state) => state.setNotesSaving);
+  const notesError = useReaderNotesStore((state) => state.notesError);
+  const setNotesError = useReaderNotesStore((state) => state.setNotesError);
   const locale = useAppLocale();
   const l = useLocaleText();
   const readerNoteEditorSourceId = GLOBAL_READER_NOTE_EDITOR_SOURCE_ID;
