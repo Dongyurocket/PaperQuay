@@ -37,10 +37,6 @@ import type {
 import { ATTACHMENT_KIND_TRANSLATED_PDF } from '../../utils/libraryPaper';
 import type { Note } from '../../types/notes';
 import type {
-  DocumentChatAttachment,
-  DocumentChatRenderMode,
-  DocumentChatSession,
-  ModelReasoningEffort,
   TranslationDisplayMode,
   WorkspaceItem,
 } from '../../types/reader';
@@ -70,10 +66,10 @@ import {
   MIN_ASSISTANT_PANEL_WIDTH,
 } from './readerWorkspaceShared';
 import { useReaderLayoutStore } from '../../stores/useReaderLayoutStore';
+import { useReaderQaStore } from '../../stores/useReaderQaStore';
 import {
   mergeLocalPdfPath,
   createNativeLibraryWorkspaceItem,
-  getModelRuntimeConfig,
   resolveLanguageLabel,
   type PreferencesSectionKey,
 } from './readerShared';
@@ -194,22 +190,12 @@ function Reader({ workspaceActive = true }: ReaderProps) {
   const persistReaderAssistantPanelWidth = useReaderLayoutStore((state) => state.persistAssistantPanelWidth);
   const latestAssistantPanelWidthRef = useRef(readerAssistantPanelWidth);
   const startAssistantPanelResize = usePointerDragResize();
-  const [readerQaSessions, setReaderQaSessions] = useState<DocumentChatSession[]>(() => [
-    createQaSession(settings.uiLanguage),
-  ]);
-  const [readerSelectedQaSessionId, setReaderSelectedQaSessionId] = useState(
-    () => readerQaSessions[0]?.id ?? '',
-  );
-  const [readerQaInput, setReaderQaInput] = useState('');
-  const [readerQaAttachments, setReaderQaAttachments] = useState<DocumentChatAttachment[]>([]);
-  const [readerSelectedQaPresetId, setReaderSelectedQaPresetId] = useState(settings.qaActivePresetId);
-  const [readerQaRagEnabled, setReaderQaRagEnabled] = useState(true);
-  const [readerQaAnswerRenderMode, setReaderQaAnswerRenderMode] = useState<DocumentChatRenderMode>('markdown');
-  const [readerQaReasoningEffort, setReaderQaReasoningEffort] = useState<ModelReasoningEffort>(
-    () => getModelRuntimeConfig(settings, 'qa').reasoningEffort ?? 'auto',
-  );
-  const [readerQaRunningSessionIds, setReaderQaRunningSessionIds] = useState<string[]>([]);
-  const [readerQaError, setReaderQaError] = useState('');
+  const readerQaSessions = useReaderQaStore((state) => state.qaSessions);
+  const setReaderQaSessions = useReaderQaStore((state) => state.setQaSessions);
+  const readerSelectedQaSessionId = useReaderQaStore((state) => state.selectedQaSessionId);
+  const setReaderSelectedQaSessionId = useReaderQaStore((state) => state.setSelectedQaSessionId);
+  const readerSelectedQaPresetId = useReaderQaStore((state) => state.selectedQaPresetId);
+  const setReaderSelectedQaPresetId = useReaderQaStore((state) => state.setSelectedQaPresetId);
   const [readerNotes, setReaderNotes] = useState<Note[]>([]);
   const [readerActiveNoteId, setReaderActiveNoteId] = useState<string | null>(null);
   const [readerNotesLoading, setReaderNotesLoading] = useState(false);
@@ -1091,26 +1077,6 @@ function Reader({ workspaceActive = true }: ReaderProps) {
                     onBridgeStateChange={handleBridgeStateChange}
                     onTranslationDisplayModeChange={handleReaderTranslationDisplayModeChange}
                     translationTargetLanguageLabel={translationTargetLanguageLabel}
-                    qaSessions={readerQaSessions}
-                    setQaSessions={setReaderQaSessions}
-                    selectedQaSessionId={readerSelectedQaSessionId}
-                    setSelectedQaSessionId={setReaderSelectedQaSessionId}
-                    qaInput={readerQaInput}
-                    setQaInput={setReaderQaInput}
-                    qaAttachments={readerQaAttachments}
-                    setQaAttachments={setReaderQaAttachments}
-                    selectedQaPresetId={readerSelectedQaPresetId}
-                    setSelectedQaPresetId={setReaderSelectedQaPresetId}
-                    qaRagEnabled={readerQaRagEnabled}
-                    setQaRagEnabled={setReaderQaRagEnabled}
-                    qaAnswerRenderMode={readerQaAnswerRenderMode}
-                    setQaAnswerRenderMode={setReaderQaAnswerRenderMode}
-                    qaReasoningEffort={readerQaReasoningEffort}
-                    setQaReasoningEffort={setReaderQaReasoningEffort}
-                    qaRunningSessionIds={readerQaRunningSessionIds}
-                    setQaRunningSessionIds={setReaderQaRunningSessionIds}
-                    qaError={readerQaError}
-                    setQaError={setReaderQaError}
                     notes={readerNotes}
                     setNotes={setReaderNotes}
                     activeNoteId={readerActiveNoteId}

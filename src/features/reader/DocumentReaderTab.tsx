@@ -174,6 +174,7 @@ import { buildQaContext, formatQaContextStatus } from './readerQaContext';
 import { useDocumentTranslation } from './useDocumentTranslation';
 import { usePointerDragResize } from './usePointerDragResize';
 import { useReaderLayoutStore } from '../../stores/useReaderLayoutStore';
+import { useReaderQaStore } from '../../stores/useReaderQaStore';
 import {
   buildPendingNoteAnchorInsert,
   buildNoteAnchorJumpDetail,
@@ -267,26 +268,6 @@ interface DocumentReaderTabProps {
   onBridgeStateChange: (tabId: string, bridge: ReaderTabBridgeState | null) => void;
   onTranslationDisplayModeChange: (mode: TranslationDisplayMode) => void;
   translationTargetLanguageLabel: string;
-  qaSessions: DocumentChatSession[];
-  setQaSessions: StateSetter<DocumentChatSession[]>;
-  selectedQaSessionId: string;
-  setSelectedQaSessionId: StateSetter<string>;
-  qaInput: string;
-  setQaInput: StateSetter<string>;
-  qaAttachments: DocumentChatAttachment[];
-  setQaAttachments: StateSetter<DocumentChatAttachment[]>;
-  selectedQaPresetId: string;
-  setSelectedQaPresetId: StateSetter<string>;
-  qaRagEnabled: boolean;
-  setQaRagEnabled: StateSetter<boolean>;
-  qaAnswerRenderMode: DocumentChatRenderMode;
-  setQaAnswerRenderMode: StateSetter<DocumentChatRenderMode>;
-  qaReasoningEffort: ModelReasoningEffort;
-  setQaReasoningEffort: StateSetter<ModelReasoningEffort>;
-  qaRunningSessionIds: string[];
-  setQaRunningSessionIds: StateSetter<string[]>;
-  qaError: string;
-  setQaError: StateSetter<string>;
   notes: Note[];
   setNotes: StateSetter<Note[]>;
   activeNoteId: string | null;
@@ -329,26 +310,6 @@ function DocumentReaderTab({
   onBridgeStateChange,
   onTranslationDisplayModeChange,
   translationTargetLanguageLabel,
-  qaSessions,
-  setQaSessions,
-  selectedQaSessionId,
-  setSelectedQaSessionId,
-  qaInput,
-  setQaInput,
-  qaAttachments,
-  setQaAttachments,
-  selectedQaPresetId,
-  setSelectedQaPresetId,
-  qaRagEnabled,
-  setQaRagEnabled,
-  qaAnswerRenderMode,
-  setQaAnswerRenderMode,
-  qaReasoningEffort,
-  setQaReasoningEffort,
-  qaRunningSessionIds,
-  setQaRunningSessionIds,
-  qaError,
-  setQaError,
   notes,
   setNotes,
   activeNoteId,
@@ -369,6 +330,26 @@ function DocumentReaderTab({
   const setAssistantActivePanel = useReaderLayoutStore((state) => state.setAssistantActivePanel);
   const assistantDetached = useReaderLayoutStore((state) => state.assistantDetached);
   const setAssistantDetached = useReaderLayoutStore((state) => state.setAssistantDetached);
+  const qaSessions = useReaderQaStore((state) => state.qaSessions);
+  const setQaSessions = useReaderQaStore((state) => state.setQaSessions);
+  const selectedQaSessionId = useReaderQaStore((state) => state.selectedQaSessionId);
+  const setSelectedQaSessionId = useReaderQaStore((state) => state.setSelectedQaSessionId);
+  const qaInput = useReaderQaStore((state) => state.qaInput);
+  const setQaInput = useReaderQaStore((state) => state.setQaInput);
+  const qaAttachments = useReaderQaStore((state) => state.qaAttachments);
+  const setQaAttachments = useReaderQaStore((state) => state.setQaAttachments);
+  const selectedQaPresetId = useReaderQaStore((state) => state.selectedQaPresetId);
+  const setSelectedQaPresetId = useReaderQaStore((state) => state.setSelectedQaPresetId);
+  const qaRagEnabled = useReaderQaStore((state) => state.qaRagEnabled);
+  const setQaRagEnabled = useReaderQaStore((state) => state.setQaRagEnabled);
+  const qaAnswerRenderMode = useReaderQaStore((state) => state.qaAnswerRenderMode);
+  const setQaAnswerRenderMode = useReaderQaStore((state) => state.setQaAnswerRenderMode);
+  const qaReasoningEffort = useReaderQaStore((state) => state.qaReasoningEffort);
+  const setQaReasoningEffort = useReaderQaStore((state) => state.setQaReasoningEffort);
+  const qaRunningSessionIds = useReaderQaStore((state) => state.qaRunningSessionIds);
+  const setQaRunningSessionIds = useReaderQaStore((state) => state.setQaRunningSessionIds);
+  const qaError = useReaderQaStore((state) => state.qaError);
+  const setQaError = useReaderQaStore((state) => state.setQaError);
   const locale = useAppLocale();
   const l = useLocaleText();
   const readerNoteEditorSourceId = GLOBAL_READER_NOTE_EDITOR_SOURCE_ID;
