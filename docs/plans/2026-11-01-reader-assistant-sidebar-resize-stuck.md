@@ -1,5 +1,9 @@
 # 阅读界面问答侧栏拖拽无法结束（宽度跟随鼠标）修复计划
 
+## 状态
+
+已修复（2026-11-02 核对：修复提交 `b7233f2` 已在 `main`；落地 `src/features/reader/usePointerDragResize.ts` 及 `AssistantSidebar.tsx`、`DocumentReaderTab.tsx`、`Reader.tsx`、`ReaderWorkspace.tsx`、`readerFloatingAssistantPanel.tsx` 的接入，另含 `tests/pointerDragResize.test.ts`）
+
 ## 现象
 
 文献阅读界面三栏布局（PDF | 翻译/结构块 | 问答侧栏）。拖动问答侧栏左侧分隔条调整宽度后松开鼠标，拖拽状态未结束，侧栏宽度仍随鼠标移动，无法固定。

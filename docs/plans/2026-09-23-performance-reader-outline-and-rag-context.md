@@ -1,8 +1,21 @@
 # PaperQuay 大文库性能、阅读目录与 RAG 上下文切片方案
 
 日期：2026-09-23  
-状态：设计方案，尚未实施  
+状态：已实施（2026-11-02 核验交付物；7.1 性能基线未实测）  
 依据：当前工作区 v0.1.51 源码核查；未执行性能基准测试。本文中的优先级与默认参数为实施建议，不代表已取得的性能结果。源码行号是核查时的定位，后续可能变化。
+
+## 0. 实施核验（2026-11-02）
+
+交付物已在当前代码中核实；第 7.1 节的性能基线仍未实测，本文的默认参数与优先级不因此变成实测结论。
+
+| 范围 | 代码证据 |
+| --- | --- |
+| 阅读目录 | `src/features/pdf/pdfOutline.ts`（`normalizePdfOutline`，来源枚举 `ReaderOutlineSource` 含 `pdf-outline` 与 `mineru-heading`）、`src/features/pdf/PdfOutlinePanel.tsx` |
+| 资源预算与标签挂载 | `src/features/reader/readerResourceBudget.ts`（`READER_MOUNTED_TAB_LIMIT`、`chooseMountedReaderTabIds`、PDF/切片图/缩略图三类预算） |
+| 解析分段与 Worker | `src/features/reader/mineruParseWorker.ts` |
+| 多选全选（跨分页、跨筛选） | `src/features/literature/LiteratureLibraryView.tsx`（`handleToggleSelectAll`、`selectAllState` 三态；全选保存 id 快照） |
+| SQL 分页 | `electron/backend/libraryDatabaseStore.cjs`（P2-1 分页查询，`LIMIT ? OFFSET ?`） |
+| RAG 目标上下文切片 | `electron/backend/ragStore.cjs` 的 `getChunkContext`（前后邻接有界读取，`MAX_CONTEXT_NEIGHBORS`）、`src/services/rag.ts` 的 `ragGetChunkContext` |
 
 ## 1. 目标与范围
 
