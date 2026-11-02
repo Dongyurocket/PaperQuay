@@ -1,5 +1,6 @@
 import {
   useCallback,
+  useMemo,
   useState,
   type Ref,
   type WheelEventHandler,
@@ -237,6 +238,32 @@ export default function AgentWorkspaceView({
   sortedHistorySessions,
 }: AgentWorkspaceViewProps) {
   const [paperToolOpen, setPaperToolOpen] = useState(false);
+  // 会话列表：可搜索 + 按日期分组，避免一屏里多条被截断成同样的前缀而无法区分。
+  const [historyQuery, setHistoryQuery] = useState('');
+  const groupedHistorySessions = useMemo(() => {
+    const keyword = historyQuery.trim().toLowerCase();
+    const matched = keyword
+      ? sortedHistorySessions.filter((session) => `${session.title} ${session.lastInstruction ?? ''}`.toLowerCase().includes(keyword))
+      : sortedHistorySessions;
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const dayMs = 24 * 60 * 60 * 1000;
+    const buckets: Array<{ key: string; label: string; sessions: typeof matched }> = [
+      { key: 'today', label: l('今天', 'Today'), sessions: [] },
+      { key: 'yesterday', label: l('昨天', 'Yesterday'), sessions: [] },
+      { key: 'week', label: l('最近 7 天', 'Previous 7 days'), sessions: [] },
+      { key: 'earlier', label: l('更早', 'Earlier'), sessions: [] },
+    ];
+
+    for (const session of matched) {
+      if (session.updatedAt >= startOfToday) buckets[0].sessions.push(session);
+      else if (session.updatedAt >= startOfToday - dayMs) buckets[1].sessions.push(session);
+      else if (session.updatedAt >= startOfToday - 7 * dayMs) buckets[2].sessions.push(session);
+      else buckets[3].sessions.push(session);
+    }
+
+    return buckets.filter((bucket) => bucket.sessions.length > 0);
+  }, [historyQuery, l, sortedHistorySessions]);
   const composerInput = useImeSafeTextareaValue(composerValue, onComposerChange);
   const canSubmitPrompt = !activeSessionRunning && composerInput.value.trim().length > 0;
   const submitCurrentPrompt = useCallback(() => {
@@ -334,6 +361,16 @@ export default function AgentWorkspaceView({
                     <Plus className="h-4 w-4 shrink-0 text-[var(--pq-text-muted)]" strokeWidth={2} />
                     <span className="truncate">{l('新对话', 'New Chat')}</span>
                   </button>
+                  <label className="mt-2 flex h-8 items-center gap-1.5 rounded-[var(--pq-radius-sm)] border border-[var(--pq-border)] bg-[var(--pq-bg-secondary)] px-2">
+                    <Search className="h-3.5 w-3.5 shrink-0 text-[var(--pq-text-faint)]" strokeWidth={1.9} />
+                    <input
+                      value={historyQuery}
+                      onChange={(event) => setHistoryQuery(event.target.value)}
+                      placeholder={l('搜索历史对话', 'Search chats')}
+                      className="min-w-0 flex-1 bg-transparent text-xs text-[var(--pq-text)] outline-none placeholder:text-[var(--pq-text-faint)]"
+                      aria-label={l('搜索历史对话', 'Search chats')}
+                    />
+                  </label>
                 </div>
 
                 <div
@@ -341,7 +378,12 @@ export default function AgentWorkspaceView({
                   className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain px-2 py-2"
                 >
                   <div className="space-y-0.5">
-                    {sortedHistorySessions.map((session) => (
+                    {groupedHistorySessions.map((bucket) => (
+                      <div key={bucket.key} className="pb-1">
+                        <div className="px-2.5 pb-1 pt-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--pq-text-faint)]">
+                          {bucket.label}
+                        </div>
+                        {bucket.sessions.map((session) => (
                       <div
                         key={session.id}
                         role="button"
@@ -367,7 +409,7 @@ export default function AgentWorkspaceView({
                           <span className="min-w-0 flex-1">
                             <span
                               className={[
-                                'block truncate text-sm',
+                                'line-clamp-2 text-sm leading-5',
                                 session.id === activeSessionId
                                   ? 'font-semibold text-[var(--pq-text)]'
                                   : 'font-medium text-[var(--pq-text-muted)] group-hover:text-[var(--pq-text)]',
@@ -394,7 +436,7 @@ export default function AgentWorkspaceView({
                               ) : null}
                               {sessionTokenUsage[session.id] ? (
                                 <span className="shrink-0" title={l('累计 token 用量', 'Cumulative token usage')}>
-                                  {compactTokenCount(sessionTokenUsage[session.id])} tok
+                                  {l(`${compactTokenCount(sessionTokenUsage[session.id])} 用量`, `${compactTokenCount(sessionTokenUsage[session.id])} used`)}
                                 </span>
                               ) : null}
                             </span>
@@ -413,7 +455,14 @@ export default function AgentWorkspaceView({
                           </button>
                         </div>
                       </div>
+                        ))}
+                      </div>
                     ))}
+                    {groupedHistorySessions.length === 0 ? (
+                      <div className="px-2.5 py-6 text-center text-xs text-[var(--pq-text-faint)]">
+                        {l('没有匹配的对话', 'No matching chats')}
+                      </div>
+                    ) : null}
                   </div>
                 </div>
                 <div className="border-t border-[var(--pq-border-subtle)] px-3 py-2">
