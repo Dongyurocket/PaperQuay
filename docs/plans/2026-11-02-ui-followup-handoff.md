@@ -1,8 +1,8 @@
 # UI 收尾计划（交接用）
 
 - 日期：2026-11-02
-- 状态：**进行中**（T1、T2、T3、T4、T5、T6、T7 已于 2026-11-02 完成，其余待办）
-- 前置：三阶段主线已完成并推送（`main` = `925ac14`，即 `fe18016` 加上本交接文档的提交）。本文件只记录**尚未完成**的部分。
+- 状态：**仅剩 T8**（T1–T7 已于 2026-11-02 完成；T9 已关闭）
+- 前置：三阶段主线已完成并推送。本文件只记录**尚未完成**的部分。
 - 关联：
   - 主线方案：`docs/plans/2026-11-02-ui-logic-and-visual-refinement.md`
   - 设计规范（新增代码的审查依据）：`docs/ui-design-system.md`
@@ -12,12 +12,13 @@
 
 | 项 | 值 |
 | --- | --- |
-| `main` / `origin/main` | `925ac14`（开工时核对，= `fe18016` + 交接文档提交） |
+| `main` / `origin/main` | `0540380`（2026-11-02 23:15 核对，两边一致） |
 | 构建 | `npm run build` 通过 |
-| 测试 | `npm test` 869 项全绿 |
-| 令牌引用 | 2824 处 `var(--pq-*)` |
-| 剩余硬编码色 | 中性色 115 处、状态色 351 处 |
-| 自建模态遮罩残留 | 8 个文件（T4 于 2026-11-02 迁走 3 个；`src/ui/` 的 2 处是合法实现，不计入） |
+| 测试 | `npm test` **878 项**全绿 |
+| 令牌引用 | 2850 处 `var(--pq-*)` |
+| 剩余硬编码色 | 中性色 108 处、状态色 **17 处**（T3 前为 351） |
+| 自建模态遮罩残留 | 8 个文件（其中 `src/ui/` 的 2 处是合法实现；T4 已迁走 3 个） |
+| 自建菜单实现 | 1 处（`src/ui/menu.tsx`）+ 1 处已登记例外（图谱节点菜单） |
 | `window.confirm` 残留 | 0 |
 | 阅读器组件规模 | `DocumentReaderTab` 62 props / 4503 行；`Reader.tsx` 1252 行 / 15 个 `useState`（其中 20 个 reader 前缀状态） |
 
@@ -170,47 +171,56 @@ git grep -n -E "Math\.min\(contextMenu\.(x|y)" -- "src/*.tsx" "src/**/*.tsx"
 
 **完成情况（2026-11-02）**：在三个新迁入 `Dialog` 的模态上各走一轮——首个可聚焦元素按 Shift+Tab 跳到末位（导入确认「确认导入」、块重识别「开始重新识别」、库设置「保存设置」），末位按 Tab 回到首个「关闭」；焦点始终在 `role="dialog"` 内，未漏到遮罩背后。验证方式为临时探针 + UIA 读取焦点元素标签，浅色/深色各截图。过程中发现 `Dialog` 在父级重渲染时会重新聚焦首个元素、导致循环失效，已修复（见 T4 完成情况）。
 
-### T8　阅读器 store 分片（高风险，建议单独一轮）
+### T8　阅读器 store 分片（高风险，建议逐刀推进）
 
-**为什么单独一轮**：`DocumentReaderTab` 62 个 props、4503 行 / 15 万字符；`Reader.tsx` 1252 行、15 个 `useState`（20 个 reader 前缀状态）；而 869 项测试以 server/service 为主，**阅读器 UI 无自动化回归**。在没有回归网的情况下拆 62 个 prop，风险落在最核心的阅读链路上。
+**为什么谨慎**：`DocumentReaderTab` 62 个 props、4503 行 / 15 万字符；`Reader.tsx` 1252 行、15 个 `useState`（20 个 reader 前缀状态）。
+
+**关于测试覆盖的准确描述（2026-11-02 修正）**：阅读器**并非**无自动化回归——`tests/` 下有十几个相关文件（`documentReaderQaSessions`、`documentReaderNotes`、`readerTranslation`、`readerRagContext`、`readerResourceBudget` 等）。但它们测的是**纯函数 helper**（如 `removeQaSession`、`resolveActiveQaSession`、`resolveQaModelPreset`、`resolveQaSessionSelection`），**没有测组件状态接线**——即 `Reader.tsx` 的状态是否正确地喂给这些 helper、再作为 62 个 props 传下去。
+
+因此 T8 的性质是：**逻辑已抽出且有测试，缺的是状态所有权**。不是「抽逻辑 + 补测试」。
 
 **分片候选**（按内聚度分组，`Reader.tsx:186-214` 起）
 
 | 分片 | 状态字段 |
 | --- | --- |
+| 布局与面板 | `readerAssistantActivePanel`、`readerAssistantDetached`、`readerAssistantPanelWidth`、`readerAssistantPanelResizing` |
 | QA 会话 | `readerQaSessions`、`readerSelectedQaSessionId`、`readerQaInput`、`readerQaAttachments`、`readerSelectedQaPresetId`、`readerQaRagEnabled`、`readerQaAnswerRenderMode`、`readerQaReasoningEffort`、`readerQaRunningSessionIds`、`readerQaError` |
 | 笔记 | `readerNotes`、`readerActiveNoteId`、`readerNotesLoading`、`readerNotesSaving`、`readerNotesError` |
-| 布局与面板 | `readerAssistantActivePanel`、`readerAssistantDetached`、`readerAssistantPanelWidth`、`readerAssistantPanelResizing` |
 | 桥接 | `readerBridges`（命令式 bridge，最复杂，最后处理） |
 
-**建议两阶段推进**
+**推进方式：一次只动一个分片**，顺序为「布局与面板 → QA 会话 → 笔记 → 桥接」。每刀完成即 build + test + 阅读器实机回归，合并后再开下一刀。第一刀（布局与面板，4 个状态）风险最低，也用来验证 store 模式是否可行。
 
-1. **先补测试**：为 QA 会话的增删改、笔记的保存/冲突、翻译显示模式切换补基础测试（可在 `tests/` 下用 Node test runner 覆盖纯逻辑部分，把状态迁移抽成纯函数）。
-2. **再迁移**：新状态一律先进 store；旧状态按「布局与面板 → QA 会话 → 笔记 → 桥接」顺序逐个迁移，每迁一个分片跑一次 `npm run build` + `npm test` + 阅读器实机回归（打开一篇文献、提问、写笔记、切换译文）。
+**每刀的共同约定**：
 
-**验收**：`DocumentReaderTab` 的 props 数从 62 降到 20 以内；阅读器四项核心流程（打开文档、RAG 问答、笔记保存、译文切换）行为不变。
+1. 新建 `src/stores/useReader<X>Store.ts`（zustand，与 `useTabsStore` / `useThemeStore` 同风格）。
+2. 下游组件**仍通过 props 接收**这些值——store 只把状态所有权上移，不改变数据流方向，这样 62 个 props 的形状不会在迁移中反复变动。
+3. localStorage 的键名与 clamp 边界必须原样保留。
+4. 若某组状态与 bridge / 内联回调强耦合、无法干净抽出，立即停止并报告耦合点，不要为了完成迁移而改写阅读器主流程。
 
-### T9　Agent wheel delegate 触控板惯性（待确认，可能不是缺陷）
+**验收（每刀）**：build + 全量测试全绿；为新增 store 补测试（默认值 / setter / clamp 边界 / 持久化）；实机回归该分片涉及的所有交互，侧栏拖动后松手固定是重点（2026-11-01 修过的问题，勿退化）。
 
-来源：`docs/plans/2026-09-23-agent-module-review-and-fix-plan.md` 第 86 行——「wheel delegate 捕获阶段劫持滚轮（疑似）：`src/hooks/useWheelScrollDelegate.ts`（141 行，第 106 行 `scrollTop += normalizedDeltaY`）命中委派时 `preventDefault` + 手动累加 `scrollTop`，丢失触控板惯性；聊天容器内 3 处嵌套滚动区依赖 delegate 串联，失效时出现内外都滚不动的死角」。
+**总目标**：`DocumentReaderTab` 的 props 数从 62 降到 20 以内；打开文档、RAG 问答、笔记保存、译文切换四项核心流程行为不变。
 
-该计划将此项标为「疑似问题，需运行态验证后另行处理」，至今未验证。
+### T9　Agent wheel delegate 触控板惯性（✗ 已关闭，2026-11-02）
 
-**第一步不是改代码，而是复现**：在触控板设备上滚 Agent 聊天区，观察是否有惯性丢失或内外都滚不动的死角。**若无复现，直接关闭该项并更新计划文档**，不要凭静态推演改动滚动实现。
+**关闭理由**：该问题（`src/hooks/useWheelScrollDelegate.ts` 第 106 行手动累加 `scrollTop` 导致触控板惯性丢失）**只能在触控板设备上复现**。本项目日常在台式工作站上用鼠标滚轮，没有惯性可丢，无法构造复现条件。
+
+自 2026-09-23 提出至今未验证，也未收到任何实际影响反馈，属于「静态推演得到、从未观察到」的疑似问题。继续挂在待办里会让清单看起来永远做不完，故关闭。
+
+**若将来换了触控板设备且确实感到 Agent 聊天区滚动手感异常**，按以下顺序重开：先在触控板上滚聊天区确认是否有惯性丢失或内外都滚不动的死角；确认后再考虑改动 `useWheelScrollDelegate` 的委派策略，不要凭静态推演直接改滚动实现。
 
 ## 二、建议的会话切分
 
 | 会话 | 任务 | 依赖 | 预估 |
 | --- | --- | --- | --- |
-| A | T1 + T2 | 无 | 半天 |
-| B | T3 | 无 | 1–2 天 |
-| C | T4 + T5 + T7 | T3 完成后再做更省事（避免同一文件反复改） | 1–2 天 |
-| D | T6 | 无 | 1 天 |
-| E | T8 的阶段 1（补测试） | 无 | 1–2 天 |
-| F | T8 的阶段 2（迁移） | E 完成 | 2–3 天 |
-| G | T9 | 需要触控板实机 | 半天 |
+| A | T1 + T2 | 无 | ✅ 已完成 |
+| B | T3 | 无 | ✅ 已完成 |
+| C | T4 + T5 + T7 | T3 后 | ✅ 已完成 |
+| D | T6 | 无 | ✅ 已完成 |
+| E | T8 第一刀：布局与面板（4 个状态） | 无 | 半天 |
+| F | T8 后续刀：QA 会话 → 笔记 → 桥接 | 每刀依赖上一刀合并 | 每刀 1–2 天 |
 
-**并行建议**：A、B、D 互不冲突，可同时开；C 与 B 会碰同一批文件，串行更安全。
+**并行建议**：剩余只有 T8，且它是同一条链路上的逐刀推进，应串行。每刀完成即合并 + 实机回归，不要攒在一个分支里。
 
 ## 三、每会话的公共约束
 
