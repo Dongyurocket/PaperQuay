@@ -66,6 +66,7 @@ import {
 } from './readerWorkspaceShared';
 import { useReaderLayoutStore } from '../../stores/useReaderLayoutStore';
 import { useReaderQaStore } from '../../stores/useReaderQaStore';
+import { useReaderBridgeStore } from '../../stores/useReaderBridgeStore';
 import {
   mergeLocalPdfPath,
   createNativeLibraryWorkspaceItem,
@@ -106,32 +107,6 @@ function isNoteAnchorJumpForWorkspace(
   workspaceId: string,
 ) {
   return Boolean(detail && resolveNoteAnchorWorkspaceId(detail) === workspaceId);
-}
-
-function areReaderTabBridgeStatesEqual(
-  left: ReaderTabBridgeState | null | undefined,
-  right: ReaderTabBridgeState | null | undefined,
-) {
-  if (left === right) {
-    return true;
-  }
-
-  if (!left || !right) {
-    return false;
-  }
-
-  return (
-    left.translating === right.translating &&
-    left.translatedCount === right.translatedCount &&
-    left.assistantSidebarProps === right.assistantSidebarProps &&
-    left.onDetachAssistant === right.onDetachAssistant &&
-    left.onAttachAssistant === right.onAttachAssistant &&
-    left.onTranslate === right.onTranslate &&
-    left.onCancelTranslate === right.onCancelTranslate &&
-    left.onClearTranslations === right.onClearTranslations &&
-    left.onCloudParse === right.onCloudParse &&
-    left.onGenerateSummary === right.onGenerateSummary
-  );
 }
 
 function Reader({ workspaceActive = true }: ReaderProps) {
@@ -176,7 +151,8 @@ function Reader({ workspaceActive = true }: ReaderProps) {
   const [nativeLibraryItems, setNativeLibraryItems] = useState<WorkspaceItem[]>([]);
   const [selectedLibraryItemId, setSelectedLibraryItemId] = useState<string | null>(null);
   const [libraryLoading, setLibraryLoading] = useState(false);
-  const [readerBridges, setReaderBridges] = useState<Record<string, ReaderTabBridgeState>>({});
+  const readerBridges = useReaderBridgeStore((state) => state.readerBridges);
+  const setReaderBridgeState = useReaderBridgeStore((state) => state.setBridgeState);
   const [recentReaderTabIds, setRecentReaderTabIds] = useState<string[]>([]);
   const readerAssistantActivePanel = useReaderLayoutStore((state) => state.assistantActivePanel);
   const setReaderAssistantActivePanel = useReaderLayoutStore((state) => state.setAssistantActivePanel);
@@ -690,27 +666,8 @@ function Reader({ workspaceActive = true }: ReaderProps) {
   }, [l, updateNativeLibrarySettings]);
 
   const handleBridgeStateChange = useCallback((tabId: string, bridge: ReaderTabBridgeState | null) => {
-    setReaderBridges((current) => {
-      if (!bridge) {
-        if (!(tabId in current)) {
-          return current;
-        }
-
-        const next = { ...current };
-        delete next[tabId];
-        return next;
-      }
-
-      if (areReaderTabBridgeStatesEqual(current[tabId], bridge)) {
-        return current;
-      }
-
-      return {
-        ...current,
-        [tabId]: bridge,
-      };
-    });
-  }, []);
+    setReaderBridgeState(tabId, bridge);
+  }, [setReaderBridgeState]);
 
   const openNoteAnchorJump = useCallback(
     async (detail: JumpToNoteAnchorEventDetail) => {
