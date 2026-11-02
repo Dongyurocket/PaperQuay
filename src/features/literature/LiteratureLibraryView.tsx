@@ -132,6 +132,8 @@ import {
   resolveSelectedPaperId,
   type LiteratureLibraryDemoState,
 } from './literatureLibraryUtils';
+import { confirmAction } from '../../ui/confirmHost';
+import { toast } from '../../ui/toast';
 
 interface LiteratureLibraryViewProps {
   onOpenPaper: (paper: LiteraturePaper) => void;
@@ -2185,10 +2187,13 @@ export default function LiteratureLibraryView({
       ]);
 
       if (originalPages && translatedPages && originalPages !== translatedPages) {
-        const proceed = window.confirm(l(
+        const proceed = await confirmAction({
+          title: l('翻译版 PDF 页数与原文不一致', 'Translated PDF page count differs'),
+          description: l(
           `翻译版 PDF 页数（${translatedPages} 页）与原版（${originalPages} 页）不一致，对照阅读时页码可能错位。仍要附加吗？`,
           `The translated PDF has ${translatedPages} pages, but the original has ${originalPages}. Page alignment in compare mode may be off. Attach anyway?`,
-        ));
+          ),
+        });
 
         if (!proceed) {
           setStatusMessage(l('已取消附加翻译版 PDF', 'Translated PDF attachment cancelled'));
@@ -3079,7 +3084,9 @@ export default function LiteratureLibraryView({
             onSortChange={(sortBy, sortDirection) => setPaperSort({ sortBy, sortDirection })}
             onTitleDisplayModeChange={setTitleDisplayMode}
             onImportPdfs={() => void handleImportPdfs()}
-            onRefresh={() => void refreshAll()}
+            onRefresh={() => void refreshAll()
+              .then(() => toast.success(l('文献库已刷新', 'Library refreshed')))
+              .catch((nextError: unknown) => toast.error(nextError instanceof Error ? nextError.message : l('刷新失败', 'Refresh failed')))}
             onSelectPaper={handleSelectPaperWithModifiers}
             onOpenPaper={onOpenPaper}
             onPaperDragStart={handlePaperDragStart}

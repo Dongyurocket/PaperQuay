@@ -98,6 +98,8 @@ import {
   resolveAgentWorkspacePaperScope,
 } from './agentPaperScopes';
 import { createAgentStreamMessageBuffer } from './agentStreamMessageBuffer';
+import { confirmAction } from '../../ui/confirmHost';
+import { toast } from '../../ui/toast';
 
 const AGENT_CHAT_AUTO_SCROLL_BOTTOM_THRESHOLD = 96;
 
@@ -2270,10 +2272,13 @@ function AgentWorkspace() {
         const capabilityCheckpoint = latestComparativeSurveyCheckpoint(events);
 
         if (capabilityCheckpoint) {
-          const resumeCapability = window.confirm(l(
-            '上次对比调研被中断。是否从最近完成的阶段继续？',
-            'The previous comparative survey was interrupted. Continue from the most recently completed stage?',
-          ));
+          const resumeCapability = await confirmAction({
+            title: l('继续上次对比调研', 'Resume the previous comparative survey'),
+            description: l(
+              '上次对比调研被中断。是否从最近完成的阶段继续？',
+              'The previous comparative survey was interrupted. Continue from the most recently completed stage?',
+            ),
+          });
 
           await finishAgentRun({ runId: interruptedRun.runId, status: 'aborted' }).catch(() => {});
 
@@ -2310,10 +2315,13 @@ function AgentWorkspace() {
           return;
         }
 
-        const resumeLoop = window.confirm(l(
-          '上次 Agent 运行被中断。是否从最近完整轮次恢复到输入区继续？',
-          'The previous Agent run was interrupted. Restore the most recent complete turn to continue?',
-        ));
+        const resumeLoop = await confirmAction({
+          title: l('恢复上次运行', 'Resume the previous run'),
+          description: l(
+            '上次 Agent 运行被中断。是否从最近完整轮次恢复到输入区继续？',
+            'The previous Agent run was interrupted. Restore the most recent complete turn to continue?',
+          ),
+        });
         await finishAgentRun({ runId: interruptedRun.runId, status: 'aborted' }).catch(() => {});
 
         if (!resumeLoop) {
@@ -2357,7 +2365,16 @@ function AgentWorkspace() {
     })();
   };
 
-  const handleDeleteHistorySession = (sessionId: string) => {
+  const handleDeleteHistorySession = async (sessionId: string) => {
+    const confirmed = await confirmAction({
+      title: l('删除该会话', 'Delete this chat'),
+      description: l('该会话的记录将被删除，且无法恢复。', 'This chat will be removed permanently.'),
+      confirmLabel: l('删除', 'Delete'),
+      danger: true,
+    });
+
+    if (!confirmed) return;
+
     // 删除前先中止该会话仍在运行的 run，避免孤儿 run 继续消耗 token 且无法取消。
     const controller = abortControllersRef.current.get(sessionId);
 
@@ -2393,7 +2410,20 @@ function AgentWorkspace() {
     setStatusMessage(l('已删除 Agent 历史对话。', 'Deleted the Agent chat history item.'));
   };
 
-  const handleClearAgentHistory = () => {
+  const handleClearAgentHistory = async () => {
+    // 该操作会删除全部会话且不可撤销，此前没有任何确认，属于误点即丢数据。
+    const confirmed = await confirmAction({
+      title: l('清空历史记录', 'Clear history'),
+      description: l(
+        '将删除全部 Agent 会话记录，且无法撤销。正在运行的会话会先被中止。',
+        'All agent sessions will be deleted and cannot be restored. Running sessions are aborted first.',
+      ),
+      confirmLabel: l('清空', 'Clear'),
+      danger: true,
+    });
+
+    if (!confirmed) return;
+
     const nextSessionId = newAgentSessionId();
     const nextMessages = [createLocalizedWelcomeMessage()];
 
@@ -2417,6 +2447,7 @@ function AgentWorkspace() {
     setSelectedAgentPresetId((current) => current ?? agentModelPresets[0]?.id ?? null);
     setHistorySessions([]);
     setStatusMessage(l('已清空 Agent 历史记录。', 'Cleared Agent history.'));
+    toast.success(l('已清空 Agent 历史记录', 'Agent history cleared'));
   };
 
   const formatHistoryTime = (timestamp: number) =>

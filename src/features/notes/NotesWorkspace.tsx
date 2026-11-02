@@ -61,6 +61,7 @@ import {
 import { extractOutline, noteContentToTiptap } from './notesTiptap';
 import { resolveNoteAnchorLocation } from './noteAnchorLocation.ts';
 import { extractNoteReferences } from './noteReferences';
+import { confirmAction } from '../../ui/confirmHost';
 
 const NOTE_FOLDERS_STORAGE_KEY = 'paperquay:note-folders:v1';
 const NOTE_FOLDERS_MIGRATION_KEY = 'paperquay:note-folders-migrated:v1';
@@ -1042,14 +1043,20 @@ export function NotesWorkspace({ workspaceActive = true }: { workspaceActive?: b
     }
   }, [folderEditDraft, setTag]);
 
-  const deleteFolder = useCallback((folder: NoteFolder) => {
+  const deleteFolder = useCallback(async (folder: NoteFolder) => {
     const removedIds = new Set([folder.id, ...getFolderDescendantIds(folder.id, folders)]);
     const hasNotes = notes.some((note) => note.folderId && removedIds.has(note.folderId));
     const message = hasNotes
       ? `删除“${folder.name}”及其子分类？其中的笔记会移动到未分类。`
       : `删除“${folder.name}”及其子分类？`;
 
-    if (!window.confirm(message)) return;
+    const confirmed = await confirmAction({
+      title: `删除分类「${folder.name}」`,
+      description: message,
+      danger: true,
+    });
+
+    if (!confirmed) return;
 
     const previousActiveNoteId = activeNoteId;
     setFolders((current) => current.filter((item) => !removedIds.has(item.id)));

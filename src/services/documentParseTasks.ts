@@ -53,6 +53,11 @@ export function subscribeDocumentParseTasks(notify: () => void): () => void {
 }
 export function getDocumentParseTask(documentKey: string) { return tasks.get(documentKey); }
 
+/** 供全局任务中心枚举当前所有解析任务（含已结束但尚未清理的）。 */
+export function listDocumentParseTasks(): DocumentParseTask[] {
+  return Array.from(tasks.values());
+}
+
 export function reportDocumentParseFailure(
   documentKey: string,
   taskId: string,

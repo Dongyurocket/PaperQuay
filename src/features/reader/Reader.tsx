@@ -79,6 +79,7 @@ import {
   resolveLanguageLabel,
   type PreferencesSectionKey,
 } from './readerShared';
+import { confirmAction } from '../../ui/confirmHost';
 
 interface ReaderProps {
   workspaceActive?: boolean;
@@ -888,10 +889,13 @@ function Reader({ workspaceActive = true }: ReaderProps) {
         ]);
 
         if (originalPages && translatedPages && originalPages !== translatedPages) {
-          const proceed = window.confirm(l(
+          const proceed = await confirmAction({
+          title: l('翻译版 PDF 页数与原文不一致', 'Translated PDF page count differs'),
+          description: l(
             `翻译版 PDF 页数（${translatedPages} 页）与原版（${originalPages} 页）不一致，对照阅读时页码可能错位。仍要附加吗？`,
             `The translated PDF has ${translatedPages} pages, but the original has ${originalPages}. Page alignment in compare mode may be off. Attach anyway?`,
-          ));
+          ),
+        });
 
           if (!proceed) {
             return false;

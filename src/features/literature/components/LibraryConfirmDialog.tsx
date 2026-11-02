@@ -1,5 +1,9 @@
-import { AlertTriangle, X } from 'lucide-react';
+import { ConfirmDialog } from '../../../ui/dialog';
 
+/**
+ * 文库侧确认框。保留原有 props 以不触碰调用点；
+ * 实现已收敛到共享的 ConfirmDialog（Portal、焦点陷阱、Esc、滚动锁统一由 src/ui/dialog.tsx 负责）。
+ */
 interface LibraryConfirmDialogProps {
   open: boolean;
   title: string;
@@ -12,77 +16,6 @@ interface LibraryConfirmDialogProps {
   onConfirm: () => void;
 }
 
-export default function LibraryConfirmDialog({
-  open,
-  title,
-  description,
-  confirmLabel,
-  cancelLabel,
-  busy = false,
-  danger = false,
-  onClose,
-  onConfirm,
-}: LibraryConfirmDialogProps) {
-  if (!open) {
-    return null;
-  }
-
-  return (
-    <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-950/28 px-4 backdrop-blur-[2px] dark:bg-black/45">
-      <div className="pq-card w-full max-w-md p-5">
-        <div className="flex items-start gap-4">
-          <div
-            className={
-              danger
-                ? 'mt-0.5 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-rose-50 text-rose-600 dark:bg-rose-400/10 dark:text-rose-200'
-                : 'mt-0.5 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-amber-50 text-amber-600 dark:bg-amber-300/10 dark:text-amber-200'
-            }
-          >
-            <AlertTriangle className="h-5 w-5" strokeWidth={1.9} />
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="flex items-start justify-between gap-3">
-              <h2 className="text-lg font-semibold text-[var(--pq-text)]">
-                {title}
-              </h2>
-              <button
-                type="button"
-                onClick={onClose}
-                disabled={busy}
-                className="pq-icon-button h-8 w-8 shrink-0 disabled:opacity-60"
-              >
-                <X className="h-4 w-4" strokeWidth={1.9} />
-              </button>
-            </div>
-            <p className="mt-2 text-sm leading-6 text-[var(--pq-text-muted)]">
-              {description}
-            </p>
-          </div>
-        </div>
-
-        <div className="mt-6 flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={busy}
-            className="pq-button px-4 py-2.5 text-sm disabled:opacity-60"
-          >
-            {cancelLabel}
-          </button>
-          <button
-            type="button"
-            onClick={onConfirm}
-            disabled={busy}
-            className={
-              danger
-                ? 'rounded-2xl bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-rose-700 disabled:opacity-60'
-                : 'pq-button-primary px-4 py-2.5 text-sm disabled:opacity-60'
-            }
-          >
-            {confirmLabel}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
+export default function LibraryConfirmDialog(props: LibraryConfirmDialogProps) {
+  return <ConfirmDialog {...props} />;
 }

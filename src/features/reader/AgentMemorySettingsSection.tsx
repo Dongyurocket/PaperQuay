@@ -9,6 +9,7 @@ import {
 } from '../../services/agentMemory';
 import { SettingsField, SettingsSelect } from './readerPreferencesPrimitives';
 import type { ReaderPreferencesLocalizer } from './readerPreferencesTypes';
+import { confirmAction } from '../../ui/confirmHost';
 
 function todayDate(): string {
   return new Date().toISOString().slice(0, 10);
@@ -75,7 +76,13 @@ export function AgentMemorySettingsSection({
   const clear = async () => {
     const label = file === 'trace' ? l('今日 L1 trace', 'today\'s L1 trace') : file === 'topics' ? 'L2' : 'L3';
 
-    if (!window.confirm(l(`确认清空 ${label}？`, `Clear ${label}?`))) {
+    const confirmed = await confirmAction({
+      title: l('确认清空 ${label}？', 'Clear ${label}?'),
+      description: l('该操作不可撤销。', 'This action cannot be undone.'),
+      danger: true,
+    });
+
+    if (!confirmed) {
       return;
     }
 

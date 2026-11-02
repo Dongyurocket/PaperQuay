@@ -33,6 +33,11 @@ import { AppLocaleProvider } from '../i18n/uiLanguage';
 import { getCurrentWindow } from '../platform/electron/window';
 import { useThemeStore } from '../stores/useThemeStore';
 import { HOME_TAB_ID, useTabsStore } from '../stores/useTabsStore';
+import { Toaster } from '../ui/toast';
+import { TaskCenter } from '../ui/taskCenter';
+import { ConfirmHost } from '../ui/confirmHost';
+import { CommandPalette } from '../ui/commandPalette';
+import { registerCommands, useGlobalShortcuts } from '../ui/commands';
 
 type AppWorkspaceKey = 'library' | 'agent' | 'notes' | 'review' | 'graph';
 type UiLanguage = 'zh-CN' | 'en-US';
@@ -147,6 +152,7 @@ function App() {
   const openReviewTab = useTabsStore((state) => state.openReviewTab);
   const openGraphTab = useTabsStore((state) => state.openGraphTab);
   const [uiLanguage, setUiLanguage] = useState<UiLanguage>(loadUiLanguage);
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const { mode: themeMode, setMode: setThemeMode } = useThemeStore();
   const isEnglish = uiLanguage === 'en-US';
   const activeTab = useMemo(
@@ -248,6 +254,97 @@ function App() {
   const handleOpenPreferences = () => {
     emitOpenPreferences();
   };
+
+  // 全局命令与快捷键：App 层统一注册导航类动作，feature 层可按需追加。
+  useEffect(() => {
+    return registerCommands([
+      {
+        id: 'nav.library',
+        title: isEnglish ? 'Go to Library' : '切换到文库',
+        group: isEnglish ? 'Navigation' : '导航',
+        keywords: ['library', 'papers', 'wenku'],
+        run: () => setActiveTab(HOME_TAB_ID),
+      },
+      {
+        id: 'nav.agent',
+        title: isEnglish ? 'Go to Agent' : '切换到 Agent',
+        group: isEnglish ? 'Navigation' : '导航',
+        keywords: ['agent', 'chat', 'ask'],
+        run: () => openAgentTab(),
+      },
+      {
+        id: 'nav.notes',
+        title: isEnglish ? 'Go to Notes' : '切换到笔记',
+        group: isEnglish ? 'Navigation' : '导航',
+        keywords: ['notes', 'bijij'],
+        run: () => openNotesTab(),
+      },
+      {
+        id: 'nav.review',
+        title: isEnglish ? 'Go to Review' : '切换到综述',
+        group: isEnglish ? 'Navigation' : '导航',
+        keywords: ['review', 'zongshu'],
+        run: () => openReviewTab(),
+      },
+      {
+        id: 'nav.graph',
+        title: isEnglish ? 'Go to Knowledge Graph' : '切换到图谱',
+        group: isEnglish ? 'Navigation' : '导航',
+        keywords: ['graph', 'tuopu'],
+        run: () => openGraphTab(),
+      },
+      {
+        id: 'tab.close',
+        title: isEnglish ? 'Close current tab' : '关闭当前标签',
+        group: isEnglish ? 'Tabs' : '标签',
+        shortcut: 'mod+w',
+        run: () => {
+          const { activeTabId: current, tabs: currentTabs } = useTabsStore.getState();
+          const tab = currentTabs.find((item) => item.id === current);
+
+          // 文库标签是常驻首页，不允许关闭。
+          if (!tab || tab.type === 'library') return;
+          closeTab(tab.id);
+        },
+      },
+      {
+        id: 'app.settings',
+        title: isEnglish ? 'Open Settings' : '打开设置',
+        group: isEnglish ? 'App' : '应用',
+        shortcut: 'mod+,',
+        keywords: ['settings', 'shezhi', 'preferences'],
+        run: () => handleOpenPreferences(),
+      },
+      {
+        id: 'app.toggle-theme',
+        title: isEnglish ? 'Toggle theme' : '切换浅色/深色主题',
+        group: isEnglish ? 'App' : '应用',
+        keywords: ['theme', 'dark', 'light', 'zhuti'],
+        run: () => handleCycleThemeMode(),
+      },
+      {
+        id: 'app.open-pdf',
+        title: isEnglish ? 'Open a PDF' : '打开 PDF 文件',
+        group: isEnglish ? 'App' : '应用',
+        keywords: ['pdf', 'open', 'import'],
+        run: () => handleOpenStandalonePdf(),
+      },
+    ]);
+  }, [
+    closeTab,
+    handleOpenStandalonePdf,
+    isEnglish,
+    openAgentTab,
+    openGraphTab,
+    openNotesTab,
+    openReviewTab,
+    setActiveTab,
+    themeMode,
+  ]);
+
+  useGlobalShortcuts({
+    onCommandPalette: () => setCommandPaletteOpen((value) => !value),
+  });
 
   const handleCycleThemeMode = () => {
     const nextMode = themeMode === 'light' ? 'dark' : themeMode === 'dark' ? 'system' : 'light';
@@ -482,6 +579,11 @@ function App() {
             </div>
           </main>
         </div>
+
+        <Toaster />
+        <TaskCenter />
+        <ConfirmHost />
+        <CommandPalette open={commandPaletteOpen} onClose={() => setCommandPaletteOpen(false)} />
       </div>
     </AppLocaleProvider>
   );
