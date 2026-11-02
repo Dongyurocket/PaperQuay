@@ -74,7 +74,7 @@ export default function LibraryTextInputDialog({
         </div>
 
         <label className="mt-5 block">
-          <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-400 dark:text-[#8d8d8d]">
+          <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-[var(--pq-text-faint)] dark:text-[#8d8d8d]">
             {label}
           </span>
           <input

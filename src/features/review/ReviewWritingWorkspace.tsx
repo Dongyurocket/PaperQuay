@@ -1198,7 +1198,7 @@ export default function ReviewWritingWorkspace() {
   };
 
   return (
-    <div className="pq-saas-scope flex h-full min-h-0 overflow-hidden rounded-[var(--pq-radius-md)] bg-[var(--pq-surface-1)]">
+    <div className="flex h-full min-h-0 overflow-hidden rounded-[var(--pq-radius-md)] bg-[var(--pq-surface-1)]">
       <aside className="flex w-[300px] shrink-0 flex-col border-r border-[var(--pq-border)] bg-[var(--pq-sidebar)]">
         <div className="border-b border-[var(--pq-border)] px-4 py-4">
           <div className="flex items-center gap-2">
@@ -1363,7 +1363,7 @@ export default function ReviewWritingWorkspace() {
                         {item.title}
                       </span>
                       {typeof item.score === 'number' && item.score > 0 ? (
-                        <span className="shrink-0 rounded-md bg-[var(--pq-surface)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--pq-text-muted)]">
+                        <span className="shrink-0 rounded-md bg-[var(--pq-surface)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--pq-text-muted)]">
                           {item.score.toFixed(1)}
                         </span>
                       ) : null}
@@ -1373,13 +1373,13 @@ export default function ReviewWritingWorkspace() {
                     </div>
                     {item.figures?.length ? (
                       <div className="mt-1 flex flex-wrap gap-1">
-                        <span className="rounded-md border border-[var(--pq-border)] bg-[var(--pq-surface)] px-1.5 py-0.5 text-[10px] text-[var(--pq-text-muted)]">
+                        <span className="rounded-md border border-[var(--pq-border)] bg-[var(--pq-surface)] px-1.5 py-0.5 text-[11px] text-[var(--pq-text-muted)]">
                           {l(`可用图表 ${item.figures.length}`, `${item.figures.length} figure/table candidate(s)`)}
                         </span>
                         {item.figures.slice(0, 3).map((figure) => (
                           <span
                             key={figure.id}
-                            className="max-w-[140px] truncate rounded-md bg-[var(--pq-accent-bg)] px-1.5 py-0.5 text-[10px] text-[var(--pq-accent)]"
+                            className="max-w-[140px] truncate rounded-md bg-[var(--pq-accent-bg)] px-1.5 py-0.5 text-[11px] text-[var(--pq-accent)]"
                             title={figure.caption || figure.title}
                           >
                             {figure.id}

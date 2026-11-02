@@ -118,17 +118,17 @@ export function AgentMemorySettingsSection({
               type="date"
               value={date}
               onChange={(event) => setDate(event.target.value || todayDate())}
-              className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-900 outline-none dark:border-white/10 dark:bg-[var(--pq-surface-2)] dark:text-[var(--pq-text)]"
+              className="rounded-xl border border-[var(--pq-border)] bg-[var(--pq-surface-2)] px-3 py-2.5 text-sm text-[var(--pq-text)] outline-none dark:border-white/10 dark:bg-[var(--pq-surface-2)] dark:text-[var(--pq-text)]"
             />
           ) : null}
         </div>
         <textarea
           value={content}
           onChange={(event) => setContent(event.target.value)}
-          className="min-h-44 w-full resize-y rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 font-mono text-xs leading-5 text-slate-900 outline-none focus:border-[var(--pq-accent)] focus:bg-white dark:border-white/10 dark:bg-[var(--pq-surface-2)] dark:text-[var(--pq-text)]"
+          className="min-h-44 w-full resize-y rounded-xl border border-[var(--pq-border)] bg-[var(--pq-surface-2)] px-3 py-2.5 font-mono text-xs leading-5 text-[var(--pq-text)] outline-none focus:border-[var(--pq-accent)] focus:bg-white dark:border-white/10 dark:bg-[var(--pq-surface-2)] dark:text-[var(--pq-text)]"
           spellCheck={false}
         />
-        <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500 dark:text-[var(--pq-text-faint)]">
+        <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-[var(--pq-text-muted)] dark:text-[var(--pq-text-faint)]">
           <span>{size} B{modifiedAt ? ` · ${new Date(modifiedAt).toLocaleString()}` : ''}</span>
           <div className="flex items-center gap-2">
             <button type="button" onClick={() => void load()} disabled={loading || saving} className="pq-icon-button h-8 w-8" title={l('刷新', 'Refresh')}>
@@ -138,13 +138,13 @@ export function AgentMemorySettingsSection({
               <Save className="h-3.5 w-3.5" />
               {l('保存', 'Save')}
             </button>
-            <button type="button" onClick={() => void clear()} disabled={loading || saving || !content} className="pq-button px-3 py-1.5 text-xs text-rose-600 dark:text-rose-300">
+            <button type="button" onClick={() => void clear()} disabled={loading || saving || !content} className="pq-button px-3 py-1.5 text-xs text-[var(--pq-danger)] dark:text-rose-300">
               <Trash2 className="h-3.5 w-3.5" />
               {l('清空', 'Clear')}
             </button>
           </div>
         </div>
-        {error ? <div className="text-xs text-rose-600 dark:text-rose-300">{error}</div> : null}
+        {error ? <div className="text-xs text-[var(--pq-danger)] dark:text-rose-300">{error}</div> : null}
       </div>
     </SettingsField>
   );

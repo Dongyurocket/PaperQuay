@@ -170,7 +170,7 @@ function ReviewFigureThumbnail({
           draggable={false}
         />
       ) : (
-        <span className="flex flex-col items-center gap-1 text-[10px] text-[var(--pq-text-faint)]">
+        <span className="flex flex-col items-center gap-1 text-[11px] text-[var(--pq-text-faint)]">
           {loading ? (
             <Loader2 className="h-4 w-4 animate-spin" strokeWidth={1.8} />
           ) : (
@@ -410,13 +410,13 @@ export function ReviewBlueprintEditor({
                       {(section.evidenceIds.length > 0 ? section.evidenceIds : ['P1']).slice(0, 6).map((id) => (
                         <span
                           key={id}
-                          className="rounded-md bg-[var(--pq-accent-bg)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--pq-accent)]"
+                          className="rounded-md bg-[var(--pq-accent-bg)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--pq-accent)]"
                         >
                           {id}
                         </span>
                       ))}
                       {section.retrievalNotes ? (
-                        <span className="max-w-[220px] truncate rounded-md border border-[var(--pq-border)] bg-[var(--pq-surface)] px-1.5 py-0.5 text-[10px] text-[var(--pq-text-muted)]">
+                        <span className="max-w-[220px] truncate rounded-md border border-[var(--pq-border)] bg-[var(--pq-surface)] px-1.5 py-0.5 text-[11px] text-[var(--pq-text-muted)]">
                           {section.retrievalNotes}
                         </span>
                       ) : null}
@@ -432,7 +432,7 @@ export function ReviewBlueprintEditor({
           <div className="space-y-2 rounded-[var(--pq-radius-sm)] border border-[var(--pq-border)] bg-[var(--pq-bg-secondary)] p-3">
             <div className="flex items-center justify-between gap-3">
               <div className="text-xs font-semibold text-[var(--pq-text)]">{l('图表插入', 'Figures')}</div>
-              <span className="rounded-md bg-[var(--pq-surface)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--pq-text-muted)]">
+              <span className="rounded-md bg-[var(--pq-surface)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--pq-text-muted)]">
                 {blueprint.figures.length}/{MAX_REVIEW_FIGURES_PER_REVIEW}
               </span>
             </div>
@@ -457,11 +457,11 @@ export function ReviewBlueprintEditor({
                     <ReviewFigureThumbnail figure={figure} l={l} />
                     <span className="min-w-0">
                       <span className="flex min-w-0 items-center gap-1.5">
-                        <span className="shrink-0 rounded-md bg-[var(--pq-surface)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--pq-accent)]">
+                        <span className="shrink-0 rounded-md bg-[var(--pq-surface)] px-1.5 py-0.5 text-[11px] font-semibold text-[var(--pq-accent)]">
                           {figure.id}
                         </span>
                         {typeof figure.pageIndex === 'number' ? (
-                          <span className="shrink-0 rounded-md border border-[var(--pq-border)] px-1.5 py-0.5 text-[10px] text-[var(--pq-text-faint)]">
+                          <span className="shrink-0 rounded-md border border-[var(--pq-border)] px-1.5 py-0.5 text-[11px] text-[var(--pq-text-faint)]">
                             p.{figure.pageIndex + 1}
                           </span>
                         ) : null}

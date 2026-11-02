@@ -317,7 +317,7 @@ function inputValue(value: string): string | null {
 
 function FieldLabel({ children }: { children: string }) {
   return (
-    <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400 dark:text-[#8d8d8d]">
+    <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--pq-text-faint)] dark:text-[#8d8d8d]">
       {children}
     </div>
   );
@@ -430,10 +430,10 @@ function ProcessingActionTile({
         {busy ? <Loader2 className="h-4 w-4 animate-spin" strokeWidth={2} /> : icon}
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block text-sm font-semibold text-slate-800 dark:text-[#e8e8e8]">
+        <span className="block text-sm font-semibold text-[var(--pq-text)] dark:text-[#e8e8e8]">
           {title}
         </span>
-        <span className="mt-0.5 block truncate text-[11px] leading-4 text-slate-500 dark:text-[#a0a0a0]">
+        <span className="mt-0.5 block truncate text-[11px] leading-4 text-[var(--pq-text-muted)] dark:text-[#a0a0a0]">
           {description}
         </span>
       </span>
@@ -469,13 +469,13 @@ function TaskStatusPanel({
       className={[
         'rounded-lg border px-3.5 py-3',
         tone === 'rose'
-          ? 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-300/25 dark:bg-rose-300/10 dark:text-rose-200'
+          ? 'border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-danger-bg)] text-[var(--pq-danger)] dark:border-rose-300/25 dark:bg-rose-300/10 dark:text-rose-200'
           : '',
         tone === 'emerald'
-          ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-300/25 dark:bg-emerald-300/10 dark:text-emerald-200'
+          ? 'border-[color-mix(in_srgb,var(--pq-success)_28%,transparent)] bg-[var(--pq-success-bg)] text-[var(--pq-success)] dark:border-emerald-300/25 dark:bg-emerald-300/10 dark:text-emerald-200'
           : '',
         tone === 'teal'
-          ? 'border-teal-200 bg-teal-50 text-teal-800 dark:border-teal-300/25 dark:bg-teal-300/10 dark:text-teal-100'
+          ? 'border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-[var(--pq-accent-bg)] text-[var(--pq-accent)] dark:border-teal-300/25 dark:bg-teal-300/10 dark:text-teal-100'
           : '',
       ].join(' ')}
     >
@@ -665,11 +665,11 @@ export default function LiteraturePaperDetails({
               <div className="min-w-0">
                 <h2 className="text-lg font-semibold leading-7">{titleDisplay?.primary}</h2>
                 {titleDisplay?.secondary ? (
-                  <p className="mt-1 text-sm leading-6 text-slate-600 dark:text-[#c3c3c3]">
+                  <p className="mt-1 text-sm leading-6 text-[var(--pq-text-muted)] dark:text-[#c3c3c3]">
                     {titleDisplay.secondary}
                   </p>
                 ) : null}
-                <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-[#a0a0a0]">
+                <p className="mt-2 text-sm leading-6 text-[var(--pq-text-muted)] dark:text-[#a0a0a0]">
                   {paperAuthors(selectedPaper, locale)}
                 </p>
               </div>
@@ -681,7 +681,7 @@ export default function LiteraturePaperDetails({
                   disabled={saving}
                   className={
                     selectedPaper.isFavorite
-                      ? 'pq-icon-button h-9 w-9 border border-amber-300/70 bg-amber-100 text-amber-700 disabled:opacity-60 dark:border-amber-300/25 dark:bg-amber-300/14 dark:text-amber-200'
+                      ? 'pq-icon-button h-9 w-9 border border-amber-300/70 bg-[var(--pq-warning-bg)] text-[var(--pq-warning)] disabled:opacity-60 dark:border-amber-300/25 dark:bg-amber-300/14 dark:text-amber-200'
                       : 'pq-icon-button h-9 w-9 border border-[var(--pq-border)] bg-white/65 text-[var(--pq-text-faint)] disabled:opacity-60'
                   }
                   title={selectedPaper.isFavorite ? l('取消收藏', 'Remove from favorites') : l('加入收藏', 'Add to favorites')}
@@ -719,10 +719,10 @@ export default function LiteraturePaperDetails({
               <section className="pq-card p-3">
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0">
-                    <div className="text-xs font-bold uppercase tracking-[0.16em] text-slate-400 dark:text-[#8d8d8d]">
+                    <div className="text-xs font-bold uppercase tracking-[0.16em] text-[var(--pq-text-faint)] dark:text-[#8d8d8d]">
                       {l('本地知识库', 'Local Knowledge Base')}
                     </div>
-                    <div className="mt-1 text-[11px] leading-5 text-slate-500 dark:text-[#a0a0a0]">
+                    <div className="mt-1 text-[11px] leading-5 text-[var(--pq-text-muted)] dark:text-[#a0a0a0]">
                       {selectedPaper.ragEnabled === false
                         ? l('已排除。重新加入后需要手动建立索引。', 'Excluded. Include it again, then build the index manually.')
                         : ragStatus === 'ready'
@@ -756,10 +756,10 @@ export default function LiteraturePaperDetails({
               <section className="pq-card p-3">
                 <div className="mb-2.5 flex items-center justify-between gap-3 px-1">
                   <div>
-                    <div className="text-xs font-bold uppercase tracking-[0.16em] text-slate-400 dark:text-[#8d8d8d]">
+                    <div className="text-xs font-bold uppercase tracking-[0.16em] text-[var(--pq-text-faint)] dark:text-[#8d8d8d]">
                       {l('文档处理', 'Document Pipeline')}
                     </div>
-                    <div className="mt-0.5 text-[11px] text-slate-500 dark:text-[#a0a0a0]">
+                    <div className="mt-0.5 text-[11px] text-[var(--pq-text-muted)] dark:text-[#a0a0a0]">
                       {l('解析、翻译和生成概览', 'Parse, translate, and generate overview')}
                     </div>
                   </div>
@@ -812,9 +812,9 @@ export default function LiteraturePaperDetails({
                   {translatedPdf ? (
                     <div className="flex items-center justify-between gap-2 rounded-xl border border-emerald-300/55 bg-emerald-50/70 px-3 py-2.5 dark:border-emerald-300/20 dark:bg-emerald-300/10">
                       <div className="flex min-w-0 items-center gap-2.5">
-                        <FileText className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-300" strokeWidth={1.9} />
+                        <FileText className="h-4 w-4 shrink-0 text-[var(--pq-success)] dark:text-emerald-300" strokeWidth={1.9} />
                         <div className="min-w-0">
-                          <div className="text-xs font-semibold text-emerald-800 dark:text-emerald-100">
+                          <div className="text-xs font-semibold text-[var(--pq-success)] dark:text-emerald-100">
                             {l('翻译版 PDF 已附加', 'Translated PDF attached')}
                           </div>
                           <div
@@ -830,7 +830,7 @@ export default function LiteraturePaperDetails({
                           type="button"
                           disabled={saving || !onAttachTranslatedPdf}
                           onClick={() => onAttachTranslatedPdf?.(selectedPaper)}
-                          className="rounded-lg p-1.5 text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-emerald-200 dark:hover:bg-emerald-300/15"
+                          className="rounded-lg p-1.5 text-[var(--pq-success)] transition hover:bg-[var(--pq-success-bg)] disabled:cursor-not-allowed disabled:opacity-50 dark:text-emerald-200 dark:hover:bg-emerald-300/15"
                           title={l('替换翻译版 PDF', 'Replace translated PDF')}
                           aria-label={l('替换翻译版 PDF', 'Replace translated PDF')}
                         >
@@ -840,7 +840,7 @@ export default function LiteraturePaperDetails({
                           type="button"
                           disabled={saving || !onRemoveTranslatedPdf}
                           onClick={() => onRemoveTranslatedPdf?.(selectedPaper)}
-                          className="rounded-lg p-1.5 text-rose-600 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-rose-300 dark:hover:bg-rose-300/15"
+                          className="rounded-lg p-1.5 text-[var(--pq-danger)] transition hover:bg-[var(--pq-danger-bg)] disabled:cursor-not-allowed disabled:opacity-50 dark:text-rose-300 dark:hover:bg-rose-300/15"
                           title={l('移除翻译版 PDF', 'Remove translated PDF')}
                           aria-label={l('移除翻译版 PDF', 'Remove translated PDF')}
                         >
@@ -904,7 +904,7 @@ export default function LiteraturePaperDetails({
                             })
                             .finally(() => setTitleTranslating(false));
                         }}
-                        className="mb-1 inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium text-indigo-600 transition hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-indigo-300 dark:hover:bg-indigo-300/10"
+                        className="mb-1 inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium text-[var(--pq-accent)] transition hover:bg-[var(--pq-accent-bg)] disabled:cursor-not-allowed disabled:opacity-50 dark:text-indigo-300 dark:hover:bg-indigo-300/10"
                         title={l('使用翻译模型生成中文标题', 'Generate Chinese title with the translation model')}
                       >
                         <Languages className="h-3 w-3" strokeWidth={1.9} />
@@ -1139,30 +1139,30 @@ export default function LiteraturePaperDetails({
                 <dl className="pq-card p-4 text-sm">
                   <div className="grid gap-3 sm:grid-cols-2">
                     <div>
-                      <dt className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400 dark:text-[#8d8d8d]">
+                      <dt className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--pq-text-faint)] dark:text-[#8d8d8d]">
                         {l('文献类型', 'Entry Type')}
                       </dt>
-                      <dd className="mt-1 font-medium text-slate-700 dark:text-[#e0e0e0]">
+                      <dd className="mt-1 font-medium text-[var(--pq-text-muted)] dark:text-[#e0e0e0]">
                         {itemTypeLabel(selectedPaper.itemType, l)}
                       </dd>
                     </div>
 
                     <div>
-                      <dt className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400 dark:text-[#8d8d8d]">
+                      <dt className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--pq-text-faint)] dark:text-[#8d8d8d]">
                         {selectedPaper.itemType === 'thesis'
                           ? l('学位授予机构', 'Institution / School')
                           : selectedPaper.itemType === 'report'
                             ? l('发布单位', 'Institution / Agency')
                             : l('期刊 / 会议 / 出版社', 'Publication / Publisher')}
                       </dt>
-                      <dd className="mt-1 text-slate-700 dark:text-[#e0e0e0]">
+                      <dd className="mt-1 text-[var(--pq-text-muted)] dark:text-[#e0e0e0]">
                         {selectedPaper.institution || selectedPaper.publisher || selectedPaper.publication || l('未设置', 'Not set')}
                       </dd>
                     </div>
                   </div>
 
                   {selectedPaper.volume || selectedPaper.issue || selectedPaper.pages || selectedPaper.reportNumber ? (
-                    <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 border-t border-[var(--pq-border)] pt-2.5 text-xs text-slate-600 dark:text-[#c0c0c0]">
+                    <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 border-t border-[var(--pq-border)] pt-2.5 text-xs text-[var(--pq-text-muted)] dark:text-[#c0c0c0]">
                       {selectedPaper.reportNumber ? (
                         <span><strong className="font-semibold">{l('报告号:', 'Report No:')}</strong> {selectedPaper.reportNumber}</span>
                       ) : null}
@@ -1179,7 +1179,7 @@ export default function LiteraturePaperDetails({
                   ) : null}
 
                   {selectedPaper.isbn || selectedPaper.issn ? (
-                    <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500 dark:text-[#9c9c9c]">
+                    <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-[var(--pq-text-muted)] dark:text-[#9c9c9c]">
                       {selectedPaper.isbn ? <span>ISBN: {selectedPaper.isbn}</span> : null}
                       {selectedPaper.issn ? <span>ISSN: {selectedPaper.issn}</span> : null}
                     </div>
@@ -1203,7 +1203,7 @@ export default function LiteraturePaperDetails({
 
                 {selectedPaper.tags.length > 0 ? (
                   <div>
-                    <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-[#8d8d8d]">
+                    <div className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--pq-text-faint)] dark:text-[#8d8d8d]">
                       {l('标签', 'Tags')}
                     </div>
                     <div className="mt-2 flex flex-wrap gap-2">
@@ -1221,7 +1221,7 @@ export default function LiteraturePaperDetails({
 
                 <section className="pq-card p-4">
                   <div className="flex items-center justify-between gap-3">
-                    <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-[#8d8d8d]">
+                    <div className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--pq-text-faint)] dark:text-[#8d8d8d]">
                       {l('AI 概览', 'AI Overview')}
                     </div>
                     {overviewSections.length > 0 ? (
@@ -1254,7 +1254,7 @@ export default function LiteraturePaperDetails({
                       </div>
 
                       <div className="rounded-xl border border-[var(--pq-border)] bg-white/54 px-4 py-4 dark:bg-white/5">
-                        <div className="text-sm font-semibold text-slate-800 dark:text-[#e0e0e0]">
+                        <div className="text-sm font-semibold text-[var(--pq-text)] dark:text-[#e0e0e0]">
                           {overviewSectionLabel(
                             activeOverviewSection.key,
                             activeOverviewSection.title,
@@ -1270,7 +1270,7 @@ export default function LiteraturePaperDetails({
                           activeOverviewSection.content,
                           activeOverviewSection.key,
                         ).length > 1 ? (
-                          <ul className="mt-3 space-y-2 text-sm leading-6 text-slate-600 dark:text-[#cfcfcf]">
+                          <ul className="mt-3 space-y-2 text-sm leading-6 text-[var(--pq-text-muted)] dark:text-[#cfcfcf]">
                             {splitOverviewListItems(
                               activeOverviewSection.content,
                               activeOverviewSection.key,
@@ -1282,7 +1282,7 @@ export default function LiteraturePaperDetails({
                             ))}
                           </ul>
                         ) : (
-                          <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-600 dark:text-[#cfcfcf]">
+                          <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-[var(--pq-text-muted)] dark:text-[#cfcfcf]">
                             {activeOverviewSection.content}
                           </p>
                         )}
@@ -1297,10 +1297,10 @@ export default function LiteraturePaperDetails({
 
                 {selectedPaper.userNote ? (
                   <div>
-                    <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-[#8d8d8d]">
+                    <div className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--pq-text-faint)] dark:text-[#8d8d8d]">
                       {l('用户笔记', 'User Note')}
                     </div>
-                    <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-600 dark:text-[#a0a0a0]">
+                    <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-[var(--pq-text-muted)] dark:text-[#a0a0a0]">
                       {selectedPaper.userNote}
                     </p>
                   </div>

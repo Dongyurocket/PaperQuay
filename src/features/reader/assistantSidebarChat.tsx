@@ -1001,7 +1001,7 @@ export function ChatWorkspacePanel({
     <div
       ref={panelRef}
       className={cn(
-        'pq-saas-scope pq-chat-workspace paperquay-assistant relative flex h-full min-h-0 overflow-hidden bg-transparent',
+        'pq-chat-workspace paperquay-assistant relative flex h-full min-h-0 overflow-hidden bg-transparent',
         workspaceMode && 'min-h-[520px]',
       )}
     >
@@ -1304,19 +1304,19 @@ export function ChatWorkspacePanel({
                         {/* Hover-reveal meta + actions row, below the answer */}
                         <div className="mt-2 flex items-center gap-2 text-[11px] text-[var(--pq-text-faint)] opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover:opacity-100">
                           {message.modelLabel ? (
-                            <span className="pq-chip px-2 py-0.5 text-[10px]">
+                            <span className="pq-chip px-2 py-0.5 text-[11px]">
                               {message.modelLabel}
                             </span>
                           ) : null}
                           {htmlAnswer ? (
-                            <span className="rounded-full border border-[var(--pq-accent-border)] bg-[var(--pq-accent-soft)] px-2 py-0.5 text-[10px] font-semibold text-[var(--pq-accent)]">
+                            <span className="rounded-full border border-[var(--pq-accent-border)] bg-[var(--pq-accent-soft)] px-2 py-0.5 text-[11px] font-semibold text-[var(--pq-accent)]">
                               HTML
                             </span>
                           ) : null}
                           {qaContextBadge ? (
                             <span
                               className={cn(
-                                'rounded-full px-2 py-0.5 text-[10px]',
+                                'rounded-full px-2 py-0.5 text-[11px]',
                                 qaContextBadgeTone === 'success' &&
                                   'border border-emerald-200 bg-emerald-50 text-emerald-700',
                                 qaContextBadgeTone === 'warning' &&
@@ -1339,7 +1339,7 @@ export function ChatWorkspacePanel({
                                 })
                               }
                               disabled={!onSaveAssistantMessageAsNote}
-                              className="ml-auto inline-flex h-6 items-center gap-1 rounded-lg px-2 text-[10px] font-medium text-[var(--pq-text-muted)] transition hover:bg-[var(--pq-hover)] hover:text-[var(--pq-text)] disabled:cursor-not-allowed disabled:opacity-50"
+                              className="ml-auto inline-flex h-6 items-center gap-1 rounded-lg px-2 text-[11px] font-medium text-[var(--pq-text-muted)] transition hover:bg-[var(--pq-hover)] hover:text-[var(--pq-text)] disabled:cursor-not-allowed disabled:opacity-50"
                               title={l('保存为笔记', 'Save as note')}
                             >
                               <FilePlus2 className="h-3 w-3" strokeWidth={1.8} />

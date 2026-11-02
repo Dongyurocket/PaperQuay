@@ -127,7 +127,7 @@ export function NotesGraphView({
             onClick={() => setHighlightCategory((current) => (current === badge.category ? null : badge.category))}
             className={`rounded-full border px-2 py-0.5 text-xs transition ${
               highlightCategory === badge.category
-                ? 'border-rose-300 bg-rose-50 text-rose-600'
+                ? 'border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-danger-bg)] text-[var(--pq-danger)]'
                 : badge.count > 0
                   ? 'border-[var(--pq-border)] bg-[var(--pq-bg-secondary)] text-[var(--pq-text-muted)] hover:text-[var(--pq-text)]'
                   : 'border-transparent text-[var(--pq-text-faint)]'

@@ -1154,7 +1154,7 @@ function Reader({ workspaceActive = true }: ReaderProps) {
                     className="group relative z-20 ml-auto w-2 shrink-0 cursor-col-resize bg-transparent transition-all duration-200"
                   >
                     <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-slate-300/90 transition-all duration-200 group-hover:w-[3px] group-hover:bg-slate-400" />
-                    <div className="absolute left-1/2 top-1/2 h-14 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-slate-300 transition-all duration-200 group-hover:w-1.5 group-hover:bg-slate-500" />
+                    <div className="absolute left-1/2 top-1/2 h-14 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--pq-surface-3)] transition-all duration-200 group-hover:w-1.5 group-hover:bg-slate-500" />
                   </div>
                 ) : null}
 

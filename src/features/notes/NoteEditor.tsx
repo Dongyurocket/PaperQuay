@@ -1808,7 +1808,7 @@ export function NoteEditor({
               >
                 <Tag className="h-3.5 w-3.5 shrink-0" strokeWidth={1.8} />
                 {currentTags.length > 0 ? (
-                  <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--pq-accent)] px-1 text-[10px] font-semibold leading-none text-white">
+                  <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--pq-accent)] px-1 text-[11px] font-semibold leading-none text-white">
                     {currentTags.length > 9 ? '9+' : currentTags.length}
                   </span>
                 ) : null}
@@ -1959,7 +1959,7 @@ export function NoteEditor({
             </div>
           </div>
 
-          {polishError ? <p className="mt-2 text-xs text-red-600">{polishError}</p> : null}
+          {polishError ? <p className="mt-2 text-xs text-[var(--pq-danger)]">{polishError}</p> : null}
           {polishResult?.notice ? <p className="mt-2 text-xs text-[var(--pq-text-muted)]">{polishResult.notice}</p> : null}
           {polishResult ? (
             <div className="mt-3 border-t border-[var(--pq-border)] pt-3">

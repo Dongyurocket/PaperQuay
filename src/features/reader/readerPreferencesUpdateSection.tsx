@@ -196,17 +196,17 @@ export function ReaderPreferencesUpdateSection({
       )}
     >
       <div className="space-y-4">
-        <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 dark:border-white/10 dark:bg-[var(--pq-surface-2)]">
+        <div className="rounded-2xl border border-[var(--pq-border)] bg-slate-50/80 p-4 dark:border-white/10 dark:bg-[var(--pq-surface-2)]">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
-              <div className="text-sm font-semibold text-slate-900 dark:text-[var(--pq-text)]">
+              <div className="text-sm font-semibold text-[var(--pq-text)] dark:text-[var(--pq-text)]">
                 {updateHeadline(status, l)}
               </div>
-              <div className="mt-1 text-xs leading-5 text-slate-500 dark:text-[var(--pq-text-muted)]">
+              <div className="mt-1 text-xs leading-5 text-[var(--pq-text-muted)] dark:text-[var(--pq-text-muted)]">
                 {updateSupportText(status, l)}
               </div>
             </div>
-            <div className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600 dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:text-[var(--pq-text-muted)]">
+            <div className="rounded-full border border-[var(--pq-border)] bg-white px-3 py-1 text-xs font-medium text-[var(--pq-text-muted)] dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:text-[var(--pq-text-muted)]">
               {status?.packaged
                 ? l('已打包版本', 'Packaged build')
                 : l('开发环境', 'Development')}
@@ -214,27 +214,27 @@ export function ReaderPreferencesUpdateSection({
           </div>
 
           <div className="mt-4 grid gap-3 md:grid-cols-3">
-            <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 dark:border-white/10 dark:bg-[var(--pq-surface-1)]">
-              <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+            <div className="rounded-xl border border-[var(--pq-border)] bg-white px-3 py-2 dark:border-white/10 dark:bg-[var(--pq-surface-1)]">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--pq-text-faint)]">
                 {l('当前版本', 'Current')}
               </div>
-              <div className="mt-1 text-sm font-semibold text-slate-900 dark:text-[var(--pq-text)]">
+              <div className="mt-1 text-sm font-semibold text-[var(--pq-text)] dark:text-[var(--pq-text)]">
                 {status?.currentVersion || '-'}
               </div>
             </div>
-            <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 dark:border-white/10 dark:bg-[var(--pq-surface-1)]">
-              <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+            <div className="rounded-xl border border-[var(--pq-border)] bg-white px-3 py-2 dark:border-white/10 dark:bg-[var(--pq-surface-1)]">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--pq-text-faint)]">
                 {l('最新版本', 'Latest')}
               </div>
-              <div className="mt-1 text-sm font-semibold text-slate-900 dark:text-[var(--pq-text)]">
+              <div className="mt-1 text-sm font-semibold text-[var(--pq-text)] dark:text-[var(--pq-text)]">
                 {status?.latestVersion || l('未检查', 'Not checked')}
               </div>
             </div>
-            <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 dark:border-white/10 dark:bg-[var(--pq-surface-1)]">
-              <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+            <div className="rounded-xl border border-[var(--pq-border)] bg-white px-3 py-2 dark:border-white/10 dark:bg-[var(--pq-surface-1)]">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--pq-text-faint)]">
                 {l('发布时间', 'Released')}
               </div>
-              <div className="mt-1 text-sm font-semibold text-slate-900 dark:text-[var(--pq-text)]">
+              <div className="mt-1 text-sm font-semibold text-[var(--pq-text)] dark:text-[var(--pq-text)]">
                 {formatDate(status?.releaseDate ?? '') || '-'}
               </div>
             </div>
@@ -243,7 +243,7 @@ export function ReaderPreferencesUpdateSection({
 
         {downloading ? (
           <div className="rounded-2xl border border-indigo-100 bg-indigo-50/70 px-4 py-3 dark:border-white/10 dark:bg-[var(--pq-surface-2)]">
-            <div className="flex items-center justify-between text-xs font-medium text-indigo-700 dark:text-[var(--pq-accent)]">
+            <div className="flex items-center justify-between text-xs font-medium text-[var(--pq-accent)] dark:text-[var(--pq-accent)]">
               <span>{l('下载进度', 'Download Progress')}</span>
               <span>{formatPercent(progress)}</span>
             </div>
@@ -257,7 +257,7 @@ export function ReaderPreferencesUpdateSection({
         ) : null}
 
         {message || status?.error ? (
-          <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-xs leading-5 text-slate-600 dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:text-[var(--pq-text-muted)]">
+          <div className="rounded-2xl border border-[var(--pq-border)] bg-white px-4 py-3 text-xs leading-5 text-[var(--pq-text-muted)] dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:text-[var(--pq-text-muted)]">
             {status?.error || message}
           </div>
         ) : null}
@@ -279,7 +279,7 @@ export function ReaderPreferencesUpdateSection({
             type="button"
             onClick={handleDownload}
             disabled={!status?.canDownload || checking || downloading || installing}
-            className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2 text-sm text-slate-700 transition hover:bg-slate-100 disabled:opacity-60 dark:border-white/10 dark:bg-[var(--pq-surface-2)] dark:text-[var(--pq-text)] dark:hover:bg-[var(--pq-hover)]"
+            className="rounded-xl border border-[var(--pq-border)] bg-[var(--pq-surface-2)] px-4 py-2 text-sm text-[var(--pq-text-muted)] transition hover:bg-[var(--pq-surface-2)] disabled:opacity-60 dark:border-white/10 dark:bg-[var(--pq-surface-2)] dark:text-[var(--pq-text)] dark:hover:bg-[var(--pq-hover)]"
           >
             <Download className="mr-2 inline h-4 w-4" strokeWidth={1.8} />
             {downloading ? l('下载中...', 'Downloading...') : l('下载更新', 'Download Update')}
@@ -288,7 +288,7 @@ export function ReaderPreferencesUpdateSection({
             type="button"
             onClick={handleInstall}
             disabled={!status?.canInstall || checking || downloading || installing}
-            className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-700 transition hover:bg-emerald-100 disabled:opacity-60 dark:border-emerald-400/20 dark:bg-emerald-400/10 dark:text-emerald-200"
+            className="rounded-xl border border-[color-mix(in_srgb,var(--pq-success)_28%,transparent)] bg-[var(--pq-success-bg)] px-4 py-2 text-sm font-medium text-[var(--pq-success)] transition hover:bg-[var(--pq-success-bg)] disabled:opacity-60 dark:border-emerald-400/20 dark:bg-emerald-400/10 dark:text-emerald-200"
           >
             <RotateCcw className="mr-2 inline h-4 w-4" strokeWidth={1.8} />
             {installing ? l('重启中...', 'Restarting...') : l('重启安装', 'Restart and Install')}
@@ -297,7 +297,7 @@ export function ReaderPreferencesUpdateSection({
             type="button"
             onClick={handleOpenRelease}
             disabled={installing}
-            className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm text-slate-700 transition hover:bg-slate-50 disabled:opacity-60 dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:text-[var(--pq-text)] dark:hover:bg-[var(--pq-hover)]"
+            className="rounded-xl border border-[var(--pq-border)] bg-white px-4 py-2 text-sm text-[var(--pq-text-muted)] transition hover:bg-[var(--pq-surface-2)] disabled:opacity-60 dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:text-[var(--pq-text)] dark:hover:bg-[var(--pq-hover)]"
           >
             <ExternalLink className="mr-2 inline h-4 w-4" strokeWidth={1.8} />
             {l('打开下载页', 'Open Downloads')}
@@ -305,8 +305,8 @@ export function ReaderPreferencesUpdateSection({
         </div>
 
         {visibleAssets.length > 0 ? (
-          <div className="rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3 dark:border-white/10 dark:bg-[var(--pq-surface-2)]">
-            <div className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">
+          <div className="rounded-2xl border border-[var(--pq-border)] bg-slate-50/80 px-4 py-3 dark:border-white/10 dark:bg-[var(--pq-surface-2)]">
+            <div className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-[var(--pq-text-faint)]">
               {l('发布资产', 'Release Assets')}
             </div>
             <div className="space-y-1">
@@ -315,7 +315,7 @@ export function ReaderPreferencesUpdateSection({
                   key={asset.url}
                   type="button"
                   onClick={() => void openAppUpdateReleasePage().then(setStatus)}
-                  className="block w-full truncate rounded-lg px-2 py-1.5 text-left text-xs text-slate-600 transition hover:bg-white dark:text-[var(--pq-text-muted)] dark:hover:bg-[var(--pq-surface-1)]"
+                  className="block w-full truncate rounded-lg px-2 py-1.5 text-left text-xs text-[var(--pq-text-muted)] transition hover:bg-white dark:text-[var(--pq-text-muted)] dark:hover:bg-[var(--pq-surface-1)]"
                 >
                   {asset.name}
                 </button>

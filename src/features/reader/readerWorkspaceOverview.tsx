@@ -46,14 +46,14 @@ function InlineProgressBar({
   return (
     <div className="rounded-2xl border border-slate-200/80 bg-white/84 px-4 py-3">
       <div className="flex items-center justify-between gap-3 text-sm">
-        <div className="font-medium text-slate-900">
+        <div className="font-medium text-[var(--pq-text)]">
           {label || '处理进度'}
         </div>
-        <div className="text-slate-500">
+        <div className="text-[var(--pq-text-muted)]">
           {completed}/{total}
         </div>
       </div>
-      <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-100">
+      <div className="mt-3 h-2 overflow-hidden rounded-full bg-[var(--pq-surface-2)]">
         <div
           className="h-full rounded-full bg-indigo-500 transition-all duration-300"
           style={{ width: `${ratio}%` }}
@@ -102,13 +102,13 @@ export function ReaderWorkspaceOverview({
           >
             <div className="flex flex-wrap items-start justify-between gap-5">
               <div className="min-w-0 flex-1">
-                <div className="inline-flex items-center rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-600">
+                <div className="inline-flex items-center rounded-full border border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-[var(--pq-accent-bg)] px-3 py-1 text-xs font-medium text-[var(--pq-accent)]">
                   {l('论文概览', 'Paper Overview')}
                 </div>
-                <h2 className="mt-4 text-[30px] font-semibold tracking-tight text-slate-950">
+                <h2 className="mt-4 text-[30px] font-semibold tracking-tight text-[var(--pq-text)]">
                   {currentDocument.title}
                 </h2>
-                <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-slate-500">
+                <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-[var(--pq-text-muted)]">
                   <span>{currentDocument.creators || l('未知作者', 'Unknown Author')}</span>
                   {currentDocument.year ? <span>· {currentDocument.year}</span> : null}
                   <span>· {sourceLabel}</span>
@@ -129,7 +129,7 @@ export function ReaderWorkspaceOverview({
                   data-tour="overview-mineru-parse"
                   onClick={onCloudParse}
                   disabled={loading}
-                  className="inline-flex items-center rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition-all duration-200 hover:border-slate-300 hover:bg-slate-50 disabled:opacity-60"
+                  className="inline-flex items-center rounded-2xl border border-[var(--pq-border)] bg-white px-4 py-2.5 text-sm font-medium text-[var(--pq-text-muted)] transition-all duration-200 hover:border-[var(--pq-border-strong)] hover:bg-[var(--pq-surface-2)] disabled:opacity-60"
                 >
                   <Sparkles className="mr-2 h-4 w-4" strokeWidth={1.8} />
                   {l('MinerU 解析', 'MinerU Parse')}
@@ -142,7 +142,7 @@ export function ReaderWorkspaceOverview({
                     '忽略已有缓存，重新执行一次完整识别（会重新上传 PDF 并消耗额度）',
                     'Ignore the existing cache and re-run a full parse (re-uploads the PDF and consumes quota)',
                   )}
-                  className="inline-flex items-center rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition-all duration-200 hover:border-slate-300 hover:bg-slate-50 disabled:opacity-60"
+                  className="inline-flex items-center rounded-2xl border border-[var(--pq-border)] bg-white px-4 py-2.5 text-sm font-medium text-[var(--pq-text-muted)] transition-all duration-200 hover:border-[var(--pq-border-strong)] hover:bg-[var(--pq-surface-2)] disabled:opacity-60"
                 >
                   <RefreshCw className="mr-2 h-4 w-4" strokeWidth={1.8} />
                   {l('重新识别', 'Re-parse')}
@@ -155,8 +155,8 @@ export function ReaderWorkspaceOverview({
                   className={[
                     'inline-flex items-center rounded-2xl border px-4 py-2.5 text-sm font-medium transition-all duration-200 disabled:opacity-60',
                     translating
-                      ? 'border-rose-200 bg-rose-50 text-rose-600 hover:bg-rose-100'
-                      : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50',
+                      ? 'border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-danger-bg)] text-[var(--pq-danger)] hover:bg-[var(--pq-danger-bg)]'
+                      : 'border-[var(--pq-border)] bg-white text-[var(--pq-text-muted)] hover:border-[var(--pq-border-strong)] hover:bg-[var(--pq-surface-2)]',
                   ].join(' ')}
                 >
                   {translating ? (
@@ -209,33 +209,33 @@ export function ReaderWorkspaceOverview({
             contentClassName="space-y-4"
           >
             <div className="rounded-[22px] border border-slate-200/80 bg-white px-4 py-4">
-              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400 dark:text-[var(--pq-text-faint)]">
+              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--pq-text-faint)] dark:text-[var(--pq-text-faint)]">
                 {l('来源', 'Source')}
               </div>
-              <div className="mt-2 text-sm leading-6 text-slate-700">{sourceLabel}</div>
+              <div className="mt-2 text-sm leading-6 text-[var(--pq-text-muted)]">{sourceLabel}</div>
             </div>
 
             <div className="rounded-[20px] border border-slate-200/80 bg-white px-4 py-4">
-              <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+              <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--pq-text-faint)]">
                 <FileText className="h-4 w-4" strokeWidth={1.8} />
                 PDF
               </div>
-              <div className="mt-2 break-words text-sm leading-6 text-slate-700">
+              <div className="mt-2 break-words text-sm leading-6 text-[var(--pq-text-muted)]">
                 {currentPdfName || l('未加载 PDF', 'No PDF Loaded')}
               </div>
             </div>
 
             <div className="rounded-[20px] border border-slate-200/80 bg-white px-4 py-4">
-              <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+              <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--pq-text-faint)]">
                 <FileJson className="h-4 w-4" strokeWidth={1.8} />
                 MinerU JSON
               </div>
-              <div className="mt-2 break-words text-sm leading-6 text-slate-700">
+              <div className="mt-2 break-words text-sm leading-6 text-[var(--pq-text-muted)]">
                 {currentJsonName || l('未加载 JSON', 'No JSON Loaded')}
               </div>
             </div>
 
-            <div className="rounded-[20px] border border-slate-200/80 bg-white px-4 py-4 text-sm leading-7 text-slate-600">
+            <div className="rounded-[20px] border border-slate-200/80 bg-white px-4 py-4 text-sm leading-7 text-[var(--pq-text-muted)]">
               {loading || translating
                 ? l('正在处理中，请稍候...', 'Processing, please wait...')
                 : blocks.length > 0
@@ -254,7 +254,7 @@ export function ReaderWorkspaceOverview({
                 type="button"
                 onClick={onOpenMineruJson}
                 disabled={loading}
-                className="inline-flex items-center rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition-all duration-200 hover:border-slate-300 hover:bg-slate-50 disabled:opacity-60"
+                className="inline-flex items-center rounded-xl border border-[var(--pq-border)] bg-white px-4 py-2 text-sm font-medium text-[var(--pq-text-muted)] transition-all duration-200 hover:border-[var(--pq-border-strong)] hover:bg-[var(--pq-surface-2)] disabled:opacity-60"
               >
                 <FileJson className="mr-2 h-4 w-4" strokeWidth={1.8} />
                 {l('打开 JSON', 'Open JSON')}

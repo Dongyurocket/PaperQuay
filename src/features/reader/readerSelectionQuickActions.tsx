@@ -374,20 +374,20 @@ export function SelectionQuickActions({
       >
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <div className="inline-flex items-center rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-indigo-600">
+            <div className="inline-flex items-center rounded-full border border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-[var(--pq-accent-bg)] px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--pq-accent)]">
               {sourceLabel}
             </div>
-            <div className="mt-2 max-h-20 overflow-hidden text-sm font-medium leading-6 text-slate-700">
+            <div className="mt-2 max-h-20 overflow-hidden text-sm font-medium leading-6 text-[var(--pq-text-muted)]">
               <MarkdownPreview
                 content={selectedExcerpt.text}
-                className="text-sm font-medium leading-6 text-slate-700 [&_.katex-display]:my-1 [&_p]:my-0 [&_p]:leading-6"
+                className="text-sm font-medium leading-6 text-[var(--pq-text-muted)] [&_.katex-display]:my-1 [&_p]:my-0 [&_p]:leading-6"
               />
             </div>
           </div>
           <button
             type="button"
             onClick={onClearSelectedExcerpt}
-            className="rounded-lg p-1.5 text-slate-400 transition-all duration-200 hover:bg-slate-100 hover:text-slate-600"
+            className="rounded-lg p-1.5 text-[var(--pq-text-faint)] transition-all duration-200 hover:bg-[var(--pq-surface-2)] hover:text-[var(--pq-text-muted)]"
             aria-label={l('关闭划词浮层', 'Close selection popover')}
           >
             <X className="h-4 w-4" strokeWidth={1.9} />
@@ -395,13 +395,13 @@ export function SelectionQuickActions({
         </div>
 
         <div className="mt-3 rounded-2xl border border-slate-200/80 bg-slate-50/90 px-3 py-2.5">
-          <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+          <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--pq-text-faint)]">
             {translationTitle}
           </div>
-          <div className="max-h-52 overflow-auto text-sm leading-6 text-slate-700">
+          <div className="max-h-52 overflow-auto text-sm leading-6 text-[var(--pq-text-muted)]">
             <MarkdownPreview
               content={translationLabel}
-              className="text-sm leading-6 text-slate-700 [&_.katex-display]:my-1 [&_p]:my-0 [&_p]:leading-6"
+              className="text-sm leading-6 text-[var(--pq-text-muted)] [&_.katex-display]:my-1 [&_p]:my-0 [&_p]:leading-6"
             />
           </div>
         </div>
@@ -426,7 +426,7 @@ export function SelectionQuickActions({
               type="button"
               onClick={onDistillSelectionToNote}
               disabled={selectionDistilling}
-              className="inline-flex items-center rounded-xl border border-teal-200 bg-teal-50 px-3 py-2 text-sm font-medium text-teal-700 transition-all duration-200 hover:border-teal-300 hover:bg-teal-100 disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex items-center rounded-xl border border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-[var(--pq-accent-bg)] px-3 py-2 text-sm font-medium text-[var(--pq-accent)] transition-all duration-200 hover:border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] hover:bg-[var(--pq-accent-bg)] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {selectionDistilling
                 ? l('正在提炼…', 'Distilling…')
@@ -439,7 +439,7 @@ export function SelectionQuickActions({
               onClick={onDistillSelectionAppendToCard}
               disabled={selectionDistilling}
               title={activeExcerptCardTitle}
-              className="inline-flex items-center rounded-xl border border-teal-200 bg-white px-3 py-2 text-sm font-medium text-teal-700 transition-all duration-200 hover:border-teal-300 hover:bg-teal-50 disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex items-center rounded-xl border border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-white px-3 py-2 text-sm font-medium text-[var(--pq-accent)] transition-all duration-200 hover:border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] hover:bg-[var(--pq-accent-bg)] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {l('追加到当前摘录卡', 'Append to Current Card')}
             </button>
@@ -447,7 +447,7 @@ export function SelectionQuickActions({
           <button
             type="button"
             onClick={onTranslateSelectedExcerpt}
-            className="inline-flex items-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition-all duration-200 hover:border-slate-300 hover:bg-slate-50"
+            className="inline-flex items-center rounded-xl border border-[var(--pq-border)] bg-white px-3 py-2 text-sm font-medium text-[var(--pq-text-muted)] transition-all duration-200 hover:border-[var(--pq-border-strong)] hover:bg-[var(--pq-surface-2)]"
           >
             {selectedExcerptTranslation.trim()
               ? l('重新翻译', 'Translate Again')

@@ -153,7 +153,7 @@ function EquationContentComponent({
     const hasValidBBox = block && isValidBBox(block.bbox) && pdfSource;
 
     return (
-      <div className="my-1 overflow-x-auto rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-3 text-rose-700 dark:border-rose-400/30 dark:bg-rose-950/20 dark:text-rose-200">
+      <div className="my-1 overflow-x-auto rounded-xl border border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-danger-bg)] px-3.5 py-3 text-[var(--pq-danger)] dark:border-rose-400/30 dark:bg-rose-950/20 dark:text-rose-200">
         <div className="mb-2 flex items-center justify-between">
           <span className="text-[11px] font-semibold uppercase tracking-[0.16em]">
             Formula parse failed
@@ -168,7 +168,7 @@ function EquationContentComponent({
                   setShowInlineCrop((prev) => !prev);
                 }
               }}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-rose-300/80 bg-white/90 px-2.5 py-1 text-xs font-semibold text-rose-800 shadow-xs transition-colors hover:bg-rose-100 dark:border-rose-800 dark:bg-rose-900/60 dark:text-rose-100 dark:hover:bg-rose-900"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-rose-300/80 bg-white/90 px-2.5 py-1 text-xs font-semibold text-[var(--pq-danger)] shadow-xs transition-colors hover:bg-[var(--pq-danger-bg)] dark:border-rose-800 dark:bg-rose-900/60 dark:text-rose-100 dark:hover:bg-rose-900"
               title={l('使用 PDF.js 裁剪并展示该区域的原版矢量图', 'Crop and display the original vector region using PDF.js')}
             >
               <Scan className="h-3.5 w-3.5" />
@@ -197,7 +197,7 @@ function EquationContentComponent({
 
   return (
     <div
-      className="my-1 overflow-x-auto overflow-y-hidden rounded-xl bg-white/70 px-3 py-2 text-slate-900 dark:bg-[var(--pq-sidebar)] dark:text-[var(--pq-text)] [&_.katex-display]:my-0 [&_.katex]:text-slate-900 dark:[&_.katex]:text-[var(--pq-text)]"
+      className="my-1 overflow-x-auto overflow-y-hidden rounded-xl bg-white/70 px-3 py-2 text-[var(--pq-text)] dark:bg-[var(--pq-sidebar)] dark:text-[var(--pq-text)] [&_.katex-display]:my-0 [&_.katex]:text-[var(--pq-text)] dark:[&_.katex]:text-[var(--pq-text)]"
       style={{ fontSize: `${15 * scale}px` }}
       dangerouslySetInnerHTML={{ __html: renderedEquation.html }}
     />
@@ -221,23 +221,23 @@ function MarkdownContentComponent({
 
   return (
     <ReactMarkdown
-      className="prose prose-slate max-w-none prose-headings:tracking-tight prose-a:text-indigo-600 prose-strong:text-slate-900 dark:prose-invert dark:prose-strong:text-[var(--pq-text)] [&_.katex]:text-slate-900 dark:[&_.katex]:text-[var(--pq-text)] [&_.katex-display]:my-4 [&_.katex-display]:overflow-x-auto [&_.katex-display]:overflow-y-hidden [&_.katex-display]:py-2"
+      className="prose prose-slate max-w-none prose-headings:tracking-tight prose-a:text-[var(--pq-accent)] prose-strong:text-[var(--pq-text)] dark:prose-invert dark:prose-strong:text-[var(--pq-text)] [&_.katex]:text-[var(--pq-text)] dark:[&_.katex]:text-[var(--pq-text)] [&_.katex-display]:my-4 [&_.katex-display]:overflow-x-auto [&_.katex-display]:overflow-y-hidden [&_.katex-display]:py-2"
       remarkPlugins={[[remarkGfm, { singleTilde: false }], remarkMath, remarkFixGluedLatex, remarkSuperscriptPlugin]}
       rehypePlugins={[[rehypeKatex, { strict: 'ignore', throwOnError: false }]]}
       components={{
         sup: ({ children }) => (
-          <sup className="align-super text-[0.72em] font-medium leading-none text-slate-800 dark:text-[var(--pq-text)]">
+          <sup className="align-super text-[0.72em] font-medium leading-none text-[var(--pq-text)] dark:text-[var(--pq-text)]">
             {children}
           </sup>
         ),
         sub: ({ children }) => (
-          <sub className="align-sub text-[0.72em] font-medium leading-none text-slate-800 dark:text-[var(--pq-text)]">
+          <sub className="align-sub text-[0.72em] font-medium leading-none text-[var(--pq-text)] dark:text-[var(--pq-text)]">
             {children}
           </sub>
         ),
         p: ({ children }) => (
           <p
-            className="my-0 text-slate-700 dark:text-[var(--pq-text-muted)] [&_.katex-display]:my-4 [&_.katex-display]:overflow-x-auto [&_.katex-display]:overflow-y-hidden"
+            className="my-0 text-[var(--pq-text-muted)] dark:text-[var(--pq-text-muted)] [&_.katex-display]:my-4 [&_.katex-display]:overflow-x-auto [&_.katex-display]:overflow-y-hidden"
             style={bodyStyle}
           >
             {children}
@@ -245,7 +245,7 @@ function MarkdownContentComponent({
         ),
         ul: ({ children }) => (
           <ul
-            className="my-0 list-disc space-y-2 pl-6 text-slate-700 dark:text-[var(--pq-text-muted)]"
+            className="my-0 list-disc space-y-2 pl-6 text-[var(--pq-text-muted)] dark:text-[var(--pq-text-muted)]"
             style={bodyStyle}
           >
             {children}
@@ -253,20 +253,20 @@ function MarkdownContentComponent({
         ),
         ol: ({ children }) => (
           <ol
-            className="my-0 list-decimal space-y-2 pl-6 text-slate-700 dark:text-[var(--pq-text-muted)]"
+            className="my-0 list-decimal space-y-2 pl-6 text-[var(--pq-text-muted)] dark:text-[var(--pq-text-muted)]"
             style={bodyStyle}
           >
             {children}
           </ol>
         ),
         li: ({ children }) => (
-          <li className="text-slate-700" style={bodyStyle}>
+          <li className="text-[var(--pq-text-muted)]" style={bodyStyle}>
             {children}
           </li>
         ),
         h1: ({ children }) => (
           <h1
-            className="my-0 font-semibold text-slate-950 dark:text-[var(--pq-text)]"
+            className="my-0 font-semibold text-[var(--pq-text)] dark:text-[var(--pq-text)]"
             style={{
               fontSize: `${30 * scale}px`,
               lineHeight: `${40 * scale}px`,
@@ -277,7 +277,7 @@ function MarkdownContentComponent({
         ),
         h2: ({ children }) => (
           <h2
-            className="my-0 font-semibold text-slate-950 dark:text-[var(--pq-text)]"
+            className="my-0 font-semibold text-[var(--pq-text)] dark:text-[var(--pq-text)]"
             style={{
               fontSize: `${25 * scale}px`,
               lineHeight: `${36 * scale}px`,
@@ -288,7 +288,7 @@ function MarkdownContentComponent({
         ),
         blockquote: ({ children }) => (
           <blockquote
-            className="my-0 border-l-2 border-slate-200 pl-4 italic text-slate-600 dark:border-[var(--pq-border)] dark:text-[var(--pq-text-muted)]"
+            className="my-0 border-l-2 border-[var(--pq-border)] pl-4 italic text-[var(--pq-text-muted)] dark:border-[var(--pq-border)] dark:text-[var(--pq-text-muted)]"
             style={bodyStyle}
           >
             {children}
@@ -370,7 +370,7 @@ function AssetFigure({
               event.stopPropagation();
               setPreviewOpen(true);
             }}
-            className="group relative block w-full overflow-hidden bg-slate-50"
+            className="group relative block w-full overflow-hidden bg-[var(--pq-surface-2)]"
           >
             <img src={dataUrl} alt={label} className="max-h-[420px] w-full object-contain" />
             <span className="pointer-events-none absolute right-3 top-3 inline-flex items-center rounded-full bg-slate-950/70 px-2.5 py-1 text-xs text-white opacity-0 transition-opacity duration-200 group-hover:opacity-100">
@@ -380,17 +380,17 @@ function AssetFigure({
           </button>
         ) : (
           <div
-            className="flex flex-col items-center justify-center gap-3 bg-slate-50 px-4 text-slate-500"
+            className="flex flex-col items-center justify-center gap-3 bg-[var(--pq-surface-2)] px-4 text-[var(--pq-text-muted)]"
             style={{ minHeight: `${180 * scale}px` }}
           >
-            <span className="inline-flex h-14 w-14 items-center justify-center rounded-full bg-white text-slate-400 shadow-sm">
+            <span className="inline-flex h-14 w-14 items-center justify-center rounded-full bg-white text-[var(--pq-text-faint)] shadow-sm">
               {emptyIcon}
             </span>
             <div className="text-sm">
               {loading ? l('正在加载资源…', 'Loading asset...') : emptyText}
             </div>
             {error ? (
-              <div className="max-w-[320px] text-center text-xs text-rose-500">{error}</div>
+              <div className="max-w-[320px] text-center text-xs text-[var(--pq-danger)]">{error}</div>
             ) : null}
           </div>
         )}
@@ -409,16 +409,16 @@ function AssetFigure({
             onClick={(event) => event.stopPropagation()}
           >
             <div className="flex items-center justify-between border-b border-slate-200/80 px-5 py-3">
-              <div className="truncate text-sm font-medium text-slate-700">{label}</div>
+              <div className="truncate text-sm font-medium text-[var(--pq-text-muted)]">{label}</div>
               <button
                 type="button"
                 onClick={() => setPreviewOpen(false)}
-                className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 transition hover:bg-slate-50"
+                className="rounded-xl border border-[var(--pq-border)] bg-white px-3 py-1.5 text-sm text-[var(--pq-text-muted)] transition hover:bg-[var(--pq-surface-2)]"
               >
                 {l('关闭', 'Close')}
               </button>
             </div>
-            <div className="max-h-[calc(100vh-140px)] overflow-auto bg-slate-50 p-4">
+            <div className="max-h-[calc(100vh-140px)] overflow-auto bg-[var(--pq-surface-2)] p-4">
               <img src={dataUrl} alt={label} className="mx-auto h-auto max-w-full object-contain" />
             </div>
           </div>
@@ -469,7 +469,7 @@ function TableContentComponent({
         <>
           {captionText ? (
             <div
-              className="font-medium leading-6 text-slate-600"
+              className="font-medium leading-6 text-[var(--pq-text-muted)]"
               style={{
                 fontSize: `${14 * scale}px`,
                 lineHeight: `${24 * scale}px`,
@@ -493,7 +493,7 @@ function TableContentComponent({
 
           {showBilingual && translatedText ? (
             <div className="rounded-[18px] border border-indigo-100 bg-indigo-50/70 px-4 py-3 dark:border-indigo-500/30 dark:bg-indigo-500/10">
-              <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-indigo-500">
+              <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--pq-accent)]">
                 <Languages className="h-3.5 w-3.5" strokeWidth={1.9} />
                 {l('译文', 'Translation')}
               </div>
@@ -544,7 +544,7 @@ function ImageContentComponent({
 
       {showBilingual && translatedText ? (
         <div className="rounded-[18px] border border-indigo-100 bg-indigo-50/70 px-4 py-3 dark:border-indigo-500/30 dark:bg-indigo-500/10">
-          <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-indigo-500">
+          <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--pq-accent)]">
             <Languages className="h-3.5 w-3.5" strokeWidth={1.9} />
             {l('译文', 'Translation')}
           </div>
@@ -574,11 +574,11 @@ function BlockPdfCropViewer({
 
   return (
     <div className="my-2 rounded-2xl border border-indigo-200/90 bg-white/95 p-3.5 shadow-sm dark:border-indigo-500/20 dark:bg-[var(--pq-surface-1)]">
-      <div className="mb-2.5 flex items-center justify-between text-xs text-slate-500 dark:text-[var(--pq-text-muted)]">
-        <div className="flex items-center gap-1.5 font-medium text-indigo-600 dark:text-indigo-400">
+      <div className="mb-2.5 flex items-center justify-between text-xs text-[var(--pq-text-muted)] dark:text-[var(--pq-text-muted)]">
+        <div className="flex items-center gap-1.5 font-medium text-[var(--pq-accent)] dark:text-indigo-400">
           <Scan className="h-4 w-4" />
           <span>{l('原版 PDF 切片', 'Original PDF Crop')}</span>
-          <span className="text-[11px] text-slate-400">
+          <span className="text-[11px] text-[var(--pq-text-faint)]">
             {l(`(第 ${block.pageIndex + 1} 页)`, `(Page ${block.pageIndex + 1})`)}
           </span>
         </div>
@@ -590,7 +590,7 @@ function BlockPdfCropViewer({
                 e.stopPropagation();
                 setPreviewOpen(true);
               }}
-              className="inline-flex items-center gap-1 rounded-lg border border-slate-200/80 bg-white px-2 py-1 text-[11px] font-medium text-slate-700 shadow-xs transition hover:bg-slate-50 dark:border-white/10 dark:bg-[var(--pq-surface-2)] dark:text-[var(--pq-text)] dark:hover:bg-[var(--pq-surface-3)]"
+              className="inline-flex items-center gap-1 rounded-lg border border-slate-200/80 bg-white px-2 py-1 text-[11px] font-medium text-[var(--pq-text-muted)] shadow-xs transition hover:bg-[var(--pq-surface-2)] dark:border-white/10 dark:bg-[var(--pq-surface-2)] dark:text-[var(--pq-text)] dark:hover:bg-[var(--pq-surface-3)]"
               title={l('放大预览原版切片', 'Enlarge Preview')}
             >
               <Expand className="h-3.5 w-3.5" />
@@ -604,7 +604,7 @@ function BlockPdfCropViewer({
                 e.stopPropagation();
                 onClose();
               }}
-              className="inline-flex items-center gap-1 rounded-lg border border-indigo-200 bg-indigo-50/80 px-2 py-1 text-[11px] font-medium text-indigo-700 transition hover:bg-indigo-100 dark:border-indigo-500/30 dark:bg-indigo-950/40 dark:text-indigo-300 dark:hover:bg-indigo-900/60"
+              className="inline-flex items-center gap-1 rounded-lg border border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-indigo-50/80 px-2 py-1 text-[11px] font-medium text-[var(--pq-accent)] transition hover:bg-[var(--pq-accent-bg)] dark:border-indigo-500/30 dark:bg-indigo-950/40 dark:text-indigo-300 dark:hover:bg-indigo-900/60"
             >
               <span>{l('返回排版', 'Show Parsed')}</span>
             </button>
@@ -614,13 +614,13 @@ function BlockPdfCropViewer({
 
       {loading ? (
         <div className="flex h-32 items-center justify-center rounded-xl bg-slate-50/90 dark:bg-[var(--pq-surface-2)]">
-          <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-[var(--pq-text-muted)]">
-            <RefreshCw className="h-4 w-4 animate-spin text-indigo-500" />
+          <div className="flex items-center gap-2 text-xs text-[var(--pq-text-muted)] dark:text-[var(--pq-text-muted)]">
+            <RefreshCw className="h-4 w-4 animate-spin text-[var(--pq-accent)]" />
             <span>{l('正在从原版 PDF 提取矢量切片…', 'Cropping vector slice from original PDF...')}</span>
           </div>
         </div>
       ) : error || !dataUrl ? (
-        <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-600 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-400">
+        <div className="rounded-xl border border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-danger-bg)] px-3 py-2 text-xs text-[var(--pq-danger)] dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-400">
           {error || l('未能截取切片图像', 'Failed to crop PDF region')}
         </div>
       ) : (
@@ -650,18 +650,18 @@ function BlockPdfCropViewer({
             onClick={(event) => event.stopPropagation()}
           >
             <div className="flex items-center justify-between border-b border-slate-200/80 px-5 py-3">
-              <div className="truncate text-sm font-medium text-slate-700">
+              <div className="truncate text-sm font-medium text-[var(--pq-text-muted)]">
                 {l(`第 ${block.pageIndex + 1} 页 · 块 ${block.blockIndex + 1} 原版切片`, `Page ${block.pageIndex + 1} · Block ${block.blockIndex + 1} Original Crop`)}
               </div>
               <button
                 type="button"
                 onClick={() => setPreviewOpen(false)}
-                className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 transition hover:bg-slate-50"
+                className="rounded-xl border border-[var(--pq-border)] bg-white px-3 py-1.5 text-sm text-[var(--pq-text-muted)] transition hover:bg-[var(--pq-surface-2)]"
               >
                 {l('关闭', 'Close')}
               </button>
             </div>
-            <div className="max-h-[calc(100vh-140px)] overflow-auto bg-slate-50 p-4">
+            <div className="max-h-[calc(100vh-140px)] overflow-auto bg-[var(--pq-surface-2)] p-4">
               <img
                 src={dataUrl}
                 alt={l(`第 ${block.pageIndex + 1} 页原版切片`, `Page ${block.pageIndex + 1} original crop`)}
@@ -806,13 +806,13 @@ function BlockItemComponent({
         className={cn(
           'absolute bottom-2 left-0 top-2 w-1 rounded-full bg-transparent transition-all duration-200',
           active && 'bg-indigo-500',
-          hovered && !active && 'bg-slate-300',
+          hovered && !active && 'bg-[var(--pq-surface-3)]',
         )}
       />
 
       {((active && showBlockMeta) || ((active || hovered || showPdfCrop) && ((pdfSource && isValidBBox(block.bbox)) || Boolean(onOpenReparse)))) ? (
         <div
-          className="mb-3 flex items-center justify-between text-indigo-500"
+          className="mb-3 flex items-center justify-between text-[var(--pq-accent)]"
           style={{
             fontSize: `${11 * metaScale}px`,
             lineHeight: `${16 * metaScale}px`,
@@ -827,7 +827,7 @@ function BlockItemComponent({
               )}
             </span>
             {customOverrideMarkdown ? (
-              <span className="inline-flex items-center gap-0.5 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300">
+              <span className="inline-flex items-center gap-0.5 rounded-full bg-[var(--pq-success-bg)] px-2 py-0.5 text-[11px] font-medium text-[var(--pq-success)] dark:bg-emerald-950/50 dark:text-emerald-300">
                 <Sparkles className="h-2.5 w-2.5" />
                 {l('AI 已修复', 'AI Fixed')}
               </span>
@@ -841,10 +841,10 @@ function BlockItemComponent({
                   event.stopPropagation();
                   onOpenReparse(block, customOverrideMarkdown || effectiveMarkdown || plainText);
                 }}
-                className="inline-flex items-center gap-1 rounded-lg border border-indigo-200/90 bg-indigo-50/80 px-2 py-0.5 text-[11px] font-medium text-indigo-700 shadow-xs transition-all hover:bg-indigo-100 dark:border-indigo-500/30 dark:bg-indigo-950/40 dark:text-indigo-300 dark:hover:bg-indigo-900/60"
+                className="inline-flex items-center gap-1 rounded-lg border border-indigo-200/90 bg-indigo-50/80 px-2 py-0.5 text-[11px] font-medium text-[var(--pq-accent)] shadow-xs transition-all hover:bg-[var(--pq-accent-bg)] dark:border-indigo-500/30 dark:bg-indigo-950/40 dark:text-indigo-300 dark:hover:bg-indigo-900/60"
                 title={l('使用 AI 大模型重新识别和修复此区块', 'Re-parse and format this block with AI')}
               >
-                <Sparkles className="h-3 w-3 text-indigo-600 dark:text-indigo-400" />
+                <Sparkles className="h-3 w-3 text-[var(--pq-accent)] dark:text-indigo-400" />
                 <span>{l('AI 重析', 'AI Re-parse')}</span>
               </button>
             ) : null}
@@ -859,7 +859,7 @@ function BlockItemComponent({
                   'inline-flex items-center gap-1.5 rounded-lg px-2.5 py-0.5 text-[11px] font-medium transition-all',
                   showPdfCrop
                     ? 'bg-indigo-600 text-white shadow-sm hover:bg-indigo-700'
-                    : 'border border-slate-200/90 bg-white/95 text-slate-600 shadow-xs hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-600 dark:border-white/10 dark:bg-[var(--pq-surface-2)] dark:text-[var(--pq-text-muted)] dark:hover:bg-indigo-950/40 dark:hover:text-indigo-400',
+                    : 'border border-slate-200/90 bg-white/95 text-[var(--pq-text-muted)] shadow-xs hover:border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] hover:bg-[var(--pq-accent-bg)] hover:text-[var(--pq-accent)] dark:border-white/10 dark:bg-[var(--pq-surface-2)] dark:text-[var(--pq-text-muted)] dark:hover:bg-indigo-950/40 dark:hover:text-indigo-400',
                 )}
                 title={
                   showPdfCrop
@@ -887,7 +887,7 @@ function BlockItemComponent({
           <MarkdownContent markdown={effectiveMarkdown} scale={scale} />
           {showBilingual && translatedText ? (
             <div className="mt-4 rounded-[18px] border border-indigo-100 bg-indigo-50/70 px-4 py-3 dark:border-white/10 dark:bg-[var(--pq-surface-1)]">
-              <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold text-indigo-500">
+              <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold text-[var(--pq-accent)]">
                 <Languages className="h-3.5 w-3.5" />{l('译文（基于原始识别）', 'Translation (original OCR)')}
               </div>
               <MarkdownContent markdown={translatedText} scale={scale} />
@@ -949,7 +949,7 @@ function BlockItemComponent({
 
               {showBilingual && translatedText && block.type !== 'equation' ? (
                 <div className="mt-4 rounded-[18px] border border-indigo-100 bg-indigo-50/70 px-4 py-3 dark:border-white/10 dark:bg-[var(--pq-surface-1)]">
-                  <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-indigo-500 dark:text-[#b8c2d9]">
+                  <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--pq-accent)] dark:text-[#b8c2d9]">
                     <Languages className="h-3.5 w-3.5" strokeWidth={1.9} />
                     {l('译文', 'Translation')}
                   </div>

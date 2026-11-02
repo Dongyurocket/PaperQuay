@@ -72,24 +72,24 @@ export function ReaderPreferencesMcpSection({
       )}
     >
       {error ? (
-        <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-700">
+        <div className="rounded-xl border border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-danger-bg)] px-3 py-2 text-xs leading-5 text-[var(--pq-danger)]">
           {error}
         </div>
       ) : null}
 
       <div className="grid gap-3 md:grid-cols-2">
-        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-xs leading-5 text-slate-600 dark:border-white/10 dark:bg-[var(--pq-surface-2)] dark:text-[var(--pq-text-muted)]">
-          <div className="font-medium text-slate-800 dark:text-[var(--pq-text)]">
+        <div className="rounded-2xl border border-[var(--pq-border)] bg-[var(--pq-surface-2)] px-3 py-3 text-xs leading-5 text-[var(--pq-text-muted)] dark:border-white/10 dark:bg-[var(--pq-surface-2)] dark:text-[var(--pq-text-muted)]">
+          <div className="font-medium text-[var(--pq-text)] dark:text-[var(--pq-text)]">
             {installed ? l('已安装桌面版', 'Installed app') : l('开发模式', 'Development')}
           </div>
           <div className="mt-1 break-all">{config?.entry || l('正在读取服务路径', 'Reading the service path')}</div>
           {config && !config.entryExists ? (
-            <div className="mt-1 text-amber-700">
+            <div className="mt-1 text-[var(--pq-warning)]">
               {l('入口文件当前不存在。安装包需先完成 MCP bundle 构建。', 'The entry file is missing. Build the MCP bundle before packaging.')}
             </div>
           ) : null}
         </div>
-        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-xs leading-5 text-slate-600 dark:border-white/10 dark:bg-[var(--pq-surface-2)] dark:text-[var(--pq-text-muted)]">
+        <div className="rounded-2xl border border-[var(--pq-border)] bg-[var(--pq-surface-2)] px-3 py-3 text-xs leading-5 text-[var(--pq-text-muted)] dark:border-white/10 dark:bg-[var(--pq-surface-2)] dark:text-[var(--pq-text-muted)]">
           <div>
             {l('内嵌 Node', 'Embedded Node')}: {config?.nodeVersion || '—'}
             {config ? ` · ${config.embeddedNodeSatisfiesSqlite ? 'node:sqlite OK' : l('低于 22.5', 'below 22.5')}` : ''}
@@ -114,7 +114,7 @@ export function ReaderPreferencesMcpSection({
         </div>
       </div>
 
-      <div className="mt-3 text-[11px] leading-5 text-slate-400 dark:text-[var(--pq-text-faint)]">
+      <div className="mt-3 text-[11px] leading-5 text-[var(--pq-text-faint)] dark:text-[var(--pq-text-faint)]">
         {l(
           `片段已带上当前数据目录 ${config?.dataDir || '（读取后显示）'}。外部 Agent 若要改用其他目录，替换 args 里的 --data-dir 值。`,
           `The snippet includes the current data directory ${config?.dataDir || '(shown after load)'}. Replace the --data-dir value if an external agent should use another directory.`,
@@ -138,7 +138,7 @@ export function ReaderPreferencesMcpSection({
           type="button"
           onClick={() => { void copySnippet(); }}
           disabled={!snippet}
-          className="inline-flex h-10 items-center rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 disabled:opacity-50 dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:text-[var(--pq-text-muted)]"
+          className="inline-flex h-10 items-center rounded-lg border border-[var(--pq-border)] bg-white px-3 text-sm font-medium text-[var(--pq-text-muted)] disabled:opacity-50 dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:text-[var(--pq-text-muted)]"
         >
           {copied ? l('已复制', 'Copied') : l('复制配置', 'Copy config')}
         </button>
@@ -146,7 +146,7 @@ export function ReaderPreferencesMcpSection({
       <textarea
         readOnly
         value={snippet}
-        className="mt-3 h-56 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 font-mono text-xs leading-5 text-slate-700 outline-none dark:border-white/10 dark:bg-[var(--pq-surface-2)] dark:text-[var(--pq-text-muted)]"
+        className="mt-3 h-56 w-full rounded-xl border border-[var(--pq-border)] bg-[var(--pq-surface-2)] px-3 py-2 font-mono text-xs leading-5 text-[var(--pq-text-muted)] outline-none dark:border-white/10 dark:bg-[var(--pq-surface-2)] dark:text-[var(--pq-text-muted)]"
       />
     </SettingsField>
   );

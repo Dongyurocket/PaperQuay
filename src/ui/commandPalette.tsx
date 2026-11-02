@@ -130,7 +130,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
             className="min-w-0 flex-1 bg-transparent text-sm text-[var(--pq-text)] outline-none placeholder:text-[var(--pq-text-faint)]"
             aria-label={l('搜索操作', 'Search commands')}
           />
-          <kbd className="pq-chip shrink-0 px-1.5 py-0.5 text-[10px] text-[var(--pq-text-faint)]">Esc</kbd>
+          <kbd className="pq-chip shrink-0 px-1.5 py-0.5 text-[11px] text-[var(--pq-text-faint)]">Esc</kbd>
         </div>
 
         <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto p-1.5" role="listbox" aria-label={l('可用操作', 'Available commands')}>
@@ -147,7 +147,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
               return (
                 <div key={command.id}>
                   {showGroup ? (
-                    <div className="px-2.5 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--pq-text-faint)]">
+                    <div className="px-2.5 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--pq-text-faint)]">
                       {command.group}
                     </div>
                   ) : null}
@@ -169,7 +169,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
                     <Icon className="h-3.5 w-3.5 shrink-0 opacity-70" strokeWidth={1.9} />
                     <span className="min-w-0 flex-1 truncate text-[13px]">{command.title}</span>
                     {command.shortcut ? (
-                      <kbd className="shrink-0 text-[10px] text-[var(--pq-text-faint)]">{formatShortcut(command.shortcut)}</kbd>
+                      <kbd className="shrink-0 text-[11px] text-[var(--pq-text-faint)]">{formatShortcut(command.shortcut)}</kbd>
                     ) : null}
                   </button>
                 </div>
@@ -178,7 +178,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
           )}
         </div>
 
-        <div className="flex items-center justify-between gap-2 border-t border-[var(--pq-border)] px-3 py-1.5 text-[10px] text-[var(--pq-text-faint)]">
+        <div className="flex items-center justify-between gap-2 border-t border-[var(--pq-border)] px-3 py-1.5 text-[11px] text-[var(--pq-text-faint)]">
           <span className="inline-flex items-center gap-1">
             <CornerDownLeft className="h-3 w-3" strokeWidth={2} />
             {l('执行', 'Run')}

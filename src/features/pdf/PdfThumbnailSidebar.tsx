@@ -153,7 +153,7 @@ export const PdfThumbnailSidebar = memo(forwardRef<HTMLElement, PdfThumbnailSide
             type="button"
             onClick={onToggleCollapsed}
             className={cn(
-              'inline-flex h-8 w-8 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:text-[var(--pq-text-muted)] dark:hover:border-white/15 dark:hover:bg-[var(--pq-surface-2)]',
+              'inline-flex h-8 w-8 items-center justify-center rounded-xl border border-[var(--pq-border)] bg-white text-[var(--pq-text-muted)] transition hover:border-[var(--pq-border-strong)] hover:bg-[var(--pq-surface-2)] dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:text-[var(--pq-text-muted)] dark:hover:border-white/15 dark:hover:bg-[var(--pq-surface-2)]',
               collapsed && 'shadow-[0_10px_24px_rgba(15,23,42,0.16)]',
             )}
             title={toggleLabel}
@@ -176,7 +176,7 @@ export const PdfThumbnailSidebar = memo(forwardRef<HTMLElement, PdfThumbnailSide
         >
           {!collapsed ? (
             <div className="flex h-full min-h-0 flex-col">
-              <div className="border-b border-slate-200/70 px-2.5 py-3 text-xs font-medium text-slate-500 dark:border-[var(--pq-border)] dark:text-[var(--pq-text-faint)]">
+              <div className="border-b border-slate-200/70 px-2.5 py-3 text-xs font-medium text-[var(--pq-text-muted)] dark:border-[var(--pq-border)] dark:text-[var(--pq-text-faint)]">
                 {contentOverride ? (contentTitle ?? l('Outline', 'Outline')) : l('Page Thumbnails', 'Page Thumbnails')}
               </div>
               {contentOverride ?? (
@@ -205,11 +205,11 @@ export const PdfThumbnailSidebar = memo(forwardRef<HTMLElement, PdfThumbnailSide
                           className={cn(
                             'group w-full rounded-xl border p-1.5 text-left transition-all duration-200',
                             isActivePage
-                              ? 'border-indigo-200 bg-white shadow-[0_10px_24px_rgba(79,70,229,0.10)] dark:border-indigo-400/30 dark:bg-[var(--pq-surface-2)] dark:shadow-[0_10px_24px_rgba(79,70,229,0.16)]'
-                              : 'border-slate-200 bg-white/70 hover:border-slate-300 hover:bg-white dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:hover:border-white/15 dark:hover:bg-[var(--pq-surface-2)]',
+                              ? 'border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-white shadow-[0_10px_24px_rgba(79,70,229,0.10)] dark:border-indigo-400/30 dark:bg-[var(--pq-surface-2)] dark:shadow-[0_10px_24px_rgba(79,70,229,0.16)]'
+                              : 'border-[var(--pq-border)] bg-white/70 hover:border-[var(--pq-border-strong)] hover:bg-white dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:hover:border-white/15 dark:hover:bg-[var(--pq-surface-2)]',
                           )}
                         >
-                          <div className="aspect-[0.74] overflow-hidden rounded-lg border border-slate-200 bg-slate-100 dark:border-white/10 dark:bg-[var(--pq-surface-1)]">
+                          <div className="aspect-[0.74] overflow-hidden rounded-lg border border-[var(--pq-border)] bg-[var(--pq-surface-2)] dark:border-white/10 dark:bg-[var(--pq-surface-1)]">
                             {thumbnailUrl ? (
                               <img
                                 src={thumbnailUrl}
@@ -220,15 +220,15 @@ export const PdfThumbnailSidebar = memo(forwardRef<HTMLElement, PdfThumbnailSide
                                 className="block h-full w-full object-contain"
                               />
                             ) : (
-                              <div className="flex h-full w-full items-center justify-center bg-[linear-gradient(180deg,#f8fafc,#eef2f7)] text-xs text-slate-400 dark:bg-[linear-gradient(180deg,#242424,#1e1e1e)] dark:text-[var(--pq-text-muted)]">
+                              <div className="flex h-full w-full items-center justify-center bg-[linear-gradient(180deg,#f8fafc,#eef2f7)] text-xs text-[var(--pq-text-faint)] dark:bg-[linear-gradient(180deg,#242424,#1e1e1e)] dark:text-[var(--pq-text-muted)]">
                                 {l('Rendering', 'Rendering')}
                               </div>
                             )}
                           </div>
-                          <div className="mt-2 flex items-center justify-between text-[11px] font-medium text-slate-500 dark:text-[var(--pq-text-faint)]">
+                          <div className="mt-2 flex items-center justify-between text-[11px] font-medium text-[var(--pq-text-muted)] dark:text-[var(--pq-text-faint)]">
                             <span>{l(`Page ${pageIndex + 1}`, `Page ${pageIndex + 1}`)}</span>
                             {isActivePage ? (
-                              <span className="text-indigo-600 dark:text-indigo-400">
+                              <span className="text-[var(--pq-accent)] dark:text-indigo-400">
                                 {l('当前', 'Current')}
                               </span>
                             ) : null}

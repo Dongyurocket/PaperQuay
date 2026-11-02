@@ -67,12 +67,12 @@ function MetadataPanel({
       }
     >
       <div className="space-y-1">
-        <div className="text-base font-semibold text-slate-900">
+        <div className="text-base font-semibold text-[var(--pq-text)]">
           {documentTitle || l('未命名论文', 'Untitled Paper')}
         </div>
-        {documentMeta ? <div className="text-sm text-slate-500">{documentMeta}</div> : null}
+        {documentMeta ? <div className="text-sm text-[var(--pq-text-muted)]">{documentMeta}</div> : null}
       </div>
-      <div className="grid gap-2 text-sm text-slate-600">
+      <div className="grid gap-2 text-sm text-[var(--pq-text-muted)]">
         <div>
           {l('PDF：', 'PDF: ')}
           {documentPdfName || l('未加载', 'Not loaded')}
@@ -93,7 +93,7 @@ function MetadataPanel({
         </StatusBadge>
       </div>
       {statusMessage ? (
-        <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500">
+        <div className="rounded-xl border border-[var(--pq-border)] bg-[var(--pq-surface-2)] px-3 py-2 text-xs text-[var(--pq-text-muted)]">
           {statusMessage}
         </div>
       ) : null}
@@ -231,7 +231,7 @@ function NotesDrawerContent({
           icon={<FileText className="h-4 w-4" strokeWidth={1.8} />}
           contentClassName="space-y-3"
           actions={
-            <div className="inline-flex rounded-2xl border border-slate-200 bg-slate-50 p-1">
+            <div className="inline-flex rounded-2xl border border-[var(--pq-border)] bg-[var(--pq-surface-2)] p-1">
               {viewModeOptions.map((option) => (
                 <button
                   key={option.key}
@@ -240,8 +240,8 @@ function NotesDrawerContent({
                   className={cn(
                     'rounded-xl px-3 py-1.5 text-xs font-semibold transition',
                     viewMode === option.key
-                      ? 'bg-white text-slate-900 shadow-sm'
-                      : 'text-slate-500 hover:text-slate-800',
+                      ? 'bg-white text-[var(--pq-text)] shadow-sm'
+                      : 'text-[var(--pq-text-muted)] hover:text-[var(--pq-text)]',
                   )}
                 >
                   {option.label}
@@ -260,11 +260,11 @@ function NotesDrawerContent({
                   'Write Markdown notes here, for example:\n\n## Key Ideas\n- Method\n- Experiments\n\n$$E = mc^2$$',
                 )}
                 className={cn(
-                  'w-full resize-y rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3 font-mono text-sm leading-7 text-slate-700 outline-none transition focus:border-indigo-200 focus:bg-white',
+                  'w-full resize-y rounded-2xl border border-[var(--pq-border)] bg-slate-50/80 px-4 py-3 font-mono text-sm leading-7 text-[var(--pq-text-muted)] outline-none transition focus:border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] focus:bg-white',
                   viewMode === 'split' ? 'min-h-[180px]' : 'min-h-[360px]',
                 )}
               />
-              <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-400">
+              <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[11px] text-[var(--pq-text-faint)]">
                 <span>
                   {l(
                     `${noteStats.characters} 字符 · ${noteStats.lines} 行`,
@@ -279,10 +279,10 @@ function NotesDrawerContent({
           {viewMode !== 'edit' ? (
             <div className="rounded-[22px] border border-slate-200/80 bg-white px-4 py-4">
               <div className="mb-3 flex items-center justify-between gap-2">
-                <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+                <div className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--pq-text-faint)]">
                   {l('实时预览', 'Live Preview')}
                 </div>
-                <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-medium text-emerald-600">
+                <span className="rounded-full border border-[color-mix(in_srgb,var(--pq-success)_28%,transparent)] bg-[var(--pq-success-bg)] px-2 py-1 text-[11px] font-medium text-[var(--pq-success)]">
                   Markdown
                 </span>
               </div>
@@ -322,11 +322,11 @@ function NotesDrawerContent({
         >
           {zoteroRelatedNotesLoading ? (
             <div className="space-y-3">
-              <div className="h-24 animate-pulse rounded-[22px] bg-slate-100" />
-              <div className="h-24 animate-pulse rounded-[22px] bg-slate-100" />
+              <div className="h-24 animate-pulse rounded-[22px] bg-[var(--pq-surface-2)]" />
+              <div className="h-24 animate-pulse rounded-[22px] bg-[var(--pq-surface-2)]" />
             </div>
           ) : zoteroRelatedNotesError ? (
-            <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600">
+            <div className="rounded-2xl border border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-danger-bg)] px-4 py-3 text-sm text-[var(--pq-danger)]">
               {zoteroRelatedNotesError}
             </div>
           ) : zoteroRelatedNotes.length > 0 ? (
@@ -339,12 +339,12 @@ function NotesDrawerContent({
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <div className="truncate text-sm font-semibold text-slate-900">
+                      <div className="truncate text-sm font-semibold text-[var(--pq-text)]">
                         {note.title || l('未命名笔记', 'Untitled Note')}
                       </div>
-                      <div className="mt-1 text-xs text-slate-400">{note.sourceLabel}</div>
+                      <div className="mt-1 text-xs text-[var(--pq-text-faint)]">{note.sourceLabel}</div>
                     </div>
-                    <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] text-slate-500">
+                    <span className="rounded-full border border-[var(--pq-border)] bg-[var(--pq-surface-2)] px-2 py-1 text-[11px] text-[var(--pq-text-muted)]">
                       {note.kind}
                     </span>
                   </div>
@@ -352,13 +352,13 @@ function NotesDrawerContent({
                     {note.contentFormat === 'markdown' ? (
                       <MarkdownPreview content={previewContent} />
                     ) : (
-                      <div className="whitespace-pre-wrap text-sm leading-7 text-slate-700">
+                      <div className="whitespace-pre-wrap text-sm leading-7 text-[var(--pq-text-muted)]">
                         {previewContent || l('无可显示内容', 'No preview available')}
                       </div>
                     )}
                   </div>
                   {note.filePath ? (
-                    <div className="mt-3 break-all text-[11px] text-slate-400">{note.filePath}</div>
+                    <div className="mt-3 break-all text-[11px] text-[var(--pq-text-faint)]">{note.filePath}</div>
                   ) : null}
                 </div>
               );

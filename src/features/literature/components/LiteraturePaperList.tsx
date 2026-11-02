@@ -512,7 +512,7 @@ export default function LiteraturePaperList({
             {l(`全选（${resolvedTotal}）`, `All (${resolvedTotal})`)}
           </button>
           <div className="relative min-w-[260px] flex-1">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" strokeWidth={1.8} />
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--pq-text-faint)]" strokeWidth={1.8} />
             <input
               value={searchQuery}
               onChange={(event) => onSearchQueryChange(event.target.value)}
@@ -614,11 +614,11 @@ export default function LiteraturePaperList({
           </div>
         ) : papers.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-[var(--pq-border)] bg-white/58 p-8 text-center dark:bg-white/5">
-            <BookOpenText className="mx-auto h-9 w-9 text-slate-400 dark:text-[#a0a0a0]" strokeWidth={1.7} />
+            <BookOpenText className="mx-auto h-9 w-9 text-[var(--pq-text-faint)] dark:text-[#a0a0a0]" strokeWidth={1.7} />
             <div className="mt-4 text-lg font-semibold">
               {l('还没有文献', 'No papers yet')}
             </div>
-            <div className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-500 dark:text-[#a0a0a0]">
+            <div className="mx-auto mt-2 max-w-md text-sm leading-6 text-[var(--pq-text-muted)] dark:text-[#a0a0a0]">
               {l(
                 '点击“导入 PDF”选择一个或多个文件。应用会把路径、附件和基础元数据保存到本地文库。',
                 'Click "Import PDF" to select one or more files. The app will save paths, attachments, and basic metadata into the local library.',
@@ -747,29 +747,29 @@ export default function LiteraturePaperList({
                     <span className="min-w-0">
                       <span className="flex min-w-0 items-center gap-2">
                         {paper.isFavorite ? (
-                          <Star className="h-3.5 w-3.5 shrink-0 text-amber-500 dark:text-amber-200" fill="currentColor" strokeWidth={1.8} />
+                          <Star className="h-3.5 w-3.5 shrink-0 text-[var(--pq-warning)] dark:text-amber-200" fill="currentColor" strokeWidth={1.8} />
                         ) : null}
                         <span className="block truncate text-sm font-semibold">
                           {titleDisplay.primary}
                         </span>
                       </span>
                       {titleDisplay.secondary ? (
-                        <span className="mt-0.5 block truncate text-xs text-slate-500 dark:text-[#a0a0a0]">
+                        <span className="mt-0.5 block truncate text-xs text-[var(--pq-text-muted)] dark:text-[#a0a0a0]">
                           {titleDisplay.secondary}
                         </span>
                       ) : null}
-                      <span className="mt-1 block truncate text-xs text-slate-500 dark:text-[#a0a0a0]">
+                      <span className="mt-1 block truncate text-xs text-[var(--pq-text-muted)] dark:text-[#a0a0a0]">
                         {paperAuthors(paper, locale)}
                       </span>
                       <span className="pq-card-badges mt-2 flex flex-wrap gap-1.5">
                         <span
                           className={clsx(
-                            'rounded-full border px-2 py-0.5 text-[10px] font-semibold',
+                            'rounded-full border px-2 py-0.5 text-[11px] font-semibold',
                             status?.checkingMineru
-                              ? 'border-slate-300 bg-slate-100 text-slate-500 dark:border-white/10 dark:bg-white/[0.06] dark:text-[#a0a0a0]'
+                              ? 'border-[var(--pq-border-strong)] bg-[var(--pq-surface-2)] text-[var(--pq-text-muted)] dark:border-white/10 dark:bg-white/[0.06] dark:text-[#a0a0a0]'
                               : mineruParsed
-                                ? 'border-emerald-300/55 bg-emerald-50 text-emerald-700 dark:border-emerald-300/20 dark:bg-emerald-300/10 dark:text-emerald-100'
-                                : 'border-amber-300/55 bg-amber-50 text-amber-700 dark:border-amber-300/20 dark:bg-amber-300/10 dark:text-amber-100',
+                                ? 'border-emerald-300/55 bg-[var(--pq-success-bg)] text-[var(--pq-success)] dark:border-emerald-300/20 dark:bg-emerald-300/10 dark:text-emerald-100'
+                                : 'border-amber-300/55 bg-[var(--pq-warning-bg)] text-[var(--pq-warning)] dark:border-amber-300/20 dark:bg-amber-300/10 dark:text-amber-100',
                           )}
                         >
                           {status?.checkingMineru
@@ -790,14 +790,14 @@ export default function LiteraturePaperList({
                                     : undefined
                             }
                             className={clsx(
-                              'rounded-full border px-2 py-0.5 text-[10px] font-semibold',
+                              'rounded-full border px-2 py-0.5 text-[11px] font-semibold',
                               indexingRag && ragStatus !== 'excluded'
-                                ? 'border-indigo-300/55 bg-indigo-50 text-indigo-700 dark:border-indigo-300/20 dark:bg-indigo-300/10 dark:text-indigo-100'
+                                ? 'border-indigo-300/55 bg-[var(--pq-accent-bg)] text-[var(--pq-accent)] dark:border-indigo-300/20 dark:bg-indigo-300/10 dark:text-indigo-100'
                                 : ragStatus === 'ready'
-                                  ? 'border-teal-300/55 bg-teal-50 text-teal-700 dark:border-teal-300/20 dark:bg-teal-300/10 dark:text-teal-100'
+                                  ? 'border-teal-300/55 bg-[var(--pq-accent-bg)] text-[var(--pq-accent)] dark:border-teal-300/20 dark:bg-teal-300/10 dark:text-teal-100'
                                   : ragStatus === 'failed'
-                                    ? 'border-rose-300/55 bg-rose-50 text-rose-700 dark:border-rose-300/20 dark:bg-rose-300/10 dark:text-rose-100'
-                                    : 'border-slate-300 bg-slate-100 text-slate-500 dark:border-white/10 dark:bg-white/[0.06] dark:text-[#a0a0a0]',
+                                    ? 'border-rose-300/55 bg-[var(--pq-danger-bg)] text-[var(--pq-danger)] dark:border-rose-300/20 dark:bg-rose-300/10 dark:text-rose-100'
+                                    : 'border-[var(--pq-border-strong)] bg-[var(--pq-surface-2)] text-[var(--pq-text-muted)] dark:border-white/10 dark:bg-white/[0.06] dark:text-[#a0a0a0]',
                             )}
                           >
                             {indexingRag && ragStatus !== 'excluded'
@@ -815,10 +815,10 @@ export default function LiteraturePaperList({
                         ) : null}
                         <span
                           className={clsx(
-                            'rounded-full border px-2 py-0.5 text-[10px] font-semibold',
+                            'rounded-full border px-2 py-0.5 text-[11px] font-semibold',
                             overviewGenerated
-                              ? 'border-sky-300/55 bg-sky-50 text-sky-700 dark:border-sky-300/20 dark:bg-sky-300/10 dark:text-sky-100'
-                              : 'border-slate-300 bg-slate-100 text-slate-500 dark:border-white/10 dark:bg-white/[0.06] dark:text-[#a0a0a0]',
+                              ? 'border-sky-300/55 bg-[var(--pq-info-bg)] text-[var(--pq-info)] dark:border-sky-300/20 dark:bg-sky-300/10 dark:text-sky-100'
+                              : 'border-[var(--pq-border-strong)] bg-[var(--pq-surface-2)] text-[var(--pq-text-muted)] dark:border-white/10 dark:bg-white/[0.06] dark:text-[#a0a0a0]',
                           )}
                         >
                           {overviewGenerated
@@ -831,19 +831,19 @@ export default function LiteraturePaperList({
                           {paper.tags.slice(0, 3).map((tag) => (
                             <span
                               key={tag.id}
-                              className="rounded-full border border-cyan-300/45 bg-cyan-50 px-2 py-0.5 text-[10px] font-semibold text-cyan-700 dark:border-cyan-300/18 dark:bg-cyan-300/10 dark:text-cyan-100"
+                              className="rounded-full border border-cyan-300/45 bg-[var(--pq-info-bg)] px-2 py-0.5 text-[11px] font-semibold text-[var(--pq-info)] dark:border-cyan-300/18 dark:bg-cyan-300/10 dark:text-cyan-100"
                             >
                               {tag.name}
                             </span>
                           ))}
                           {paper.tags.length > 3 ? (
-                            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500 dark:bg-white/[0.06] dark:text-[#a0a0a0]">
+                            <span className="rounded-full bg-[var(--pq-surface-2)] px-2 py-0.5 text-[11px] font-semibold text-[var(--pq-text-muted)] dark:bg-white/[0.06] dark:text-[#a0a0a0]">
                               +{paper.tags.length - 3}
                             </span>
                           ) : null}
                         </span>
                       ) : null}
-                      <span className="mt-2 block truncate text-[11px] text-slate-400 dark:text-[#8d8d8d]">
+                      <span className="mt-2 block truncate text-[11px] text-[var(--pq-text-faint)] dark:text-[#8d8d8d]">
                         {pdfPath ? truncateMiddle(pdfPath, 68) : l('缺少 PDF 附件', 'Missing PDF attachment')}
                       </span>
                     </span>

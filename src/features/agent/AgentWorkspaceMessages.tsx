@@ -37,9 +37,9 @@ import { loadLocalAssetDataUrl } from '../../services/assets';
 import { formatFileSize } from '../../utils/files';
 
 const agentPlanPrimaryActionClass =
-  'inline-flex items-center gap-2 rounded-2xl border border-emerald-600 bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm transition hover:border-emerald-700 hover:bg-emerald-700 disabled:cursor-not-allowed disabled:border-emerald-200 disabled:bg-emerald-50 disabled:text-emerald-700 disabled:shadow-none dark:border-emerald-400 dark:bg-emerald-400 dark:text-slate-950 dark:hover:border-emerald-300 dark:hover:bg-emerald-300 dark:disabled:border-emerald-400/20 dark:disabled:bg-emerald-400/10 dark:disabled:text-emerald-200/70';
+  'inline-flex items-center gap-2 rounded-2xl border border-emerald-600 bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm transition hover:border-emerald-700 hover:bg-emerald-700 disabled:cursor-not-allowed disabled:border-[color-mix(in_srgb,var(--pq-success)_28%,transparent)] disabled:bg-[var(--pq-success-bg)] disabled:text-[var(--pq-success)] disabled:shadow-none dark:border-[color-mix(in_srgb,var(--pq-success)_28%,transparent)] dark:bg-emerald-400 dark:text-[var(--pq-text)] dark:hover:border-[color-mix(in_srgb,var(--pq-success)_28%,transparent)] dark:hover:bg-[var(--pq-success-bg)] dark:disabled:border-emerald-400/20 dark:disabled:bg-emerald-400/10 dark:disabled:text-emerald-200/70';
 const agentPlanSecondaryActionClass =
-  'inline-flex items-center gap-2 rounded-2xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-bold text-slate-800 shadow-sm transition hover:border-slate-400 hover:bg-slate-50 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-500 disabled:shadow-none dark:border-white/14 dark:bg-chrome-900 dark:text-chrome-100 dark:hover:border-white/24 dark:hover:bg-chrome-800 dark:disabled:border-white/10 dark:disabled:bg-white/8 dark:disabled:text-chrome-500';
+  'inline-flex items-center gap-2 rounded-2xl border border-[var(--pq-border-strong)] bg-white px-4 py-2.5 text-sm font-bold text-[var(--pq-text)] shadow-sm transition hover:border-[var(--pq-border-strong)] hover:bg-[var(--pq-surface-2)] disabled:cursor-not-allowed disabled:border-[var(--pq-border)] disabled:bg-[var(--pq-surface-2)] disabled:text-[var(--pq-text-muted)] disabled:shadow-none dark:border-white/14 dark:bg-chrome-900 dark:text-chrome-100 dark:hover:border-white/24 dark:hover:bg-chrome-800 dark:disabled:border-white/10 dark:disabled:bg-white/8 dark:disabled:text-chrome-500';
 
 function PaperSelectionRequestCard({
   activeSessionRunning,
@@ -299,18 +299,18 @@ function AgentFigureReferences({
             key={figure.id}
             type="button"
             onClick={() => setPreview(figure)}
-            className="flex max-w-[260px] items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 p-2 text-left dark:border-white/10 dark:bg-chrome-950"
+            className="flex max-w-[260px] items-center gap-2 rounded-xl border border-[var(--pq-border)] bg-[var(--pq-surface-2)] p-2 text-left dark:border-white/10 dark:bg-chrome-950"
           >
             {urls[figure.id] ? (
               <img src={urls[figure.id]} alt={figure.caption} className="h-12 w-16 shrink-0 rounded-lg object-cover" />
             ) : (
-              <span className="flex h-12 w-16 shrink-0 items-center justify-center rounded-lg bg-slate-200 text-[10px] text-slate-500 dark:bg-white/10 dark:text-chrome-400">
+              <span className="flex h-12 w-16 shrink-0 items-center justify-center rounded-lg bg-[var(--pq-surface-3)] text-[11px] text-[var(--pq-text-muted)] dark:bg-white/10 dark:text-chrome-400">
                 {figure.kind === 'table' ? l('表', 'Table') : l('图', 'Figure')}
               </span>
             )}
             <span className="min-w-0">
-              <span className="block truncate text-xs font-semibold text-slate-700 dark:text-chrome-200">{figure.paperTitle}</span>
-              <span className="mt-0.5 block line-clamp-2 text-[10px] leading-4 text-slate-500 dark:text-chrome-400">{figure.caption}</span>
+              <span className="block truncate text-xs font-semibold text-[var(--pq-text-muted)] dark:text-chrome-200">{figure.paperTitle}</span>
+              <span className="mt-0.5 block line-clamp-2 text-[11px] leading-4 text-[var(--pq-text-muted)] dark:text-chrome-400">{figure.caption}</span>
             </span>
           </button>
         ))}
@@ -320,7 +320,7 @@ function AgentFigureReferences({
           <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/80 p-6" onClick={() => setPreview(null)}>
             <div className="max-h-full max-w-5xl overflow-auto" onClick={(event) => event.stopPropagation()}>
               <img src={urls[preview.id]} alt={preview.caption} className="max-h-[80vh] max-w-full object-contain" />
-              <div className="bg-white p-3 text-sm text-slate-700 dark:bg-chrome-900 dark:text-chrome-200">{preview.caption}</div>
+              <div className="bg-white p-3 text-sm text-[var(--pq-text-muted)] dark:bg-chrome-900 dark:text-chrome-200">{preview.caption}</div>
             </div>
           </div>,
           document.body,
@@ -372,34 +372,34 @@ function CapabilityProgress({
           : l('未完成', 'Failed');
 
   return (
-    <div className="mt-4 rounded-[20px] border border-slate-200 bg-slate-50/70 p-4 dark:border-white/10 dark:bg-chrome-950/60">
+    <div className="mt-4 rounded-[20px] border border-[var(--pq-border)] bg-slate-50/70 p-4 dark:border-white/10 dark:bg-chrome-950/60">
       <div className="flex items-center justify-between gap-3">
-        <div className="text-sm font-bold text-slate-950 dark:text-white">
+        <div className="text-sm font-bold text-[var(--pq-text)] dark:text-white">
           {title}
         </div>
-        <span className="text-xs font-semibold text-slate-500 dark:text-chrome-400">{statusLabel}</span>
+        <span className="text-xs font-semibold text-[var(--pq-text-muted)] dark:text-chrome-400">{statusLabel}</span>
       </div>
       <div className="mt-3 grid gap-2 sm:grid-cols-4">
         {capability.stages.map((stage, index) => (
-          <div key={stage.id} className="rounded-xl border border-slate-200 bg-white px-3 py-2 dark:border-white/10 dark:bg-chrome-900">
+          <div key={stage.id} className="rounded-xl border border-[var(--pq-border)] bg-white px-3 py-2 dark:border-white/10 dark:bg-chrome-900">
             <div className="flex items-center gap-2">
               <span className={[
-                'flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold',
+                'flex h-5 w-5 items-center justify-center rounded-full text-[11px] font-bold',
                 stage.status === 'success'
-                  ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-300/15 dark:text-emerald-200'
+                  ? 'bg-[var(--pq-success-bg)] text-[var(--pq-success)] dark:bg-emerald-300/15 dark:text-emerald-200'
                   : stage.status === 'running'
-                    ? 'bg-sky-100 text-sky-700 dark:bg-sky-300/15 dark:text-sky-200'
+                    ? 'bg-[var(--pq-info-bg)] text-[var(--pq-info)] dark:bg-sky-300/15 dark:text-sky-200'
                     : stage.status === 'error'
-                      ? 'bg-rose-100 text-rose-700 dark:bg-rose-300/15 dark:text-rose-200'
+                      ? 'bg-[var(--pq-danger-bg)] text-[var(--pq-danger)] dark:bg-rose-300/15 dark:text-rose-200'
                       : stage.status === 'warning'
-                        ? 'bg-amber-100 text-amber-700 dark:bg-amber-300/15 dark:text-amber-200'
-                        : 'bg-slate-100 text-slate-500 dark:bg-white/10 dark:text-chrome-400',
+                        ? 'bg-[var(--pq-warning-bg)] text-[var(--pq-warning)] dark:bg-amber-300/15 dark:text-amber-200'
+                        : 'bg-[var(--pq-surface-2)] text-[var(--pq-text-muted)] dark:bg-white/10 dark:text-chrome-400',
               ].join(' ')}>{index + 1}</span>
-              <span className="text-xs font-semibold text-slate-700 dark:text-chrome-200">
+              <span className="text-xs font-semibold text-[var(--pq-text-muted)] dark:text-chrome-200">
                 {getStageTitle(stage.id)}
               </span>
             </div>
-            {stage.detail ? <div className="mt-1 line-clamp-2 text-[10px] text-slate-400">{stage.detail}</div> : null}
+            {stage.detail ? <div className="mt-1 line-clamp-2 text-[11px] text-[var(--pq-text-faint)]">{stage.detail}</div> : null}
           </div>
         ))}
       </div>
@@ -420,10 +420,10 @@ function DeliveryQualitySummary({
       ? l('交付检查：部分完成', 'Delivery check: partial')
       : l('交付检查：未完成', 'Delivery check: failed');
   const stateClass = quality.state === 'complete'
-    ? 'border-emerald-200 bg-emerald-50/70 text-emerald-700 dark:border-emerald-300/25 dark:bg-emerald-300/10 dark:text-emerald-200'
+    ? 'border-[color-mix(in_srgb,var(--pq-success)_28%,transparent)] bg-emerald-50/70 text-[var(--pq-success)] dark:border-emerald-300/25 dark:bg-emerald-300/10 dark:text-emerald-200'
     : quality.state === 'partial'
-      ? 'border-amber-200 bg-amber-50/70 text-amber-700 dark:border-amber-300/25 dark:bg-amber-300/10 dark:text-amber-200'
-      : 'border-rose-200 bg-rose-50/70 text-rose-700 dark:border-rose-300/25 dark:bg-rose-300/10 dark:text-rose-200';
+      ? 'border-[color-mix(in_srgb,var(--pq-warning)_28%,transparent)] bg-amber-50/70 text-[var(--pq-warning)] dark:border-amber-300/25 dark:bg-amber-300/10 dark:text-amber-200'
+      : 'border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-rose-50/70 text-[var(--pq-danger)] dark:border-rose-300/25 dark:bg-rose-300/10 dark:text-rose-200';
   const issueLabel = (item: DeliveryQualityIssue) => {
     const labels: Record<DeliveryQualityIssue['code'], [string, string]> = {
       'empty-answer': ['回答为空', 'Answer is empty'],
@@ -482,7 +482,7 @@ export function SurveyCoverageCard({
     : undefined;
   const coverage = normalizeSurveyCoverageLedger(artifacts?.coverage);
   if (!coverage || coverage.papers.length === 0) return (
-    <div className="mt-3 text-xs text-slate-500 dark:text-chrome-400">
+    <div className="mt-3 text-xs text-[var(--pq-text-muted)] dark:text-chrome-400">
       {capability.status === 'running' ? l('覆盖情况：等待本轮记录。', 'Coverage: awaiting this run’s records.') : l('覆盖情况：未记录，无法推定已读数量。', 'Coverage: not recorded; reading counts are unknown.')}
     </div>
   );
@@ -524,25 +524,25 @@ export function SurveyCoverageCard({
     'no-citable-evidence': ['未取得可引用正文证据', 'No citable body evidence'],
   } as const;
   return (
-    <div className="mt-3 rounded-2xl border border-slate-200 bg-white/70 p-4 text-xs dark:border-white/10 dark:bg-chrome-950/60">
+    <div className="mt-3 rounded-2xl border border-[var(--pq-border)] bg-white/70 p-4 text-xs dark:border-white/10 dark:bg-chrome-950/60">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="font-bold text-slate-900 dark:text-white">{l('本轮调研覆盖（篇）', 'Research coverage (papers)')}</span>
-        <span className="text-slate-500 dark:text-chrome-400">{coverage.stopReason ? l(...stopLabels[coverage.stopReason]) : l('检索进行中', 'Research in progress')}</span>
+        <span className="font-bold text-[var(--pq-text)] dark:text-white">{l('本轮调研覆盖（篇）', 'Research coverage (papers)')}</span>
+        <span className="text-[var(--pq-text-muted)] dark:text-chrome-400">{coverage.stopReason ? l(...stopLabels[coverage.stopReason]) : l('检索进行中', 'Research in progress')}</span>
       </div>
       <dl className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
-        {counts.map(([zh, en, count]) => <div key={en} className="rounded-xl bg-slate-50 px-3 py-2 dark:bg-white/5">
-          <dt className="text-slate-500 dark:text-chrome-400">{l(zh, en)}</dt>
-          <dd className="mt-1 font-semibold text-slate-900 dark:text-white">{count}</dd>
+        {counts.map(([zh, en, count]) => <div key={en} className="rounded-xl bg-[var(--pq-surface-2)] px-3 py-2 dark:bg-white/5">
+          <dt className="text-[var(--pq-text-muted)] dark:text-chrome-400">{l(zh, en)}</dt>
+          <dd className="mt-1 font-semibold text-[var(--pq-text)] dark:text-white">{count}</dd>
         </div>)}
       </dl>
-      <div className="mt-3 space-y-1 leading-5 text-slate-600 dark:text-chrome-300">
+      <div className="mt-3 space-y-1 leading-5 text-[var(--pq-text-muted)] dark:text-chrome-300">
         <div>{l(`子问题完成 ${summary.completedSubquestionCount}/${summary.subquestionCount}，部分完成 ${summary.partialSubquestionCount}，失败 ${summary.failedSubquestionCount}，待处理 ${summary.pendingSubquestionCount}。`, `Subquestions: ${summary.completedSubquestionCount}/${summary.subquestionCount} completed, ${summary.partialSubquestionCount} partial, ${summary.failedSubquestionCount} failed, ${summary.pendingSubquestionCount} pending.`)}</div>
         <div>{l(`累计已记录用量 ${measuredTokens} tokens、${(budget.elapsedMilliseconds / 1000).toFixed(1)} 秒。`, `Recorded cumulative usage: ${measuredTokens} tokens, ${(budget.elapsedMilliseconds / 1000).toFixed(1)} seconds.`)}</div>
         <div>{l(`本次执行 ${Math.max(0, executionTokens)}${budget.maxTokens === undefined ? '' : `/${budget.maxTokens}`} tokens、${(Math.max(0, executionMilliseconds) / 1000).toFixed(1)}${budget.maxMilliseconds === undefined ? '' : `/${(budget.maxMilliseconds / 1000).toFixed(1)}`} 秒。`, `This execution: ${Math.max(0, executionTokens)}${budget.maxTokens === undefined ? '' : `/${budget.maxTokens}`} tokens, ${(Math.max(0, executionMilliseconds) / 1000).toFixed(1)}${budget.maxMilliseconds === undefined ? '' : `/${(budget.maxMilliseconds / 1000).toFixed(1)}`} seconds.`)}</div>
         <div>{l('各项记录可重叠。正文切片命中只计为检索；重点阅读与全文通读不同。', 'These records can overlap. A body hit counts as retrieval; focused reading does not mean the entire paper was read.')}</div>
       </div>
       {coverage.subquestions.length > 0 || summary.pendingCount || summary.failedCount || summary.unresolvedCount ? (
-        <details className="mt-3 text-slate-600 dark:text-chrome-300">
+        <details className="mt-3 text-[var(--pq-text-muted)] dark:text-chrome-300">
           <summary className="cursor-pointer font-semibold">{l('查看子问题与待处理项', 'Show subquestions and remaining work')}</summary>
           <ul className="mt-2 list-disc space-y-1 pl-4 leading-5">
             {coverage.subquestions.map((question) => <li key={question.id} className="break-words">{question.question} · {l(`检索 ${question.completedPaperIds.length}/${question.candidatePaperIds.length} 篇`, `${question.completedPaperIds.length}/${question.candidatePaperIds.length} papers searched`)}</li>)}
@@ -563,7 +563,7 @@ export function SurveyCoverageCard({
 export function UserMessageCard({ message }: { message: AgentChatMessage }) {
   return (
     <article className="flex items-start justify-end gap-3">
-      <div className="max-w-[72%] rounded-[24px] border border-teal-300 bg-teal-600 px-4 py-3 text-sm leading-7 text-white shadow-[0_18px_40px_rgba(20,184,166,0.18)] dark:border-teal-300/30 dark:bg-teal-300 dark:text-slate-950">
+      <div className="max-w-[72%] rounded-[24px] border border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-[var(--pq-accent-button-bg)] px-4 py-3 text-sm leading-7 text-white shadow-[0_18px_40px_rgba(20,184,166,0.18)] dark:border-teal-300/30 dark:bg-[var(--pq-accent-bg)] dark:text-[var(--pq-text)]">
         <div className="whitespace-pre-wrap break-words">{message.content}</div>
         {message.attachments && message.attachments.length > 0 ? (
           <div className="mt-3 flex flex-wrap gap-2">
@@ -578,21 +578,21 @@ export function UserMessageCard({ message }: { message: AgentChatMessage }) {
               return (
                 <span
                   key={attachment.id}
-                  className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs text-teal-50 dark:border-slate-900/10 dark:bg-slate-950/10 dark:text-slate-800"
+                  className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs text-[var(--pq-accent)] dark:border-slate-900/10 dark:bg-slate-950/10 dark:text-[var(--pq-text)]"
                 >
                   <AttachmentIcon className="h-3.5 w-3.5" strokeWidth={1.8} />
                   <span className="max-w-[180px] truncate">{attachment.name}</span>
-                  <span className="text-teal-50/80 dark:text-slate-700">{formatFileSize(attachment.size)}</span>
+                  <span className="text-teal-50/80 dark:text-[var(--pq-text-muted)]">{formatFileSize(attachment.size)}</span>
                 </span>
               );
             })}
           </div>
         ) : null}
         {message.meta ? (
-          <div className="mt-2 text-xs text-teal-50/85 dark:text-slate-700">{message.meta}</div>
+          <div className="mt-2 text-xs text-teal-50/85 dark:text-[var(--pq-text-muted)]">{message.meta}</div>
         ) : null}
       </div>
-      <span className="mt-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-white text-slate-700 shadow-lg dark:bg-chrome-900 dark:text-chrome-100">
+      <span className="mt-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-white text-[var(--pq-text-muted)] shadow-lg dark:bg-chrome-900 dark:text-chrome-100">
         <User className="h-4 w-4" strokeWidth={2} />
       </span>
     </article>
@@ -684,18 +684,18 @@ export function AssistantMessageCard({
 
   return (
     <article className="flex items-start gap-3">
-      <span className="mt-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-slate-950 text-white shadow-lg dark:bg-teal-300 dark:text-slate-950">
+      <span className="mt-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-slate-950 text-white shadow-lg dark:bg-[var(--pq-accent-bg)] dark:text-[var(--pq-text)]">
         <Bot className="h-4.5 w-4.5" strokeWidth={2.2} />
       </span>
       <div className="min-w-0 flex-1 rounded-[30px] border border-white/80 bg-white/86 p-5 shadow-[0_24px_70px_rgba(15,23,42,0.08)] dark:border-white/10 dark:bg-[#171d26]/86 dark:shadow-none">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500 dark:border-white/10 dark:bg-chrome-950 dark:text-chrome-400">
+              <span className="rounded-full border border-[var(--pq-border)] bg-[var(--pq-surface-2)] px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--pq-text-muted)] dark:border-white/10 dark:bg-chrome-950 dark:text-chrome-400">
                 Agent Reply
               </span>
               {message.meta ? (
-                <span className="text-xs font-semibold text-slate-400 dark:text-chrome-500">
+                <span className="text-xs font-semibold text-[var(--pq-text-faint)] dark:text-chrome-500">
                   {message.meta}
                 </span>
               ) : null}
@@ -723,12 +723,12 @@ export function AssistantMessageCard({
             </details> : null}
             <AgentFigureReferences figures={message.ragFigures} l={l} />
             {message.visionNotice ? (
-              <div className="mt-3 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs leading-5 text-sky-700 dark:border-sky-300/20 dark:bg-sky-300/10 dark:text-sky-200">
+              <div className="mt-3 rounded-xl border border-[color-mix(in_srgb,var(--pq-info)_28%,transparent)] bg-[var(--pq-info-bg)] px-3 py-2 text-xs leading-5 text-[var(--pq-info)] dark:border-sky-300/20 dark:bg-sky-300/10 dark:text-sky-200">
                 {message.visionNotice}
               </div>
             ) : null}
             {message.ragNotice ? (
-              <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-700 dark:border-amber-300/25 dark:bg-amber-300/10 dark:text-amber-200">
+              <div className="mt-3 rounded-2xl border border-[color-mix(in_srgb,var(--pq-warning)_28%,transparent)] bg-[var(--pq-warning-bg)] px-4 py-3 text-xs leading-5 text-[var(--pq-warning)] dark:border-amber-300/25 dark:bg-amber-300/10 dark:text-amber-200">
                 {message.ragNotice}
               </div>
             ) : null}
@@ -736,11 +736,11 @@ export function AssistantMessageCard({
             {message.capability ? <SurveyCoverageCard capability={message.capability} disabled={activeSessionRunning} l={l} onContinue={onContinueSurvey ? () => onContinueSurvey(message) : undefined} /> : null}
             {message.deliveryQuality ? <DeliveryQualitySummary quality={message.deliveryQuality} l={l} /> : null}
             {message.citationAudit && message.citationAudit.rejectedClaimLines.length > 0 && !message.memoryPlan ? (
-              <div className="mt-4 rounded-[20px] border border-amber-200 bg-amber-50/70 p-4 dark:border-amber-300/25 dark:bg-amber-300/10">
-                <div className="text-sm font-bold text-slate-950 dark:text-white">
+              <div className="mt-4 rounded-[20px] border border-[color-mix(in_srgb,var(--pq-warning)_28%,transparent)] bg-amber-50/70 p-4 dark:border-amber-300/25 dark:bg-amber-300/10">
+                <div className="text-sm font-bold text-[var(--pq-text)] dark:text-white">
                   {l('发现未被库内证据支持的主张', 'Claims without library evidence found')}
                 </div>
-                <div className="mt-1 text-xs leading-5 text-slate-600 dark:text-chrome-300">
+                <div className="mt-1 text-xs leading-5 text-[var(--pq-text-muted)] dark:text-chrome-300">
                   {l(
                     `引用核对标记了 ${message.citationAudit.rejectedClaimLines.length} 条库内无证据或证据相反的主张。可以把它们合并进工作记忆的 Rejected claims（不影响当前任务段），避免后续回答再次引用。`,
                     `Citation audit flagged ${message.citationAudit.rejectedClaimLines.length} claim(s) with no library evidence or with contradicting evidence. Merge them into the working memory's Rejected claims (your current task stays untouched) so later answers do not cite them again.`,
@@ -760,22 +760,22 @@ export function AssistantMessageCard({
               </div>
             ) : null}
             {memoryPlan ? (
-              <div className="mt-4 rounded-[20px] border border-sky-200 bg-sky-50/70 p-4 dark:border-sky-300/25 dark:bg-sky-300/10">
+              <div className="mt-4 rounded-[20px] border border-[color-mix(in_srgb,var(--pq-info)_28%,transparent)] bg-sky-50/70 p-4 dark:border-sky-300/25 dark:bg-sky-300/10">
                 <div className="flex items-center justify-between gap-3">
-                  <div className="text-sm font-bold text-slate-950 dark:text-white">
+                  <div className="text-sm font-bold text-[var(--pq-text)] dark:text-white">
                     {l('Agent 记忆更新', 'Agent Memory Update')}
                   </div>
                   {message.memoryPlanStatus ? (
-                    <span className="rounded-full border border-sky-200 bg-white px-2.5 py-0.5 text-[11px] font-semibold text-sky-700 dark:border-sky-300/30 dark:bg-sky-300/10 dark:text-sky-200">
+                    <span className="rounded-full border border-[color-mix(in_srgb,var(--pq-info)_28%,transparent)] bg-white px-2.5 py-0.5 text-[11px] font-semibold text-[var(--pq-info)] dark:border-sky-300/30 dark:bg-sky-300/10 dark:text-sky-200">
                       {message.memoryPlanStatus === 'applied' ? l('已写入', 'Applied') :
                         message.memoryPlanStatus === 'unchanged' ? l('未新增', 'No change') : l('已拒绝', 'Rejected')}
                     </span>
                   ) : null}
                 </div>
-                <div className="mt-1 text-xs leading-5 text-slate-600 dark:text-chrome-300">
+                <div className="mt-1 text-xs leading-5 text-[var(--pq-text-muted)] dark:text-chrome-300">
                   {memoryPlan.summary}
                 </div>
-                <pre className="mt-3 max-h-52 overflow-auto whitespace-pre-wrap rounded-xl border border-sky-200/80 bg-white/80 p-3 text-xs leading-5 text-slate-700 dark:border-sky-300/20 dark:bg-chrome-950 dark:text-chrome-200">
+                <pre className="mt-3 max-h-52 overflow-auto whitespace-pre-wrap rounded-xl border border-sky-200/80 bg-white/80 p-3 text-xs leading-5 text-[var(--pq-text-muted)] dark:border-sky-300/20 dark:bg-chrome-950 dark:text-chrome-200">
                   {memoryPlan.content}
                 </pre>
                 <div className="mt-3 flex flex-wrap gap-2">
@@ -809,18 +809,18 @@ export function AssistantMessageCard({
               </div>
             ) : null}
             {notePlan ? (
-              <div className="mt-4 rounded-[20px] border border-teal-200 bg-teal-50/70 p-4 dark:border-teal-300/25 dark:bg-teal-300/10">
+              <div className="mt-4 rounded-[20px] border border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-teal-50/70 p-4 dark:border-teal-300/25 dark:bg-teal-300/10">
                 <div className="flex items-center justify-between gap-3">
-                  <div className="text-sm font-bold text-slate-950 dark:text-white">
+                  <div className="text-sm font-bold text-[var(--pq-text)] dark:text-white">
                     {l('笔记变更计划', 'Note Changes')}
                   </div>
                   {message.notePlanStatus ? (
-                    <span className="rounded-full border border-teal-200 bg-white px-2.5 py-0.5 text-[11px] font-semibold text-teal-700 dark:border-teal-300/30 dark:bg-teal-300/10 dark:text-teal-200">
+                    <span className="rounded-full border border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-white px-2.5 py-0.5 text-[11px] font-semibold text-[var(--pq-accent)] dark:border-teal-300/30 dark:bg-teal-300/10 dark:text-teal-200">
                       {message.notePlanStatus === 'applied' ? l('已写入', 'Applied') : l('已拒绝', 'Rejected')}
                     </span>
                   ) : null}
                 </div>
-                <div className="mt-1 text-xs leading-5 text-slate-600 dark:text-chrome-300">
+                <div className="mt-1 text-xs leading-5 text-[var(--pq-text-muted)] dark:text-chrome-300">
                   {notePlan.summary}
                 </div>
                 <div className="mt-3 grid gap-2">
@@ -830,22 +830,22 @@ export function AssistantMessageCard({
                       className="rounded-xl border border-teal-200/80 bg-white/80 p-3 text-xs leading-5 dark:border-teal-300/20 dark:bg-chrome-950"
                     >
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="rounded-full bg-teal-100 px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide text-teal-700 dark:bg-teal-300/15 dark:text-teal-200">
+                        <span className="rounded-full bg-[var(--pq-accent-bg)] px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide text-[var(--pq-accent)] dark:bg-teal-300/15 dark:text-teal-200">
                           {operation.kind === 'create'
                             ? l('创建', 'Create')
                             : operation.kind === 'update'
                               ? l('更新', 'Update')
                               : l('删除', 'Delete')}
                         </span>
-                        <span className="font-semibold text-slate-800 dark:text-chrome-100">
+                        <span className="font-semibold text-[var(--pq-text)] dark:text-chrome-100">
                           {operation.title || operation.noteId}
                         </span>
                       </div>
                       {operation.reason ? (
-                        <div className="mt-1 text-slate-500 dark:text-chrome-400">{operation.reason}</div>
+                        <div className="mt-1 text-[var(--pq-text-muted)] dark:text-chrome-400">{operation.reason}</div>
                       ) : null}
                       {operation.kind !== 'delete' && operation.content ? (
-                        <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap rounded-lg bg-slate-50 p-2 text-slate-700 dark:bg-chrome-900 dark:text-chrome-200">
+                        <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap rounded-lg bg-[var(--pq-surface-2)] p-2 text-[var(--pq-text-muted)] dark:bg-chrome-900 dark:text-chrome-200">
                           {operation.kind === 'update' && operation.before
                             ? operation.content
                             : operation.content}
@@ -890,16 +890,16 @@ export function AssistantMessageCard({
                     type="button"
                     onClick={() => handleAgentChoice(choice.instruction, message.paperScopeIds)}
                     disabled={activeSessionRunning}
-                    className="group rounded-[20px] border border-slate-200 bg-slate-50/80 px-4 py-3 text-left transition hover:border-teal-200 hover:bg-teal-50 disabled:opacity-60 dark:border-white/10 dark:bg-chrome-950/70 dark:hover:border-teal-300/30 dark:hover:bg-teal-300/10"
+                    className="group rounded-[20px] border border-[var(--pq-border)] bg-slate-50/80 px-4 py-3 text-left transition hover:border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] hover:bg-[var(--pq-accent-bg)] disabled:opacity-60 dark:border-white/10 dark:bg-chrome-950/70 dark:hover:border-teal-300/30 dark:hover:bg-teal-300/10"
                   >
                     <div className="flex items-center justify-between gap-3">
-                      <span className="text-sm font-black text-slate-950 group-hover:text-teal-700 dark:text-white dark:group-hover:text-teal-200">
+                      <span className="text-sm font-black text-[var(--pq-text)] group-hover:text-[var(--pq-accent)] dark:text-white dark:group-hover:text-teal-200">
                         {choice.label}
                       </span>
-                      <PlayCircle className="h-4 w-4 shrink-0 text-slate-400 group-hover:text-teal-600 dark:group-hover:text-teal-300" />
+                      <PlayCircle className="h-4 w-4 shrink-0 text-[var(--pq-text-faint)] group-hover:text-[var(--pq-accent)] dark:group-hover:text-teal-300" />
                     </div>
                     {choice.description ? (
-                      <div className="mt-1 text-xs leading-5 text-slate-500 dark:text-chrome-400">
+                      <div className="mt-1 text-xs leading-5 text-[var(--pq-text-muted)] dark:text-chrome-400">
                         {choice.description}
                       </div>
                     ) : null}
@@ -918,14 +918,14 @@ export function AssistantMessageCard({
             <GitFork className="h-3.5 w-3.5" strokeWidth={1.8} />
           </button>
           {messagePlan ? (
-            <div className="shrink-0 rounded-[22px] border border-slate-200 bg-slate-50/80 px-4 py-3 dark:border-white/10 dark:bg-chrome-950/70">
-              <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400">
+            <div className="shrink-0 rounded-[22px] border border-[var(--pq-border)] bg-slate-50/80 px-4 py-3 dark:border-white/10 dark:bg-chrome-950/70">
+              <div className="text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--pq-text-faint)]">
                 {l('当前工具', 'Current Tool')}
               </div>
-              <div className="mt-1 text-sm font-black text-slate-950 dark:text-white">
+              <div className="mt-1 text-sm font-black text-[var(--pq-text)] dark:text-white">
                 {localizedToolLabel(messagePlan.tool)}
               </div>
-              <div className="mt-1 font-mono text-[11px] text-slate-400">
+              <div className="mt-1 font-mono text-[11px] text-[var(--pq-text-faint)]">
                 {messagePlan.tool}
               </div>
             </div>
@@ -969,22 +969,22 @@ export function AssistantMessageCard({
         ) : null}
 
         {messagePlan && messagePlan.items.length > 0 ? (
-          <div className="mt-4 rounded-[26px] border border-slate-200 bg-slate-50/70 p-4 dark:border-white/10 dark:bg-chrome-950/54">
+          <div className="mt-4 rounded-[26px] border border-[var(--pq-border)] bg-slate-50/70 p-4 dark:border-white/10 dark:bg-chrome-950/54">
             <div className="mb-3 flex items-center justify-between gap-3">
               <div>
-                <div className="text-sm font-black text-slate-950 dark:text-white">
+                <div className="text-sm font-black text-[var(--pq-text)] dark:text-white">
                   {l('结果 Diff 预览', 'Result Diff Preview')}
                 </div>
-                <div className="mt-1 text-xs text-slate-500 dark:text-chrome-400">
+                <div className="mt-1 text-xs text-[var(--pq-text-muted)] dark:text-chrome-400">
                   {l('原值与新值分开展示，确认前不会写入数据库。', 'Original and new values are shown separately. Nothing is written before confirmation.')}
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-bold text-slate-500 dark:border-white/10 dark:bg-chrome-900 dark:text-chrome-400">
+                <span className="rounded-full border border-[var(--pq-border)] bg-white px-3 py-1 text-xs font-bold text-[var(--pq-text-muted)] dark:border-white/10 dark:bg-chrome-900 dark:text-chrome-400">
                   {messagePlan.items.length} changes
                 </span>
                 {message.planStatus ? (
-                  <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-bold text-slate-500 dark:border-white/10 dark:bg-chrome-900 dark:text-chrome-400">
+                  <span className="rounded-full border border-[var(--pq-border)] bg-white px-3 py-1 text-xs font-bold text-[var(--pq-text-muted)] dark:border-white/10 dark:bg-chrome-900 dark:text-chrome-400">
                     {message.planStatus === 'applied' ? l('已执行', 'Applied') : l('已取消', 'Cancelled')}
                   </span>
                 ) : null}

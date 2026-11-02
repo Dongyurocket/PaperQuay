@@ -613,7 +613,7 @@ function PdfAnnotationWorkspace({
     <div className="paperquay-pdf-annotation flex h-full min-h-0 flex-col bg-[linear-gradient(180deg,#eff4fb,#e9f0f7)]">
       <div className="border-b border-slate-200/80 bg-white/78 px-4 py-3 backdrop-blur-xl">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="inline-flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-1">
+          <div className="inline-flex flex-wrap items-center gap-2 rounded-2xl border border-[var(--pq-border)] bg-[var(--pq-surface-2)] p-1">
             {[
               {
                 key: 'select' as const,
@@ -649,8 +649,8 @@ function PdfAnnotationWorkspace({
                 className={cn(
                   'inline-flex items-center gap-2 rounded-[14px] px-3 py-2 text-sm font-medium transition-all duration-200',
                   toolMode === item.key
-                    ? 'bg-white text-indigo-600 shadow-[0_8px_18px_rgba(79,70,229,0.12)]'
-                    : 'text-slate-500 hover:text-slate-800',
+                    ? 'bg-white text-[var(--pq-accent)] shadow-[0_8px_18px_rgba(79,70,229,0.12)]'
+                    : 'text-[var(--pq-text-muted)] hover:text-[var(--pq-text)]',
                 )}
               >
                 {item.icon}
@@ -659,8 +659,8 @@ function PdfAnnotationWorkspace({
             ))}
           </div>
 
-          <div className="inline-flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-white/86 px-3 py-2">
-            <span className="text-xs font-medium text-slate-500">
+          <div className="inline-flex flex-wrap items-center gap-2 rounded-2xl border border-[var(--pq-border)] bg-white/86 px-3 py-2">
+            <span className="text-xs font-medium text-[var(--pq-text-muted)]">
               {activeColorTool === 'highlight'
                 ? l('高亮颜色', 'Highlight color')
                 : activeColorTool === 'freetext'
@@ -682,7 +682,7 @@ function PdfAnnotationWorkspace({
                       'h-6 w-6 rounded-full border-2 transition-all duration-200',
                       active
                         ? 'scale-110 border-slate-900 shadow-[0_0_0_2px_rgba(255,255,255,0.9)]'
-                        : 'border-white hover:scale-105 hover:border-slate-300',
+                        : 'border-white hover:scale-105 hover:border-[var(--pq-border-strong)]',
                     )}
                     style={{ backgroundColor: colorValue }}
                     title={colorLabel}
@@ -692,7 +692,7 @@ function PdfAnnotationWorkspace({
               })}
             </div>
             <label
-              className="inline-flex cursor-pointer items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-600 transition hover:border-slate-300 hover:bg-white"
+              className="inline-flex cursor-pointer items-center gap-1 rounded-full border border-[var(--pq-border)] bg-[var(--pq-surface-2)] px-2 py-1 text-xs text-[var(--pq-text-muted)] transition hover:border-[var(--pq-border-strong)] hover:bg-white"
               title={l('自定义颜色', 'Custom color')}
             >
               <input
@@ -710,19 +710,19 @@ function PdfAnnotationWorkspace({
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <div className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-500">
+            <div className="rounded-full border border-[var(--pq-border)] bg-white px-3 py-1 text-xs font-medium text-[var(--pq-text-muted)]">
               {l(
                 `第 ${currentPage}/${Math.max(pageCount, 1)} 页`,
                 `Page ${currentPage}/${Math.max(pageCount, 1)}`,
               )}
             </div>
-            <div className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-500">
+            <div className="rounded-full border border-[var(--pq-border)] bg-white px-3 py-1 text-xs font-medium text-[var(--pq-text-muted)]">
               {zoomLabel}
             </div>
             <button
               type="button"
               onClick={handleZoomOut}
-              className="inline-flex items-center rounded-xl border border-slate-200 bg-white p-2 text-slate-600 transition-all duration-200 hover:bg-slate-50"
+              className="inline-flex items-center rounded-xl border border-[var(--pq-border)] bg-white p-2 text-[var(--pq-text-muted)] transition-all duration-200 hover:bg-[var(--pq-surface-2)]"
               title={l('缩小', 'Zoom out')}
             >
               <ZoomOut className="h-4 w-4" strokeWidth={1.8} />
@@ -730,7 +730,7 @@ function PdfAnnotationWorkspace({
             <button
               type="button"
               onClick={handleZoomIn}
-              className="inline-flex items-center rounded-xl border border-slate-200 bg-white p-2 text-slate-600 transition-all duration-200 hover:bg-slate-50"
+              className="inline-flex items-center rounded-xl border border-[var(--pq-border)] bg-white p-2 text-[var(--pq-text-muted)] transition-all duration-200 hover:bg-[var(--pq-surface-2)]"
               title={l('放大', 'Zoom in')}
             >
               <ZoomIn className="h-4 w-4" strokeWidth={1.8} />
@@ -742,8 +742,8 @@ function PdfAnnotationWorkspace({
               className={cn(
                 'inline-flex items-center rounded-xl border px-3 py-2 text-sm font-medium transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-60',
                 hasSelectedEditor && !loading && !saving
-                  ? 'border-rose-200 bg-rose-50 text-rose-600 hover:bg-rose-100'
-                  : 'border-slate-200 bg-white text-slate-400',
+                  ? 'border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-danger-bg)] text-[var(--pq-danger)] hover:bg-[var(--pq-danger-bg)]'
+                  : 'border-[var(--pq-border)] bg-white text-[var(--pq-text-faint)]',
               )}
               title={l('删除当前选中的批注', 'Delete the selected annotation')}
             >
@@ -766,7 +766,7 @@ function PdfAnnotationWorkspace({
           </div>
         </div>
 
-        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-slate-500">
+        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-[var(--pq-text-muted)]">
           <span>
             {l(
               '高亮模式下选择文本即可生成标准 PDF 高亮批注',
@@ -776,14 +776,14 @@ function PdfAnnotationWorkspace({
           <span>{l('文本模式点击页面即可添加自由文本', 'In text mode, click the page to add free text.')}</span>
           <span>{l('手写模式按住鼠标即可绘制批注', 'In ink mode, hold the mouse to draw annotations.')}</span>
         </div>
-        {saveMessage ? <div className="mt-2 text-xs text-emerald-600">{saveMessage}</div> : null}
-        {error ? <div className="mt-2 text-xs text-rose-600">{error}</div> : null}
+        {saveMessage ? <div className="mt-2 text-xs text-[var(--pq-success)]">{saveMessage}</div> : null}
+        {error ? <div className="mt-2 text-xs text-[var(--pq-danger)]">{error}</div> : null}
       </div>
 
       <div className="relative min-h-0 flex-1">
         {loading ? (
           <div className="absolute inset-0 z-20 flex items-center justify-center bg-[rgba(241,245,249,0.72)] backdrop-blur-sm">
-            <div className="inline-flex items-center rounded-full border border-white/70 bg-white/92 px-4 py-2 text-sm text-slate-600 shadow-[0_14px_34px_rgba(15,23,42,0.08)]">
+            <div className="inline-flex items-center rounded-full border border-white/70 bg-white/92 px-4 py-2 text-sm text-[var(--pq-text-muted)] shadow-[0_14px_34px_rgba(15,23,42,0.08)]">
               <Loader2 className="mr-2 h-4 w-4 animate-spin" strokeWidth={1.8} />
               {l('正在加载 PDF 批注界面…', 'Loading the PDF annotation workspace...')}
             </div>

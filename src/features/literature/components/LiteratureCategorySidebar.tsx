@@ -250,7 +250,7 @@ export default function LiteratureCategorySidebar({
                 title={collapsed ? l('展开分类', 'Expand category') : l('折叠分类', 'Collapse category')}
                 className={clsx(
                   'inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-lg transition hover:bg-black/5 dark:hover:bg-white/10',
-                  selectedCategoryId === category.id ? 'text-white' : 'text-slate-400 dark:text-[#8d8d8d]',
+                  selectedCategoryId === category.id ? 'text-white' : 'text-[var(--pq-text-faint)] dark:text-[#8d8d8d]',
                 )}
               >
                 <ChevronRight
@@ -363,9 +363,9 @@ export default function LiteratureCategorySidebar({
                     }
                     closeContextMenu();
                   }}
-                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-100 dark:text-[#e0e0e0] dark:hover:bg-[#2f2f2f]"
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--pq-text-muted)] transition hover:bg-[var(--pq-surface-2)] dark:text-[#e0e0e0] dark:hover:bg-[#2f2f2f]"
                 >
-                  <FolderPlus className="h-4 w-4 text-teal-600 dark:text-[#79c6c9]" strokeWidth={1.9} />
+                  <FolderPlus className="h-4 w-4 text-[var(--pq-accent)] dark:text-[#79c6c9]" strokeWidth={1.9} />
                   {l('新建子分类', 'New Subcategory')}
                 </button>
                 {contextMenuCategoryHasChildren ? (
@@ -379,11 +379,11 @@ export default function LiteratureCategorySidebar({
                       }
                       closeContextMenu();
                     }}
-                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-100 dark:text-[#e0e0e0] dark:hover:bg-[#2f2f2f]"
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--pq-text-muted)] transition hover:bg-[var(--pq-surface-2)] dark:text-[#e0e0e0] dark:hover:bg-[#2f2f2f]"
                   >
                     <ChevronRight
                       className={clsx(
-                        'h-4 w-4 text-slate-500 transition-transform dark:text-[#a0a0a0]',
+                        'h-4 w-4 text-[var(--pq-text-muted)] transition-transform dark:text-[#a0a0a0]',
                         !collapsedCategoryIds.has(contextMenu.category.id) && 'rotate-90',
                       )}
                       strokeWidth={1.9}
@@ -403,12 +403,12 @@ export default function LiteratureCategorySidebar({
                     }
                     closeContextMenu();
                   }}
-                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-100 dark:text-[#e0e0e0] dark:hover:bg-[#2f2f2f]"
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--pq-text-muted)] transition hover:bg-[var(--pq-surface-2)] dark:text-[#e0e0e0] dark:hover:bg-[#2f2f2f]"
                 >
-                  <Pencil className="h-4 w-4 text-slate-500 dark:text-[#a0a0a0]" strokeWidth={1.9} />
+                  <Pencil className="h-4 w-4 text-[var(--pq-text-muted)] dark:text-[#a0a0a0]" strokeWidth={1.9} />
                   {l('重命名分类', 'Rename Category')}
                 </button>
-                <div className="my-1 border-t border-slate-100 dark:border-white/10" />
+                <div className="my-1 border-t border-[var(--pq-border)] dark:border-white/10" />
                 <button
                   type="button"
                   onClick={() => {
@@ -419,7 +419,7 @@ export default function LiteratureCategorySidebar({
                     }
                     closeContextMenu();
                   }}
-                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-rose-600 transition hover:bg-rose-50 dark:text-rose-200 dark:hover:bg-rose-400/10"
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--pq-danger)] transition hover:bg-[var(--pq-danger-bg)] dark:text-rose-200 dark:hover:bg-rose-400/10"
                 >
                   <Trash2 className="h-4 w-4" strokeWidth={1.9} />
                   {l('删除分类', 'Delete Category')}
@@ -432,9 +432,9 @@ export default function LiteratureCategorySidebar({
                   onCreateCategory(null);
                   closeContextMenu();
                 }}
-                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-100 dark:text-[#e0e0e0] dark:hover:bg-[#2f2f2f]"
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--pq-text-muted)] transition hover:bg-[var(--pq-surface-2)] dark:text-[#e0e0e0] dark:hover:bg-[#2f2f2f]"
               >
-                <FolderPlus className="h-4 w-4 text-teal-600 dark:text-[#79c6c9]" strokeWidth={1.9} />
+                <FolderPlus className="h-4 w-4 text-[var(--pq-accent)] dark:text-[#79c6c9]" strokeWidth={1.9} />
                 {l('新建顶层分类', 'New Root Category')}
               </button>
             )}

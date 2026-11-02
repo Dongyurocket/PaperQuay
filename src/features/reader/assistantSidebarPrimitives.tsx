@@ -39,14 +39,14 @@ function SectionCard({
         <div className="min-w-0 flex-1">
           <div className="flex items-start gap-2">
             {icon ? (
-              <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-slate-600">
+              <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[var(--pq-surface-2)] text-[var(--pq-text-muted)]">
                 {icon}
               </span>
             ) : null}
             <div className="min-w-0 flex-1">
-              <div className="break-words text-sm font-semibold leading-5 text-slate-900">{title}</div>
+              <div className="break-words text-sm font-semibold leading-5 text-[var(--pq-text)]">{title}</div>
               {description ? (
-                <div className="mt-1 text-xs leading-5 text-slate-500">{description}</div>
+                <div className="mt-1 text-xs leading-5 text-[var(--pq-text-muted)]">{description}</div>
               ) : null}
             </div>
           </div>
@@ -69,9 +69,9 @@ function StatusBadge({
     <span
       className={cn(
         'inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-medium',
-        tone === 'neutral' && 'border-slate-200 bg-slate-50 text-slate-600',
-        tone === 'accent' && 'border-indigo-200 bg-indigo-50 text-indigo-600',
-        tone === 'success' && 'border-emerald-200 bg-emerald-50 text-emerald-600',
+        tone === 'neutral' && 'border-[var(--pq-border)] bg-[var(--pq-surface-2)] text-[var(--pq-text-muted)]',
+        tone === 'accent' && 'border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-[var(--pq-accent-bg)] text-[var(--pq-accent)]',
+        tone === 'success' && 'border-[color-mix(in_srgb,var(--pq-success)_28%,transparent)] bg-[var(--pq-success-bg)] text-[var(--pq-success)]',
       )}
     >
       {children}
@@ -91,11 +91,11 @@ function HintPanel({
   return (
     <div
       className={cn(
-        'rounded-2xl border border-dashed border-slate-200 bg-white/60 px-4 py-4 text-sm leading-7 text-slate-500',
+        'rounded-2xl border border-dashed border-[var(--pq-border)] bg-white/60 px-4 py-4 text-sm leading-7 text-[var(--pq-text-muted)]',
         className,
       )}
     >
-      <div className="mb-2 flex items-center gap-2 text-slate-600">{icon}</div>
+      <div className="mb-2 flex items-center gap-2 text-[var(--pq-text-muted)]">{icon}</div>
       {children}
     </div>
   );
@@ -146,12 +146,12 @@ function MarkdownFallback({
   return (
     <div className="space-y-3">
       {error ? (
-        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-700">
+        <div className="rounded-2xl border border-[color-mix(in_srgb,var(--pq-warning)_28%,transparent)] bg-[var(--pq-warning-bg)] px-3 py-2 text-xs leading-5 text-[var(--pq-warning)]">
           {l('Markdown 预览暂时无法渲染，已切换为纯文本预览。', 'Markdown preview failed and fell back to plain text.')}
           <div className="mt-1 break-all opacity-80">{error}</div>
         </div>
       ) : null}
-      <pre className="max-h-[420px] overflow-auto whitespace-pre-wrap rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-7 text-slate-700">
+      <pre className="max-h-[420px] overflow-auto whitespace-pre-wrap rounded-2xl border border-[var(--pq-border)] bg-[var(--pq-surface-2)] px-4 py-3 text-sm leading-7 text-[var(--pq-text-muted)]">
         {content}
       </pre>
     </div>
@@ -193,31 +193,31 @@ function MarkdownPreview({
     <MarkdownRenderBoundary resetKey={normalized.content} fallback={fallback}>
       <ReactMarkdown
         className={cn(
-          'max-w-none space-y-3 text-sm leading-7 text-slate-700',
-          '[&_h1]:mb-3 [&_h1]:mt-5 [&_h1]:border-b [&_h1]:border-slate-200 [&_h1]:pb-2 [&_h1]:text-2xl [&_h1]:font-bold [&_h1]:leading-tight [&_h1]:text-slate-950',
-          '[&_h2]:mb-2.5 [&_h2]:mt-5 [&_h2]:text-xl [&_h2]:font-bold [&_h2]:leading-tight [&_h2]:text-slate-900',
-          '[&_h3]:mb-2 [&_h3]:mt-4 [&_h3]:text-base [&_h3]:font-semibold [&_h3]:text-slate-900',
-          '[&_h4]:mb-1.5 [&_h4]:mt-3 [&_h4]:text-sm [&_h4]:font-semibold [&_h4]:text-slate-800',
-          '[&_p]:my-2 [&_p]:leading-7 [&_strong]:font-semibold [&_strong]:text-slate-950 [&_em]:text-slate-700',
+          'max-w-none space-y-3 text-sm leading-7 text-[var(--pq-text-muted)]',
+          '[&_h1]:mb-3 [&_h1]:mt-5 [&_h1]:border-b [&_h1]:border-[var(--pq-border)] [&_h1]:pb-2 [&_h1]:text-2xl [&_h1]:font-bold [&_h1]:leading-tight [&_h1]:text-[var(--pq-text)]',
+          '[&_h2]:mb-2.5 [&_h2]:mt-5 [&_h2]:text-xl [&_h2]:font-bold [&_h2]:leading-tight [&_h2]:text-[var(--pq-text)]',
+          '[&_h3]:mb-2 [&_h3]:mt-4 [&_h3]:text-base [&_h3]:font-semibold [&_h3]:text-[var(--pq-text)]',
+          '[&_h4]:mb-1.5 [&_h4]:mt-3 [&_h4]:text-sm [&_h4]:font-semibold [&_h4]:text-[var(--pq-text)]',
+          '[&_p]:my-2 [&_p]:leading-7 [&_strong]:font-semibold [&_strong]:text-[var(--pq-text)] [&_em]:text-[var(--pq-text-muted)]',
           '[&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:my-1 [&_li]:pl-1',
-          '[&_blockquote]:my-3 [&_blockquote]:border-l-4 [&_blockquote]:border-[var(--pq-accent-border)] [&_blockquote]:bg-[var(--pq-accent-soft)] [&_blockquote]:py-2 [&_blockquote]:pl-4 [&_blockquote]:pr-3 [&_blockquote]:text-slate-600',
-          '[&_code]:rounded [&_code]:bg-slate-100 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.88em] [&_code]:text-[var(--pq-accent)]',
-          '[&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre]:rounded-2xl [&_pre]:border [&_pre]:border-slate-200 [&_pre]:bg-slate-950 [&_pre]:p-4 [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-slate-100',
+          '[&_blockquote]:my-3 [&_blockquote]:border-l-4 [&_blockquote]:border-[var(--pq-accent-border)] [&_blockquote]:bg-[var(--pq-accent-soft)] [&_blockquote]:py-2 [&_blockquote]:pl-4 [&_blockquote]:pr-3 [&_blockquote]:text-[var(--pq-text-muted)]',
+          '[&_code]:rounded [&_code]:bg-[var(--pq-surface-2)] [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.88em] [&_code]:text-[var(--pq-accent)]',
+          '[&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre]:rounded-2xl [&_pre]:border [&_pre]:border-[var(--pq-border)] [&_pre]:bg-slate-950 [&_pre]:p-4 [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-slate-100',
           '[&_a]:font-medium [&_a]:text-[var(--pq-accent)] [&_a]:underline [&_a]:underline-offset-2',
-          '[&_table]:my-3 [&_table]:w-full [&_table]:border-collapse [&_table]:overflow-hidden [&_table]:rounded-xl [&_th]:border [&_th]:border-slate-200 [&_th]:bg-slate-50 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:font-semibold [&_td]:border [&_td]:border-slate-200 [&_td]:px-3 [&_td]:py-2',
-          '[&_hr]:my-5 [&_hr]:border-slate-200 [&_.katex]:text-slate-900 [&_.katex-display]:my-4 [&_.katex-display]:overflow-x-auto [&_.katex-display]:overflow-y-hidden [&_.katex-display]:py-2',
+          '[&_table]:my-3 [&_table]:w-full [&_table]:border-collapse [&_table]:overflow-hidden [&_table]:rounded-xl [&_th]:border [&_th]:border-[var(--pq-border)] [&_th]:bg-[var(--pq-surface-2)] [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:font-semibold [&_td]:border [&_td]:border-[var(--pq-border)] [&_td]:px-3 [&_td]:py-2',
+          '[&_hr]:my-5 [&_hr]:border-[var(--pq-border)] [&_.katex]:text-[var(--pq-text)] [&_.katex-display]:my-4 [&_.katex-display]:overflow-x-auto [&_.katex-display]:overflow-y-hidden [&_.katex-display]:py-2',
           className,
         )}
         remarkPlugins={[[remarkGfm, { singleTilde: false }], remarkMath, remarkFixGluedLatex, remarkSuperscriptPlugin]}
         rehypePlugins={[[rehypeKatex, { strict: 'ignore', throwOnError: false }]]}
         components={{
           sup: ({ children }) => (
-            <sup className="align-super text-[0.72em] font-medium leading-none text-slate-800 dark:text-[var(--pq-text)]">
+            <sup className="align-super text-[0.72em] font-medium leading-none text-[var(--pq-text)] dark:text-[var(--pq-text)]">
               {children}
             </sup>
           ),
           sub: ({ children }) => (
-            <sub className="align-sub text-[0.72em] font-medium leading-none text-slate-800 dark:text-[var(--pq-text)]">
+            <sub className="align-sub text-[0.72em] font-medium leading-none text-[var(--pq-text)] dark:text-[var(--pq-text)]">
               {children}
             </sub>
           ),
@@ -291,7 +291,7 @@ function SummaryPanel({
           data-tour="generate-summary"
           onClick={onGenerateSummary}
           disabled={loading}
-          className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 disabled:opacity-60"
+          className="rounded-xl border border-[var(--pq-border)] bg-white px-3 py-2 text-xs font-medium text-[var(--pq-text-muted)] transition hover:border-[var(--pq-border-strong)] hover:bg-[var(--pq-surface-2)] disabled:opacity-60"
         >
           {loading
             ? l('生成中...', 'Generating...')
@@ -321,16 +321,16 @@ function SummaryPanel({
       ) : null}
 
       {error ? (
-        <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600">
+        <div className="rounded-2xl border border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-danger-bg)] px-4 py-3 text-sm text-[var(--pq-danger)]">
           {error}
         </div>
       ) : null}
 
       {loading ? (
         <div className="space-y-3">
-          <div className="h-24 animate-pulse rounded-2xl bg-slate-100" />
-          <div className="h-24 animate-pulse rounded-2xl bg-slate-100" />
-          <div className="h-24 animate-pulse rounded-2xl bg-slate-100" />
+          <div className="h-24 animate-pulse rounded-2xl bg-[var(--pq-surface-2)]" />
+          <div className="h-24 animate-pulse rounded-2xl bg-[var(--pq-surface-2)]" />
+          <div className="h-24 animate-pulse rounded-2xl bg-[var(--pq-surface-2)]" />
         </div>
       ) : null}
 
@@ -349,8 +349,8 @@ function SummaryPanel({
                 )}
               </StatusBadge>
             </div>
-            <h3 className="mt-4 text-xl font-semibold text-slate-950">{paperSummary.title}</h3>
-            <MarkdownPreview content={paperSummary.abstract} className="mt-3 text-slate-600" />
+            <h3 className="mt-4 text-xl font-semibold text-[var(--pq-text)]">{paperSummary.title}</h3>
+            <MarkdownPreview content={paperSummary.abstract} className="mt-3 text-[var(--pq-text-muted)]" />
           </div>
 
           <div className="flex flex-wrap gap-2">
@@ -362,8 +362,8 @@ function SummaryPanel({
                 className={cn(
                   'rounded-full border px-3 py-1.5 text-sm font-medium transition',
                   activeTab === section.key
-                    ? 'border-indigo-200 bg-indigo-50 text-indigo-600'
-                    : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50',
+                    ? 'border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-[var(--pq-accent-bg)] text-[var(--pq-accent)]'
+                    : 'border-[var(--pq-border)] bg-white text-[var(--pq-text-muted)] hover:border-[var(--pq-border-strong)] hover:bg-[var(--pq-surface-2)]',
                 )}
               >
                 {section.label}
@@ -373,12 +373,12 @@ function SummaryPanel({
 
           {activeSection ? (
             <div className="rounded-[22px] border border-slate-200/80 bg-white px-5 py-4">
-              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--pq-text-faint)]">
                 {activeSection.label}
               </div>
               <MarkdownPreview
                 content={activeSection.content || l('暂无内容', 'No content yet')}
-                className="mt-3 text-slate-700"
+                className="mt-3 text-[var(--pq-text-muted)]"
               />
             </div>
           ) : null}
@@ -453,13 +453,13 @@ function SelectionPanel({
           </div>
 
           {selectedExcerptError ? (
-            <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600">
+            <div className="rounded-2xl border border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-danger-bg)] px-4 py-3 text-sm text-[var(--pq-danger)]">
               {selectedExcerptError}
             </div>
           ) : null}
 
           {selectedExcerptTranslating ? (
-            <div className="rounded-[22px] border border-indigo-100 bg-indigo-50/70 px-4 py-4 text-sm text-indigo-600">
+            <div className="rounded-[22px] border border-indigo-100 bg-indigo-50/70 px-4 py-4 text-sm text-[var(--pq-accent)]">
               {isPdfBlockExcerpt
                 ? l('正在翻译当前段落...', 'Translating this paragraph...')
                 : l('正在翻译选中文本...', 'Translating the selected text...')}
@@ -497,14 +497,14 @@ function SelectionPanel({
             <button
               type="button"
               onClick={onTranslateSelectedExcerpt}
-              className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+              className="rounded-xl border border-[var(--pq-border)] bg-white px-4 py-2 text-sm font-medium text-[var(--pq-text-muted)] transition hover:border-[var(--pq-border-strong)] hover:bg-[var(--pq-surface-2)]"
             >
               {l('立即翻译', 'Translate Now')}
             </button>
             <button
               type="button"
               onClick={onClearSelectedExcerpt}
-              className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+              className="rounded-xl border border-[var(--pq-border)] bg-white px-4 py-2 text-sm font-medium text-[var(--pq-text-muted)] transition hover:border-[var(--pq-border-strong)] hover:bg-[var(--pq-surface-2)]"
             >
               {l('清除', 'Clear')}
             </button>

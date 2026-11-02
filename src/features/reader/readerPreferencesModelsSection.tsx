@@ -119,7 +119,7 @@ function PresetNumberField({
           }
         }}
       />
-      <div className="text-[11px] leading-5 text-slate-400 dark:text-[var(--pq-text-faint)]">
+      <div className="text-[11px] leading-5 text-[var(--pq-text-faint)] dark:text-[var(--pq-text-faint)]">
         {hint}{clampNote ? ` · ${clampNote}` : ''}
       </div>
     </>
@@ -355,10 +355,10 @@ export function ReaderPreferencesModelsSection({
             return (
               <div
                 key={preset.id}
-                className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4"
+                className="rounded-2xl border border-[var(--pq-border)] bg-slate-50/70 p-4"
               >
               <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div className="min-w-0 truncate text-sm font-semibold text-slate-900">
+                <div className="min-w-0 truncate text-sm font-semibold text-[var(--pq-text)]">
                   {preset.label || preset.model || l('Unnamed Preset', 'Unnamed Preset')}
                 </div>
                 <div className="flex flex-wrap items-center gap-2 sm:ml-auto sm:justify-end">
@@ -366,7 +366,7 @@ export function ReaderPreferencesModelsSection({
                     type="button"
                     onClick={() => void handleListModelPresetModels(preset)}
                     disabled={!preset.baseUrl.trim() || Boolean(presetModelListLoadingMap[preset.id])}
-                    className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-[var(--pq-border)] bg-white px-3 text-xs font-medium text-[var(--pq-text-muted)] transition hover:border-[var(--pq-border-strong)] hover:bg-[var(--pq-surface-2)] disabled:cursor-not-allowed disabled:opacity-50"
                     title={l('读取模型列表', 'Load model list')}
                   >
                     <RefreshCw
@@ -388,7 +388,7 @@ export function ReaderPreferencesModelsSection({
                       !preset.apiKey.trim() ||
                       Boolean(presetTestLoadingMap[preset.id])
                     }
-                    className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-[var(--pq-border)] bg-white px-3 text-xs font-medium text-[var(--pq-text-muted)] transition hover:border-[var(--pq-border-strong)] hover:bg-[var(--pq-surface-2)] disabled:cursor-not-allowed disabled:opacity-50"
                     title={l('测试模型连接', 'Test model connection')}
                   >
                     <TestTube2 className="h-3.5 w-3.5" strokeWidth={1.9} />
@@ -402,7 +402,7 @@ export function ReaderPreferencesModelsSection({
                     type="button"
                     onClick={() => onQaModelPresetRemove(preset.id)}
                     disabled={qaModelPresets.length <= 1}
-                    className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-500 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700 disabled:cursor-not-allowed disabled:hover:border-slate-200 disabled:hover:bg-white disabled:hover:text-slate-500 disabled:opacity-50"
+                    className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-[var(--pq-border)] bg-white px-3 text-xs font-medium text-[var(--pq-text-muted)] transition hover:border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] hover:bg-[var(--pq-danger-bg)] hover:text-[var(--pq-danger)] disabled:cursor-not-allowed disabled:hover:border-[var(--pq-border)] disabled:hover:bg-white disabled:hover:text-[var(--pq-text-muted)] disabled:opacity-50"
                     title={l('删除模型预设', 'Delete model preset')}
                   >
                     <Trash2 className="h-3.5 w-3.5" strokeWidth={1.9} />
@@ -413,7 +413,7 @@ export function ReaderPreferencesModelsSection({
 
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="space-y-2">
-                  <div className="text-xs font-medium text-slate-500">
+                  <div className="text-xs font-medium text-[var(--pq-text-muted)]">
                     {l('显示名称', 'Display Name')}
                   </div>
                   <SettingsInput
@@ -425,7 +425,7 @@ export function ReaderPreferencesModelsSection({
                   />
                 </div>
                 <div className="space-y-2">
-                  <div className="text-xs font-medium text-slate-500">
+                  <div className="text-xs font-medium text-[var(--pq-text-muted)]">
                     {l('模型名称', 'Model Name')}
                   </div>
                   {loadedModels.length > 0 ? (
@@ -458,7 +458,7 @@ export function ReaderPreferencesModelsSection({
                   />
                 </div>
                 <div className="space-y-2 md:col-span-2">
-                  <div className="text-xs font-medium text-slate-500">
+                  <div className="text-xs font-medium text-[var(--pq-text-muted)]">
                     {l('地址', 'Endpoint')}
                   </div>
                   <SettingsInput
@@ -470,7 +470,7 @@ export function ReaderPreferencesModelsSection({
                   />
                 </div>
                 <div className="space-y-2">
-                  <div className="text-xs font-medium text-slate-500">
+                  <div className="text-xs font-medium text-[var(--pq-text-muted)]">
                     {l('接口格式', 'API Format')}
                   </div>
                   <SettingsSelect
@@ -487,7 +487,7 @@ export function ReaderPreferencesModelsSection({
                       </option>
                     ))}
                   </SettingsSelect>
-                  <div className="text-[11px] leading-5 text-slate-400">
+                  <div className="text-[11px] leading-5 text-[var(--pq-text-faint)]">
                     {
                       MODEL_API_MODE_OPTIONS.find((option) => option.value === preset.apiMode)?.[
                         uiLanguage === 'en-US' ? 'descriptionEn' : 'descriptionZh'
@@ -496,7 +496,7 @@ export function ReaderPreferencesModelsSection({
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <div className="text-xs font-medium text-slate-500">API Key</div>
+                  <div className="text-xs font-medium text-[var(--pq-text-muted)]">API Key</div>
                   <SettingsInput
                     value={preset.apiKey}
                     onChange={(event) =>
@@ -510,7 +510,7 @@ export function ReaderPreferencesModelsSection({
                   />
                 </div>
                 <div className="space-y-2">
-                  <div className="text-xs font-medium text-slate-500">
+                  <div className="text-xs font-medium text-[var(--pq-text-muted)]">
                     {l('上下文窗口', 'Context Window')}
                   </div>
                   <PresetNumberField
@@ -527,7 +527,7 @@ export function ReaderPreferencesModelsSection({
                   />
                 </div>
                 <div className="space-y-2">
-                  <div className="text-xs font-medium text-slate-500">
+                  <div className="text-xs font-medium text-[var(--pq-text-muted)]">
                     {l('最大输出', 'Max Output Tokens')}
                   </div>
                   <PresetNumberField
@@ -544,8 +544,8 @@ export function ReaderPreferencesModelsSection({
                   />
                 </div>
                 <div className="space-y-2">
-                  <div className="text-xs font-medium text-slate-500">{l('视觉能力', 'Vision Capability')}</div>
-                  <label className="flex min-h-11 cursor-pointer items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-700 dark:border-white/10 dark:bg-[var(--pq-surface-2)] dark:text-[var(--pq-text-muted)]">
+                  <div className="text-xs font-medium text-[var(--pq-text-muted)]">{l('视觉能力', 'Vision Capability')}</div>
+                  <label className="flex min-h-11 cursor-pointer items-center justify-between gap-3 rounded-xl border border-[var(--pq-border)] bg-[var(--pq-surface-2)] px-3 py-2.5 text-sm text-[var(--pq-text-muted)] dark:border-white/10 dark:bg-[var(--pq-surface-2)] dark:text-[var(--pq-text-muted)]">
                     <span>{l('支持图片输入', 'Supports image input')}</span>
                     <input
                       type="checkbox"
@@ -558,7 +558,7 @@ export function ReaderPreferencesModelsSection({
               </div>
 
               {!preset.baseUrl.trim() || !preset.model.trim() || !preset.apiKey.trim() ? (
-                <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-700">
+                <div className="mt-3 rounded-xl border border-[color-mix(in_srgb,var(--pq-warning)_28%,transparent)] bg-[var(--pq-warning-bg)] px-3 py-2 text-xs leading-5 text-[var(--pq-warning)]">
                   {l('Fill in the Base URL, model name, and API key before testing or using this preset.', 'Fill in the Base URL, model name, and API key before testing or using this preset.',
                   )}
                 </div>
@@ -572,7 +572,7 @@ export function ReaderPreferencesModelsSection({
               ) : null}
 
               {modelListError ? (
-                <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-700">
+                <div className="mt-3 rounded-xl border border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-danger-bg)] px-3 py-2 text-xs leading-5 text-[var(--pq-danger)]">
                   {modelListError}
                 </div>
               ) : null}
@@ -582,8 +582,8 @@ export function ReaderPreferencesModelsSection({
                   className={clsx(
                     'mt-3 rounded-xl border px-3 py-2 text-xs leading-5',
                     presetTestResultMap[preset.id]?.ok
-                      ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                      : 'border-rose-200 bg-rose-50 text-rose-700',
+                      ? 'border-[color-mix(in_srgb,var(--pq-success)_28%,transparent)] bg-[var(--pq-success-bg)] text-[var(--pq-success)]'
+                      : 'border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-danger-bg)] text-[var(--pq-danger)]',
                   )}
                 >
                   <div className="font-medium">
@@ -616,7 +616,7 @@ export function ReaderPreferencesModelsSection({
           <button
             type="button"
             onClick={onQaModelPresetAdd}
-            className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-dashed border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 transition hover:border-slate-400 hover:bg-slate-50"
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-dashed border-[var(--pq-border-strong)] bg-white px-4 text-sm font-medium text-[var(--pq-text-muted)] transition hover:border-[var(--pq-border-strong)] hover:bg-[var(--pq-surface-2)]"
           >
             <Plus className="h-4 w-4" strokeWidth={1.9} />
             <span>{l('新增模型预设', 'Add Model Preset')}</span>
@@ -639,14 +639,14 @@ export function ReaderPreferencesModelsSection({
             return (
               <div
                 key={binding.key}
-                className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3 dark:border-white/10 dark:bg-[var(--pq-sidebar)]"
+                className="rounded-2xl border border-[var(--pq-border)] bg-slate-50/70 p-3 dark:border-white/10 dark:bg-[var(--pq-sidebar)]"
               >
                 <div className="grid gap-3 lg:grid-cols-[minmax(150px,220px)_minmax(0,1fr)_auto] lg:items-center">
                   <div className="min-w-0">
-                    <div className="text-sm font-medium text-slate-900 dark:text-[var(--pq-text)]">
+                    <div className="text-sm font-medium text-[var(--pq-text)] dark:text-[var(--pq-text)]">
                       {binding.title}
                     </div>
-                    <div className="mt-1 text-xs leading-5 text-slate-500 dark:text-[var(--pq-text-faint)]">
+                    <div className="mt-1 text-xs leading-5 text-[var(--pq-text-muted)] dark:text-[var(--pq-text-faint)]">
                       {binding.description}
                     </div>
                   </div>
@@ -664,22 +664,22 @@ export function ReaderPreferencesModelsSection({
                     type="button"
                     onClick={() => setExpandedModelConfigKey(expanded ? null : binding.key)}
                     disabled={!selectedPreset}
-                    className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:opacity-50 dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:text-[var(--pq-text-muted)] dark:hover:bg-[var(--pq-surface-2)]"
+                    className="inline-flex items-center justify-center gap-2 rounded-xl border border-[var(--pq-border)] bg-white px-3 py-2.5 text-sm font-medium text-[var(--pq-text-muted)] transition hover:bg-[var(--pq-surface-2)] disabled:opacity-50 dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:text-[var(--pq-text-muted)] dark:hover:bg-[var(--pq-surface-2)]"
                   >
                     <Settings2 className="h-4 w-4" strokeWidth={1.8} />
                     {l('配置', 'Configure')}
                   </button>
                 </div>
-                <div className="mt-2 text-[11px] leading-5 text-slate-400 dark:text-[var(--pq-text-faint)]">
+                <div className="mt-2 text-[11px] leading-5 text-[var(--pq-text-faint)] dark:text-[var(--pq-text-faint)]">
                   {selectedPreset
                     ? `${selectedPreset.label || selectedPreset.model} · ${formatRuntimeConfig(l, runtimeConfig)}`
                     : l('未选择模型预设', 'No model preset selected')}
                 </div>
 
                 {expanded && selectedPreset ? (
-                  <div className="mt-3 grid gap-3 rounded-2xl border border-slate-200 bg-white p-3 dark:border-white/10 dark:bg-[var(--pq-surface-1)] md:grid-cols-2">
+                  <div className="mt-3 grid gap-3 rounded-2xl border border-[var(--pq-border)] bg-white p-3 dark:border-white/10 dark:bg-[var(--pq-surface-1)] md:grid-cols-2">
                     <div className="space-y-2">
-                      <div className="text-xs font-medium text-slate-500 dark:text-[var(--pq-text-faint)]">
+                      <div className="text-xs font-medium text-[var(--pq-text-muted)] dark:text-[var(--pq-text-faint)]">
                         {l('温度', 'Temperature')}
                       </div>
                       <PresetNumberField
@@ -701,7 +701,7 @@ export function ReaderPreferencesModelsSection({
                       />
                     </div>
                     <div className="space-y-2">
-                      <div className="text-xs font-medium text-slate-500 dark:text-[var(--pq-text-faint)]">
+                      <div className="text-xs font-medium text-[var(--pq-text-muted)] dark:text-[var(--pq-text-faint)]">
                         {l('Reasoning Effort', 'Reasoning Effort')}
                       </div>
                       <SettingsSelect
@@ -718,7 +718,7 @@ export function ReaderPreferencesModelsSection({
                           </option>
                         ))}
                       </SettingsSelect>
-                      <div className="text-[11px] leading-5 text-slate-400 dark:text-[var(--pq-text-faint)]">
+                      <div className="text-[11px] leading-5 text-[var(--pq-text-faint)] dark:text-[var(--pq-text-faint)]">
                         {
                           MODEL_REASONING_OPTIONS.find(
                             (option) => option.value === (runtimeConfig.reasoningEffort ?? 'auto'),

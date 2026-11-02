@@ -643,7 +643,7 @@ function BlockViewer({
     entries.push({
       id: 'reparse-block-ai',
       label: l('✨ AI 重新识别此块', '✨ AI Re-parse This Block'),
-      icon: <Sparkles className="h-4 w-4 text-indigo-500" strokeWidth={1.9} />,
+      icon: <Sparkles className="h-4 w-4 text-[var(--pq-accent)]" strokeWidth={1.9} />,
       tone: 'accent',
       disabled: !blockTextForReparse && !(pdfSource && isValidBBox(contextMenu.block.bbox)),
       onSelect: () => {
@@ -883,25 +883,25 @@ function BlockViewer({
   return (
     <div
       ref={containerRef}
-      className="flex h-full min-h-0 flex-col bg-[radial-gradient(circle_at_top,#ffffff,#f8fafc_34%,#f5f5f4_100%)] text-slate-900 dark:bg-[var(--pq-bg-primary)] dark:text-[var(--pq-text)]"
+      className="flex h-full min-h-0 flex-col bg-[radial-gradient(circle_at_top,#ffffff,#f8fafc_34%,#f5f5f4_100%)] text-[var(--pq-text)] dark:bg-[var(--pq-bg-primary)] dark:text-[var(--pq-text)]"
       onMouseUp={active ? () => scheduleSelectionCommit() : undefined}
       onKeyUp={active ? () => scheduleSelectionCommit() : undefined}
     >
       <div className="sticky top-0 z-40 px-4 pt-4">
         <div className="mx-auto flex w-fit max-w-full flex-wrap items-center gap-2 rounded-2xl border border-white/80 bg-white/72 px-3 py-2 shadow-[0_10px_22px_rgba(15,23,42,0.05)] backdrop-blur-xl dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:shadow-none">
-          <div className="flex items-center gap-2 rounded-full bg-slate-50 px-2.5 py-1 text-sm text-slate-600 dark:bg-[var(--pq-surface-2)] dark:text-[var(--pq-text-muted)]">
-            <SearchCode className="h-4 w-4 text-slate-400 dark:text-[var(--pq-text-faint)]" strokeWidth={1.8} />
+          <div className="flex items-center gap-2 rounded-full bg-[var(--pq-surface-2)] px-2.5 py-1 text-sm text-[var(--pq-text-muted)] dark:bg-[var(--pq-surface-2)] dark:text-[var(--pq-text-muted)]">
+            <SearchCode className="h-4 w-4 text-[var(--pq-text-faint)] dark:text-[var(--pq-text-faint)]" strokeWidth={1.8} />
             <span className="hidden sm:inline">{l('Structured Reading', 'Structured Reading')}</span>
           </div>
 
-          <span className="pq-badge-neutral rounded-full border border-slate-200 bg-white px-3 py-1 text-xs text-slate-500">
+          <span className="pq-badge-neutral rounded-full border border-[var(--pq-border)] bg-white px-3 py-1 text-xs text-[var(--pq-text-muted)]">
             {l(`${visibleBlocks.length} 个块`, `${visibleBlocks.length} blocks`)}
           </span>
-          <span className="pq-badge-state rounded-full border border-slate-200 bg-white px-3 py-1 text-xs text-slate-500">
+          <span className="pq-badge-state rounded-full border border-[var(--pq-border)] bg-white px-3 py-1 text-xs text-[var(--pq-text-muted)]">
             {l(`${translatedCount} 个译文块`, `${translatedCount} translated blocks`)}
           </span>
 
-          <div className="flex items-center gap-1 rounded-full border border-slate-200 bg-white p-1 text-xs text-slate-600 dark:border-white/10 dark:bg-[var(--pq-surface-2)] dark:text-[var(--pq-text-muted)]">
+          <div className="flex items-center gap-1 rounded-full border border-[var(--pq-border)] bg-white p-1 text-xs text-[var(--pq-text-muted)] dark:border-white/10 dark:bg-[var(--pq-surface-2)] dark:text-[var(--pq-text-muted)]">
             {displayModeOptions.map((option) => {
               const selected = option.mode === activeDisplayMode;
 
@@ -915,7 +915,7 @@ function BlockViewer({
                     'rounded-full px-3 py-1.5 font-medium transition-all duration-200',
                     selected
                       ? 'bg-slate-900 text-white dark:bg-[var(--pq-accent)] dark:text-[var(--pq-accent-text)]'
-                      : 'text-slate-500 hover:bg-slate-100 dark:text-[var(--pq-text-muted)] dark:hover:bg-[var(--pq-surface-3)]',
+                      : 'text-[var(--pq-text-muted)] hover:bg-[var(--pq-surface-2)] dark:text-[var(--pq-text-muted)] dark:hover:bg-[var(--pq-surface-3)]',
                     option.disabled &&
                       'cursor-not-allowed opacity-45 hover:bg-transparent dark:hover:bg-transparent',
                   )}
@@ -926,29 +926,29 @@ function BlockViewer({
             })}
           </div>
 
-          <div className="flex items-center gap-1 rounded-full border border-slate-200 bg-white px-1.5 py-1 text-sm text-slate-600 dark:border-white/10 dark:bg-[var(--pq-surface-2)] dark:text-[var(--pq-text-muted)]">
+          <div className="flex items-center gap-1 rounded-full border border-[var(--pq-border)] bg-white px-1.5 py-1 text-sm text-[var(--pq-text-muted)] dark:border-white/10 dark:bg-[var(--pq-surface-2)] dark:text-[var(--pq-text-muted)]">
             <button
               type="button"
               onClick={() => updateContentScale(-CONTENT_SCALE_STEP)}
-              className="rounded-full p-1.5 transition-all duration-200 hover:bg-slate-100 dark:hover:bg-[var(--pq-surface-3)]"
+              className="rounded-full p-1.5 transition-all duration-200 hover:bg-[var(--pq-surface-2)] dark:hover:bg-[var(--pq-surface-3)]"
               aria-label={l('缩小正文', 'Zoom out content')}
             >
               <ZoomOut className="h-4 w-4" strokeWidth={1.9} />
             </button>
-            <span className="min-w-[54px] text-center text-sm font-medium text-slate-700 dark:text-[var(--pq-text)]">
+            <span className="min-w-[54px] text-center text-sm font-medium text-[var(--pq-text-muted)] dark:text-[var(--pq-text)]">
               {Math.round(contentScale * 100)}%
             </span>
             <button
               type="button"
               onClick={() => updateContentScale(CONTENT_SCALE_STEP)}
-              className="rounded-full p-1.5 transition-all duration-200 hover:bg-slate-100 dark:hover:bg-[var(--pq-surface-3)]"
+              className="rounded-full p-1.5 transition-all duration-200 hover:bg-[var(--pq-surface-2)] dark:hover:bg-[var(--pq-surface-3)]"
               aria-label={l('放大正文', 'Zoom in content')}
             >
               <ZoomIn className="h-4 w-4" strokeWidth={1.9} />
             </button>
           </div>
 
-          <span className="hidden rounded-full bg-slate-50 px-3 py-1 text-xs text-slate-400 lg:inline dark:bg-[var(--pq-surface-2)] dark:text-[var(--pq-text-faint)]">
+          <span className="hidden rounded-full bg-[var(--pq-surface-2)] px-3 py-1 text-xs text-[var(--pq-text-faint)] lg:inline dark:bg-[var(--pq-surface-2)] dark:text-[var(--pq-text-faint)]">
             {l(
               '点击块可反向定位到 PDF 几何区域',
               'Click a block to jump back to the PDF geometry region',
@@ -997,7 +997,7 @@ function BlockViewer({
           </div>
 
           <div className="mt-8 flex justify-center">
-            <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-400 shadow-sm dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:text-[var(--pq-text-faint)] dark:shadow-none">
+            <div className="inline-flex items-center gap-2 rounded-full border border-[var(--pq-border)] bg-white px-3 py-1.5 text-xs text-[var(--pq-text-faint)] shadow-sm dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:text-[var(--pq-text-faint)] dark:shadow-none">
               <Sparkles className="h-3.5 w-3.5" strokeWidth={1.9} />
               {l(
                 '左侧 PDF 与右侧结构块保持几何联动',

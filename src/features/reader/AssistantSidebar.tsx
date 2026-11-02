@@ -227,7 +227,7 @@ function AssistantSidebar({
   ];
 
   return (
-    <div className="pq-saas-scope pq-reader-assistant paperquay-assistant flex h-full min-h-0 overflow-hidden">
+    <div className="pq-reader-assistant paperquay-assistant flex h-full min-h-0 overflow-hidden">
       <div
         className={cn(
           'pq-reader-pane overflow-hidden border-l',

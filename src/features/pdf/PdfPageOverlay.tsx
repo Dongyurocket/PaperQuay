@@ -57,9 +57,9 @@ export const PdfPageOverlay = memo(function PdfPageOverlay({
             aria-label={block.blockId}
             className={cn(
               'absolute rounded-lg border transition-all duration-150',
-              isHovered && 'border-amber-300 bg-amber-200/18',
+              isHovered && 'border-[color-mix(in_srgb,var(--pq-warning)_28%,transparent)] bg-amber-200/18',
               isActive &&
-                'border-indigo-400 bg-indigo-300/14 shadow-[0_0_0_1px_rgba(99,102,241,0.18)]',
+                'border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-indigo-300/14 shadow-[0_0_0_1px_rgba(99,102,241,0.18)]',
             )}
             style={bboxToCssStyle(
               block.bbox!,
@@ -106,7 +106,7 @@ export const PdfPageOverlay = memo(function PdfPageOverlay({
                     event.stopPropagation();
                     onAnnotationSelect?.(annotation.id);
                   }}
-                  className="pointer-events-auto absolute -right-1.5 -top-1.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-500 px-1 text-[10px] font-semibold text-white shadow-sm transition hover:bg-amber-600"
+                  className="pointer-events-auto absolute -right-1.5 -top-1.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-500 px-1 text-[11px] font-semibold text-white shadow-sm transition hover:bg-amber-600"
                   title={annotationTitle}
                 >
                   {index + 1}
@@ -138,7 +138,7 @@ export const PdfPageOverlay = memo(function PdfPageOverlay({
             style={annotationStyle}
             title={annotationTitle}
           >
-            <span className="absolute -right-1.5 -top-1.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-500 px-1 text-[10px] font-semibold text-white shadow-sm">
+            <span className="absolute -right-1.5 -top-1.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-500 px-1 text-[11px] font-semibold text-white shadow-sm">
               {index + 1}
             </span>
           </button>

@@ -111,7 +111,7 @@ export function ModelPresetPicker({
           <Sparkles className="h-3.5 w-3.5 shrink-0 text-[var(--pq-accent)]" strokeWidth={1.9} />
           <div className="truncate text-xs font-semibold text-[var(--pq-text)]">{title}</div>
         </div>
-        <div className="mt-0.5 truncate text-[10px] text-[var(--pq-text-faint)]">
+        <div className="mt-0.5 truncate text-[11px] text-[var(--pq-text-faint)]">
           {l('选择一个已配置的模型', 'Choose a configured model')}
         </div>
       </div>
@@ -151,7 +151,7 @@ export function ModelPresetPicker({
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="block truncate font-medium">{preset.label || preset.model}</span>
-                  <span className="mt-0.5 block truncate text-[10px] text-[var(--pq-text-faint)]">
+                  <span className="mt-0.5 block truncate text-[11px] text-[var(--pq-text-faint)]">
                     {preset.model}
                   </span>
                 </span>
@@ -194,7 +194,7 @@ export function ModelPresetPicker({
           />
         ) : (
           <Bot
-            className="h-4 w-4 shrink-0 text-slate-400 dark:text-[var(--pq-text-faint)]"
+            className="h-4 w-4 shrink-0 text-[var(--pq-text-faint)] dark:text-[var(--pq-text-faint)]"
             strokeWidth={1.8}
           />
         )}

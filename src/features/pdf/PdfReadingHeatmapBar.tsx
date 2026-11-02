@@ -89,7 +89,7 @@ export function PdfReadingHeatmapBar({
   return (
     <div className="absolute inset-x-3 bottom-3 z-20 pointer-events-none">
       <div className="rounded-xl border border-slate-200/80 bg-white/88 px-3 py-2 shadow-[0_14px_34px_rgba(15,23,42,0.10)] backdrop-blur-xl dark:border-white/10 dark:bg-[var(--pq-sidebar)] dark:shadow-[0_14px_34px_rgba(0,0,0,0.28)]">
-        <div className="mb-1.5 flex items-center justify-between gap-3 text-[11px] font-medium text-slate-500 dark:text-[var(--pq-text-faint)]">
+        <div className="mb-1.5 flex items-center justify-between gap-3 text-[11px] font-medium text-[var(--pq-text-muted)] dark:text-[var(--pq-text-faint)]">
           <span>{label}</span>
           <span>
             {totalLabel} {totalText}
@@ -97,7 +97,7 @@ export function PdfReadingHeatmapBar({
         </div>
         <button
           type="button"
-          className="pointer-events-auto group relative h-9 w-full cursor-pointer touch-none overflow-hidden rounded-lg border border-slate-200 bg-slate-100 text-left outline-none transition hover:border-slate-300 dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:hover:border-white/15"
+          className="pointer-events-auto group relative h-9 w-full cursor-pointer touch-none overflow-hidden rounded-lg border border-[var(--pq-border)] bg-[var(--pq-surface-2)] text-left outline-none transition hover:border-[var(--pq-border-strong)] dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:hover:border-white/15"
           onClick={(event) => handlePointer(event.clientX, event.currentTarget)}
           onPointerDown={(event) => handlePointer(event.clientX, event.currentTarget)}
           aria-label={label}

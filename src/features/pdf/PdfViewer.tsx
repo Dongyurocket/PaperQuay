@@ -3101,8 +3101,8 @@ function PdfViewer({
                 className={cn(
                   'inline-flex h-8 w-8 items-center justify-center rounded-xl border transition',
                   sidebarTab === 'thumbnails' && !thumbnailsCollapsed
-                    ? 'border-indigo-200 bg-indigo-50 text-indigo-600 dark:border-indigo-400/30 dark:bg-indigo-500/10 dark:text-indigo-300'
-                    : 'border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:bg-slate-50 dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:text-[var(--pq-text-muted)] dark:hover:border-white/15 dark:hover:bg-[var(--pq-surface-2)]',
+                    ? 'border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-[var(--pq-accent-bg)] text-[var(--pq-accent)] dark:border-indigo-400/30 dark:bg-indigo-500/10 dark:text-indigo-300'
+                    : 'border-[var(--pq-border)] bg-white text-[var(--pq-text-muted)] hover:border-[var(--pq-border-strong)] hover:bg-[var(--pq-surface-2)] dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:text-[var(--pq-text-muted)] dark:hover:border-white/15 dark:hover:bg-[var(--pq-surface-2)]',
                 )}
               >
                 <Images className="h-4 w-4" strokeWidth={1.8} />
@@ -3119,8 +3119,8 @@ function PdfViewer({
                 className={cn(
                   'inline-flex h-8 w-8 items-center justify-center rounded-xl border transition',
                   sidebarTab === 'outline' && !thumbnailsCollapsed
-                    ? 'border-indigo-200 bg-indigo-50 text-indigo-600 dark:border-indigo-400/30 dark:bg-indigo-500/10 dark:text-indigo-300'
-                    : 'border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:bg-slate-50 dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:text-[var(--pq-text-muted)] dark:hover:border-white/15 dark:hover:bg-[var(--pq-surface-2)]',
+                    ? 'border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-[var(--pq-accent-bg)] text-[var(--pq-accent)] dark:border-indigo-400/30 dark:bg-indigo-500/10 dark:text-indigo-300'
+                    : 'border-[var(--pq-border)] bg-white text-[var(--pq-text-muted)] hover:border-[var(--pq-border-strong)] hover:bg-[var(--pq-surface-2)] dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:text-[var(--pq-text-muted)] dark:hover:border-white/15 dark:hover:bg-[var(--pq-surface-2)]',
                 )}
               >
                 <ListTree className="h-4 w-4" strokeWidth={1.8} />
@@ -3150,7 +3150,7 @@ function PdfViewer({
         <div className="relative min-h-0 flex-1">
           {loading ? (
           <div className="absolute inset-0 z-20 flex items-center justify-center bg-[rgba(241,245,249,0.72)] backdrop-blur-sm dark:bg-[rgba(15,23,42,0.72)]">
-            <div className="inline-flex items-center rounded-full border border-white/70 bg-white/92 px-4 py-2 text-sm text-slate-600 shadow-[0_14px_34px_rgba(15,23,42,0.08)] dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:text-[var(--pq-text-muted)] dark:shadow-[0_14px_34px_rgba(0,0,0,0.24)]">
+            <div className="inline-flex items-center rounded-full border border-white/70 bg-white/92 px-4 py-2 text-sm text-[var(--pq-text-muted)] shadow-[0_14px_34px_rgba(15,23,42,0.08)] dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:text-[var(--pq-text-muted)] dark:shadow-[0_14px_34px_rgba(0,0,0,0.24)]">
               {l('Loading PDF...', 'Loading PDF...')}
             </div>
           </div>

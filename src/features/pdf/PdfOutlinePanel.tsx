@@ -77,18 +77,18 @@ export const PdfOutlinePanel = memo(function PdfOutlinePanel({
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex items-center gap-1.5 border-b border-slate-200/70 px-2.5 py-2.5 dark:border-[var(--pq-border)]">
         <div className="relative min-w-0 flex-1">
-          <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400 dark:text-[var(--pq-text-faint)]" />
+          <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--pq-text-faint)] dark:text-[var(--pq-text-faint)]" />
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder={l('搜索标题', 'Search headings')}
-            className="h-7 w-full rounded-lg border border-slate-200 bg-white/80 pl-7 pr-6 text-xs text-slate-700 outline-none transition focus:border-indigo-300 dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:text-[var(--pq-text)] dark:focus:border-indigo-400/40"
+            className="h-7 w-full rounded-lg border border-[var(--pq-border)] bg-white/80 pl-7 pr-6 text-xs text-[var(--pq-text-muted)] outline-none transition focus:border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:text-[var(--pq-text)] dark:focus:border-indigo-400/40"
           />
           {query ? (
             <button
               type="button"
               onClick={() => setQuery('')}
-              className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-slate-400 hover:text-slate-600 dark:hover:text-[var(--pq-text)]"
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-[var(--pq-text-faint)] hover:text-[var(--pq-text-muted)] dark:hover:text-[var(--pq-text)]"
               aria-label={l('清除搜索', 'Clear search')}
             >
               <X className="h-3 w-3" />
@@ -101,7 +101,7 @@ export const PdfOutlinePanel = memo(function PdfOutlinePanel({
             onClick={onGoBack}
             title={l('返回上一个位置', 'Back to previous location')}
             aria-label={l('返回上一个位置', 'Back to previous location')}
-            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition hover:border-slate-300 hover:text-slate-700 dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:text-[var(--pq-text-muted)] dark:hover:text-[var(--pq-text)]"
+            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-[var(--pq-border)] bg-white text-[var(--pq-text-muted)] transition hover:border-[var(--pq-border-strong)] hover:text-[var(--pq-text-muted)] dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:text-[var(--pq-text-muted)] dark:hover:text-[var(--pq-text)]"
           >
             <CornerUpLeft className="h-3.5 w-3.5" strokeWidth={1.8} />
           </button>
@@ -114,15 +114,15 @@ export const PdfOutlinePanel = memo(function PdfOutlinePanel({
         className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain px-1.5 py-2"
       >
         {loading ? (
-          <div className="px-2 py-6 text-center text-xs text-slate-400 dark:text-[var(--pq-text-faint)]">
+          <div className="px-2 py-6 text-center text-xs text-[var(--pq-text-faint)] dark:text-[var(--pq-text-faint)]">
             {l('正在读取目录…', 'Loading outline...')}
           </div>
         ) : errorMessage ? (
-          <div className="px-2 py-6 text-center text-xs text-amber-600 dark:text-amber-400">
+          <div className="px-2 py-6 text-center text-xs text-[var(--pq-warning)] dark:text-amber-400">
             {errorMessage}
           </div>
         ) : rows.length === 0 ? (
-          <div className="flex flex-col items-center gap-2 px-3 py-8 text-center text-xs text-slate-400 dark:text-[var(--pq-text-faint)]">
+          <div className="flex flex-col items-center gap-2 px-3 py-8 text-center text-xs text-[var(--pq-text-faint)] dark:text-[var(--pq-text-faint)]">
             <ListTree className="h-5 w-5" strokeWidth={1.6} />
             {searching
               ? l('没有匹配的标题', 'No matching headings')
@@ -139,8 +139,8 @@ export const PdfOutlinePanel = memo(function PdfOutlinePanel({
                     className={cn(
                       'group flex w-full items-center gap-0.5 rounded-lg pr-1 text-left transition-colors',
                       isActive
-                        ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-500/10 dark:text-indigo-300'
-                        : 'text-slate-600 hover:bg-slate-100/80 dark:text-[var(--pq-text-muted)] dark:hover:bg-[var(--pq-surface-2)]',
+                        ? 'bg-[var(--pq-accent-bg)] text-[var(--pq-accent)] dark:bg-indigo-500/10 dark:text-indigo-300'
+                        : 'text-[var(--pq-text-muted)] hover:bg-slate-100/80 dark:text-[var(--pq-text-muted)] dark:hover:bg-[var(--pq-surface-2)]',
                     )}
                     style={{ paddingLeft: `${(depth - 1) * 12 + 2}px` }}
                   >
@@ -148,7 +148,7 @@ export const PdfOutlinePanel = memo(function PdfOutlinePanel({
                       <button
                         type="button"
                         onClick={() => onToggleCollapsed(item.id)}
-                        className="inline-flex h-6 w-5 shrink-0 items-center justify-center text-slate-400 transition hover:text-slate-600 dark:hover:text-[var(--pq-text)]"
+                        className="inline-flex h-6 w-5 shrink-0 items-center justify-center text-[var(--pq-text-faint)] transition hover:text-[var(--pq-text-muted)] dark:hover:text-[var(--pq-text)]"
                         aria-label={collapsed ? l('展开', 'Expand') : l('折叠', 'Collapse')}
                       >
                         {collapsed ? (

@@ -1541,7 +1541,7 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
                       )}
                     >
                       <span className="min-w-0 truncate">{node.label}</span>
-                      <span className="shrink-0 text-[10px] uppercase text-[var(--pq-text-faint)]">{node.type}</span>
+                      <span className="shrink-0 text-[11px] uppercase text-[var(--pq-text-faint)]">{node.type}</span>
                     </button>
                   )) : (
                     <div className="px-2 py-2 text-[11px] text-[var(--pq-text-faint)]">
@@ -1593,7 +1593,7 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
                 >
                   <span className="w-4 shrink-0 text-[var(--pq-text-faint)]">{index + 1}</span>
                   <span className="min-w-0 flex-1 truncate">{item.node.label}</span>
-                  <span className="shrink-0 rounded bg-[var(--pq-bg-secondary)] px-1.5 py-0.5 text-[10px]">
+                  <span className="shrink-0 rounded bg-[var(--pq-bg-secondary)] px-1.5 py-0.5 text-[11px]">
                     {item.degree}
                   </span>
                 </button>
@@ -1848,7 +1848,7 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
         ) : null}
 
         {error ? (
-          <div className="absolute left-4 top-4 flex max-w-md items-start gap-2 rounded-[var(--pq-radius-sm)] border border-red-200 bg-red-50 px-3 py-2 text-xs leading-5 text-red-700 shadow-[var(--pq-shadow-md)]">
+          <div className="absolute left-4 top-4 flex max-w-md items-start gap-2 rounded-[var(--pq-radius-sm)] border border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-danger-bg)] px-3 py-2 text-xs leading-5 text-[var(--pq-danger)] shadow-[var(--pq-shadow-md)]">
             <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" />
             <span>{error}</span>
           </div>
@@ -1930,7 +1930,7 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
                             {edge.label} {'->'} {otherNode?.label ?? edge.target}
                           </div>
                           {edge.description ? (
-                            <div className="truncate text-[10px] text-[var(--pq-text-faint)]">
+                            <div className="truncate text-[11px] text-[var(--pq-text-faint)]">
                               {edge.description}
                             </div>
                           ) : null}
@@ -1963,7 +1963,7 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
               <span className="min-w-0 flex-1 truncate text-sm font-semibold text-[var(--pq-text)]">
                 {selectedEdge.label || selectedEdge.type}
               </span>
-              <span className="shrink-0 rounded-md bg-[var(--pq-bg-secondary)] px-1.5 py-0.5 text-[10px] uppercase text-[var(--pq-text-faint)]">
+              <span className="shrink-0 rounded-md bg-[var(--pq-bg-secondary)] px-1.5 py-0.5 text-[11px] uppercase text-[var(--pq-text-faint)]">
                 {selectedEdge.type}
               </span>
             </div>
@@ -2009,7 +2009,7 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
                     setSelectedEdge(null);
                     void deleteRelation(edgeId);
                   }}
-                  className="pq-button h-8 px-3 text-xs text-red-600"
+                  className="pq-button h-8 px-3 text-xs text-[var(--pq-danger)]"
                 >
                   {l('删除', 'Delete')}
                 </button>

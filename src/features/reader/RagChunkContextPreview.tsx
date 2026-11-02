@@ -104,7 +104,7 @@ export function RagChunkContextPreview({
     }
 
     if (error) {
-      return <p className="px-4 py-6 text-center text-xs text-red-500">{error}</p>;
+      return <p className="px-4 py-6 text-center text-xs text-[var(--pq-danger)]">{error}</p>;
     }
 
     if (!response) {
@@ -149,7 +149,7 @@ export function RagChunkContextPreview({
                 : 'rounded-lg border border-[var(--pq-border)] bg-[var(--pq-surface-2)] p-2.5'
             }
           >
-            <div className="mb-1.5 flex items-center gap-2 text-[10px] text-[var(--pq-text-faint)]">
+            <div className="mb-1.5 flex items-center gap-2 text-[11px] text-[var(--pq-text-faint)]">
               <span
                 className={
                   slice.position === 'hit'
@@ -165,7 +165,7 @@ export function RagChunkContextPreview({
               <button
                 type="button"
                 onClick={() => onLocate(slice)}
-                className="ml-auto inline-flex items-center gap-1 rounded-full border border-[var(--pq-border)] px-2 py-0.5 text-[10px] text-[var(--pq-text-muted)] transition hover:border-[var(--pq-accent-border)] hover:text-[var(--pq-accent)]"
+                className="ml-auto inline-flex items-center gap-1 rounded-full border border-[var(--pq-border)] px-2 py-0.5 text-[11px] text-[var(--pq-text-muted)] transition hover:border-[var(--pq-accent-border)] hover:text-[var(--pq-accent)]"
                 title={l('在结构化正文中定位该切片', 'Locate this chunk in the structured blocks')}
               >
                 <MapPin className="h-3 w-3" strokeWidth={1.8} />
@@ -188,7 +188,7 @@ export function RagChunkContextPreview({
           <div className="truncate text-xs font-semibold text-[var(--pq-text)]">
             {l(`切片上下文 · [${citation.label}]`, `Chunk context · [${citation.label}]`)}
           </div>
-          <div className="text-[10px] text-[var(--pq-text-faint)]">
+          <div className="text-[11px] text-[var(--pq-text-faint)]">
             {l('仅本地预览，不会发送给模型', 'Local preview only; nothing is sent to the model')}
           </div>
         </div>

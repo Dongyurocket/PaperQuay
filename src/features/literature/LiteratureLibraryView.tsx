@@ -2896,7 +2896,7 @@ export default function LiteratureLibraryView({
 
   return (
     <div
-      className="pq-saas-scope pq-library-workspace pq-workspace-surface relative grid h-full min-h-0 overflow-hidden text-[var(--pq-text)]"
+      className="pq-library-workspace pq-workspace-surface relative grid h-full min-h-0 overflow-hidden text-[var(--pq-text)]"
       style={{
         gridTemplateColumns: `${categorySidebarWidth}px minmax(360px,1fr) ${detailsPanelWidth}px`,
         gridTemplateRows: 'minmax(0, 1fr)',
@@ -3045,7 +3045,7 @@ export default function LiteratureLibraryView({
               type="button"
               disabled={batchWorking}
               onClick={handleBatchDeletePapers}
-              className="pq-button px-2.5 py-1 text-xs text-rose-600 disabled:opacity-50 dark:text-rose-300"
+              className="pq-button px-2.5 py-1 text-xs text-[var(--pq-danger)] disabled:opacity-50 dark:text-rose-300"
             >
               {l('删除', 'Delete')}
             </button>
@@ -3126,7 +3126,7 @@ export default function LiteratureLibraryView({
             'mx-auto h-full w-px transition',
             categorySidebarResizing
               ? 'bg-teal-400 shadow-[0_0_0_3px_rgba(45,212,191,0.16)]'
-              : 'bg-slate-200 hover:bg-teal-300 dark:bg-white/10 dark:hover:bg-teal-300/60',
+              : 'bg-[var(--pq-surface-3)] hover:bg-[var(--pq-accent-bg)] dark:bg-white/10 dark:hover:bg-teal-300/60',
           ].join(' ')}
         />
       </div>
@@ -3211,7 +3211,7 @@ export default function LiteratureLibraryView({
             'mx-auto h-full w-px transition',
             detailsPanelResizing
               ? 'bg-teal-400 shadow-[0_0_0_3px_rgba(45,212,191,0.16)]'
-              : 'bg-slate-200 hover:bg-teal-300 dark:bg-white/10 dark:hover:bg-teal-300/60',
+              : 'bg-[var(--pq-surface-3)] hover:bg-[var(--pq-accent-bg)] dark:bg-white/10 dark:hover:bg-teal-300/60',
           ].join(' ')}
         />
       </div>
@@ -3246,17 +3246,17 @@ export default function LiteratureLibraryView({
             }}
             onClick={(event) => event.stopPropagation()}
           >
-            <div className="border-b border-slate-100 px-3 py-2 text-xs text-slate-500 dark:border-white/10 dark:text-[#a0a0a0]">
+            <div className="border-b border-[var(--pq-border)] px-3 py-2 text-xs text-[var(--pq-text-muted)] dark:border-white/10 dark:text-[#a0a0a0]">
               {paperContextMenu.paper.title}
             </div>
             <button
               type="button"
               onClick={() => void handleToggleFavoriteFromContextMenu()}
               disabled={paperSaving}
-              className="mt-1 flex w-full items-center rounded-xl px-3 py-2 text-left text-sm font-medium text-slate-700 transition hover:bg-slate-100 disabled:opacity-60 dark:text-[#e0e0e0] dark:hover:bg-white/[0.06]"
+              className="mt-1 flex w-full items-center rounded-xl px-3 py-2 text-left text-sm font-medium text-[var(--pq-text-muted)] transition hover:bg-[var(--pq-surface-2)] disabled:opacity-60 dark:text-[#e0e0e0] dark:hover:bg-white/[0.06]"
             >
               <Star
-                className="mr-2 h-4 w-4 text-amber-500"
+                className="mr-2 h-4 w-4 text-[var(--pq-warning)]"
                 fill={paperContextMenu.paper.isFavorite ? 'currentColor' : 'none'}
                 strokeWidth={1.9}
               />
@@ -3267,17 +3267,17 @@ export default function LiteratureLibraryView({
             <button
               type="button"
               onClick={handleOpenTagDialogFromContextMenu}
-              className="mt-1 flex w-full items-center rounded-xl px-3 py-2 text-left text-sm font-medium text-slate-700 transition hover:bg-slate-100 dark:text-[#e0e0e0] dark:hover:bg-white/[0.06]"
+              className="mt-1 flex w-full items-center rounded-xl px-3 py-2 text-left text-sm font-medium text-[var(--pq-text-muted)] transition hover:bg-[var(--pq-surface-2)] dark:text-[#e0e0e0] dark:hover:bg-white/[0.06]"
             >
-              <Tag className="mr-2 h-4 w-4 text-cyan-600 dark:text-cyan-200" strokeWidth={1.9} />
+              <Tag className="mr-2 h-4 w-4 text-[var(--pq-info)] dark:text-cyan-200" strokeWidth={1.9} />
               {l('添加自定义标签', 'Add Custom Tag')}
             </button>
             <button
               type="button"
               onClick={() => void handleOpenMetadataDialogFromContextMenu()}
-              className="mt-1 flex w-full items-center rounded-xl px-3 py-2 text-left text-sm font-medium text-slate-700 transition hover:bg-slate-100 dark:text-[#e0e0e0] dark:hover:bg-white/[0.06]"
+              className="mt-1 flex w-full items-center rounded-xl px-3 py-2 text-left text-sm font-medium text-[var(--pq-text-muted)] transition hover:bg-[var(--pq-surface-2)] dark:text-[#e0e0e0] dark:hover:bg-white/[0.06]"
             >
-              <Sparkles className="mr-2 h-4 w-4 text-violet-600 dark:text-violet-200" strokeWidth={1.9} />
+              <Sparkles className="mr-2 h-4 w-4 text-[var(--pq-accent)] dark:text-violet-200" strokeWidth={1.9} />
               {l('解析元数据', 'Parse Metadata')}
             </button>
             <button
@@ -3292,9 +3292,9 @@ export default function LiteratureLibraryView({
                 setConfirmDialog({ kind: 'exclude-rag-paper', paper });
               }}
               disabled={paperSaving || batchWorking}
-              className="mt-1 flex w-full items-center rounded-xl px-3 py-2 text-left text-sm font-medium text-slate-700 transition hover:bg-slate-100 disabled:opacity-60 dark:text-[#e0e0e0] dark:hover:bg-white/[0.06]"
+              className="mt-1 flex w-full items-center rounded-xl px-3 py-2 text-left text-sm font-medium text-[var(--pq-text-muted)] transition hover:bg-[var(--pq-surface-2)] disabled:opacity-60 dark:text-[#e0e0e0] dark:hover:bg-white/[0.06]"
             >
-              <Database className="mr-2 h-4 w-4 text-slate-500 dark:text-slate-300" strokeWidth={1.9} />
+              <Database className="mr-2 h-4 w-4 text-[var(--pq-text-muted)] dark:text-[var(--pq-text-faint)]" strokeWidth={1.9} />
               {paperContextMenu.paper.ragEnabled === false
                 ? l('加入本地知识库', 'Include in Local Knowledge Base')
                 : l('移出本地知识库', 'Exclude from Local Knowledge Base')}
@@ -3307,19 +3307,19 @@ export default function LiteratureLibraryView({
                   ragIndexingDocumentKey === paperContextMenu.paper.id
                   || paperContextMenu.paper.ragEnabled === false
                 }
-                className="mt-1 flex w-full items-center rounded-xl px-3 py-2 text-left text-sm font-medium text-slate-700 transition hover:bg-slate-100 disabled:opacity-60 dark:text-[#e0e0e0] dark:hover:bg-white/[0.06]"
+                className="mt-1 flex w-full items-center rounded-xl px-3 py-2 text-left text-sm font-medium text-[var(--pq-text-muted)] transition hover:bg-[var(--pq-surface-2)] disabled:opacity-60 dark:text-[#e0e0e0] dark:hover:bg-white/[0.06]"
               >
-                <Database className="mr-2 h-4 w-4 text-teal-600 dark:text-teal-200" strokeWidth={1.9} />
+                <Database className="mr-2 h-4 w-4 text-[var(--pq-accent)] dark:text-teal-200" strokeWidth={1.9} />
                 {ragIndexingDocumentKey === paperContextMenu.paper.id
                   ? l('RAG 索引中…', 'Indexing…')
                   : l('建立/重建 RAG 索引', 'Build/Rebuild RAG Index')}
               </button>
             ) : null}
-            <div className="my-1 border-t border-slate-100 dark:border-white/10" />
+            <div className="my-1 border-t border-[var(--pq-border)] dark:border-white/10" />
             <button
               type="button"
               onClick={handleDeletePaperFromContextMenu}
-              className="flex w-full items-center rounded-xl px-3 py-2 text-left text-sm font-medium text-rose-600 transition hover:bg-rose-50 dark:text-rose-300 dark:hover:bg-rose-400/10"
+              className="flex w-full items-center rounded-xl px-3 py-2 text-left text-sm font-medium text-[var(--pq-danger)] transition hover:bg-[var(--pq-danger-bg)] dark:text-rose-300 dark:hover:bg-rose-400/10"
             >
               <Trash2 className="mr-2 h-4 w-4" strokeWidth={1.9} />
               {l('删除文献记录', 'Delete Paper Record')}

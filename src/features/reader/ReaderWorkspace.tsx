@@ -506,8 +506,8 @@ function ReadingStage(props: ReaderWorkspaceProps & { immersiveReading: boolean 
                 onPointerDown={onStartResize}
                 className="group relative z-20 w-2 shrink-0 cursor-col-resize bg-transparent transition-all duration-200"
               >
-                <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-slate-300/80 transition-all duration-200 group-hover:w-[3px] group-hover:bg-indigo-300" />
-                <div className="absolute left-1/2 top-1/2 h-14 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-slate-300 transition-all duration-200 group-hover:w-1.5 group-hover:bg-indigo-400" />
+                <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-slate-300/80 transition-all duration-200 group-hover:w-[3px] group-hover:bg-[var(--pq-accent-bg)]" />
+                <div className="absolute left-1/2 top-1/2 h-14 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--pq-surface-3)] transition-all duration-200 group-hover:w-1.5 group-hover:bg-indigo-400" />
               </div>
 
               <section
@@ -708,7 +708,7 @@ function ReaderWorkspace(props: ReaderWorkspaceProps) {
       ) : null}
 
       {error ? (
-        <div className="border-b border-rose-200 bg-rose-50 px-6 py-3 text-sm text-rose-600 dark:border-rose-400/30 dark:bg-rose-400/10 dark:text-rose-400">
+        <div className="border-b border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-danger-bg)] px-6 py-3 text-sm text-[var(--pq-danger)] dark:border-rose-400/30 dark:bg-rose-400/10 dark:text-rose-400">
           {error}
         </div>
       ) : null}
@@ -745,7 +745,7 @@ function ReaderWorkspace(props: ReaderWorkspaceProps) {
         <button
           type="button"
           onClick={() => setImmersiveReading(false)}
-          className="fixed bottom-14 right-5 z-[120] inline-flex h-10 items-center gap-2 rounded-2xl border border-slate-200 bg-white/92 px-3 text-sm font-medium text-slate-700 shadow-[0_14px_34px_rgba(15,23,42,0.16)] backdrop-blur-xl transition hover:bg-white dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:text-[var(--pq-text)] dark:hover:bg-[var(--pq-surface-2)]"
+          className="fixed bottom-14 right-5 z-[120] inline-flex h-10 items-center gap-2 rounded-2xl border border-[var(--pq-border)] bg-white/92 px-3 text-sm font-medium text-[var(--pq-text-muted)] shadow-[0_14px_34px_rgba(15,23,42,0.16)] backdrop-blur-xl transition hover:bg-white dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:text-[var(--pq-text)] dark:hover:bg-[var(--pq-surface-2)]"
           title={l('退出沉浸', 'Exit Immersive')}
           aria-label={l('退出沉浸', 'Exit Immersive')}
         >
@@ -762,7 +762,7 @@ function ReaderWorkspace(props: ReaderWorkspaceProps) {
         />
       ) : null}
 
-      <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-slate-200/80 bg-white/70 px-6 py-2.5 text-xs text-slate-500 backdrop-blur-xl dark:border-white/10 dark:bg-[var(--pq-bg-primary)] dark:text-[var(--pq-text-faint)]">
+      <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-slate-200/80 bg-white/70 px-6 py-2.5 text-xs text-[var(--pq-text-muted)] backdrop-blur-xl dark:border-white/10 dark:bg-[var(--pq-bg-primary)] dark:text-[var(--pq-text-faint)]">
         <div className="min-w-0 truncate">
           {loading || translating ? statusMessage || l('正在处理中...', 'Processing...') : statusMessage}
         </div>

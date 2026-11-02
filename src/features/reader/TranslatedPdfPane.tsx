@@ -58,12 +58,12 @@ export default function TranslatedPdfPane({
   if (!translatedPdfPath) {
     return (
       <div className="flex h-full min-h-0 flex-col items-center justify-center gap-4 p-8 text-center">
-        <BookCopy className="h-10 w-10 text-slate-300 dark:text-[#666]" strokeWidth={1.6} />
+        <BookCopy className="h-10 w-10 text-[var(--pq-text-faint)] dark:text-[#666]" strokeWidth={1.6} />
         <div className="max-w-sm">
-          <div className="text-sm font-semibold text-slate-700 dark:text-[var(--pq-text)]">
+          <div className="text-sm font-semibold text-[var(--pq-text-muted)] dark:text-[var(--pq-text)]">
             {l('尚未附加翻译版 PDF', 'No translated PDF attached')}
           </div>
-          <p className="mt-1.5 text-xs leading-5 text-slate-500 dark:text-[var(--pq-text-muted)]">
+          <p className="mt-1.5 text-xs leading-5 text-[var(--pq-text-muted)] dark:text-[var(--pq-text-muted)]">
             {l(
               '附加由 retainpdf 翻译的 PDF 后，可与原版 PDF 逐页对照阅读。翻译版页码需与原版一一对应。',
               'Attach a retainpdf-translated PDF to read it side by side with the original. Page numbers must match the original.',
@@ -91,13 +91,13 @@ export default function TranslatedPdfPane({
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex shrink-0 items-center justify-between gap-2 border-b border-slate-200/70 bg-white/60 px-3 py-1.5 dark:border-white/10 dark:bg-white/[0.04]">
         <div className="flex min-w-0 items-center gap-1.5">
-          <BookCopy className="h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-300" strokeWidth={1.9} />
-          <span className="shrink-0 text-[11px] font-semibold text-slate-600 dark:text-[var(--pq-text-muted)]">
+          <BookCopy className="h-3.5 w-3.5 shrink-0 text-[var(--pq-success)] dark:text-emerald-300" strokeWidth={1.9} />
+          <span className="shrink-0 text-[11px] font-semibold text-[var(--pq-text-muted)] dark:text-[var(--pq-text-muted)]">
             {l('翻译版 PDF', 'Translated PDF')}
           </span>
           {fileName ? (
             <span
-              className="truncate text-[11px] text-slate-400 dark:text-[var(--pq-text-faint)]"
+              className="truncate text-[11px] text-[var(--pq-text-faint)] dark:text-[var(--pq-text-faint)]"
               title={fileName}
             >
               {fileName}
@@ -109,8 +109,8 @@ export default function TranslatedPdfPane({
           onClick={() => onSyncEnabledChange(!syncEnabled)}
           className={
             syncEnabled
-              ? 'inline-flex h-6 shrink-0 items-center gap-1 rounded-full border border-emerald-300/70 bg-emerald-50 px-2 text-[11px] font-medium text-emerald-700 transition dark:border-emerald-300/25 dark:bg-emerald-300/10 dark:text-emerald-200'
-              : 'inline-flex h-6 shrink-0 items-center gap-1 rounded-full border border-slate-300/80 bg-slate-50 px-2 text-[11px] font-medium text-slate-500 transition dark:border-white/10 dark:bg-white/[0.06] dark:text-[var(--pq-text-faint)]'
+              ? 'inline-flex h-6 shrink-0 items-center gap-1 rounded-full border border-emerald-300/70 bg-[var(--pq-success-bg)] px-2 text-[11px] font-medium text-[var(--pq-success)] transition dark:border-emerald-300/25 dark:bg-emerald-300/10 dark:text-emerald-200'
+              : 'inline-flex h-6 shrink-0 items-center gap-1 rounded-full border border-slate-300/80 bg-[var(--pq-surface-2)] px-2 text-[11px] font-medium text-[var(--pq-text-muted)] transition dark:border-white/10 dark:bg-white/[0.06] dark:text-[var(--pq-text-faint)]'
           }
           title={
             syncEnabled

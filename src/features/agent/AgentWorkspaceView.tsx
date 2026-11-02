@@ -281,7 +281,7 @@ export default function AgentWorkspaceView({
     !plan;
 
   return (
-    <div className="pq-saas-scope pq-agent-workspace pq-workspace-surface relative h-full min-h-0 overflow-hidden text-[var(--pq-text)]">
+    <div className="pq-agent-workspace pq-workspace-surface relative h-full min-h-0 overflow-hidden text-[var(--pq-text)]">
       <div className="flex h-full min-h-0 flex-col bg-transparent">
         <main
           className="grid min-h-0 flex-1 overflow-hidden"
@@ -330,7 +330,7 @@ export default function AgentWorkspaceView({
                           ? 'bg-[#55a99b] ring-4 ring-[#55a99b]/15'
                           : session.status === 'error'
                             ? 'bg-rose-400 hover:bg-rose-500'
-                            : 'bg-slate-300 hover:bg-slate-400 dark:bg-[var(--pq-surface-3)] dark:hover:bg-[var(--pq-surface-3)]',
+                            : 'bg-[var(--pq-surface-3)] hover:bg-slate-400 dark:bg-[var(--pq-surface-3)] dark:hover:bg-[var(--pq-surface-3)]',
                       ].join(' ')}
                       title={session.title}
                     />
@@ -380,7 +380,7 @@ export default function AgentWorkspaceView({
                   <div className="space-y-0.5">
                     {groupedHistorySessions.map((bucket) => (
                       <div key={bucket.key} className="pb-1">
-                        <div className="px-2.5 pb-1 pt-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--pq-text-faint)]">
+                        <div className="px-2.5 pb-1 pt-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--pq-text-faint)]">
                           {bucket.label}
                         </div>
                         {bucket.sessions.map((session) => (
@@ -425,7 +425,7 @@ export default function AgentWorkspaceView({
                                     ? 'bg-rose-400'
                                     : session.status === 'running'
                                       ? 'bg-amber-400'
-                                      : 'bg-slate-300 dark:bg-white/20',
+                                      : 'bg-[var(--pq-surface-3)] dark:bg-white/20',
                                 ].join(' ')}
                               />
                               <span className="truncate">{formatHistoryTime(session.updatedAt)}</span>
@@ -447,7 +447,7 @@ export default function AgentWorkspaceView({
                               event.stopPropagation();
                               handleDeleteHistorySession(session.id);
                             }}
-                            className="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-[var(--pq-radius-sm)] text-slate-400 opacity-0 transition hover:bg-rose-50 hover:text-rose-600 group-hover:opacity-100 focus:opacity-100 dark:hover:bg-rose-400/10 dark:hover:text-rose-300"
+                            className="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-[var(--pq-radius-sm)] text-[var(--pq-text-faint)] opacity-0 transition hover:bg-[var(--pq-danger-bg)] hover:text-[var(--pq-danger)] group-hover:opacity-100 focus:opacity-100 dark:hover:bg-rose-400/10 dark:hover:text-rose-300"
                             aria-label={l('删除历史对话', 'Delete history item')}
                             title={l('删除历史对话', 'Delete history item')}
                           >
@@ -469,7 +469,7 @@ export default function AgentWorkspaceView({
                   <button
                     type="button"
                     onClick={handleClearAgentHistory}
-                    className="flex h-8 w-full items-center rounded-[var(--pq-radius-sm)] px-2.5 text-left text-xs font-medium text-[var(--pq-text-faint)] transition hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-400/10 dark:hover:text-rose-300"
+                    className="flex h-8 w-full items-center rounded-[var(--pq-radius-sm)] px-2.5 text-left text-xs font-medium text-[var(--pq-text-faint)] transition hover:bg-[var(--pq-danger-bg)] hover:text-[var(--pq-danger)] dark:hover:bg-rose-400/10 dark:hover:text-rose-300"
                   >
                     {l('清空历史记录', 'Clear history')}
                   </button>
@@ -570,7 +570,7 @@ export default function AgentWorkspaceView({
                 </div>
 
                 {error ? (
-                  <div className="mb-3 whitespace-pre-wrap rounded-lg border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm leading-6 text-rose-700 dark:border-rose-300/20 dark:bg-rose-400/10 dark:text-rose-200">
+                  <div className="mb-3 whitespace-pre-wrap rounded-lg border border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-danger-bg)] px-4 py-2.5 text-sm leading-6 text-[var(--pq-danger)] dark:border-rose-300/20 dark:bg-rose-400/10 dark:text-rose-200">
                     {error}
                   </div>
                 ) : null}
@@ -603,10 +603,10 @@ export default function AgentWorkspaceView({
                             </span>
                           )}
                           <div className="min-w-0">
-                            <div className="max-w-[180px] truncate font-medium text-slate-700 dark:text-[var(--pq-text-muted)]">
+                            <div className="max-w-[180px] truncate font-medium text-[var(--pq-text-muted)] dark:text-[var(--pq-text-muted)]">
                               {attachment.name}
                             </div>
-                            <div className="mt-0.5 text-[11px] text-slate-400 dark:text-[var(--pq-text-faint)]">
+                            <div className="mt-0.5 text-[11px] text-[var(--pq-text-faint)] dark:text-[var(--pq-text-faint)]">
                               {formatFileSize(attachment.size)}
                             </div>
                           </div>
@@ -635,7 +635,7 @@ export default function AgentWorkspaceView({
                             {agentRagEnabled ? 'RAG on' : 'RAG off'}
                           </span>
                         </div>
-                        <div className="mt-1 text-xs text-slate-500 dark:text-[var(--pq-text-faint)]">
+                        <div className="mt-1 text-xs text-[var(--pq-text-muted)] dark:text-[var(--pq-text-faint)]">
                           {l(
                             `手动选择 ${selectedPaperIds.size} · 搜索结果 ${filteredPapers.length} · 全库 ${papers.length}。未选择时，RAG 自动使用全库候选。`,
                             `Manual ${selectedPaperIds.size} · Results ${filteredPapers.length} · Library ${papers.length}. When none are selected, RAG automatically uses the full library.`,
@@ -680,12 +680,12 @@ export default function AgentWorkspaceView({
                     <div className="p-4">
                       <div className="mb-3 flex flex-wrap items-center gap-2">
                         <label className="pq-input flex min-w-[240px] flex-1 items-center gap-2 px-3 py-2.5 text-sm text-[var(--pq-text-muted)]">
-                          <Search className="h-4 w-4 shrink-0 text-slate-400 dark:text-[var(--pq-text-faint)]" strokeWidth={2} />
+                          <Search className="h-4 w-4 shrink-0 text-[var(--pq-text-faint)] dark:text-[var(--pq-text-faint)]" strokeWidth={2} />
                           <input
                             value={paperSearchQuery}
                             onChange={(event) => onPaperSearchQueryChange(event.target.value)}
                             placeholder={l('搜索标题、作者、年份、标签...', 'Search title, author, year, tags...')}
-                            className="min-w-0 flex-1 bg-transparent text-sm text-slate-800 outline-none placeholder:text-slate-400 dark:text-[var(--pq-text)] dark:placeholder:text-[var(--pq-text-faint)]"
+                            className="min-w-0 flex-1 bg-transparent text-sm text-[var(--pq-text)] outline-none placeholder:text-[var(--pq-text-faint)] dark:text-[var(--pq-text)] dark:placeholder:text-[var(--pq-text-faint)]"
                           />
                         </label>
                         <button
@@ -707,7 +707,7 @@ export default function AgentWorkspaceView({
 
                       {selectedTags.length > 0 ? (
                         <div className="mb-3 flex items-center gap-2 overflow-x-auto pb-1">
-                          <Tags className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                          <Tags className="h-3.5 w-3.5 shrink-0 text-[var(--pq-text-faint)]" />
                           {selectedTags.map((tag) => (
                             <span key={tag} className={agentTagClass}>
                               {tag}
@@ -721,7 +721,7 @@ export default function AgentWorkspaceView({
                         className="max-h-72 overflow-y-auto overscroll-y-contain rounded-xl border border-[var(--pq-border)] bg-[var(--pq-surface-1)]"
                       >
                         {loading ? (
-                          <div className="flex h-40 items-center justify-center text-sm text-slate-500">
+                          <div className="flex h-40 items-center justify-center text-sm text-[var(--pq-text-muted)]">
                             <Loader2 className="mr-2 h-4 w-4 animate-spin" strokeWidth={2} />
                             {l('正在加载文库...', 'Loading library...')}
                           </div>
@@ -758,7 +758,7 @@ export default function AgentWorkspaceView({
                                       'flex h-5 w-5 shrink-0 items-center justify-center rounded-full border',
                                       selected
                                         ? 'border-[var(--pq-accent)] bg-[var(--pq-accent)] text-[var(--pq-accent-text)]'
-                                        : 'border-slate-300 bg-white text-transparent dark:border-white/20 dark:bg-[var(--pq-bg-primary)]',
+                                        : 'border-[var(--pq-border-strong)] bg-white text-transparent dark:border-white/20 dark:bg-[var(--pq-bg-primary)]',
                                     ].join(' ')}
                                   >
                                     <Check className="h-3.5 w-3.5" strokeWidth={2.2} />
@@ -767,11 +767,11 @@ export default function AgentWorkspaceView({
                                     <span className="truncate text-sm font-semibold text-[var(--pq-text)]">
                                       {paper.title}
                                     </span>
-                                    <span className="mt-1 block truncate text-xs text-slate-500 dark:text-[var(--pq-text-faint)]">
+                                    <span className="mt-1 block truncate text-xs text-[var(--pq-text-muted)] dark:text-[var(--pq-text-faint)]">
                                       {formatPaperMeta(paper, locale) || l('暂无元数据', 'No metadata')}
                                     </span>
                                   </span>
-                                  <span className="hidden shrink-0 text-xs text-slate-400 sm:inline">
+                                  <span className="hidden shrink-0 text-xs text-[var(--pq-text-faint)] sm:inline">
                                     {paper.year || ''}
                                   </span>
                                 </button>
@@ -888,8 +888,8 @@ export default function AgentWorkspaceView({
                         className={[
                           'pq-icon-button relative h-10 w-10 shrink-0 border transition',
                           agentRagEnabled
-                            ? 'border-emerald-300 bg-emerald-50 text-emerald-700 shadow-[0_0_0_3px_rgba(16,185,129,0.12)] dark:border-emerald-400/40 dark:bg-emerald-400/12 dark:text-emerald-200'
-                            : 'border-[var(--pq-border)] bg-white/60 text-slate-400 dark:bg-white/5 dark:text-[var(--pq-text-faint)]',
+                            ? 'border-[color-mix(in_srgb,var(--pq-success)_28%,transparent)] bg-[var(--pq-success-bg)] text-[var(--pq-success)] shadow-[0_0_0_3px_rgba(16,185,129,0.12)] dark:border-emerald-400/40 dark:bg-emerald-400/12 dark:text-emerald-200'
+                            : 'border-[var(--pq-border)] bg-white/60 text-[var(--pq-text-faint)] dark:bg-white/5 dark:text-[var(--pq-text-faint)]',
                         ].join(' ')}
                       >
                         <Database className="h-4 w-4" strokeWidth={1.8} />
@@ -940,7 +940,7 @@ export default function AgentWorkspaceView({
                         onClick={activeSessionRunning && !activeSessionCancelling ? onCancelAgentRun : undefined}
                         disabled={activeSessionRunning ? activeSessionCancelling : !canSubmitPrompt}
                         className={activeSessionRunning
-                          ? 'pq-button h-11 shrink-0 border-rose-200 px-5 text-sm text-rose-600 disabled:opacity-60 dark:border-rose-300/20 dark:text-rose-300'
+                          ? 'pq-button h-11 shrink-0 border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] px-5 text-sm text-[var(--pq-danger)] disabled:opacity-60 dark:border-rose-300/20 dark:text-rose-300'
                           : 'pq-button-primary h-11 shrink-0 px-5 text-sm disabled:opacity-50'}
                       >
                         {activeSessionRunning ? (

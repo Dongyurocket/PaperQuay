@@ -60,7 +60,7 @@ function HeaderStageTabs({
   const l = useLocaleText();
 
   return (
-    <div className="inline-flex shrink-0 whitespace-nowrap rounded-2xl border border-slate-200 bg-slate-50 p-1 dark:border-white/10 dark:bg-[var(--pq-surface-1)]">
+    <div className="inline-flex shrink-0 whitespace-nowrap rounded-2xl border border-[var(--pq-border)] bg-[var(--pq-surface-2)] p-1 dark:border-white/10 dark:bg-[var(--pq-surface-1)]">
       {[
         {
           key: 'overview' as const,
@@ -81,8 +81,8 @@ function HeaderStageTabs({
           className={cn(
             'inline-flex h-9 min-w-9 items-center justify-center gap-2 rounded-[14px] px-2 text-sm font-medium transition-all duration-200 xl:px-3',
             workspaceStage === tab.key
-              ? 'bg-white text-slate-900 shadow-[0_6px_18px_rgba(15,23,42,0.08)] dark:bg-[var(--pq-surface-2)] dark:text-[var(--pq-text)] dark:shadow-[0_6px_18px_rgba(0,0,0,0.16)]'
-              : 'text-slate-500 hover:text-slate-800 dark:text-[var(--pq-text-faint)] dark:hover:text-[var(--pq-text)]',
+              ? 'bg-white text-[var(--pq-text)] shadow-[0_6px_18px_rgba(15,23,42,0.08)] dark:bg-[var(--pq-surface-2)] dark:text-[var(--pq-text)] dark:shadow-[0_6px_18px_rgba(0,0,0,0.16)]'
+              : 'text-[var(--pq-text-muted)] hover:text-[var(--pq-text)] dark:text-[var(--pq-text-faint)] dark:hover:text-[var(--pq-text)]',
           )}
         >
           {tab.icon}
@@ -104,7 +104,7 @@ function HeaderReadingModeTabs({
   const l = useLocaleText();
 
   return (
-    <div className="inline-flex shrink-0 whitespace-nowrap rounded-2xl border border-slate-200 bg-slate-50 p-1 dark:border-white/10 dark:bg-[var(--pq-surface-1)]">
+    <div className="inline-flex shrink-0 whitespace-nowrap rounded-2xl border border-[var(--pq-border)] bg-[var(--pq-surface-2)] p-1 dark:border-white/10 dark:bg-[var(--pq-surface-1)]">
       {[
         { key: 'pdf-only' as const, label: l('单栏 PDF', 'Single PDF') },
         { key: 'dual-pane' as const, label: l('PDF 双栏', 'PDF Dual Pane') },
@@ -141,9 +141,9 @@ function HeaderReadingModeTabs({
             className={cn(
               'inline-flex h-9 min-w-9 items-center justify-center gap-2 rounded-[14px] px-2 text-sm font-medium transition-all duration-200 2xl:px-3',
               readingViewMode === mode.key
-                ? 'bg-white text-slate-900 shadow-[0_6px_18px_rgba(15,23,42,0.08)]'
-                : 'text-slate-500 hover:text-slate-800',
-              'disabled' in mode && mode.disabled === true && 'cursor-not-allowed opacity-45 hover:text-slate-500',
+                ? 'bg-white text-[var(--pq-text)] shadow-[0_6px_18px_rgba(15,23,42,0.08)]'
+                : 'text-[var(--pq-text-muted)] hover:text-[var(--pq-text)]',
+              'disabled' in mode && mode.disabled === true && 'cursor-not-allowed opacity-45 hover:text-[var(--pq-text-muted)]',
             )}
           >
             {modeIcon}
@@ -173,8 +173,8 @@ function HeaderPdfVersionControl({
 
   if (availablePdfOptions.length > 1) {
     return (
-      <label className="flex min-w-[180px] max-w-[260px] items-center gap-3 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600 dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:text-[var(--pq-text-muted)] 2xl:min-w-[240px] 2xl:max-w-[420px]">
-        <span className="hidden shrink-0 text-xs font-medium text-slate-500 dark:text-[var(--pq-text-faint)] 2xl:inline">
+      <label className="flex min-w-[180px] max-w-[260px] items-center gap-3 rounded-2xl border border-[var(--pq-border)] bg-white px-3 py-2 text-sm text-[var(--pq-text-muted)] dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:text-[var(--pq-text-muted)] 2xl:min-w-[240px] 2xl:max-w-[420px]">
+        <span className="hidden shrink-0 text-xs font-medium text-[var(--pq-text-muted)] dark:text-[var(--pq-text-faint)] 2xl:inline">
           {l('PDF 版本', 'PDF Version')}
         </span>
         <div className="relative min-w-0 flex-1">
@@ -182,7 +182,7 @@ function HeaderPdfVersionControl({
             value={currentPdfPath || availablePdfOptions[0]?.path || ''}
             onChange={(event) => onCurrentPdfPathChange(event.target.value)}
             title={selectedPdfOption?.label || ''}
-            className="block w-full min-w-0 appearance-none truncate bg-transparent pr-8 text-sm leading-6 text-slate-700 outline-none dark:text-[var(--pq-text-muted)]"
+            className="block w-full min-w-0 appearance-none truncate bg-transparent pr-8 text-sm leading-6 text-[var(--pq-text-muted)] outline-none dark:text-[var(--pq-text-muted)]"
           >
             {availablePdfOptions.map((option) => (
               <option key={option.path} value={option.path}>
@@ -191,7 +191,7 @@ function HeaderPdfVersionControl({
             ))}
           </select>
           <ChevronDown
-            className="pointer-events-none absolute right-0 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 dark:text-[var(--pq-text-faint)]"
+            className="pointer-events-none absolute right-0 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--pq-text-faint)] dark:text-[var(--pq-text-faint)]"
             strokeWidth={1.8}
           />
         </div>
@@ -204,7 +204,7 @@ function HeaderPdfVersionControl({
   }
 
   return (
-    <div className="rounded-full border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:text-[var(--pq-text-muted)]">
+    <div className="rounded-full border border-[var(--pq-border)] bg-white px-3 py-2 text-sm font-medium text-[var(--pq-text-muted)] dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:text-[var(--pq-text-muted)]">
       {currentPdfVariantLabel}
     </div>
   );
@@ -302,7 +302,7 @@ function HeaderToolsMenu({
   const menu = toolbarOpen ? (
     <div
       ref={menuRef}
-      className="fixed z-[10000] w-56 rounded-2xl border border-slate-200 bg-white/95 p-2 shadow-[0_18px_42px_rgba(15,23,42,0.18)] backdrop-blur-xl dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:shadow-[0_18px_42px_rgba(0,0,0,0.24)]"
+      className="fixed z-[10000] w-56 rounded-2xl border border-[var(--pq-border)] bg-white/95 p-2 shadow-[0_18px_42px_rgba(15,23,42,0.18)] backdrop-blur-xl dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:shadow-[0_18px_42px_rgba(0,0,0,0.24)]"
       style={menuStyle}
     >
       {[
@@ -359,8 +359,8 @@ function HeaderToolsMenu({
           className={cn(
             'flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-50',
             action.tone === 'danger'
-              ? 'text-rose-600 hover:bg-rose-50 dark:text-rose-300 dark:hover:bg-rose-400/10'
-              : 'text-slate-700 hover:bg-slate-50 dark:text-[var(--pq-text-muted)] dark:hover:bg-[var(--pq-surface-2)]',
+              ? 'text-[var(--pq-danger)] hover:bg-[var(--pq-danger-bg)] dark:text-rose-300 dark:hover:bg-rose-400/10'
+              : 'text-[var(--pq-text-muted)] hover:bg-[var(--pq-surface-2)] dark:text-[var(--pq-text-muted)] dark:hover:bg-[var(--pq-surface-2)]',
           )}
         >
           {action.icon}
@@ -376,7 +376,7 @@ function HeaderToolsMenu({
         ref={buttonRef}
         type="button"
         onClick={() => setToolbarOpen((current) => !current)}
-        className="inline-flex h-10 min-w-10 items-center justify-center rounded-2xl border border-slate-200 bg-white px-2 text-[0px] font-medium text-slate-700 transition-all duration-200 hover:border-slate-300 hover:bg-slate-50 dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:text-[var(--pq-text-muted)] dark:hover:border-white/15 dark:hover:bg-[var(--pq-surface-2)] 2xl:px-3 2xl:text-sm"
+        className="inline-flex h-10 min-w-10 items-center justify-center rounded-2xl border border-[var(--pq-border)] bg-white px-2 text-[0px] font-medium text-[var(--pq-text-muted)] transition-all duration-200 hover:border-[var(--pq-border-strong)] hover:bg-[var(--pq-surface-2)] dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:text-[var(--pq-text-muted)] dark:hover:border-white/15 dark:hover:bg-[var(--pq-surface-2)] 2xl:px-3 2xl:text-sm"
         title={l('工具', 'Tools')}
       >
         <MoreHorizontal className="mr-0 h-4 w-4 2xl:mr-2" strokeWidth={1.8} />
@@ -438,19 +438,19 @@ export function ReaderWorkspaceHeader({
         )}
       >
         <div className="min-w-0">
-          <div className="truncate text-xs font-semibold uppercase tracking-[0.18em] text-slate-400 dark:text-[var(--pq-text-faint)]">
+          <div className="truncate text-xs font-semibold uppercase tracking-[0.18em] text-[var(--pq-text-faint)] dark:text-[var(--pq-text-faint)]">
             {sourceLabel}
           </div>
           <div
             className={cn(
-              'truncate font-semibold tracking-tight text-slate-950 transition-all duration-200 dark:text-[var(--pq-text)]',
+              'truncate font-semibold tracking-tight text-[var(--pq-text)] transition-all duration-200 dark:text-[var(--pq-text)]',
               headerCollapsed ? 'mt-0.5 max-w-[720px] text-base' : 'mt-1 text-lg 2xl:text-[22px]',
             )}
           >
             {documentTitle}
           </div>
           {!headerCollapsed ? (
-            <div className="mt-1 flex min-w-0 items-center gap-2 overflow-hidden whitespace-nowrap text-sm text-slate-500 dark:text-[var(--pq-text-muted)]">
+            <div className="mt-1 flex min-w-0 items-center gap-2 overflow-hidden whitespace-nowrap text-sm text-[var(--pq-text-muted)] dark:text-[var(--pq-text-muted)]">
               <span>{documentCreators || l('未知作者', 'Unknown Author')}</span>
               {documentYear ? <span>· {documentYear}</span> : null}
               {currentPdfName ? <span>· {currentPdfName}</span> : null}
@@ -489,7 +489,7 @@ export function ReaderWorkspaceHeader({
             <button
               type="button"
               onClick={onEnterImmersive}
-              className="inline-flex h-10 min-w-10 items-center justify-center rounded-2xl border border-slate-200 bg-white px-2 text-[0px] font-medium text-slate-700 transition-all duration-200 hover:border-slate-300 hover:bg-slate-50 dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:text-[var(--pq-text-muted)] dark:hover:border-white/15 dark:hover:bg-[var(--pq-surface-2)] 2xl:px-3 2xl:text-sm"
+              className="inline-flex h-10 min-w-10 items-center justify-center rounded-2xl border border-[var(--pq-border)] bg-white px-2 text-[0px] font-medium text-[var(--pq-text-muted)] transition-all duration-200 hover:border-[var(--pq-border-strong)] hover:bg-[var(--pq-surface-2)] dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:text-[var(--pq-text-muted)] dark:hover:border-white/15 dark:hover:bg-[var(--pq-surface-2)] 2xl:px-3 2xl:text-sm"
               title={l('沉浸阅读', 'Immersive Reading')}
               aria-label={l('沉浸阅读', 'Immersive Reading')}
             >
@@ -501,7 +501,7 @@ export function ReaderWorkspaceHeader({
           <button
             type="button"
             onClick={() => setHeaderCollapsed((current) => !current)}
-            className="inline-flex h-10 min-w-10 items-center justify-center rounded-2xl border border-slate-200 bg-white px-2 text-[0px] font-medium text-slate-700 transition-all duration-200 hover:border-slate-300 hover:bg-slate-50 dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:text-[var(--pq-text-muted)] dark:hover:border-white/15 dark:hover:bg-[var(--pq-surface-2)] 2xl:px-3 2xl:text-sm"
+            className="inline-flex h-10 min-w-10 items-center justify-center rounded-2xl border border-[var(--pq-border)] bg-white px-2 text-[0px] font-medium text-[var(--pq-text-muted)] transition-all duration-200 hover:border-[var(--pq-border-strong)] hover:bg-[var(--pq-surface-2)] dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:text-[var(--pq-text-muted)] dark:hover:border-white/15 dark:hover:bg-[var(--pq-surface-2)] 2xl:px-3 2xl:text-sm"
             title={headerCollapsed ? l('展开状态栏', 'Expand Header') : l('收起状态栏', 'Collapse Header')}
           >
             {headerCollapsed ? (
