@@ -211,6 +211,30 @@ textarea,
   cursor: text;
 }
 
+/* 键盘焦点可见：此前只有 3 个文件零散写了 focus-visible，大部分控件（图标按钮、导航、列表行）
+   用键盘 Tab 过去时没有任何视觉反馈。这里统一给可聚焦元素补一圈使用 accent 的焦点环；
+   已自带 ring 的元素通过 .pq-focus-ring-reset 或后续自定义 class 覆盖。 */
+:focus-visible {
+  outline: 2px solid var(--pq-accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* 输入类控件用自身边框/阴影表达焦点，不再叠 outline。 */
+.pq-input:focus-visible,
+.pq-chat-composer:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+[contenteditable='true']:focus-visible {
+  outline: none;
+}
+
+/* 对话框/浮层面板自身接收焦点时不应出现焦点环。 */
+[role='dialog']:focus-visible {
+  outline: none;
+}
+
 [data-window-drag-region] {
   -webkit-app-region: drag;
 }
