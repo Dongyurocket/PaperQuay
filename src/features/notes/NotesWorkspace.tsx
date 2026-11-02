@@ -29,6 +29,7 @@ import {
   type NoteChangedEventDetail,
 } from '../../app/appEvents';
 import { listLibraryPapers } from '../../services/library';
+import { useLocaleText } from '../../i18n/uiLanguage';
 import { useNotesStore } from '../../stores/useNotesStore';
 import { useTabsStore, type NoteTab } from '../../stores/useTabsStore';
 import type { LiteraturePaper } from '../../types/library';
@@ -605,6 +606,7 @@ function NotesRightPanel({
   onOpenPaper: (paperId: string, location?: PaperReferenceLocation) => void;
   onClose: () => void;
 }) {
+  const l = useLocaleText();
   const outline = useMemo(() => extractOutline(noteContentToTiptap(note)), [note]);
   const references = useMemo(
     () => extractNoteReferences(noteContentToTiptap(note), note?.anchors ?? []),
@@ -617,14 +619,14 @@ function NotesRightPanel({
       <section className="border-b border-[var(--pq-border)] p-4">
         <div className="flex items-center justify-between gap-3">
           <div className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--pq-text-faint)]">
-            Outline
+            {l('大纲', 'Outline')}
           </div>
           <button
             type="button"
             onClick={onClose}
             className="pq-icon-button h-7 w-7"
-            title="Hide outline"
-            aria-label="Hide outline"
+            title={l('隐藏大纲', 'Hide outline')}
+            aria-label={l('隐藏大纲', 'Hide outline')}
           >
             <PanelRightClose className="h-4 w-4" strokeWidth={1.8} />
           </button>
@@ -717,7 +719,7 @@ function NotesRightPanel({
 
       <section className="min-h-0 flex-1 overflow-y-auto p-4">
         <div className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--pq-text-faint)]">
-          Backlinks
+          {l('反向链接', 'Backlinks')}
         </div>
         <div className="mt-3 space-y-2">
           {note?.backlinks?.length ? note.backlinks.map((backlink) => (
@@ -738,7 +740,7 @@ function NotesRightPanel({
             </button>
           )) : (
             <div className="px-2 py-1 text-xs text-[var(--pq-text-faint)]">
-              No backlinks
+              {l('暂无反向链接', 'No backlinks')}
             </div>
           )}
         </div>
@@ -748,6 +750,7 @@ function NotesRightPanel({
 }
 
 export function NotesWorkspace({ workspaceActive = true }: { workspaceActive?: boolean }) {
+  const l = useLocaleText();
   const {
     notes,
     tags,
@@ -1515,7 +1518,7 @@ export function NotesWorkspace({ workspaceActive = true }: { workspaceActive?: b
             <input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search"
+              placeholder={l('搜索', 'Search')}
               className="min-w-0 flex-1 bg-transparent text-xs outline-none placeholder:text-[var(--pq-text-faint)]"
             />
           </label>
@@ -1719,18 +1722,21 @@ export function NotesWorkspace({ workspaceActive = true }: { workspaceActive?: b
       </aside>
 
       <main className="relative flex h-full min-w-0 flex-col overflow-hidden bg-[var(--pq-bg-primary)] p-3">
-        <button
-          type="button"
-          onClick={() => setMainView((current) => (current === 'editor' ? 'graph' : 'editor'))}
-          className="pq-icon-button absolute left-3 top-3 z-20 flex h-8 items-center gap-1 rounded-lg border border-[var(--pq-border)] bg-[var(--pq-surface-1)] px-2 text-xs text-[var(--pq-text-muted)] shadow-[var(--pq-shadow-soft)] transition hover:text-[var(--pq-accent)]"
-          title={mainView === 'editor' ? '查看笔记图谱与体检' : '返回编辑器'}
-          aria-label="Toggle notes graph view"
-        >
-          <Network className="h-3.5 w-3.5" strokeWidth={1.8} />
-          {mainView === 'editor' ? '图谱' : '编辑'}
-        </button>
+        {/* 入口放进文档流而非浮层：原先 absolute 定位会直接盖住笔记标题首行。 */}
+        <div className="mb-2 flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setMainView((current) => (current === 'editor' ? 'graph' : 'editor'))}
+            className="pq-icon-button flex h-8 items-center gap-1 rounded-lg border border-[var(--pq-border)] bg-[var(--pq-surface-1)] px-2 text-xs text-[var(--pq-text-muted)] shadow-[var(--pq-shadow-soft)] transition hover:text-[var(--pq-accent)]"
+            title={mainView === 'editor' ? l('查看笔记图谱与体检', 'View notes graph and health check') : l('返回编辑器', 'Back to editor')}
+            aria-label={mainView === 'editor' ? l('查看笔记图谱与体检', 'View notes graph and health check') : l('返回编辑器', 'Back to editor')}
+          >
+            <Network className="h-3.5 w-3.5" strokeWidth={1.8} />
+            {mainView === 'editor' ? l('图谱', 'Graph') : l('编辑', 'Edit')}
+          </button>
+        </div>
         {mainView === 'graph' ? (
-          <div className="mt-9 min-h-0 flex-1">
+          <div className="min-h-0 flex-1">
             <NotesGraphView
               notes={notes}
               folders={folders}

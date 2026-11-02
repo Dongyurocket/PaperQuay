@@ -38,6 +38,7 @@ import {
 import { extractNoteReferences, upsertNoteReferenceList } from './noteReferences';
 import { NOTE_CITATION_STYLE_OPTIONS, type NoteCitationStyle } from './bibliography';
 import type { LiteraturePaper } from '../../types/library';
+import { useLocaleText } from '../../i18n/uiLanguage';
 
 const TOOLBAR_TEXT = {
   editorLoading: 'Loading editor...',
@@ -155,6 +156,7 @@ export function NoteEditorToolbar({
   onReferencePickerToggle?: () => void;
   onReferencePickerClose?: () => void;
 }) {
+  const l = useLocaleText();
   const [tableOpen, setTableOpen] = useState(false);
   const [tableSize, setTableSize] = useState({ rows: 3, cols: 3 });
   const [tableMenuPosition, setTableMenuPosition] = useState<{ left: number; top: number } | null>(null);
@@ -391,10 +393,10 @@ export function NoteEditorToolbar({
             setTableOpen(false);
             setTemplateOpen((open) => !open);
           }}
-          title="Templates"
+          title={l('插入模板', 'Insert template')}
         >
           <FileText className="h-3.5 w-3.5" strokeWidth={1.8} />
-          <span>Template</span>
+          <span>{l('模板', 'Template')}</span>
           <ChevronDown className="h-3 w-3" strokeWidth={1.8} />
         </button>
         {templateOpen ? (

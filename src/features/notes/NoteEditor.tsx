@@ -64,6 +64,7 @@ import {
   X,
 } from 'lucide-react';
 import { NOTE_CHANGED_EVENT, type NoteChangedEventDetail } from '../../app/appEvents';
+import { useLocaleText } from '../../i18n/uiLanguage';
 import type { LiteraturePaper } from '../../types/library';
 import type {
   Note,
@@ -284,25 +285,52 @@ function setTableCellTextSelection(view: EditorView, pointer: TableCellPointer) 
   });
 }
 
-const TEXT = {
-  editorLoading: 'Loading editor...',
-  linkPrompt: '\u8f93\u5165\u94fe\u63a5\u5730\u5740',
-  imagePrompt: '\u8f93\u5165\u56fe\u7247\u5730\u5740\u6216\u672c\u5730 data URL',
-  mathPrompt: '\u8f93\u5165 LaTeX \u516c\u5f0f',
-  headingPlaceholder: '\u8f93\u5165\u6807\u9898...',
-  bodyPlaceholder: 'Start writing...',
-  noNote: 'No note selected',
-  untitled: '\u672a\u547d\u540d\u7b14\u8bb0',
-  tagsPlaceholder: 'Tags',
-  saving: 'Saving...',
-  dirty: 'Unsaved',
-  saved: 'Saved',
-  save: 'Save',
-  externalUpdate: '有外部更新',
-  externalUpdateDescription: '这条笔记已在其他位置保存。刷新后会加载最新版本。',
-  externalUpdateDirtyDescription: '这条笔记已在其他位置保存。当前编辑器还有未保存内容，刷新会用最新版本覆盖当前编辑器。',
-  refresh: '刷新',
-};
+const NOTE_TEXT = {
+  editorLoading: ['加载编辑器…', 'Loading editor...'],
+  linkPrompt: ['输入链接地址', 'Enter link URL'],
+  imagePrompt: ['输入图片地址或本地 data URL', 'Enter an image URL or a local data URL'],
+  mathPrompt: ['输入 LaTeX 公式', 'Enter a LaTeX formula'],
+  headingPlaceholder: ['输入标题...', 'Enter a heading...'],
+  bodyPlaceholder: ['开始写作...', 'Start writing...'],
+  noNote: ['未选择笔记', 'No note selected'],
+  untitled: ['未命名笔记', 'Untitled note'],
+  tagsPlaceholder: ['标签', 'Tags'],
+  saving: ['保存中…', 'Saving...'],
+  dirty: ['未保存', 'Unsaved'],
+  saved: ['已保存', 'Saved'],
+  save: ['保存', 'Save'],
+  externalUpdate: ['有外部更新', 'External update available'],
+  externalUpdateDescription: ['这条笔记已在其他位置保存。刷新后会加载最新版本。', 'This note was saved elsewhere. Refresh to load the latest version.'],
+  externalUpdateDirtyDescription: ['这条笔记已在其他位置保存。当前编辑器还有未保存内容，刷新会用最新版本覆盖当前编辑器。', 'This note was saved elsewhere and the editor still has unsaved changes. Refreshing overwrites the editor with the latest version.'],
+  refresh: ['刷新', 'Refresh'],
+} satisfies Record<string, [string, string]>;
+
+type NoteTextKey = keyof typeof NOTE_TEXT;
+
+function localizeNoteText(l: <T,>(zh: T, en: T) => T): Record<NoteTextKey, string> {
+  const entries = Object.entries(NOTE_TEXT) as Array<[NoteTextKey, [string, string]]>;
+
+  return Object.fromEntries(entries.map(([key, value]) => [key, l(value[0], value[1])])) as Record<NoteTextKey, string>;
+}
+
+const CJK_PATTERN = /[\u3400-\u4dbf\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]/;
+
+// 中文按字数报计量，西文按词数；原先统一显示 “N words” 对中文笔记没有意义。
+function formatNoteLength(wordCount: number, text: string, l: <T,>(zh: T, en: T) => T) {
+  const trimmed = text.trim();
+
+  if (!trimmed) {
+    return l('0 字', '0 words');
+  }
+
+  if (CJK_PATTERN.test(trimmed)) {
+    const characters = Array.from(trimmed.replace(/\s+/g, '')).length;
+
+    return l(`${characters} 字`, `${characters} characters`);
+  }
+
+  return l(`${wordCount} words`, `${wordCount} words`);
+}
 
 function createNoteEditorSourceId() {
   return `note-editor-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
@@ -682,6 +710,8 @@ export function NoteEditor({
   onJumpToNoteAnchor,
   onPageKindChange,
 }: NoteEditorProps) {
+  const l = useLocaleText();
+  const TEXT = useMemo(() => localizeNoteText(l), [l]);
   const [title, setTitle] = useState(note?.title ?? '');
   const [loadedStateNoteId, setLoadedStateNoteId] = useState<string | null>(note?.id ?? null);
   const [tagText, setTagText] = useState(note?.tags.join(', ') ?? '');
@@ -1760,7 +1790,7 @@ export function NoteEditor({
                 {TEXT.externalUpdate}
               </span>
             ) : null}
-            <span>{saving ? TEXT.saving : dirty ? TEXT.dirty : TEXT.saved}</span>
+            <span>{saving ? TEXT.saving : dirty ? TEXT.dirty : ''}</span>
 
             <div ref={tagEditorRef} className="relative">
               <button
@@ -1977,7 +2007,7 @@ export function NoteEditor({
       ) : null}
 
       <div className="flex items-center justify-between gap-3 border-t border-[var(--pq-border)] px-3 py-2 text-xs text-[var(--pq-text-faint)]">
-        <span>{snapshotRef.current.wordCount || 0} words</span>
+        <span>{formatNoteLength(snapshotRef.current.wordCount || 0, snapshotRef.current.contentText, l)}</span>
         <div className="flex items-center gap-2">
           {externalUpdateAvailable ? (
             <button
@@ -1994,7 +2024,10 @@ export function NoteEditor({
             type="button"
             onClick={() => void save()}
             disabled={!dirty || saving}
-            className="pq-button-primary h-8 px-3 text-sm disabled:opacity-50"
+            className={cn(
+              'pq-button-primary h-8 px-3 text-sm disabled:opacity-50',
+              !dirty && !saving ? 'hidden' : '',
+            )}
             title="Ctrl / Cmd + S"
           >
             <Save className="h-4 w-4" strokeWidth={1.8} />
