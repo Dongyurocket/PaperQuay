@@ -605,7 +605,7 @@ export default function LiteraturePaperList({
 
       <div
         data-wheel-scroll-target
-        className="h-0 min-h-0 flex-1 overflow-y-auto overscroll-y-contain p-3"
+        className="pq-paper-list h-0 min-h-0 flex-1 overflow-y-auto overscroll-y-contain p-3"
         onScroll={handleListScroll}
       >
         {loading ? (
@@ -688,11 +688,9 @@ export default function LiteraturePaperList({
                     onDoubleClick={() => onOpenPaper(paper)}
                     onKeyDown={(event) => handleRowKeyDown(event, paper)}
                     className={clsx(
-                      'pq-card grid w-full gap-3 px-3 py-3 text-left transition',
+                      'pq-card pq-paper-row-card grid w-full gap-3 px-3 py-3 text-left transition',
+                      showReadingHeatmap && 'pq-paper-row-card--heatmap',
                       manualSortingEnabled ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer',
-                      showReadingHeatmap
-                        ? 'grid-cols-[28px_minmax(0,1fr)_minmax(128px,160px)_72px_96px] max-[900px]:grid-cols-[28px_minmax(0,1fr)_64px_86px]'
-                        : 'grid-cols-[28px_minmax(0,1fr)_100px_110px]',
                       active
                         ? 'border-[var(--pq-accent-border-strong)] bg-[var(--pq-accent-soft)] ring-1 ring-[var(--pq-accent-ring)]'
                         : multiSelected
@@ -763,7 +761,7 @@ export default function LiteraturePaperList({
                       <span className="mt-1 block truncate text-xs text-slate-500 dark:text-[#a0a0a0]">
                         {paperAuthors(paper, locale)}
                       </span>
-                      <span className="mt-2 flex flex-wrap gap-1.5">
+                      <span className="pq-card-badges mt-2 flex flex-wrap gap-1.5">
                         <span
                           className={clsx(
                             'rounded-full border px-2 py-0.5 text-[10px] font-semibold',
@@ -829,7 +827,7 @@ export default function LiteraturePaperList({
                         </span>
                       </span>
                       {paper.tags.length > 0 ? (
-                        <span className="mt-2 flex flex-wrap gap-1.5">
+                        <span className="pq-card-badges mt-2 flex flex-wrap gap-1.5">
                           {paper.tags.slice(0, 3).map((tag) => (
                             <span
                               key={tag.id}
@@ -850,16 +848,16 @@ export default function LiteraturePaperList({
                       </span>
                     </span>
                     {showReadingHeatmap ? (
-                      <span className="min-w-0 self-center max-[900px]:hidden">
+                      <span className="pq-card-heatmap min-w-0 self-center">
                         <LiteratureReadingHeatmapPreview
                           heatmap={heatmapsByPaperId[paper.id] ?? null}
                         />
                       </span>
                     ) : null}
-                    <span className="text-sm text-slate-500 dark:text-[#a0a0a0]">
+                    <span className="pq-card-year text-sm text-[var(--pq-text-muted)]">
                       {paper.year ?? 'n.d.'}
                     </span>
-                    <span className="text-right text-xs text-slate-400 dark:text-[#8d8d8d]">
+                    <span className="pq-card-date text-right text-xs text-[var(--pq-text-faint)]">
                       {new Date(paper.importedAt).toLocaleDateString()}
                     </span>
                   </div>

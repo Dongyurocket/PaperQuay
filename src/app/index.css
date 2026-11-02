@@ -448,6 +448,68 @@ textarea,
   contain-intrinsic-size: auto 132px;
 }
 
+/* 文库卡片列宽：按列表容器的实际宽度级联降级。
+   该区域宽度由三栏拖拽（分类侧栏 + 详情栏）决定，与视口宽度无关，
+   因此必须用容器查询而非媒体查询，否则侧栏拉宽后标题列会被压到接近 0。 */
+.pq-paper-list {
+  container-type: inline-size;
+  container-name: paperlist;
+}
+
+/* 最窄：只留手柄与标题，年份/日期/热力列收起 */
+.pq-paper-row-card {
+  grid-template-columns: 28px minmax(0, 1fr);
+}
+
+.pq-card-heatmap,
+.pq-card-year,
+.pq-card-date {
+  display: none;
+}
+
+/* ≥520px：恢复年份列 */
+@container paperlist (min-width: 520px) {
+  .pq-paper-row-card {
+    grid-template-columns: 28px minmax(0, 1fr) 72px;
+  }
+
+  .pq-card-year {
+    display: block;
+  }
+}
+
+/* ≥640px：恢复导入日期列 */
+@container paperlist (min-width: 640px) {
+  .pq-paper-row-card {
+    grid-template-columns: 28px minmax(0, 1fr) 72px 96px;
+  }
+
+  .pq-card-date {
+    display: block;
+  }
+}
+
+/* ≥780px：恢复阅读热力列（仅在用户开启时） */
+@container paperlist (min-width: 780px) {
+  .pq-paper-row-card {
+    grid-template-columns: 28px minmax(0, 1fr) 100px 110px;
+  }
+
+  .pq-paper-row-card--heatmap {
+    grid-template-columns: 28px minmax(0, 1fr) minmax(128px, 160px) 72px 96px;
+  }
+
+  .pq-card-heatmap {
+    display: block;
+  }
+}
+
+/* 徽标内部不得折行：容器过窄时曾把「MinerU 已解析」压成竖排 */
+.pq-card-badges > span {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
 /* 目录行窗口化：目录条目上限 2000 条，浏览器跳过视口外行的布局与绘制。 */
 .pq-outline-row {
   content-visibility: auto;
