@@ -1,8 +1,8 @@
 # UI 收尾计划（交接用）
 
 - 日期：2026-11-02
-- 状态：**planned**（尚未开始）
-- 前置：三阶段主线已完成并推送（`main` = `fe18016`）。本文件只记录**尚未完成**的部分。
+- 状态：**进行中**（T1、T2 已于 2026-11-02 完成，其余待办）
+- 前置：三阶段主线已完成并推送（`main` = `925ac14`，即 `fe18016` 加上本交接文档的提交）。本文件只记录**尚未完成**的部分。
 - 关联：
   - 主线方案：`docs/plans/2026-11-02-ui-logic-and-visual-refinement.md`
   - 设计规范（新增代码的审查依据）：`docs/ui-design-system.md`
@@ -12,7 +12,7 @@
 
 | 项 | 值 |
 | --- | --- |
-| `main` / `origin/main` | `fe18016`，一致 |
+| `main` / `origin/main` | `925ac14`（开工时核对，= `fe18016` + 交接文档提交） |
 | 构建 | `npm run build` 通过 |
 | 测试 | `npm test` 869 项全绿 |
 | 令牌引用 | 2824 处 `var(--pq-*)` |
@@ -40,6 +40,8 @@
 
 **验收**：四项逐一在实机上成功一次，并在 `docs/changes/` 补一条验证记录（可并入下一次变更记录，不必单独建文件）。若发现失败，先复现再定位——本次改动只动了 class 名，理论上不应影响事件处理。
 
+**完成情况（2026-11-02）**：四项均通过实机验证（单选切换详情；真 Ctrl+点击从「已选 1 篇」到「已选 2 篇」；手动排序下拖拽换序、重启后保留；拖到「医疗与eVTOL」后计数 13→14、重启后保留），非手动排序时把手禁用且拖拽无效。与本节描述的差异：选中 2 篇及以上时右栏是「批量操作」面板而非最后点击项详情。详细证据见 `docs/changes/2026-11-02-ui-followup-t1-t2.md`。
+
 ### T2　修两份计划文档的陈旧状态（极低风险，文档）
 
 | 文件 | 问题 |
@@ -47,7 +49,9 @@
 | `docs/plans/2026-09-23-performance-reader-outline-and-rag-context.md` | 头部写「状态：设计方案，尚未实施」，但交付物 `src/features/pdf/PdfOutlinePanel.tsx`、`src/features/reader/readerResourceBudget.ts`、`src/features/reader/mineruParseWorker.ts` 与跨页全选均已在代码中。改为「已实施」并注明核验日期 |
 | `docs/plans/2026-11-01-reader-assistant-sidebar-resize-stuck.md` | 无状态行；对应修复 `b7233f2 fix(reader): end resize drag reliably and persist sizes on release` 已在 main。补状态行 |
 
-**验收**：两份文档头部状态与实际代码一致；`grep -rln "尚未实施" docs/plans/` 不再命中已完成的计划。
+**验收**：两份文档头部状态与实际代码一致；`grep -rln "尚未实施" docs/plans/` 不再命中已完成的计划（唯一剩余命中是本表对本条问题的引述）。
+
+**完成情况（2026-11-02）**：两份文档状态已按代码校正——09-23 文档改「已实施」并新增「0. 实施核验」小节，11-01 文档补「状态」小节（修复提交 `b7233f2` 在 `main`）。
 
 ### T3　定义按钮级语义令牌，清理剩余状态色（中风险）
 
@@ -202,6 +206,8 @@ src/features/reader/ReaderPreferencesWindow.tsx
 5. **新建文件会被环境归一化为 LF**（1–2 秒内），写 CRLF 保留不住；`git add` 的 `LF will be replaced by CRLF` 警告可忽略，索引里存的就是 LF。但提交前要查**混合行尾**。
 6. **修改颜色前先算对比度与色相距离**：语义色之间色相差应 ≥30°，正文文字对底 ≥4.5:1。上一轮就是靠这个发现 accent 与 success 只差 13°。
 7. **`scripts/` 是个人未跟踪资产**，不要提交、不要清理。
+8. **`ELECTRON_RUN_AS_NODE=1` 会让 Electron 静默退出（2026-11-02 实测）**：Agent 会话环境自带该变量，从中启动的 Electron 可执行文件被当作 Node 运行，进程立即以 0 退出、无窗口无输出，看起来像「可执行文件起不来」。启动前先 `Remove-Item Env:\ELECTRON_RUN_AS_NODE`。清掉该变量后，工作区目录内的 `release/*/win-unpacked/PaperQuay.exe` 仍返回 `0x80000003`（STATUS_BREAKPOINT），复制到 `%TEMP%` 才能启动，故第 1 条继续成立。
+9. **改 `$env:APPDATA` 不能隔离应用数据（2026-11-02 实测）**：Electron 的应用数据路径取自 Windows Known Folder API，覆盖环境变量后临时目录始终没有写出 `.settings` 与 RAG 库，改动落在真实 `paperquay-library.sqlite`。实机验收前先备份该库，验收后按备份还原（本轮以 `Get-FileHash` 确认一致）。
 
 ## 五、验证方法
 
