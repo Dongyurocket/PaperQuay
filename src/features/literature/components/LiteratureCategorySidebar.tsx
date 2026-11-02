@@ -1,6 +1,5 @@
 import clsx from 'clsx';
 import { useRef, useState, type DragEvent, type MouseEvent } from 'react';
-import { createPortal } from 'react-dom';
 import {
   ChevronRight,
   FolderPlus,
@@ -8,6 +7,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { useAppLocale, useLocaleText } from '../../../i18n/uiLanguage';
+import { Menu, type MenuEntry } from '../../../ui/menu';
 import type {
   LiteratureCategory,
 } from '../../../types/library';
@@ -122,14 +122,81 @@ export default function LiteratureCategorySidebar({
   ) => {
     event.preventDefault();
     setContextMenu({
-      x: Math.max(12, Math.min(event.clientX, window.innerWidth - 232)),
-      y: Math.max(12, Math.min(event.clientY, window.innerHeight - (category && !category.isSystem ? 168 : 60))),
+      x: event.clientX,
+      y: event.clientY,
       category,
     });
   };
 
   const closeContextMenu = () => {
     setContextMenu(null);
+  };
+
+  const contextMenuEntries = (): MenuEntry[] => {
+    if (!contextMenu) {
+      return [];
+    }
+
+    const category = contextMenu.category;
+
+    if (!category || category.isSystem) {
+      return [
+        {
+          id: 'new-root-category',
+          label: l('新建顶层分类', 'New Root Category'),
+          icon: <FolderPlus className="h-4 w-4 text-[var(--pq-accent)]" strokeWidth={1.9} />,
+          onSelect: () => onCreateCategory(null),
+        },
+      ];
+    }
+
+    const collapsed = collapsedCategoryIds.has(category.id);
+    const entries: MenuEntry[] = [
+      {
+        id: 'new-subcategory',
+        label: l('新建子分类', 'New Subcategory'),
+        icon: <FolderPlus className="h-4 w-4 text-[var(--pq-accent)]" strokeWidth={1.9} />,
+        onSelect: () => {
+          expandCategory(category.id);
+          onCreateCategory(category);
+        },
+      },
+    ];
+
+    if (contextMenuCategoryHasChildren) {
+      entries.push({
+        id: 'toggle-collapse',
+        label: collapsed
+          ? l('展开分类', 'Expand Category')
+          : l('折叠分类', 'Collapse Category'),
+        icon: (
+          <ChevronRight
+            className={clsx('h-4 w-4 transition-transform', !collapsed && 'rotate-90')}
+            strokeWidth={1.9}
+          />
+        ),
+        onSelect: () => toggleCategoryCollapse(category.id),
+      });
+    }
+
+    entries.push(
+      {
+        id: 'rename-category',
+        label: l('重命名分类', 'Rename Category'),
+        icon: <Pencil className="h-4 w-4" strokeWidth={1.9} />,
+        onSelect: () => onRenameCategory(category),
+      },
+      { type: 'separator', id: 'delete-category-separator' },
+      {
+        id: 'delete-category',
+        label: l('删除分类', 'Delete Category'),
+        tone: 'danger',
+        icon: <Trash2 className="h-4 w-4" strokeWidth={1.9} />,
+        onSelect: () => onDeleteCategory(category),
+      },
+    );
+
+    return entries;
   };
 
   const handleCategoryDragStart = (
@@ -332,115 +399,13 @@ export default function LiteratureCategorySidebar({
         </div>
       </div>
 
-      {contextMenu ? createPortal(
-        <div
-          className="fixed inset-0 z-[10000]"
-          onClick={closeContextMenu}
-          onContextMenu={(event) => {
-            event.preventDefault();
-            closeContextMenu();
-          }}
-        >
-          <div
-            className="pq-acrylic min-w-52 overflow-hidden py-1.5"
-            style={{
-              left: contextMenu.x,
-              top: contextMenu.y,
-              position: 'fixed',
-            }}
-            onClick={(event) => event.stopPropagation()}
-          >
-            {contextMenu.category && !contextMenu.category.isSystem ? (
-              <>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const category = contextMenu.category;
-
-                    if (category) {
-                      expandCategory(category.id);
-                      onCreateCategory(category);
-                    }
-                    closeContextMenu();
-                  }}
-                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--pq-text-muted)] transition hover:bg-[var(--pq-surface-2)] dark:text-[#e0e0e0] dark:hover:bg-[#2f2f2f]"
-                >
-                  <FolderPlus className="h-4 w-4 text-[var(--pq-accent)] dark:text-[#79c6c9]" strokeWidth={1.9} />
-                  {l('新建子分类', 'New Subcategory')}
-                </button>
-                {contextMenuCategoryHasChildren ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const category = contextMenu.category;
-
-                      if (category) {
-                        toggleCategoryCollapse(category.id);
-                      }
-                      closeContextMenu();
-                    }}
-                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--pq-text-muted)] transition hover:bg-[var(--pq-surface-2)] dark:text-[#e0e0e0] dark:hover:bg-[#2f2f2f]"
-                  >
-                    <ChevronRight
-                      className={clsx(
-                        'h-4 w-4 text-[var(--pq-text-muted)] transition-transform dark:text-[#a0a0a0]',
-                        !collapsedCategoryIds.has(contextMenu.category.id) && 'rotate-90',
-                      )}
-                      strokeWidth={1.9}
-                    />
-                    {collapsedCategoryIds.has(contextMenu.category.id)
-                      ? l('展开分类', 'Expand Category')
-                      : l('折叠分类', 'Collapse Category')}
-                  </button>
-                ) : null}
-                <button
-                  type="button"
-                  onClick={() => {
-                    const category = contextMenu.category;
-
-                    if (category) {
-                      onRenameCategory(category);
-                    }
-                    closeContextMenu();
-                  }}
-                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--pq-text-muted)] transition hover:bg-[var(--pq-surface-2)] dark:text-[#e0e0e0] dark:hover:bg-[#2f2f2f]"
-                >
-                  <Pencil className="h-4 w-4 text-[var(--pq-text-muted)] dark:text-[#a0a0a0]" strokeWidth={1.9} />
-                  {l('重命名分类', 'Rename Category')}
-                </button>
-                <div className="my-1 border-t border-[var(--pq-border)] dark:border-white/10" />
-                <button
-                  type="button"
-                  onClick={() => {
-                    const category = contextMenu.category;
-
-                    if (category) {
-                      onDeleteCategory(category);
-                    }
-                    closeContextMenu();
-                  }}
-                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--pq-danger)] transition hover:bg-[var(--pq-danger-bg)] "
-                >
-                  <Trash2 className="h-4 w-4" strokeWidth={1.9} />
-                  {l('删除分类', 'Delete Category')}
-                </button>
-              </>
-            ) : (
-              <button
-                type="button"
-                onClick={() => {
-                  onCreateCategory(null);
-                  closeContextMenu();
-                }}
-                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--pq-text-muted)] transition hover:bg-[var(--pq-surface-2)] dark:text-[#e0e0e0] dark:hover:bg-[#2f2f2f]"
-              >
-                <FolderPlus className="h-4 w-4 text-[var(--pq-accent)] dark:text-[#79c6c9]" strokeWidth={1.9} />
-                {l('新建顶层分类', 'New Root Category')}
-              </button>
-            )}
-          </div>
-        </div>,
-        document.body,
+      {contextMenu ? (
+        <Menu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          entries={contextMenuEntries()}
+          onClose={closeContextMenu}
+        />
       ) : null}
     </aside>
   );
