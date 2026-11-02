@@ -141,7 +141,7 @@ function HeaderReadingModeTabs({
             className={cn(
               'inline-flex h-9 min-w-9 items-center justify-center gap-2 rounded-[14px] px-2 text-sm font-medium transition-all duration-200 2xl:px-3',
               readingViewMode === mode.key
-                ? 'bg-white text-[var(--pq-text)] shadow-[0_6px_18px_rgba(15,23,42,0.08)]'
+                ? 'bg-white text-[var(--pq-text)] shadow-[0_6px_18px_rgba(15,23,42,0.08)] dark:bg-[var(--pq-surface-2)] dark:text-[var(--pq-text)] dark:shadow-[0_6px_18px_rgba(0,0,0,0.16)]'
                 : 'text-[var(--pq-text-muted)] hover:text-[var(--pq-text)]',
               'disabled' in mode && mode.disabled === true && 'cursor-not-allowed opacity-45 hover:text-[var(--pq-text-muted)]',
             )}
@@ -359,7 +359,7 @@ function HeaderToolsMenu({
           className={cn(
             'flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-50',
             action.tone === 'danger'
-              ? 'text-[var(--pq-danger)] hover:bg-[var(--pq-danger-bg)] dark:text-rose-300 dark:hover:bg-rose-400/10'
+              ? 'text-[var(--pq-danger)] hover:bg-[var(--pq-danger-bg)] '
               : 'text-[var(--pq-text-muted)] hover:bg-[var(--pq-surface-2)] dark:text-[var(--pq-text-muted)] dark:hover:bg-[var(--pq-surface-2)]',
           )}
         >

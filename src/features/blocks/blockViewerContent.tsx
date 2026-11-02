@@ -153,7 +153,7 @@ function EquationContentComponent({
     const hasValidBBox = block && isValidBBox(block.bbox) && pdfSource;
 
     return (
-      <div className="my-1 overflow-x-auto rounded-xl border border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-danger-bg)] px-3.5 py-3 text-[var(--pq-danger)] dark:border-rose-400/30 dark:bg-rose-950/20 dark:text-rose-200">
+      <div className="my-1 overflow-x-auto rounded-xl border border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-danger-bg)] px-3.5 py-3 text-[var(--pq-danger)] ">
         <div className="mb-2 flex items-center justify-between">
           <span className="text-[11px] font-semibold uppercase tracking-[0.16em]">
             Formula parse failed
@@ -492,7 +492,7 @@ function TableContentComponent({
           )}
 
           {showBilingual && translatedText ? (
-            <div className="rounded-[18px] border border-indigo-100 bg-indigo-50/70 px-4 py-3 dark:border-indigo-500/30 dark:bg-indigo-500/10">
+            <div className="rounded-[18px] border border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-[var(--pq-accent-bg)] px-4 py-3 ">
               <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--pq-accent)]">
                 <Languages className="h-3.5 w-3.5" strokeWidth={1.9} />
                 {l('译文', 'Translation')}
@@ -543,7 +543,7 @@ function ImageContentComponent({
       />
 
       {showBilingual && translatedText ? (
-        <div className="rounded-[18px] border border-indigo-100 bg-indigo-50/70 px-4 py-3 dark:border-indigo-500/30 dark:bg-indigo-500/10">
+        <div className="rounded-[18px] border border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-[var(--pq-accent-bg)] px-4 py-3 ">
           <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--pq-accent)]">
             <Languages className="h-3.5 w-3.5" strokeWidth={1.9} />
             {l('译文', 'Translation')}
@@ -573,9 +573,9 @@ function BlockPdfCropViewer({
   const [previewOpen, setPreviewOpen] = useState(false);
 
   return (
-    <div className="my-2 rounded-2xl border border-indigo-200/90 bg-white/95 p-3.5 shadow-sm dark:border-indigo-500/20 dark:bg-[var(--pq-surface-1)]">
+    <div className="my-2 rounded-2xl border border-[color-mix(in_srgb,var(--pq-accent)_40%,transparent)] bg-white/95 p-3.5 shadow-sm dark:bg-[var(--pq-surface-1)]">
       <div className="mb-2.5 flex items-center justify-between text-xs text-[var(--pq-text-muted)] dark:text-[var(--pq-text-muted)]">
-        <div className="flex items-center gap-1.5 font-medium text-[var(--pq-accent)] dark:text-indigo-400">
+        <div className="flex items-center gap-1.5 font-medium text-[var(--pq-accent)] ">
           <Scan className="h-4 w-4" />
           <span>{l('原版 PDF 切片', 'Original PDF Crop')}</span>
           <span className="text-[11px] text-[var(--pq-text-faint)]">
@@ -604,7 +604,7 @@ function BlockPdfCropViewer({
                 e.stopPropagation();
                 onClose();
               }}
-              className="inline-flex items-center gap-1 rounded-lg border border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-indigo-50/80 px-2 py-1 text-[11px] font-medium text-[var(--pq-accent)] transition hover:bg-[var(--pq-accent-bg)] dark:border-indigo-500/30 dark:bg-indigo-950/40 dark:text-indigo-300 dark:hover:bg-indigo-900/60"
+              className="inline-flex items-center gap-1 rounded-lg border border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-[var(--pq-accent-bg)] px-2 py-1 text-[11px] font-medium text-[var(--pq-accent)] transition hover:bg-[var(--pq-accent-bg)] "
             >
               <span>{l('返回排版', 'Show Parsed')}</span>
             </button>
@@ -620,7 +620,7 @@ function BlockPdfCropViewer({
           </div>
         </div>
       ) : error || !dataUrl ? (
-        <div className="rounded-xl border border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-danger-bg)] px-3 py-2 text-xs text-[var(--pq-danger)] dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-400">
+        <div className="rounded-xl border border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-danger-bg)] px-3 py-2 text-xs text-[var(--pq-danger)] ">
           {error || l('未能截取切片图像', 'Failed to crop PDF region')}
         </div>
       ) : (
@@ -799,13 +799,13 @@ function BlockItemComponent({
         active &&
           'bg-white shadow-[0_18px_40px_rgba(79,70,229,0.09)] dark:bg-[var(--pq-surface-1)] dark:shadow-[0_18px_40px_rgba(79,70,229,0.12)]',
         hovered && !active && 'bg-slate-100/70 dark:bg-[var(--pq-surface-2)]',
-        flashing && 'ring-2 ring-indigo-200/80',
+        flashing && 'ring-2 ring-[color-mix(in_srgb,var(--pq-accent)_40%,transparent)]',
       )}
     >
       <div
         className={cn(
           'absolute bottom-2 left-0 top-2 w-1 rounded-full bg-transparent transition-all duration-200',
-          active && 'bg-indigo-500',
+          active && 'bg-[var(--pq-accent)]',
           hovered && !active && 'bg-[var(--pq-surface-3)]',
         )}
       />
@@ -827,7 +827,7 @@ function BlockItemComponent({
               )}
             </span>
             {customOverrideMarkdown ? (
-              <span className="inline-flex items-center gap-0.5 rounded-full bg-[var(--pq-success-bg)] px-2 py-0.5 text-[11px] font-medium text-[var(--pq-success)] dark:bg-emerald-950/50 dark:text-emerald-300">
+              <span className="inline-flex items-center gap-0.5 rounded-full bg-[var(--pq-success-bg)] px-2 py-0.5 text-[11px] font-medium text-[var(--pq-success)] ">
                 <Sparkles className="h-2.5 w-2.5" />
                 {l('AI 已修复', 'AI Fixed')}
               </span>
@@ -841,10 +841,10 @@ function BlockItemComponent({
                   event.stopPropagation();
                   onOpenReparse(block, customOverrideMarkdown || effectiveMarkdown || plainText);
                 }}
-                className="inline-flex items-center gap-1 rounded-lg border border-indigo-200/90 bg-indigo-50/80 px-2 py-0.5 text-[11px] font-medium text-[var(--pq-accent)] shadow-xs transition-all hover:bg-[var(--pq-accent-bg)] dark:border-indigo-500/30 dark:bg-indigo-950/40 dark:text-indigo-300 dark:hover:bg-indigo-900/60"
+                className="inline-flex items-center gap-1 rounded-lg border border-[color-mix(in_srgb,var(--pq-accent)_40%,transparent)] bg-[var(--pq-accent-bg)] px-2 py-0.5 text-[11px] font-medium text-[var(--pq-accent)] shadow-xs transition-all hover:bg-[var(--pq-accent-bg)] "
                 title={l('使用 AI 大模型重新识别和修复此区块', 'Re-parse and format this block with AI')}
               >
-                <Sparkles className="h-3 w-3 text-[var(--pq-accent)] dark:text-indigo-400" />
+                <Sparkles className="h-3 w-3 text-[var(--pq-accent)] " />
                 <span>{l('AI 重析', 'AI Re-parse')}</span>
               </button>
             ) : null}
@@ -858,8 +858,8 @@ function BlockItemComponent({
                 className={cn(
                   'inline-flex items-center gap-1.5 rounded-lg px-2.5 py-0.5 text-[11px] font-medium transition-all',
                   showPdfCrop
-                    ? 'bg-indigo-600 text-white shadow-sm hover:bg-indigo-700'
-                    : 'border border-slate-200/90 bg-white/95 text-[var(--pq-text-muted)] shadow-xs hover:border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] hover:bg-[var(--pq-accent-bg)] hover:text-[var(--pq-accent)] dark:border-white/10 dark:bg-[var(--pq-surface-2)] dark:text-[var(--pq-text-muted)] dark:hover:bg-indigo-950/40 dark:hover:text-indigo-400',
+                    ? 'bg-[var(--pq-accent-button-bg)] text-[var(--pq-accent-button-text)] shadow-sm hover:bg-[var(--pq-accent-button-bg-hover)]'
+                    : 'border border-slate-200/90 bg-white/95 text-[var(--pq-text-muted)] shadow-xs hover:border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] hover:bg-[var(--pq-accent-bg)] hover:text-[var(--pq-accent)] dark:border-white/10 dark:bg-[var(--pq-surface-2)] dark:text-[var(--pq-text-muted)] ',
                 )}
                 title={
                   showPdfCrop
@@ -886,7 +886,7 @@ function BlockItemComponent({
         <>
           <MarkdownContent markdown={effectiveMarkdown} scale={scale} />
           {showBilingual && translatedText ? (
-            <div className="mt-4 rounded-[18px] border border-indigo-100 bg-indigo-50/70 px-4 py-3 dark:border-white/10 dark:bg-[var(--pq-surface-1)]">
+            <div className="mt-4 rounded-[18px] border border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-[var(--pq-accent-bg)] px-4 py-3 dark:border-white/10 dark:bg-[var(--pq-surface-1)]">
               <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold text-[var(--pq-accent)]">
                 <Languages className="h-3.5 w-3.5" />{l('译文（基于原始识别）', 'Translation (original OCR)')}
               </div>
@@ -948,7 +948,7 @@ function BlockItemComponent({
               )}
 
               {showBilingual && translatedText && block.type !== 'equation' ? (
-                <div className="mt-4 rounded-[18px] border border-indigo-100 bg-indigo-50/70 px-4 py-3 dark:border-white/10 dark:bg-[var(--pq-surface-1)]">
+                <div className="mt-4 rounded-[18px] border border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-[var(--pq-accent-bg)] px-4 py-3 dark:border-white/10 dark:bg-[var(--pq-surface-1)]">
                   <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--pq-accent)] dark:text-[#b8c2d9]">
                     <Languages className="h-3.5 w-3.5" strokeWidth={1.9} />
                     {l('译文', 'Translation')}

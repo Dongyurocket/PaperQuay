@@ -698,8 +698,8 @@ export default function LiteraturePaperList({
                           : dropIndicator?.paperId === paper.id
                             ? 'border-[var(--pq-accent-border-strong)] bg-[var(--pq-accent-soft)]'
                             : 'hover:border-[var(--pq-accent-border)] hover:bg-white/92',
-                      sortDraggingPaperId === paper.id && 'opacity-60 ring-2 ring-teal-300/60',
-                      categoryDraggingPaperId === paper.id && 'opacity-70 ring-2 ring-teal-300/70',
+                      sortDraggingPaperId === paper.id && 'opacity-60 ring-2 ring-[color-mix(in_srgb,var(--pq-accent)_30%,transparent)]',
+                      categoryDraggingPaperId === paper.id && 'opacity-70 ring-2 ring-[color-mix(in_srgb,var(--pq-accent)_35%,transparent)]',
                     )}
                   >
                     {multiSelectActive ? (
@@ -747,7 +747,7 @@ export default function LiteraturePaperList({
                     <span className="min-w-0">
                       <span className="flex min-w-0 items-center gap-2">
                         {paper.isFavorite ? (
-                          <Star className="h-3.5 w-3.5 shrink-0 text-[var(--pq-warning)] dark:text-amber-200" fill="currentColor" strokeWidth={1.8} />
+                          <Star className="h-3.5 w-3.5 shrink-0 text-[var(--pq-warning)] " fill="currentColor" strokeWidth={1.8} />
                         ) : null}
                         <span className="block truncate text-sm font-semibold">
                           {titleDisplay.primary}
@@ -768,8 +768,8 @@ export default function LiteraturePaperList({
                             status?.checkingMineru
                               ? 'border-[var(--pq-border-strong)] bg-[var(--pq-surface-2)] text-[var(--pq-text-muted)] dark:border-white/10 dark:bg-white/[0.06] dark:text-[#a0a0a0]'
                               : mineruParsed
-                                ? 'border-emerald-300/55 bg-[var(--pq-success-bg)] text-[var(--pq-success)] dark:border-emerald-300/20 dark:bg-emerald-300/10 dark:text-emerald-100'
-                                : 'border-amber-300/55 bg-[var(--pq-warning-bg)] text-[var(--pq-warning)] dark:border-amber-300/20 dark:bg-amber-300/10 dark:text-amber-100',
+                                ? 'border-[color-mix(in_srgb,var(--pq-success)_28%,transparent)] bg-[var(--pq-success-bg)] text-[var(--pq-success)] '
+                                : 'border-[color-mix(in_srgb,var(--pq-warning)_28%,transparent)] bg-[var(--pq-warning-bg)] text-[var(--pq-warning)] ',
                           )}
                         >
                           {status?.checkingMineru
@@ -792,11 +792,11 @@ export default function LiteraturePaperList({
                             className={clsx(
                               'rounded-full border px-2 py-0.5 text-[11px] font-semibold',
                               indexingRag && ragStatus !== 'excluded'
-                                ? 'border-indigo-300/55 bg-[var(--pq-accent-bg)] text-[var(--pq-accent)] dark:border-indigo-300/20 dark:bg-indigo-300/10 dark:text-indigo-100'
+                                ? 'border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-[var(--pq-accent-bg)] text-[var(--pq-accent)] '
                                 : ragStatus === 'ready'
-                                  ? 'border-teal-300/55 bg-[var(--pq-accent-bg)] text-[var(--pq-accent)] dark:border-teal-300/20 dark:bg-teal-300/10 dark:text-teal-100'
+                                  ? 'border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-[var(--pq-accent-bg)] text-[var(--pq-accent)] '
                                   : ragStatus === 'failed'
-                                    ? 'border-rose-300/55 bg-[var(--pq-danger-bg)] text-[var(--pq-danger)] dark:border-rose-300/20 dark:bg-rose-300/10 dark:text-rose-100'
+                                    ? 'border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-danger-bg)] text-[var(--pq-danger)] '
                                     : 'border-[var(--pq-border-strong)] bg-[var(--pq-surface-2)] text-[var(--pq-text-muted)] dark:border-white/10 dark:bg-white/[0.06] dark:text-[#a0a0a0]',
                             )}
                           >
@@ -817,7 +817,7 @@ export default function LiteraturePaperList({
                           className={clsx(
                             'rounded-full border px-2 py-0.5 text-[11px] font-semibold',
                             overviewGenerated
-                              ? 'border-sky-300/55 bg-[var(--pq-info-bg)] text-[var(--pq-info)] dark:border-sky-300/20 dark:bg-sky-300/10 dark:text-sky-100'
+                              ? 'border-[color-mix(in_srgb,var(--pq-info)_28%,transparent)] bg-[var(--pq-info-bg)] text-[var(--pq-info)] '
                               : 'border-[var(--pq-border-strong)] bg-[var(--pq-surface-2)] text-[var(--pq-text-muted)] dark:border-white/10 dark:bg-white/[0.06] dark:text-[#a0a0a0]',
                           )}
                         >
@@ -831,7 +831,7 @@ export default function LiteraturePaperList({
                           {paper.tags.slice(0, 3).map((tag) => (
                             <span
                               key={tag.id}
-                              className="rounded-full border border-cyan-300/45 bg-[var(--pq-info-bg)] px-2 py-0.5 text-[11px] font-semibold text-[var(--pq-info)] dark:border-cyan-300/18 dark:bg-cyan-300/10 dark:text-cyan-100"
+                              className="rounded-full border border-[color-mix(in_srgb,var(--pq-info)_28%,transparent)] bg-[var(--pq-info-bg)] px-2 py-0.5 text-[11px] font-semibold text-[var(--pq-info)] "
                             >
                               {tag.name}
                             </span>

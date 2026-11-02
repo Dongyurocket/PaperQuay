@@ -180,7 +180,7 @@ export function PdfViewerToolbar({
                   (item.key !== 'select' &&
                     item.key !== 'highlight' &&
                     editorTool === item.key))
-                  ? 'border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-white text-[var(--pq-accent)] shadow-[0_8px_18px_rgba(79,70,229,0.12)] dark:border-indigo-400/30 dark:bg-[var(--pq-surface-2)] dark:text-indigo-400 dark:shadow-[0_8px_18px_rgba(79,70,229,0.18)]'
+                  ? 'border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-white text-[var(--pq-accent)] shadow-[0_8px_18px_rgba(79,70,229,0.12)] dark:bg-[var(--pq-surface-2)] dark:shadow-[0_8px_18px_rgba(79,70,229,0.18)]'
                   : 'border-transparent bg-transparent hover:border-[var(--pq-border)] hover:bg-white hover:text-[var(--pq-text)] dark:hover:border-white/15 dark:hover:bg-[var(--pq-surface-2)] dark:hover:text-[var(--pq-text)]',
               )}
             >
@@ -295,7 +295,7 @@ export function PdfViewerToolbar({
             className={cn(
               'inline-flex items-center rounded-xl border px-3 py-2 text-sm font-medium transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-60',
               hasSelectedEditor && !loading && !saving
-                ? 'border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-danger-bg)] text-[var(--pq-danger)] hover:bg-[var(--pq-danger-bg)] dark:border-rose-400/30 dark:bg-rose-400/10 dark:text-rose-400 dark:hover:bg-rose-400/20'
+                ? 'border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-danger-bg)] text-[var(--pq-danger)] hover:bg-[var(--pq-danger-bg)] '
                 : 'border-[var(--pq-border)] bg-white text-[var(--pq-text-faint)] dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:text-[var(--pq-text-faint)]',
             )}
             title={l('删除当前选中的 PDF 批注', 'Delete the selected PDF annotation')}
@@ -307,7 +307,7 @@ export function PdfViewerToolbar({
             type="button"
             onClick={() => void onSave()}
             disabled={saving || loading}
-            className="inline-flex items-center rounded-xl bg-slate-900 px-3 py-2 text-sm font-medium text-white transition-all duration-200 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-[var(--pq-accent)] dark:text-[var(--pq-text)] dark:hover:bg-[var(--pq-accent-hover)]"
+            className="inline-flex items-center rounded-xl bg-slate-900 px-3 py-2 text-sm font-medium text-white transition-all duration-200 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-[var(--pq-accent-button-bg)] dark:text-[var(--pq-accent-button-text)] dark:hover:bg-[var(--pq-accent-button-bg-hover)]"
           >
             {saving ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" strokeWidth={1.8} />
@@ -322,16 +322,16 @@ export function PdfViewerToolbar({
       {saveMessage ? <div className="mt-2 text-xs text-[var(--pq-success)]">{saveMessage}</div> : null}
       {documentError ? <div className="mt-2 text-xs text-[var(--pq-danger)]">{documentError}</div> : null}
       {translating && translationProgressTotal > 0 ? (
-        <div className="mt-3 rounded-2xl border border-indigo-100 bg-indigo-50/80 px-3 py-2.5 dark:border-indigo-400/20 dark:bg-indigo-400/10">
-          <div className="flex items-center justify-between gap-3 text-xs font-medium text-[var(--pq-accent)] dark:text-indigo-400">
+        <div className="mt-3 rounded-2xl border border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-[var(--pq-accent-bg)] px-3 py-2.5 ">
+          <div className="flex items-center justify-between gap-3 text-xs font-medium text-[var(--pq-accent)] ">
             <span>{l('MinerU block translation progress', 'MinerU block translation progress')}</span>
             <span>
               {translationProgressCompleted}/{translationProgressTotal}
             </span>
           </div>
-          <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--pq-accent-bg)] dark:bg-indigo-500/20">
+          <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--pq-accent-bg)] ">
             <div
-              className="h-full rounded-full bg-indigo-500 transition-all duration-300 dark:bg-indigo-400"
+              className="h-full rounded-full bg-[var(--pq-accent)] transition-all duration-300 "
               style={{ width: `${translationProgressRatio}%` }}
             />
           </div>

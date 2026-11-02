@@ -26,7 +26,7 @@ export function ToggleRow({
     <button
       type="button"
       onClick={() => onChange(!checked)}
-      className="flex w-full items-center justify-between gap-4 rounded-2xl border border-slate-200/80 bg-white/90 px-4 py-3 text-left shadow-[0_10px_24px_rgba(15,23,42,0.04)] transition-all duration-200 hover:border-[var(--pq-border-strong)] hover:bg-white"
+      className="flex w-full items-center justify-between gap-4 rounded-2xl border border-[var(--pq-border)] bg-[var(--pq-surface-1)] px-4 py-3 text-left shadow-[0_10px_24px_rgba(15,23,42,0.04)] transition-all duration-200 hover:border-[var(--pq-border-strong)] hover:bg-[var(--pq-surface-2)]"
     >
       <span className="min-w-0">
         <span className="block text-sm font-medium text-[var(--pq-text)]">{title}</span>
@@ -35,7 +35,7 @@ export function ToggleRow({
       <span
         className={clsx(
           'relative h-6 w-11 shrink-0 rounded-full transition',
-          checked ? 'bg-indigo-500' : 'bg-[var(--pq-surface-3)]',
+          checked ? 'bg-[var(--pq-accent)]' : 'bg-[var(--pq-surface-3)]',
         )}
       >
         <span
@@ -65,7 +65,7 @@ function ProgressBar({
       <div
         className={clsx(
           'h-full rounded-full transition-all duration-300',
-          tone === 'emerald' ? 'bg-emerald-500' : 'bg-indigo-500',
+          tone === 'emerald' ? 'bg-[var(--pq-success)]' : 'bg-[var(--pq-accent)]',
         )}
         style={{ width: `${ratio}%` }}
       />

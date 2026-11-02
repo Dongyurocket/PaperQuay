@@ -459,13 +459,13 @@ function SelectionPanel({
           ) : null}
 
           {selectedExcerptTranslating ? (
-            <div className="rounded-[22px] border border-indigo-100 bg-indigo-50/70 px-4 py-4 text-sm text-[var(--pq-accent)]">
+            <div className="rounded-[22px] border border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-[var(--pq-accent-bg)] px-4 py-4 text-sm text-[var(--pq-accent)]">
               {isPdfBlockExcerpt
                 ? l('正在翻译当前段落...', 'Translating this paragraph...')
                 : l('正在翻译选中文本...', 'Translating the selected text...')}
             </div>
           ) : selectedExcerptTranslation ? (
-            <div className="rounded-[22px] border border-indigo-100 bg-indigo-50/70 px-4 py-4">
+            <div className="rounded-[22px] border border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-[var(--pq-accent-bg)] px-4 py-4">
               <MarkdownPreview content={selectedExcerptTranslation} />
             </div>
           ) : aiConfigured ? (

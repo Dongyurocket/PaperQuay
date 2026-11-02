@@ -109,7 +109,7 @@ export function NoteDistillPreviewPanel({
           </div>
 
           <div className="flex min-h-0 flex-col rounded-xl border border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-white">
-            <div className="border-b border-teal-100 px-4 py-3 text-sm font-semibold text-[var(--pq-text)]">
+            <div className="border-b border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] px-4 py-3 text-sm font-semibold text-[var(--pq-text)]">
               {l('提炼稿（可编辑）', 'Distilled draft (editable)')}
             </div>
             <div className="grid min-h-[220px] flex-1 gap-3 p-4">

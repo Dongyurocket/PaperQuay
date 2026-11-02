@@ -329,7 +329,7 @@ export default function AgentWorkspaceView({
                         session.id === activeSessionId
                           ? 'bg-[#55a99b] ring-4 ring-[#55a99b]/15'
                           : session.status === 'error'
-                            ? 'bg-rose-400 hover:bg-rose-500'
+                            ? 'bg-[var(--pq-danger)] hover:opacity-80'
                             : 'bg-[var(--pq-surface-3)] hover:bg-slate-400 dark:bg-[var(--pq-surface-3)] dark:hover:bg-[var(--pq-surface-3)]',
                       ].join(' ')}
                       title={session.title}
@@ -422,9 +422,9 @@ export default function AgentWorkspaceView({
                                 className={[
                                   'h-1.5 w-1.5 shrink-0 rounded-full',
                                   session.status === 'error'
-                                    ? 'bg-rose-400'
+                                    ? 'bg-[var(--pq-danger)]'
                                     : session.status === 'running'
-                                      ? 'bg-amber-400'
+                                      ? 'bg-[var(--pq-warning)]'
                                       : 'bg-[var(--pq-surface-3)] dark:bg-white/20',
                                 ].join(' ')}
                               />
@@ -447,7 +447,7 @@ export default function AgentWorkspaceView({
                               event.stopPropagation();
                               handleDeleteHistorySession(session.id);
                             }}
-                            className="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-[var(--pq-radius-sm)] text-[var(--pq-text-faint)] opacity-0 transition hover:bg-[var(--pq-danger-bg)] hover:text-[var(--pq-danger)] group-hover:opacity-100 focus:opacity-100 dark:hover:bg-rose-400/10 dark:hover:text-rose-300"
+                            className="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-[var(--pq-radius-sm)] text-[var(--pq-text-faint)] opacity-0 transition hover:bg-[var(--pq-danger-bg)] hover:text-[var(--pq-danger)] group-hover:opacity-100 focus:opacity-100 "
                             aria-label={l('删除历史对话', 'Delete history item')}
                             title={l('删除历史对话', 'Delete history item')}
                           >
@@ -469,7 +469,7 @@ export default function AgentWorkspaceView({
                   <button
                     type="button"
                     onClick={handleClearAgentHistory}
-                    className="flex h-8 w-full items-center rounded-[var(--pq-radius-sm)] px-2.5 text-left text-xs font-medium text-[var(--pq-text-faint)] transition hover:bg-[var(--pq-danger-bg)] hover:text-[var(--pq-danger)] dark:hover:bg-rose-400/10 dark:hover:text-rose-300"
+                    className="flex h-8 w-full items-center rounded-[var(--pq-radius-sm)] px-2.5 text-left text-xs font-medium text-[var(--pq-text-faint)] transition hover:bg-[var(--pq-danger-bg)] hover:text-[var(--pq-danger)] "
                   >
                     {l('清空历史记录', 'Clear history')}
                   </button>
@@ -570,7 +570,7 @@ export default function AgentWorkspaceView({
                 </div>
 
                 {error ? (
-                  <div className="mb-3 whitespace-pre-wrap rounded-lg border border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-danger-bg)] px-4 py-2.5 text-sm leading-6 text-[var(--pq-danger)] dark:border-rose-300/20 dark:bg-rose-400/10 dark:text-rose-200">
+                  <div className="mb-3 whitespace-pre-wrap rounded-lg border border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-danger-bg)] px-4 py-2.5 text-sm leading-6 text-[var(--pq-danger)] ">
                     {error}
                   </div>
                 ) : null}
@@ -888,7 +888,7 @@ export default function AgentWorkspaceView({
                         className={[
                           'pq-icon-button relative h-10 w-10 shrink-0 border transition',
                           agentRagEnabled
-                            ? 'border-[color-mix(in_srgb,var(--pq-success)_28%,transparent)] bg-[var(--pq-success-bg)] text-[var(--pq-success)] shadow-[0_0_0_3px_rgba(16,185,129,0.12)] dark:border-emerald-400/40 dark:bg-emerald-400/12 dark:text-emerald-200'
+                            ? 'border-[color-mix(in_srgb,var(--pq-success)_28%,transparent)] bg-[var(--pq-success-bg)] text-[var(--pq-success)] shadow-[0_0_0_3px_rgba(16,185,129,0.12)] '
                             : 'border-[var(--pq-border)] bg-white/60 text-[var(--pq-text-faint)] dark:bg-white/5 dark:text-[var(--pq-text-faint)]',
                         ].join(' ')}
                       >
@@ -940,7 +940,7 @@ export default function AgentWorkspaceView({
                         onClick={activeSessionRunning && !activeSessionCancelling ? onCancelAgentRun : undefined}
                         disabled={activeSessionRunning ? activeSessionCancelling : !canSubmitPrompt}
                         className={activeSessionRunning
-                          ? 'pq-button h-11 shrink-0 border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] px-5 text-sm text-[var(--pq-danger)] disabled:opacity-60 dark:border-rose-300/20 dark:text-rose-300'
+                          ? 'pq-button h-11 shrink-0 border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] px-5 text-sm text-[var(--pq-danger)] disabled:opacity-60 '
                           : 'pq-button-primary h-11 shrink-0 px-5 text-sm disabled:opacity-50'}
                       >
                         {activeSessionRunning ? (

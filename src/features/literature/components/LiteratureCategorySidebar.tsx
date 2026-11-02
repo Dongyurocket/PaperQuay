@@ -419,7 +419,7 @@ export default function LiteratureCategorySidebar({
                     }
                     closeContextMenu();
                   }}
-                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--pq-danger)] transition hover:bg-[var(--pq-danger-bg)] dark:text-rose-200 dark:hover:bg-rose-400/10"
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--pq-danger)] transition hover:bg-[var(--pq-danger-bg)] "
                 >
                   <Trash2 className="h-4 w-4" strokeWidth={1.9} />
                   {l('删除分类', 'Delete Category')}

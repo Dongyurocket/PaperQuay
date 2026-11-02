@@ -47,6 +47,11 @@
 | `--pq-accent-border` | 强调边框 | 22% 透明 | 28% 透明 |
 | `--pq-accent-button-bg` | 主按钮底 | `#0d9488` | `#115e59` |
 | `--pq-accent-button-text` | 主按钮文字 | `#ffffff` | `#ecfeff` |
+| `--pq-success-button-bg` / `-bg-hover` / `-text` | 成功实心按钮 | `#15803d` / `#166534` / `#ffffff` | `#14532d` / `#166534` / `#dcfce7` |
+| `--pq-danger-button-bg` / `-bg-hover` / `-text` | 危险实心按钮 | `#dc2626` / `#b91c1c` / `#ffffff` | `#7f1d1d` / `#991b1b` / `#fee2e2` |
+| `--pq-warning-button-bg` / `-bg-hover` / `-text` | 警告实心按钮 | `#b45309` / `#92400e` / `#ffffff` | `#78350f` / `#92400e` / `#fef3c7` |
+
+**按钮级令牌专供实心按钮**：浅色是「亮底 + 白字」，深色反过来是「深底 + 浅字」。不要用 `--pq-{semantic}` 直接当实心按钮底——它是文字/图标色，深色主题下为亮色，叠浅字会失去对比度；也不要把它映射到 `--pq-{semantic}-bg`（10% 透明度，按钮会消失）。每组文字对底按 §六 第 3 条核算，当前 9 组均 ≥4.5:1（最低浅色 danger 4.83:1）。
 
 语义色与品牌色必须能靠色相区分：
 

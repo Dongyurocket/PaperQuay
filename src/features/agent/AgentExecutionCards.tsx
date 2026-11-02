@@ -20,13 +20,13 @@ import { useAppLocale, useLocaleText } from '../../i18n/uiLanguage';
 function statusTone(status: AgentStepStatus): string {
   switch (status) {
     case 'success':
-      return 'border-[color-mix(in_srgb,var(--pq-success)_28%,transparent)] bg-[var(--pq-success-bg)] text-[var(--pq-success)] dark:border-emerald-300/20 dark:bg-emerald-300/10 dark:text-emerald-200';
+      return 'border-[color-mix(in_srgb,var(--pq-success)_28%,transparent)] bg-[var(--pq-success-bg)] text-[var(--pq-success)] ';
     case 'running':
-      return 'border-[color-mix(in_srgb,var(--pq-info)_28%,transparent)] bg-[var(--pq-info-bg)] text-[var(--pq-info)] dark:border-sky-300/20 dark:bg-sky-300/10 dark:text-sky-200';
+      return 'border-[color-mix(in_srgb,var(--pq-info)_28%,transparent)] bg-[var(--pq-info-bg)] text-[var(--pq-info)] ';
     case 'warning':
-      return 'border-[color-mix(in_srgb,var(--pq-warning)_28%,transparent)] bg-[var(--pq-warning-bg)] text-[var(--pq-warning)] dark:border-amber-300/20 dark:bg-amber-300/10 dark:text-amber-200';
+      return 'border-[color-mix(in_srgb,var(--pq-warning)_28%,transparent)] bg-[var(--pq-warning-bg)] text-[var(--pq-warning)] ';
     case 'error':
-      return 'border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-danger-bg)] text-[var(--pq-danger)] dark:border-rose-300/20 dark:bg-rose-400/10 dark:text-rose-200';
+      return 'border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-danger-bg)] text-[var(--pq-danger)] ';
     case 'skipped':
       return 'border-[var(--pq-border)] bg-[var(--pq-surface-2)] text-[var(--pq-text-faint)] dark:border-white/10 dark:bg-chrome-900 dark:text-chrome-500';
     default:
@@ -89,7 +89,7 @@ export function PlanDiffCard({
       className={[
         'group rounded-[22px] border p-3.5 transition',
         approved
-          ? 'border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-teal-50/70 shadow-[0_14px_35px_rgba(20,184,166,0.10)] dark:border-teal-300/20 dark:bg-teal-300/10'
+          ? 'border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-[var(--pq-accent-bg)] shadow-[0_14px_35px_rgba(20,184,166,0.10)] '
           : 'border-[var(--pq-border)] bg-white/74 opacity-75 dark:border-white/10 dark:bg-chrome-900/62',
       ].join(' ')}
     >
@@ -100,7 +100,7 @@ export function PlanDiffCard({
           className={[
             'mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition',
             approved
-              ? 'border-teal-500 bg-teal-500 text-white'
+              ? 'border-[var(--pq-accent-button-bg)] bg-[var(--pq-accent-button-bg)] text-[var(--pq-accent-button-text)]'
               : 'border-[var(--pq-border-strong)] bg-white text-transparent dark:border-white/20 dark:bg-chrome-950',
           ].join(' ')}
         >
@@ -124,11 +124,11 @@ export function PlanDiffCard({
                   {item.before || l('空', 'Empty')}
                 </div>
               </div>
-              <div className="flex justify-center text-[var(--pq-accent)] dark:text-teal-300">
+              <div className="flex justify-center text-[var(--pq-accent)] ">
                 <ArrowRight className="h-4 w-4" strokeWidth={2} />
               </div>
-              <div className="rounded-2xl border border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-white px-3 py-2 dark:border-teal-300/20 dark:bg-chrome-950">
-                <div className="mb-1 text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--pq-accent)] dark:text-teal-300">
+              <div className="rounded-2xl border border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-white px-3 py-2 dark:bg-chrome-950">
+                <div className="mb-1 text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--pq-accent)] ">
                   After
                 </div>
                 <div className="line-clamp-3 text-[var(--pq-text)] dark:text-chrome-100">
@@ -141,7 +141,7 @@ export function PlanDiffCard({
           <button
             type="button"
             onClick={onInspect}
-            className="mt-3 text-xs font-bold text-[var(--pq-accent)] opacity-80 transition hover:opacity-100 dark:text-teal-200"
+            className="mt-3 text-xs font-bold text-[var(--pq-accent)] opacity-80 transition hover:opacity-100 "
           >
             {l('查看详情', 'View Details')}
           </button>

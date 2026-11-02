@@ -242,14 +242,14 @@ export function ReaderPreferencesUpdateSection({
         </div>
 
         {downloading ? (
-          <div className="rounded-2xl border border-indigo-100 bg-indigo-50/70 px-4 py-3 dark:border-white/10 dark:bg-[var(--pq-surface-2)]">
+          <div className="rounded-2xl border border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-[var(--pq-accent-bg)] px-4 py-3 dark:border-white/10 dark:bg-[var(--pq-surface-2)]">
             <div className="flex items-center justify-between text-xs font-medium text-[var(--pq-accent)] dark:text-[var(--pq-accent)]">
               <span>{l('下载进度', 'Download Progress')}</span>
               <span>{formatPercent(progress)}</span>
             </div>
             <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/80 dark:bg-[var(--pq-surface-1)]">
               <div
-                className="h-full rounded-full bg-indigo-500 transition-all duration-300 dark:bg-[var(--pq-accent)]"
+                className="h-full rounded-full bg-[var(--pq-accent)] transition-all duration-300 dark:bg-[var(--pq-accent)]"
                 style={{ width: formatPercent(progress) }}
               />
             </div>
@@ -288,7 +288,7 @@ export function ReaderPreferencesUpdateSection({
             type="button"
             onClick={handleInstall}
             disabled={!status?.canInstall || checking || downloading || installing}
-            className="rounded-xl border border-[color-mix(in_srgb,var(--pq-success)_28%,transparent)] bg-[var(--pq-success-bg)] px-4 py-2 text-sm font-medium text-[var(--pq-success)] transition hover:bg-[var(--pq-success-bg)] disabled:opacity-60 dark:border-emerald-400/20 dark:bg-emerald-400/10 dark:text-emerald-200"
+            className="rounded-xl border border-[color-mix(in_srgb,var(--pq-success)_28%,transparent)] bg-[var(--pq-success-bg)] px-4 py-2 text-sm font-medium text-[var(--pq-success)] transition hover:bg-[var(--pq-success-bg)] disabled:opacity-60 "
           >
             <RotateCcw className="mr-2 inline h-4 w-4" strokeWidth={1.8} />
             {installing ? l('重启中...', 'Restarting...') : l('重启安装', 'Restart and Install')}

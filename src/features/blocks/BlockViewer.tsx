@@ -894,10 +894,10 @@ function BlockViewer({
             <span className="hidden sm:inline">{l('Structured Reading', 'Structured Reading')}</span>
           </div>
 
-          <span className="pq-badge-neutral rounded-full border border-[var(--pq-border)] bg-white px-3 py-1 text-xs text-[var(--pq-text-muted)]">
+          <span className="pq-badge-neutral rounded-full border border-[var(--pq-border)] bg-[var(--pq-surface-1)] px-3 py-1 text-xs text-[var(--pq-text-muted)]">
             {l(`${visibleBlocks.length} 个块`, `${visibleBlocks.length} blocks`)}
           </span>
-          <span className="pq-badge-state rounded-full border border-[var(--pq-border)] bg-white px-3 py-1 text-xs text-[var(--pq-text-muted)]">
+          <span className="pq-badge-state rounded-full border border-[var(--pq-border)] bg-[var(--pq-surface-1)] px-3 py-1 text-xs text-[var(--pq-text-muted)]">
             {l(`${translatedCount} 个译文块`, `${translatedCount} translated blocks`)}
           </span>
 
@@ -914,7 +914,7 @@ function BlockViewer({
                   className={cn(
                     'rounded-full px-3 py-1.5 font-medium transition-all duration-200',
                     selected
-                      ? 'bg-slate-900 text-white dark:bg-[var(--pq-accent)] dark:text-[var(--pq-accent-text)]'
+                      ? 'bg-slate-900 text-white dark:bg-[var(--pq-accent-button-bg)] dark:text-[var(--pq-accent-button-text)]'
                       : 'text-[var(--pq-text-muted)] hover:bg-[var(--pq-surface-2)] dark:text-[var(--pq-text-muted)] dark:hover:bg-[var(--pq-surface-3)]',
                     option.disabled &&
                       'cursor-not-allowed opacity-45 hover:bg-transparent dark:hover:bg-transparent',

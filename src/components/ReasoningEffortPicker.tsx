@@ -236,7 +236,7 @@ export function ReasoningEffortPicker({
           compact ? 'h-8 w-8' : 'h-10 w-10',
           value === 'auto'
             ? 'border-[var(--pq-border)] text-[var(--pq-text-faint)] dark:bg-white/5 dark:text-[var(--pq-text-faint)]'
-            : 'border-[color-mix(in_srgb,var(--pq-success)_28%,transparent)] bg-[var(--pq-success-bg)] text-[var(--pq-success)] shadow-[0_0_0_3px_rgba(16,185,129,0.12)] dark:border-emerald-400/40 dark:bg-emerald-400/12 dark:text-emerald-200',
+            : 'border-[color-mix(in_srgb,var(--pq-success)_28%,transparent)] bg-[var(--pq-success-bg)] text-[var(--pq-success)] shadow-[0_0_0_3px_rgba(16,185,129,0.12)] ',
         )}
       >
         <Brain className="h-4 w-4" strokeWidth={1.8} />

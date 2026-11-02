@@ -3045,7 +3045,7 @@ export default function LiteratureLibraryView({
               type="button"
               disabled={batchWorking}
               onClick={handleBatchDeletePapers}
-              className="pq-button px-2.5 py-1 text-xs text-[var(--pq-danger)] disabled:opacity-50 dark:text-rose-300"
+              className="pq-button px-2.5 py-1 text-xs text-[var(--pq-danger)] disabled:opacity-50 "
             >
               {l('删除', 'Delete')}
             </button>
@@ -3114,7 +3114,7 @@ export default function LiteratureLibraryView({
         onDoubleClick={() => setCategorySidebarWidth(CATEGORY_SIDEBAR_DEFAULT_WIDTH)}
         className={[
           'absolute bottom-0 top-0 z-40 w-4 -translate-x-1/2 cursor-col-resize touch-none',
-          categorySidebarResizing ? 'bg-teal-400/10' : 'bg-transparent hover:bg-teal-400/[0.04]',
+          categorySidebarResizing ? 'bg-[color-mix(in_srgb,var(--pq-accent)_10%,transparent)]' : 'bg-transparent hover:bg-[color-mix(in_srgb,var(--pq-accent)_4%,transparent)]',
         ].join(' ')}
         style={{
           left: categorySidebarWidth,
@@ -3125,8 +3125,8 @@ export default function LiteratureLibraryView({
           className={[
             'mx-auto h-full w-px transition',
             categorySidebarResizing
-              ? 'bg-teal-400 shadow-[0_0_0_3px_rgba(45,212,191,0.16)]'
-              : 'bg-[var(--pq-surface-3)] hover:bg-[var(--pq-accent-bg)] dark:bg-white/10 dark:hover:bg-teal-300/60',
+              ? 'bg-[var(--pq-accent)] shadow-[0_0_0_3px_rgba(45,212,191,0.16)]'
+              : 'bg-[var(--pq-surface-3)] hover:bg-[var(--pq-accent-bg)] dark:bg-white/10 ',
           ].join(' ')}
         />
       </div>
@@ -3199,7 +3199,7 @@ export default function LiteratureLibraryView({
         onDoubleClick={() => setDetailsPanelWidth(DETAILS_PANEL_DEFAULT_WIDTH)}
         className={[
           'absolute bottom-0 top-0 z-40 w-4 -translate-x-1/2 cursor-col-resize touch-none',
-          detailsPanelResizing ? 'bg-teal-400/10' : 'bg-transparent hover:bg-teal-400/[0.04]',
+          detailsPanelResizing ? 'bg-[color-mix(in_srgb,var(--pq-accent)_10%,transparent)]' : 'bg-transparent hover:bg-[color-mix(in_srgb,var(--pq-accent)_4%,transparent)]',
         ].join(' ')}
         style={{
           right: detailsPanelWidth - 1,
@@ -3210,8 +3210,8 @@ export default function LiteratureLibraryView({
           className={[
             'mx-auto h-full w-px transition',
             detailsPanelResizing
-              ? 'bg-teal-400 shadow-[0_0_0_3px_rgba(45,212,191,0.16)]'
-              : 'bg-[var(--pq-surface-3)] hover:bg-[var(--pq-accent-bg)] dark:bg-white/10 dark:hover:bg-teal-300/60',
+              ? 'bg-[var(--pq-accent)] shadow-[0_0_0_3px_rgba(45,212,191,0.16)]'
+              : 'bg-[var(--pq-surface-3)] hover:bg-[var(--pq-accent-bg)] dark:bg-white/10 ',
           ].join(' ')}
         />
       </div>
@@ -3269,7 +3269,7 @@ export default function LiteratureLibraryView({
               onClick={handleOpenTagDialogFromContextMenu}
               className="mt-1 flex w-full items-center rounded-xl px-3 py-2 text-left text-sm font-medium text-[var(--pq-text-muted)] transition hover:bg-[var(--pq-surface-2)] dark:text-[#e0e0e0] dark:hover:bg-white/[0.06]"
             >
-              <Tag className="mr-2 h-4 w-4 text-[var(--pq-info)] dark:text-cyan-200" strokeWidth={1.9} />
+              <Tag className="mr-2 h-4 w-4 text-[var(--pq-info)] " strokeWidth={1.9} />
               {l('添加自定义标签', 'Add Custom Tag')}
             </button>
             <button
@@ -3309,7 +3309,7 @@ export default function LiteratureLibraryView({
                 }
                 className="mt-1 flex w-full items-center rounded-xl px-3 py-2 text-left text-sm font-medium text-[var(--pq-text-muted)] transition hover:bg-[var(--pq-surface-2)] disabled:opacity-60 dark:text-[#e0e0e0] dark:hover:bg-white/[0.06]"
               >
-                <Database className="mr-2 h-4 w-4 text-[var(--pq-accent)] dark:text-teal-200" strokeWidth={1.9} />
+                <Database className="mr-2 h-4 w-4 text-[var(--pq-accent)] " strokeWidth={1.9} />
                 {ragIndexingDocumentKey === paperContextMenu.paper.id
                   ? l('RAG 索引中…', 'Indexing…')
                   : l('建立/重建 RAG 索引', 'Build/Rebuild RAG Index')}
@@ -3319,7 +3319,7 @@ export default function LiteratureLibraryView({
             <button
               type="button"
               onClick={handleDeletePaperFromContextMenu}
-              className="flex w-full items-center rounded-xl px-3 py-2 text-left text-sm font-medium text-[var(--pq-danger)] transition hover:bg-[var(--pq-danger-bg)] dark:text-rose-300 dark:hover:bg-rose-400/10"
+              className="flex w-full items-center rounded-xl px-3 py-2 text-left text-sm font-medium text-[var(--pq-danger)] transition hover:bg-[var(--pq-danger-bg)] "
             >
               <Trash2 className="mr-2 h-4 w-4" strokeWidth={1.9} />
               {l('删除文献记录', 'Delete Paper Record')}

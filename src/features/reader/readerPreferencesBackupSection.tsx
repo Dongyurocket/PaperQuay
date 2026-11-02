@@ -372,8 +372,8 @@ export function ReaderPreferencesBackupSection({
             <div
               className={
                 lastBackup.failedCount > 0
-                  ? 'rounded-2xl border border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-rose-50/80 px-3 py-2 text-xs leading-5 text-[var(--pq-danger)] dark:border-rose-400/30 dark:bg-rose-400/10 dark:text-rose-200'
-                  : 'rounded-2xl border border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-teal-50/80 px-3 py-2 text-xs leading-5 text-[var(--pq-accent)] dark:border-[color-mix(in_srgb,var(--pq-accent)_30%,transparent)] dark:bg-[var(--pq-accent)] dark:text-[var(--pq-accent)]'
+                  ? 'rounded-2xl border border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-danger-bg)] px-3 py-2 text-xs leading-5 text-[var(--pq-danger)] '
+                  : 'rounded-2xl border border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-[var(--pq-accent-bg)] px-3 py-2 text-xs leading-5 text-[var(--pq-accent)] dark:border-[color-mix(in_srgb,var(--pq-accent)_30%,transparent)] dark:bg-[var(--pq-accent-bg)] dark:text-[var(--pq-accent)]'
               }
             >
               <div>
@@ -396,7 +396,7 @@ export function ReaderPreferencesBackupSection({
           ) : null}
 
           {latestBackup ? (
-            <div className="rounded-2xl border border-[color-mix(in_srgb,var(--pq-info)_28%,transparent)] bg-sky-50/80 px-3 py-2 text-xs leading-5 text-[var(--pq-info)] dark:border-sky-300/30 dark:bg-sky-400/10 dark:text-sky-200">
+            <div className="rounded-2xl border border-[color-mix(in_srgb,var(--pq-info)_28%,transparent)] bg-[var(--pq-info-bg)] px-3 py-2 text-xs leading-5 text-[var(--pq-info)] ">
               {latestBackup.available
                 ? l(
                     `最新远端备份：${latestBackup.backupId ?? 'unknown'}，上传 ${latestBackup.uploadedCount}，PDF ${latestBackup.pdfCount}，缓存 ${latestBackup.derivedCount}`,
@@ -407,7 +407,7 @@ export function ReaderPreferencesBackupSection({
           ) : null}
 
           {lastRestore ? (
-            <div className="rounded-2xl border border-[color-mix(in_srgb,var(--pq-warning)_28%,transparent)] bg-amber-50/80 px-3 py-2 text-xs leading-5 text-[var(--pq-warning)] dark:border-amber-300/30 dark:bg-amber-400/10 dark:text-amber-200">
+            <div className="rounded-2xl border border-[color-mix(in_srgb,var(--pq-warning)_28%,transparent)] bg-[var(--pq-warning-bg)] px-3 py-2 text-xs leading-5 text-[var(--pq-warning)] ">
               {l(
                 `最近恢复：下载 ${lastRestore.downloadedCount}，跳过 ${lastRestore.skippedCount}，合并 ${lastRestore.mergedRowCount} 行，修补 ${lastRestore.updatedRowCount} 行`,
                 `Last restore: downloaded ${lastRestore.downloadedCount}, skipped ${lastRestore.skippedCount}, merged ${lastRestore.mergedRowCount} rows, repaired ${lastRestore.updatedRowCount} rows`,
@@ -438,7 +438,7 @@ export function ReaderPreferencesBackupSection({
               type="button"
               onClick={() => void handleRunBackup()}
               disabled={working}
-              className="inline-flex rounded-xl bg-[var(--pq-accent-button-bg)] px-4 py-2 text-sm font-semibold text-[var(--pq-accent-button-text)] transition hover:bg-[var(--pq-accent-button-bg-hover)] disabled:opacity-60 dark:bg-[var(--pq-accent)] dark:text-[var(--pq-accent-text)] dark:hover:bg-[var(--pq-accent-soft)]"
+              className="inline-flex rounded-xl bg-[var(--pq-accent-button-bg)] px-4 py-2 text-sm font-semibold text-[var(--pq-accent-button-text)] transition hover:bg-[var(--pq-accent-button-bg-hover)] disabled:opacity-60"
             >
               <Cloud className="mr-2 h-4 w-4" strokeWidth={1.8} />
               {working ? l('处理中...', 'Working...') : l('立即手动备份', 'Back Up Now')}
@@ -447,7 +447,7 @@ export function ReaderPreferencesBackupSection({
               type="button"
               onClick={() => void handleInspectLatest()}
               disabled={working}
-              className="inline-flex rounded-xl border border-[color-mix(in_srgb,var(--pq-info)_28%,transparent)] bg-[var(--pq-info-bg)] px-4 py-2 text-sm text-[var(--pq-info)] transition hover:bg-[var(--pq-info-bg)] disabled:opacity-60 dark:border-sky-300/30 dark:bg-sky-400/10 dark:text-sky-200"
+              className="inline-flex rounded-xl border border-[color-mix(in_srgb,var(--pq-info)_28%,transparent)] bg-[var(--pq-info-bg)] px-4 py-2 text-sm text-[var(--pq-info)] transition hover:bg-[var(--pq-info-bg)] disabled:opacity-60 "
             >
               <RefreshCw className="mr-2 h-4 w-4" strokeWidth={1.8} />
               {l('查看最新备份', 'Inspect Latest Backup')}
@@ -456,7 +456,7 @@ export function ReaderPreferencesBackupSection({
               type="button"
               onClick={() => void handleRestoreMissing()}
               disabled={working}
-              className="inline-flex rounded-xl border border-[color-mix(in_srgb,var(--pq-warning)_28%,transparent)] bg-[var(--pq-warning-bg)] px-4 py-2 text-sm font-semibold text-[var(--pq-warning)] transition hover:bg-[var(--pq-warning-bg)] disabled:opacity-60 dark:border-amber-300/30 dark:bg-amber-400/10 dark:text-amber-200"
+              className="inline-flex rounded-xl border border-[color-mix(in_srgb,var(--pq-warning)_28%,transparent)] bg-[var(--pq-warning-bg)] px-4 py-2 text-sm font-semibold text-[var(--pq-warning)] transition hover:bg-[var(--pq-warning-bg)] disabled:opacity-60 "
             >
               <Download className="mr-2 h-4 w-4" strokeWidth={1.8} />
               {l('补全恢复缺失内容', 'Restore Missing Content')}
@@ -466,7 +466,7 @@ export function ReaderPreferencesBackupSection({
                 type="button"
                 onClick={() => void handleClearPassword()}
                 disabled={working}
-                className="inline-flex rounded-xl border border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-danger-bg)] px-4 py-2 text-sm text-[var(--pq-danger)] transition hover:bg-[var(--pq-danger-bg)] disabled:opacity-60 dark:border-rose-400/30 dark:bg-rose-400/10 dark:text-rose-300"
+                className="inline-flex rounded-xl border border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-danger-bg)] px-4 py-2 text-sm text-[var(--pq-danger)] transition hover:bg-[var(--pq-danger-bg)] disabled:opacity-60 "
               >
                 {l('清除密码', 'Clear Password')}
               </button>

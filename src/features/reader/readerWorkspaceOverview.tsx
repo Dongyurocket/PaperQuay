@@ -55,7 +55,7 @@ function InlineProgressBar({
       </div>
       <div className="mt-3 h-2 overflow-hidden rounded-full bg-[var(--pq-surface-2)]">
         <div
-          className="h-full rounded-full bg-indigo-500 transition-all duration-300"
+          className="h-full rounded-full bg-[var(--pq-accent)] transition-all duration-300"
           style={{ width: `${ratio}%` }}
         />
       </div>

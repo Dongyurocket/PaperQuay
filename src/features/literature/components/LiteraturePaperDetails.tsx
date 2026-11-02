@@ -469,13 +469,13 @@ function TaskStatusPanel({
       className={[
         'rounded-lg border px-3.5 py-3',
         tone === 'rose'
-          ? 'border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-danger-bg)] text-[var(--pq-danger)] dark:border-rose-300/25 dark:bg-rose-300/10 dark:text-rose-200'
+          ? 'border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-danger-bg)] text-[var(--pq-danger)] '
           : '',
         tone === 'emerald'
-          ? 'border-[color-mix(in_srgb,var(--pq-success)_28%,transparent)] bg-[var(--pq-success-bg)] text-[var(--pq-success)] dark:border-emerald-300/25 dark:bg-emerald-300/10 dark:text-emerald-200'
+          ? 'border-[color-mix(in_srgb,var(--pq-success)_28%,transparent)] bg-[var(--pq-success-bg)] text-[var(--pq-success)] '
           : '',
         tone === 'teal'
-          ? 'border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-[var(--pq-accent-bg)] text-[var(--pq-accent)] dark:border-teal-300/25 dark:bg-teal-300/10 dark:text-teal-100'
+          ? 'border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-[var(--pq-accent-bg)] text-[var(--pq-accent)] '
           : '',
       ].join(' ')}
     >
@@ -503,9 +503,9 @@ function TaskStatusPanel({
               className={[
                 'h-full rounded-full transition-all duration-300',
                 state.status === 'running' && !hasProgress ? 'animate-pulse' : '',
-                tone === 'rose' ? 'bg-rose-500' : '',
-                tone === 'emerald' ? 'bg-emerald-500' : '',
-                tone === 'teal' ? 'bg-teal-500' : '',
+                tone === 'rose' ? 'bg-[var(--pq-danger)]' : '',
+                tone === 'emerald' ? 'bg-[var(--pq-success)]' : '',
+                tone === 'teal' ? 'bg-[var(--pq-accent)]' : '',
               ].join(' ')}
               style={{ width: state.status === 'error' ? '100%' : `${ratio}%` }}
             />
@@ -681,7 +681,7 @@ export default function LiteraturePaperDetails({
                   disabled={saving}
                   className={
                     selectedPaper.isFavorite
-                      ? 'pq-icon-button h-9 w-9 border border-amber-300/70 bg-[var(--pq-warning-bg)] text-[var(--pq-warning)] disabled:opacity-60 dark:border-amber-300/25 dark:bg-amber-300/14 dark:text-amber-200'
+                      ? 'pq-icon-button h-9 w-9 border border-[color-mix(in_srgb,var(--pq-warning)_40%,transparent)] bg-[var(--pq-warning-bg)] text-[var(--pq-warning)] disabled:opacity-60 '
                       : 'pq-icon-button h-9 w-9 border border-[var(--pq-border)] bg-white/65 text-[var(--pq-text-faint)] disabled:opacity-60'
                   }
                   title={selectedPaper.isFavorite ? l('取消收藏', 'Remove from favorites') : l('加入收藏', 'Add to favorites')}
@@ -810,15 +810,15 @@ export default function LiteraturePaperDetails({
                   />
 
                   {translatedPdf ? (
-                    <div className="flex items-center justify-between gap-2 rounded-xl border border-emerald-300/55 bg-emerald-50/70 px-3 py-2.5 dark:border-emerald-300/20 dark:bg-emerald-300/10">
+                    <div className="flex items-center justify-between gap-2 rounded-xl border border-[color-mix(in_srgb,var(--pq-success)_28%,transparent)] bg-[var(--pq-success-bg)] px-3 py-2.5 ">
                       <div className="flex min-w-0 items-center gap-2.5">
-                        <FileText className="h-4 w-4 shrink-0 text-[var(--pq-success)] dark:text-emerald-300" strokeWidth={1.9} />
+                        <FileText className="h-4 w-4 shrink-0 text-[var(--pq-success)] " strokeWidth={1.9} />
                         <div className="min-w-0">
-                          <div className="text-xs font-semibold text-[var(--pq-success)] dark:text-emerald-100">
+                          <div className="text-xs font-semibold text-[var(--pq-success)] ">
                             {l('翻译版 PDF 已附加', 'Translated PDF attached')}
                           </div>
                           <div
-                            className="truncate text-[11px] text-emerald-700/80 dark:text-emerald-200/70"
+                            className="truncate text-[11px] text-[var(--pq-success)] "
                             title={translatedPdf.path}
                           >
                             {translatedPdf.attachment.fileName}
@@ -830,7 +830,7 @@ export default function LiteraturePaperDetails({
                           type="button"
                           disabled={saving || !onAttachTranslatedPdf}
                           onClick={() => onAttachTranslatedPdf?.(selectedPaper)}
-                          className="rounded-lg p-1.5 text-[var(--pq-success)] transition hover:bg-[var(--pq-success-bg)] disabled:cursor-not-allowed disabled:opacity-50 dark:text-emerald-200 dark:hover:bg-emerald-300/15"
+                          className="rounded-lg p-1.5 text-[var(--pq-success)] transition hover:bg-[var(--pq-success-bg)] disabled:cursor-not-allowed disabled:opacity-50 "
                           title={l('替换翻译版 PDF', 'Replace translated PDF')}
                           aria-label={l('替换翻译版 PDF', 'Replace translated PDF')}
                         >
@@ -840,7 +840,7 @@ export default function LiteraturePaperDetails({
                           type="button"
                           disabled={saving || !onRemoveTranslatedPdf}
                           onClick={() => onRemoveTranslatedPdf?.(selectedPaper)}
-                          className="rounded-lg p-1.5 text-[var(--pq-danger)] transition hover:bg-[var(--pq-danger-bg)] disabled:cursor-not-allowed disabled:opacity-50 dark:text-rose-300 dark:hover:bg-rose-300/15"
+                          className="rounded-lg p-1.5 text-[var(--pq-danger)] transition hover:bg-[var(--pq-danger-bg)] disabled:cursor-not-allowed disabled:opacity-50 "
                           title={l('移除翻译版 PDF', 'Remove translated PDF')}
                           aria-label={l('移除翻译版 PDF', 'Remove translated PDF')}
                         >
@@ -904,7 +904,7 @@ export default function LiteraturePaperDetails({
                             })
                             .finally(() => setTitleTranslating(false));
                         }}
-                        className="mb-1 inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium text-[var(--pq-accent)] transition hover:bg-[var(--pq-accent-bg)] disabled:cursor-not-allowed disabled:opacity-50 dark:text-indigo-300 dark:hover:bg-indigo-300/10"
+                        className="mb-1 inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium text-[var(--pq-accent)] transition hover:bg-[var(--pq-accent-bg)] disabled:cursor-not-allowed disabled:opacity-50 "
                         title={l('使用翻译模型生成中文标题', 'Generate Chinese title with the translation model')}
                       >
                         <Languages className="h-3 w-3" strokeWidth={1.9} />

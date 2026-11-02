@@ -205,7 +205,7 @@ export const PdfThumbnailSidebar = memo(forwardRef<HTMLElement, PdfThumbnailSide
                           className={cn(
                             'group w-full rounded-xl border p-1.5 text-left transition-all duration-200',
                             isActivePage
-                              ? 'border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-white shadow-[0_10px_24px_rgba(79,70,229,0.10)] dark:border-indigo-400/30 dark:bg-[var(--pq-surface-2)] dark:shadow-[0_10px_24px_rgba(79,70,229,0.16)]'
+                              ? 'border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-white shadow-[0_10px_24px_rgba(79,70,229,0.10)] dark:bg-[var(--pq-surface-2)] dark:shadow-[0_10px_24px_rgba(79,70,229,0.16)]'
                               : 'border-[var(--pq-border)] bg-white/70 hover:border-[var(--pq-border-strong)] hover:bg-white dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:hover:border-white/15 dark:hover:bg-[var(--pq-surface-2)]',
                           )}
                         >
@@ -228,7 +228,7 @@ export const PdfThumbnailSidebar = memo(forwardRef<HTMLElement, PdfThumbnailSide
                           <div className="mt-2 flex items-center justify-between text-[11px] font-medium text-[var(--pq-text-muted)] dark:text-[var(--pq-text-faint)]">
                             <span>{l(`Page ${pageIndex + 1}`, `Page ${pageIndex + 1}`)}</span>
                             {isActivePage ? (
-                              <span className="text-[var(--pq-accent)] dark:text-indigo-400">
+                              <span className="text-[var(--pq-accent)] ">
                                 {l('当前', 'Current')}
                               </span>
                             ) : null}

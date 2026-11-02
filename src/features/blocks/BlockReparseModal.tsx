@@ -139,7 +139,7 @@ export function BlockReparseModal({
               {availablePresets.map((preset) => <option key={preset.id} value={preset.id}>{preset.label || preset.model} · {preset.supportsVision ? l('视觉', 'Vision') : l('文本', 'Text')}</option>)}
             </select>
           </label>
-          <div role="status" className="rounded-xl border border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-indigo-50/60 p-3 text-xs text-[var(--pq-accent)] dark:border-indigo-500/30 dark:bg-indigo-950/30 dark:text-indigo-200">{inputNotice}</div>
+          <div role="status" className="rounded-xl border border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-[var(--pq-accent-bg)] p-3 text-xs text-[var(--pq-accent)] ">{inputNotice}</div>
           {imageDataUrl && <img src={imageDataUrl} alt={l('将发送给模型的原 PDF 区块切片', 'Original PDF crop to send to the model')} className="max-h-52 w-full rounded-lg border border-[var(--pq-border)] bg-white object-contain" />}
           <label className="block space-y-1.5 text-xs text-[var(--pq-text-muted)] dark:text-[var(--pq-text-muted)]">
             <span>{l('补充要求（可选）', 'Additional instructions (optional)')}</span>
@@ -149,7 +149,7 @@ export function BlockReparseModal({
             <summary className="cursor-pointer text-[var(--pq-text-muted)]">{l('参考 OCR 文本', 'Reference OCR text')} ({initialText.length})</summary>
             <pre className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap text-[11px] text-[var(--pq-text-muted)] dark:text-[var(--pq-text-muted)]">{initialText || l('无参考文字，将依据图片识别。', 'No reference text; recognition will use the image.')}</pre>
           </details>
-          {(error || storageError) && <div role="alert" className="flex gap-2 whitespace-pre-wrap rounded-xl border border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-danger-bg)] p-3 text-xs text-[var(--pq-danger)] dark:bg-rose-950/30 dark:text-rose-300"><AlertCircle className="h-4 w-4 shrink-0" /><span>{error || storageError}</span></div>}
+          {(error || storageError) && <div role="alert" className="flex gap-2 whitespace-pre-wrap rounded-xl border border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-danger-bg)] p-3 text-xs text-[var(--pq-danger)] "><AlertCircle className="h-4 w-4 shrink-0" /><span>{error || storageError}</span></div>}
           {reparsedResult && <div className="space-y-2">
             <div className="flex items-center justify-between text-xs">
               <span className="font-semibold text-[var(--pq-success)]">{resultSource === 'image' ? l('图片重析结果', 'Image re-parse result') : l('文本修复结果', 'Text repair result')}</span>
@@ -158,7 +158,7 @@ export function BlockReparseModal({
                 <button type="button" onClick={() => setViewTab('source')} className={viewTab === 'source' ? 'font-bold' : ''}>{l('Markdown 原文', 'Markdown source')}</button>
               </div>
             </div>
-            <div className="max-h-60 overflow-auto rounded-xl border border-[color-mix(in_srgb,var(--pq-success)_28%,transparent)] p-3 dark:border-emerald-500/30">
+            <div className="max-h-60 overflow-auto rounded-xl border border-[color-mix(in_srgb,var(--pq-success)_28%,transparent)] p-3 ">
               {viewTab === 'preview' ? <div className="prose prose-slate max-w-none text-xs dark:prose-invert [&_table]:w-full [&_th]:border [&_th]:p-1.5 [&_td]:border [&_td]:p-1.5">
                 <ReactMarkdown remarkPlugins={[[remarkGfm, { singleTilde: false }], remarkMath, remarkFixGluedLatex]} rehypePlugins={[[rehypeKatex, { strict: 'ignore', throwOnError: false }]]}>{normalizedPreview}</ReactMarkdown>
               </div> : <pre className="whitespace-pre-wrap font-mono text-[11px]">{reparsedResult}</pre>}
@@ -169,11 +169,11 @@ export function BlockReparseModal({
           <div>{hasCustomOverride && onReset && <button type="button" disabled={loading || !storageReady} onClick={() => applyOrRestore(true)} className="inline-flex items-center gap-1.5 rounded-xl border px-3 py-1.5 disabled:opacity-40"><RotateCcw className="h-3.5 w-3.5" />{l('恢复原始识别', 'Restore original')}</button>}</div>
           <div className="flex items-center gap-2">
             <button type="button" onClick={onClose} disabled={loading} className="px-3 py-1.5 disabled:opacity-40">{l('关闭', 'Close')}</button>
-            <button type="button" disabled={loading || preparingImage || !selectedPreset || (!initialText.trim() && !imageDataUrl)} onClick={handleStartReparse} className="inline-flex items-center gap-1.5 rounded-xl border border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-[var(--pq-accent-bg)] px-3 py-1.5 text-[var(--pq-accent)] disabled:opacity-40 dark:bg-indigo-950/40 dark:text-indigo-300">
+            <button type="button" disabled={loading || preparingImage || !selectedPreset || (!initialText.trim() && !imageDataUrl)} onClick={handleStartReparse} className="inline-flex items-center gap-1.5 rounded-xl border border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-[var(--pq-accent-bg)] px-3 py-1.5 text-[var(--pq-accent)] disabled:opacity-40 ">
               {loading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
               {loading ? l('大模型正在处理…', 'Processing…') : imageDataUrl ? l('开始重新识别', 'Start re-parse') : l('开始文本修复', 'Start text repair')}
             </button>
-            {reparsedResult && <button type="button" disabled={loading || !storageReady} onClick={() => applyOrRestore(false)} className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3 py-1.5 text-white disabled:opacity-40"><Check className="h-3.5 w-3.5" />{l('保存并应用', 'Save and apply')}</button>}
+            {reparsedResult && <button type="button" disabled={loading || !storageReady} onClick={() => applyOrRestore(false)} className="inline-flex items-center gap-1.5 rounded-xl bg-[var(--pq-accent-button-bg)] px-3 py-1.5 text-[var(--pq-accent-button-text)] disabled:opacity-40"><Check className="h-3.5 w-3.5" />{l('保存并应用', 'Save and apply')}</button>}
           </div>
         </div>
       </div>

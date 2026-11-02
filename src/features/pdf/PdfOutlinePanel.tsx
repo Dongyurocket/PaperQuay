@@ -82,7 +82,7 @@ export const PdfOutlinePanel = memo(function PdfOutlinePanel({
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder={l('搜索标题', 'Search headings')}
-            className="h-7 w-full rounded-lg border border-[var(--pq-border)] bg-white/80 pl-7 pr-6 text-xs text-[var(--pq-text-muted)] outline-none transition focus:border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:text-[var(--pq-text)] dark:focus:border-indigo-400/40"
+            className="h-7 w-full rounded-lg border border-[var(--pq-border)] bg-white/80 pl-7 pr-6 text-xs text-[var(--pq-text-muted)] outline-none transition focus:border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:text-[var(--pq-text)] "
           />
           {query ? (
             <button
@@ -118,7 +118,7 @@ export const PdfOutlinePanel = memo(function PdfOutlinePanel({
             {l('正在读取目录…', 'Loading outline...')}
           </div>
         ) : errorMessage ? (
-          <div className="px-2 py-6 text-center text-xs text-[var(--pq-warning)] dark:text-amber-400">
+          <div className="px-2 py-6 text-center text-xs text-[var(--pq-warning)] ">
             {errorMessage}
           </div>
         ) : rows.length === 0 ? (
@@ -139,7 +139,7 @@ export const PdfOutlinePanel = memo(function PdfOutlinePanel({
                     className={cn(
                       'group flex w-full items-center gap-0.5 rounded-lg pr-1 text-left transition-colors',
                       isActive
-                        ? 'bg-[var(--pq-accent-bg)] text-[var(--pq-accent)] dark:bg-indigo-500/10 dark:text-indigo-300'
+                        ? 'bg-[var(--pq-accent-bg)] text-[var(--pq-accent)] '
                         : 'text-[var(--pq-text-muted)] hover:bg-slate-100/80 dark:text-[var(--pq-text-muted)] dark:hover:bg-[var(--pq-surface-2)]',
                     )}
                     style={{ paddingLeft: `${(depth - 1) * 12 + 2}px` }}

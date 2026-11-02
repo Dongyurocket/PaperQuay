@@ -37,7 +37,7 @@ import { loadLocalAssetDataUrl } from '../../services/assets';
 import { formatFileSize } from '../../utils/files';
 
 const agentPlanPrimaryActionClass =
-  'inline-flex items-center gap-2 rounded-2xl border border-emerald-600 bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm transition hover:border-emerald-700 hover:bg-emerald-700 disabled:cursor-not-allowed disabled:border-[color-mix(in_srgb,var(--pq-success)_28%,transparent)] disabled:bg-[var(--pq-success-bg)] disabled:text-[var(--pq-success)] disabled:shadow-none dark:border-[color-mix(in_srgb,var(--pq-success)_28%,transparent)] dark:bg-emerald-400 dark:text-[var(--pq-text)] dark:hover:border-[color-mix(in_srgb,var(--pq-success)_28%,transparent)] dark:hover:bg-[var(--pq-success-bg)] dark:disabled:border-emerald-400/20 dark:disabled:bg-emerald-400/10 dark:disabled:text-emerald-200/70';
+  'inline-flex items-center gap-2 rounded-2xl border border-[var(--pq-success-button-bg)] bg-[var(--pq-success-button-bg)] px-4 py-2.5 text-sm font-bold text-[var(--pq-success-button-text)] shadow-sm transition hover:border-[var(--pq-success-button-bg-hover)] hover:bg-[var(--pq-success-button-bg-hover)] disabled:cursor-not-allowed disabled:border-[color-mix(in_srgb,var(--pq-success)_28%,transparent)] disabled:bg-[var(--pq-success-bg)] disabled:text-[var(--pq-success)] disabled:shadow-none';
 const agentPlanSecondaryActionClass =
   'inline-flex items-center gap-2 rounded-2xl border border-[var(--pq-border-strong)] bg-white px-4 py-2.5 text-sm font-bold text-[var(--pq-text)] shadow-sm transition hover:border-[var(--pq-border-strong)] hover:bg-[var(--pq-surface-2)] disabled:cursor-not-allowed disabled:border-[var(--pq-border)] disabled:bg-[var(--pq-surface-2)] disabled:text-[var(--pq-text-muted)] disabled:shadow-none dark:border-white/14 dark:bg-chrome-900 dark:text-chrome-100 dark:hover:border-white/24 dark:hover:bg-chrome-800 dark:disabled:border-white/10 dark:disabled:bg-white/8 dark:disabled:text-chrome-500';
 
@@ -386,13 +386,13 @@ function CapabilityProgress({
               <span className={[
                 'flex h-5 w-5 items-center justify-center rounded-full text-[11px] font-bold',
                 stage.status === 'success'
-                  ? 'bg-[var(--pq-success-bg)] text-[var(--pq-success)] dark:bg-emerald-300/15 dark:text-emerald-200'
+                  ? 'bg-[var(--pq-success-bg)] text-[var(--pq-success)] '
                   : stage.status === 'running'
-                    ? 'bg-[var(--pq-info-bg)] text-[var(--pq-info)] dark:bg-sky-300/15 dark:text-sky-200'
+                    ? 'bg-[var(--pq-info-bg)] text-[var(--pq-info)] '
                     : stage.status === 'error'
-                      ? 'bg-[var(--pq-danger-bg)] text-[var(--pq-danger)] dark:bg-rose-300/15 dark:text-rose-200'
+                      ? 'bg-[var(--pq-danger-bg)] text-[var(--pq-danger)] '
                       : stage.status === 'warning'
-                        ? 'bg-[var(--pq-warning-bg)] text-[var(--pq-warning)] dark:bg-amber-300/15 dark:text-amber-200'
+                        ? 'bg-[var(--pq-warning-bg)] text-[var(--pq-warning)] '
                         : 'bg-[var(--pq-surface-2)] text-[var(--pq-text-muted)] dark:bg-white/10 dark:text-chrome-400',
               ].join(' ')}>{index + 1}</span>
               <span className="text-xs font-semibold text-[var(--pq-text-muted)] dark:text-chrome-200">
@@ -420,10 +420,10 @@ function DeliveryQualitySummary({
       ? l('交付检查：部分完成', 'Delivery check: partial')
       : l('交付检查：未完成', 'Delivery check: failed');
   const stateClass = quality.state === 'complete'
-    ? 'border-[color-mix(in_srgb,var(--pq-success)_28%,transparent)] bg-emerald-50/70 text-[var(--pq-success)] dark:border-emerald-300/25 dark:bg-emerald-300/10 dark:text-emerald-200'
+    ? 'border-[color-mix(in_srgb,var(--pq-success)_28%,transparent)] bg-[var(--pq-success-bg)] text-[var(--pq-success)] '
     : quality.state === 'partial'
-      ? 'border-[color-mix(in_srgb,var(--pq-warning)_28%,transparent)] bg-amber-50/70 text-[var(--pq-warning)] dark:border-amber-300/25 dark:bg-amber-300/10 dark:text-amber-200'
-      : 'border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-rose-50/70 text-[var(--pq-danger)] dark:border-rose-300/25 dark:bg-rose-300/10 dark:text-rose-200';
+      ? 'border-[color-mix(in_srgb,var(--pq-warning)_28%,transparent)] bg-[var(--pq-warning-bg)] text-[var(--pq-warning)] '
+      : 'border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-danger-bg)] text-[var(--pq-danger)] ';
   const issueLabel = (item: DeliveryQualityIssue) => {
     const labels: Record<DeliveryQualityIssue['code'], [string, string]> = {
       'empty-answer': ['回答为空', 'Answer is empty'],
@@ -563,7 +563,7 @@ export function SurveyCoverageCard({
 export function UserMessageCard({ message }: { message: AgentChatMessage }) {
   return (
     <article className="flex items-start justify-end gap-3">
-      <div className="max-w-[72%] rounded-[24px] border border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-[var(--pq-accent-button-bg)] px-4 py-3 text-sm leading-7 text-white shadow-[0_18px_40px_rgba(20,184,166,0.18)] dark:border-teal-300/30 dark:bg-[var(--pq-accent-bg)] dark:text-[var(--pq-text)]">
+      <div className="max-w-[72%] rounded-[24px] border border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-[var(--pq-accent-button-bg)] px-4 py-3 text-sm leading-7 text-white shadow-[0_18px_40px_rgba(20,184,166,0.18)] dark:bg-[var(--pq-accent-bg)] dark:text-[var(--pq-text)]">
         <div className="whitespace-pre-wrap break-words">{message.content}</div>
         {message.attachments && message.attachments.length > 0 ? (
           <div className="mt-3 flex flex-wrap gap-2">
@@ -582,14 +582,14 @@ export function UserMessageCard({ message }: { message: AgentChatMessage }) {
                 >
                   <AttachmentIcon className="h-3.5 w-3.5" strokeWidth={1.8} />
                   <span className="max-w-[180px] truncate">{attachment.name}</span>
-                  <span className="text-teal-50/80 dark:text-[var(--pq-text-muted)]">{formatFileSize(attachment.size)}</span>
+                  <span className="text-white/80 dark:text-[var(--pq-text-muted)]">{formatFileSize(attachment.size)}</span>
                 </span>
               );
             })}
           </div>
         ) : null}
         {message.meta ? (
-          <div className="mt-2 text-xs text-teal-50/85 dark:text-[var(--pq-text-muted)]">{message.meta}</div>
+          <div className="mt-2 text-xs text-white/85 dark:text-[var(--pq-text-muted)]">{message.meta}</div>
         ) : null}
       </div>
       <span className="mt-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-white text-[var(--pq-text-muted)] shadow-lg dark:bg-chrome-900 dark:text-chrome-100">
@@ -723,12 +723,12 @@ export function AssistantMessageCard({
             </details> : null}
             <AgentFigureReferences figures={message.ragFigures} l={l} />
             {message.visionNotice ? (
-              <div className="mt-3 rounded-xl border border-[color-mix(in_srgb,var(--pq-info)_28%,transparent)] bg-[var(--pq-info-bg)] px-3 py-2 text-xs leading-5 text-[var(--pq-info)] dark:border-sky-300/20 dark:bg-sky-300/10 dark:text-sky-200">
+              <div className="mt-3 rounded-xl border border-[color-mix(in_srgb,var(--pq-info)_28%,transparent)] bg-[var(--pq-info-bg)] px-3 py-2 text-xs leading-5 text-[var(--pq-info)] ">
                 {message.visionNotice}
               </div>
             ) : null}
             {message.ragNotice ? (
-              <div className="mt-3 rounded-2xl border border-[color-mix(in_srgb,var(--pq-warning)_28%,transparent)] bg-[var(--pq-warning-bg)] px-4 py-3 text-xs leading-5 text-[var(--pq-warning)] dark:border-amber-300/25 dark:bg-amber-300/10 dark:text-amber-200">
+              <div className="mt-3 rounded-2xl border border-[color-mix(in_srgb,var(--pq-warning)_28%,transparent)] bg-[var(--pq-warning-bg)] px-4 py-3 text-xs leading-5 text-[var(--pq-warning)] ">
                 {message.ragNotice}
               </div>
             ) : null}
@@ -736,7 +736,7 @@ export function AssistantMessageCard({
             {message.capability ? <SurveyCoverageCard capability={message.capability} disabled={activeSessionRunning} l={l} onContinue={onContinueSurvey ? () => onContinueSurvey(message) : undefined} /> : null}
             {message.deliveryQuality ? <DeliveryQualitySummary quality={message.deliveryQuality} l={l} /> : null}
             {message.citationAudit && message.citationAudit.rejectedClaimLines.length > 0 && !message.memoryPlan ? (
-              <div className="mt-4 rounded-[20px] border border-[color-mix(in_srgb,var(--pq-warning)_28%,transparent)] bg-amber-50/70 p-4 dark:border-amber-300/25 dark:bg-amber-300/10">
+              <div className="mt-4 rounded-[20px] border border-[color-mix(in_srgb,var(--pq-warning)_28%,transparent)] bg-[var(--pq-warning-bg)] p-4 ">
                 <div className="text-sm font-bold text-[var(--pq-text)] dark:text-white">
                   {l('发现未被库内证据支持的主张', 'Claims without library evidence found')}
                 </div>
@@ -760,13 +760,13 @@ export function AssistantMessageCard({
               </div>
             ) : null}
             {memoryPlan ? (
-              <div className="mt-4 rounded-[20px] border border-[color-mix(in_srgb,var(--pq-info)_28%,transparent)] bg-sky-50/70 p-4 dark:border-sky-300/25 dark:bg-sky-300/10">
+              <div className="mt-4 rounded-[20px] border border-[color-mix(in_srgb,var(--pq-info)_28%,transparent)] bg-[var(--pq-info-bg)] p-4 ">
                 <div className="flex items-center justify-between gap-3">
                   <div className="text-sm font-bold text-[var(--pq-text)] dark:text-white">
                     {l('Agent 记忆更新', 'Agent Memory Update')}
                   </div>
                   {message.memoryPlanStatus ? (
-                    <span className="rounded-full border border-[color-mix(in_srgb,var(--pq-info)_28%,transparent)] bg-white px-2.5 py-0.5 text-[11px] font-semibold text-[var(--pq-info)] dark:border-sky-300/30 dark:bg-sky-300/10 dark:text-sky-200">
+                    <span className="rounded-full border border-[color-mix(in_srgb,var(--pq-info)_28%,transparent)] bg-white px-2.5 py-0.5 text-[11px] font-semibold text-[var(--pq-info)] ">
                       {message.memoryPlanStatus === 'applied' ? l('已写入', 'Applied') :
                         message.memoryPlanStatus === 'unchanged' ? l('未新增', 'No change') : l('已拒绝', 'Rejected')}
                     </span>
@@ -775,7 +775,7 @@ export function AssistantMessageCard({
                 <div className="mt-1 text-xs leading-5 text-[var(--pq-text-muted)] dark:text-chrome-300">
                   {memoryPlan.summary}
                 </div>
-                <pre className="mt-3 max-h-52 overflow-auto whitespace-pre-wrap rounded-xl border border-sky-200/80 bg-white/80 p-3 text-xs leading-5 text-[var(--pq-text-muted)] dark:border-sky-300/20 dark:bg-chrome-950 dark:text-chrome-200">
+                <pre className="mt-3 max-h-52 overflow-auto whitespace-pre-wrap rounded-xl border border-[color-mix(in_srgb,var(--pq-info)_40%,transparent)] bg-white/80 p-3 text-xs leading-5 text-[var(--pq-text-muted)] dark:bg-chrome-950 dark:text-chrome-200">
                   {memoryPlan.content}
                 </pre>
                 <div className="mt-3 flex flex-wrap gap-2">
@@ -809,13 +809,13 @@ export function AssistantMessageCard({
               </div>
             ) : null}
             {notePlan ? (
-              <div className="mt-4 rounded-[20px] border border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-teal-50/70 p-4 dark:border-teal-300/25 dark:bg-teal-300/10">
+              <div className="mt-4 rounded-[20px] border border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-[var(--pq-accent-bg)] p-4 ">
                 <div className="flex items-center justify-between gap-3">
                   <div className="text-sm font-bold text-[var(--pq-text)] dark:text-white">
                     {l('笔记变更计划', 'Note Changes')}
                   </div>
                   {message.notePlanStatus ? (
-                    <span className="rounded-full border border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-white px-2.5 py-0.5 text-[11px] font-semibold text-[var(--pq-accent)] dark:border-teal-300/30 dark:bg-teal-300/10 dark:text-teal-200">
+                    <span className="rounded-full border border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-white px-2.5 py-0.5 text-[11px] font-semibold text-[var(--pq-accent)] ">
                       {message.notePlanStatus === 'applied' ? l('已写入', 'Applied') : l('已拒绝', 'Rejected')}
                     </span>
                   ) : null}
@@ -827,10 +827,10 @@ export function AssistantMessageCard({
                   {notePlan.operations.map((operation, index) => (
                     <div
                       key={`${notePlan.id}:${index}`}
-                      className="rounded-xl border border-teal-200/80 bg-white/80 p-3 text-xs leading-5 dark:border-teal-300/20 dark:bg-chrome-950"
+                      className="rounded-xl border border-[color-mix(in_srgb,var(--pq-accent)_40%,transparent)] bg-white/80 p-3 text-xs leading-5 dark:bg-chrome-950"
                     >
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="rounded-full bg-[var(--pq-accent-bg)] px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide text-[var(--pq-accent)] dark:bg-teal-300/15 dark:text-teal-200">
+                        <span className="rounded-full bg-[var(--pq-accent-bg)] px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide text-[var(--pq-accent)] ">
                           {operation.kind === 'create'
                             ? l('创建', 'Create')
                             : operation.kind === 'update'
@@ -890,13 +890,13 @@ export function AssistantMessageCard({
                     type="button"
                     onClick={() => handleAgentChoice(choice.instruction, message.paperScopeIds)}
                     disabled={activeSessionRunning}
-                    className="group rounded-[20px] border border-[var(--pq-border)] bg-slate-50/80 px-4 py-3 text-left transition hover:border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] hover:bg-[var(--pq-accent-bg)] disabled:opacity-60 dark:border-white/10 dark:bg-chrome-950/70 dark:hover:border-teal-300/30 dark:hover:bg-teal-300/10"
+                    className="group rounded-[20px] border border-[var(--pq-border)] bg-slate-50/80 px-4 py-3 text-left transition hover:border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] hover:bg-[var(--pq-accent-bg)] disabled:opacity-60 dark:border-white/10 dark:bg-chrome-950/70 "
                   >
                     <div className="flex items-center justify-between gap-3">
-                      <span className="text-sm font-black text-[var(--pq-text)] group-hover:text-[var(--pq-accent)] dark:text-white dark:group-hover:text-teal-200">
+                      <span className="text-sm font-black text-[var(--pq-text)] group-hover:text-[var(--pq-accent)] dark:text-white ">
                         {choice.label}
                       </span>
-                      <PlayCircle className="h-4 w-4 shrink-0 text-[var(--pq-text-faint)] group-hover:text-[var(--pq-accent)] dark:group-hover:text-teal-300" />
+                      <PlayCircle className="h-4 w-4 shrink-0 text-[var(--pq-text-faint)] group-hover:text-[var(--pq-accent)] " />
                     </div>
                     {choice.description ? (
                       <div className="mt-1 text-xs leading-5 text-[var(--pq-text-muted)] dark:text-chrome-400">

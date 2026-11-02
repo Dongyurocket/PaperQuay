@@ -3101,7 +3101,7 @@ function PdfViewer({
                 className={cn(
                   'inline-flex h-8 w-8 items-center justify-center rounded-xl border transition',
                   sidebarTab === 'thumbnails' && !thumbnailsCollapsed
-                    ? 'border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-[var(--pq-accent-bg)] text-[var(--pq-accent)] dark:border-indigo-400/30 dark:bg-indigo-500/10 dark:text-indigo-300'
+                    ? 'border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-[var(--pq-accent-bg)] text-[var(--pq-accent)] '
                     : 'border-[var(--pq-border)] bg-white text-[var(--pq-text-muted)] hover:border-[var(--pq-border-strong)] hover:bg-[var(--pq-surface-2)] dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:text-[var(--pq-text-muted)] dark:hover:border-white/15 dark:hover:bg-[var(--pq-surface-2)]',
                 )}
               >
@@ -3119,7 +3119,7 @@ function PdfViewer({
                 className={cn(
                   'inline-flex h-8 w-8 items-center justify-center rounded-xl border transition',
                   sidebarTab === 'outline' && !thumbnailsCollapsed
-                    ? 'border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-[var(--pq-accent-bg)] text-[var(--pq-accent)] dark:border-indigo-400/30 dark:bg-indigo-500/10 dark:text-indigo-300'
+                    ? 'border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-[var(--pq-accent-bg)] text-[var(--pq-accent)] '
                     : 'border-[var(--pq-border)] bg-white text-[var(--pq-text-muted)] hover:border-[var(--pq-border-strong)] hover:bg-[var(--pq-surface-2)] dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:text-[var(--pq-text-muted)] dark:hover:border-white/15 dark:hover:bg-[var(--pq-surface-2)]',
                 )}
               >

@@ -641,7 +641,7 @@ export function ReaderPreferencesContent({
                   type="button"
                   onClick={onImportLocalZotero}
                   disabled={libraryLoading}
-                  className="rounded-xl bg-[var(--pq-accent-button-bg)] px-3 py-2 text-sm font-medium text-[var(--pq-accent-button-text)] transition hover:bg-[var(--pq-accent-button-bg-hover)] disabled:opacity-60 dark:bg-[var(--pq-accent)] dark:text-[var(--pq-accent-text)] dark:hover:bg-[var(--pq-accent-soft)]"
+                  className="rounded-xl bg-[var(--pq-accent-button-bg)] px-3 py-2 text-sm font-medium text-[var(--pq-accent-button-text)] transition hover:bg-[var(--pq-accent-button-bg-hover)] disabled:opacity-60"
                 >
                   {l('读取并导入本地文库', 'Read and Import to Library')}
                 </button>
@@ -832,7 +832,7 @@ export function ReaderPreferencesContent({
                     <button
                       type="button"
                       onClick={() => void openExternalUrl('https://aistudio.baidu.com/paddleocr/task')}
-                      className="font-semibold text-[var(--pq-info)] underline decoration-sky-300 underline-offset-2 transition hover:text-[var(--pq-info)] dark:text-sky-300 dark:decoration-sky-500/70 dark:hover:text-sky-200"
+                      className="font-semibold text-[var(--pq-info)] underline decoration-[color-mix(in_srgb,var(--pq-info)_55%,transparent)] underline-offset-2 transition hover:text-[var(--pq-info)] "
                     >
                       https://aistudio.baidu.com/paddleocr/task
                     </button>
@@ -876,7 +876,7 @@ export function ReaderPreferencesContent({
                 <button
                   type="button"
                   onClick={() => void openExternalUrl('https://mineru.net/')}
-                  className="font-semibold text-[var(--pq-info)] underline decoration-sky-300 underline-offset-2 transition hover:text-[var(--pq-info)] dark:text-sky-300 dark:decoration-sky-500/70 dark:hover:text-sky-200"
+                  className="font-semibold text-[var(--pq-info)] underline decoration-[color-mix(in_srgb,var(--pq-info)_55%,transparent)] underline-offset-2 transition hover:text-[var(--pq-info)] "
                 >
                   https://mineru.net/
                 </button>
@@ -914,13 +914,13 @@ export function ReaderPreferencesContent({
                     className={clsx(
                       'inline-flex items-center gap-1 rounded-md px-2 py-0.5 font-medium',
                       mineruTokens.length > 0
-                        ? 'bg-[var(--pq-success-bg)] text-[var(--pq-success)] dark:bg-emerald-950/40 dark:text-emerald-300'
-                        : 'bg-[var(--pq-warning-bg)] text-[var(--pq-warning)] dark:bg-amber-950/40 dark:text-amber-300',
+                        ? 'bg-[var(--pq-success-bg)] text-[var(--pq-success)] '
+                        : 'bg-[var(--pq-warning-bg)] text-[var(--pq-warning)] ',
                     )}
                   >
                     {mineruTokens.length > 0 ? (
                       <>
-                        <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                        <span className="inline-block h-1.5 w-1.5 rounded-full bg-[var(--pq-success)]" />
                         {l(
                           `已识别 ${mineruTokens.length} 个 Key（轮换使用）`,
                           `${mineruTokens.length} Key(s) active (Round-robin)`,
@@ -928,7 +928,7 @@ export function ReaderPreferencesContent({
                       </>
                     ) : (
                       <>
-                        <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-500" />
+                        <span className="inline-block h-1.5 w-1.5 rounded-full bg-[var(--pq-warning)]" />
                         {l('尚未配置 Key', 'No Keys Configured')}
                       </>
                     )}
@@ -1381,7 +1381,7 @@ export function ReaderPreferencesContent({
                 className={clsx(
                   'rounded-xl px-4 py-2 text-sm font-medium text-white transition disabled:opacity-60',
                   translating
-                    ? 'bg-rose-600 hover:bg-rose-700'
+                    ? 'bg-[var(--pq-danger-button-bg)] hover:bg-[var(--pq-danger-button-bg-hover)]'
                     : 'bg-slate-900 hover:bg-slate-800',
                 )}
               >
@@ -1501,7 +1501,7 @@ export function ReaderPreferencesContent({
                     onClick={() => onSettingChange('summarySourceMode', option.value)}
                     className={
                       settings.summarySourceMode === option.value
-                        ? 'rounded-2xl border border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-indigo-50/70 px-4 py-3 text-left transition'
+                        ? 'rounded-2xl border border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-[var(--pq-accent-bg)] px-4 py-3 text-left transition'
                         : 'rounded-2xl border border-[var(--pq-border)] bg-slate-50/70 px-4 py-3 text-left transition hover:bg-[var(--pq-surface-2)]'
                     }
                   >
@@ -1586,7 +1586,7 @@ export function ReaderPreferencesContent({
                   onClick={() => onSettingChange('qaSourceMode', option.value)}
                   className={
                     settings.qaSourceMode === option.value
-                      ? 'rounded-2xl border border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-indigo-50/80 px-4 py-3 text-left text-[var(--pq-accent)] transition'
+                      ? 'rounded-2xl border border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-[var(--pq-accent-bg)] px-4 py-3 text-left text-[var(--pq-accent)] transition'
                       : 'rounded-2xl border border-[var(--pq-border)] bg-[var(--pq-surface-2)] px-4 py-3 text-left text-[var(--pq-text-muted)] transition hover:border-[var(--pq-border-strong)] hover:bg-white'
                   }
                 >
@@ -1633,7 +1633,7 @@ export function ReaderPreferencesContent({
                         onClick={() => onSettingChange('ragSourceMode', option.value)}
                         className={
                           settings.ragSourceMode === option.value
-                            ? 'rounded-2xl border border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-indigo-50/80 px-4 py-3 text-left text-[var(--pq-accent)] transition'
+                            ? 'rounded-2xl border border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-[var(--pq-accent-bg)] px-4 py-3 text-left text-[var(--pq-accent)] transition'
                             : 'rounded-2xl border border-[var(--pq-border)] bg-[var(--pq-surface-2)] px-4 py-3 text-left text-[var(--pq-text-muted)] transition hover:border-[var(--pq-border-strong)] hover:bg-white'
                         }
                       >

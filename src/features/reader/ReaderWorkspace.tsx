@@ -507,7 +507,7 @@ function ReadingStage(props: ReaderWorkspaceProps & { immersiveReading: boolean 
                 className="group relative z-20 w-2 shrink-0 cursor-col-resize bg-transparent transition-all duration-200"
               >
                 <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-slate-300/80 transition-all duration-200 group-hover:w-[3px] group-hover:bg-[var(--pq-accent-bg)]" />
-                <div className="absolute left-1/2 top-1/2 h-14 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--pq-surface-3)] transition-all duration-200 group-hover:w-1.5 group-hover:bg-indigo-400" />
+                <div className="absolute left-1/2 top-1/2 h-14 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--pq-surface-3)] transition-all duration-200 group-hover:w-1.5 group-hover:bg-[var(--pq-accent)]" />
               </div>
 
               <section
@@ -708,7 +708,7 @@ function ReaderWorkspace(props: ReaderWorkspaceProps) {
       ) : null}
 
       {error ? (
-        <div className="border-b border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-danger-bg)] px-6 py-3 text-sm text-[var(--pq-danger)] dark:border-rose-400/30 dark:bg-rose-400/10 dark:text-rose-400">
+        <div className="border-b border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-danger-bg)] px-6 py-3 text-sm text-[var(--pq-danger)] ">
           {error}
         </div>
       ) : null}

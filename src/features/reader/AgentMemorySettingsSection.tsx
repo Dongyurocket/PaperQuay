@@ -138,13 +138,13 @@ export function AgentMemorySettingsSection({
               <Save className="h-3.5 w-3.5" />
               {l('保存', 'Save')}
             </button>
-            <button type="button" onClick={() => void clear()} disabled={loading || saving || !content} className="pq-button px-3 py-1.5 text-xs text-[var(--pq-danger)] dark:text-rose-300">
+            <button type="button" onClick={() => void clear()} disabled={loading || saving || !content} className="pq-button px-3 py-1.5 text-xs text-[var(--pq-danger)] ">
               <Trash2 className="h-3.5 w-3.5" />
               {l('清空', 'Clear')}
             </button>
           </div>
         </div>
-        {error ? <div className="text-xs text-[var(--pq-danger)] dark:text-rose-300">{error}</div> : null}
+        {error ? <div className="text-xs text-[var(--pq-danger)] ">{error}</div> : null}
       </div>
     </SettingsField>
   );

@@ -1,7 +1,7 @@
 # UI 收尾计划（交接用）
 
 - 日期：2026-11-02
-- 状态：**进行中**（T1、T2 已于 2026-11-02 完成，其余待办）
+- 状态：**进行中**（T1、T2、T3 已于 2026-11-02 完成，其余待办）
 - 前置：三阶段主线已完成并推送（`main` = `925ac14`，即 `fe18016` 加上本交接文档的提交）。本文件只记录**尚未完成**的部分。
 - 关联：
   - 主线方案：`docs/plans/2026-11-02-ui-logic-and-visual-refinement.md`
@@ -88,6 +88,8 @@
 - 上游改过的 `DocumentReaderTab.tsx`、`assistantSidebarChat.tsx` 继续跳过，避免下次同步冲突。
 
 **验收**：`grep -rEo '(bg|text|border)-(emerald|rose|amber|sky|indigo|teal|red|cyan|blue|green)-[0-9]{2,3}' src --include=*.tsx | wc -l` 显著下降（目标 < 50，剩余仅深底浅字这类必须保留的 `dark:` 覆盖）；浅色/深色各截 4 个主界面确认无回归。
+
+**完成情况（2026-11-02）**：新增 9 个按钮级令牌（success / danger / warning 各 `-button-bg` / `-bg-hover` / `-text`），浅色「亮底 + 白字」、深色「深底 + 浅字」，9 组文字对底均 ≥4.5:1（最低为浅色 danger 4.83:1）；计划建议的浅色 success `#16a34a` 配白字只有 3.30:1，改用 `#15803d`（5.02:1）。26 个文件替换 338 处，目标 grep **350 → 17**：剩余 5 处是 `blockViewerContent.tsx:171` 的深底浅字实心危险小按钮（按约束保留），12 处是继续跳过的 `assistantSidebarChat.tsx`。另顺带修正 4 类深色可读性缺陷（阅读视图高亮、两个计数徽标、`ToggleRow`、4 处亮 accent 实心按钮）。映射规则、对比度数值与 8 张实机截图见 `docs/changes/2026-11-02-ui-button-tokens.md`。
 
 ### T4　把剩余自建模态迁移到 `Dialog` 原语（中风险）
 

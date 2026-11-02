@@ -57,9 +57,9 @@ export const PdfPageOverlay = memo(function PdfPageOverlay({
             aria-label={block.blockId}
             className={cn(
               'absolute rounded-lg border transition-all duration-150',
-              isHovered && 'border-[color-mix(in_srgb,var(--pq-warning)_28%,transparent)] bg-amber-200/18',
+              isHovered && 'border-[color-mix(in_srgb,var(--pq-warning)_28%,transparent)] bg-[color-mix(in_srgb,var(--pq-warning)_18%,transparent)]',
               isActive &&
-                'border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-indigo-300/14 shadow-[0_0_0_1px_rgba(99,102,241,0.18)]',
+                'border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-[color-mix(in_srgb,var(--pq-accent)_14%,transparent)] shadow-[0_0_0_1px_rgba(99,102,241,0.18)]',
             )}
             style={bboxToCssStyle(
               block.bbox!,
@@ -89,8 +89,8 @@ export const PdfPageOverlay = memo(function PdfPageOverlay({
               className={cn(
                 'pointer-events-none absolute rounded-lg border-2 transition-all duration-150',
                 selectedAnnotationId === annotation.id
-                  ? 'border-amber-500 bg-amber-200/18 shadow-[0_0_0_1px_rgba(245,158,11,0.20)]'
-                  : 'border-amber-300/80 bg-amber-200/10',
+                  ? 'border-[var(--pq-warning)] bg-[color-mix(in_srgb,var(--pq-warning)_18%,transparent)] shadow-[0_0_0_1px_rgba(245,158,11,0.20)]'
+                  : 'border-[color-mix(in_srgb,var(--pq-warning)_40%,transparent)] bg-[color-mix(in_srgb,var(--pq-warning)_10%,transparent)]',
               )}
               style={annotationStyle}
               title={annotationTitle}
@@ -106,7 +106,7 @@ export const PdfPageOverlay = memo(function PdfPageOverlay({
                     event.stopPropagation();
                     onAnnotationSelect?.(annotation.id);
                   }}
-                  className="pointer-events-auto absolute -right-1.5 -top-1.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-500 px-1 text-[11px] font-semibold text-white shadow-sm transition hover:bg-amber-600"
+                  className="pointer-events-auto absolute -right-1.5 -top-1.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-[var(--pq-warning-button-bg)] px-1 text-[11px] font-semibold text-[var(--pq-warning-button-text)] shadow-sm transition hover:bg-[var(--pq-warning-button-bg-hover)]"
                   title={annotationTitle}
                 >
                   {index + 1}
@@ -132,13 +132,13 @@ export const PdfPageOverlay = memo(function PdfPageOverlay({
               'absolute rounded-lg border-2 transition-all duration-150',
               allowLinkedInteractions ? 'pointer-events-auto' : 'pointer-events-none',
               selectedAnnotationId === annotation.id
-                ? 'border-amber-500 bg-amber-200/18 shadow-[0_0_0_1px_rgba(245,158,11,0.20)]'
-                : 'border-amber-300/90 bg-amber-200/10 hover:bg-amber-200/16',
+                ? 'border-[var(--pq-warning)] bg-[color-mix(in_srgb,var(--pq-warning)_18%,transparent)] shadow-[0_0_0_1px_rgba(245,158,11,0.20)]'
+                : 'border-[color-mix(in_srgb,var(--pq-warning)_40%,transparent)] bg-[color-mix(in_srgb,var(--pq-warning)_10%,transparent)] hover:bg-[color-mix(in_srgb,var(--pq-warning)_16%,transparent)]',
             )}
             style={annotationStyle}
             title={annotationTitle}
           >
-            <span className="absolute -right-1.5 -top-1.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-500 px-1 text-[11px] font-semibold text-white shadow-sm">
+            <span className="absolute -right-1.5 -top-1.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-[var(--pq-warning-button-bg)] px-1 text-[11px] font-semibold text-[var(--pq-warning-button-text)] shadow-sm">
               {index + 1}
             </span>
           </button>
@@ -147,7 +147,7 @@ export const PdfPageOverlay = memo(function PdfPageOverlay({
 
       {activeHighlight && activeHighlight.pageIndex === pageIndex && activeHighlightSource ? (
         <div
-          className="absolute z-[5] rounded-lg border-2 border-indigo-500 bg-indigo-200/18 shadow-[0_0_0_1px_rgba(79,70,229,0.18)]"
+          className="absolute z-[5] rounded-lg border-2 border-[var(--pq-accent)] bg-[color-mix(in_srgb,var(--pq-accent)_18%,transparent)] shadow-[0_0_0_1px_rgba(79,70,229,0.18)]"
           style={bboxToCssStyle(
             activeHighlight.bbox,
             resolveBBoxBaseSize(activeHighlightSource, originalPage),
