@@ -1,7 +1,7 @@
 # UI 收尾计划（交接用）
 
 - 日期：2026-11-02
-- 状态：**进行中**（T1、T2、T3、T4、T7 已于 2026-11-02 完成，其余待办）
+- 状态：**进行中**（T1、T2、T3、T4、T5、T7 已于 2026-11-02 完成，其余待办）
 - 前置：三阶段主线已完成并推送（`main` = `925ac14`，即 `fe18016` 加上本交接文档的提交）。本文件只记录**尚未完成**的部分。
 - 关联：
   - 主线方案：`docs/plans/2026-11-02-ui-logic-and-visual-refinement.md`
@@ -127,6 +127,8 @@ src/features/reader/ReaderPreferencesWindow.tsx
 **做法**：以 `components/ContextMenu.tsx` 为基础扩展（它已有位置钳制与分隔符支持），把笔记侧的特有项（块操作、锚点）作为 entries 传入；统一后迁到 `src/ui/menu.tsx` 并与 `docs/ui-design-system.md` 的组件表对齐。
 
 **验收**：标签栏右键菜单、笔记右键菜单、分类右键菜单三处行为一致（键盘 ↑↓ 选择、Esc 关闭、点击外部关闭、危险项红色）。
+
+**完成情况（2026-11-02）**：两套复制品实现合并为 `src/ui/menu.tsx` 的 `Menu` / `MenuItem` / `MenuEntry`，`x`/`y`/`title`/`entries`/`onClose`/`width` 语义与分隔符、危险/强调色、贴边钳制、点外部关闭全部保持不变；`isEditableContextTarget` / `hasActiveTextSelection` 抽到 `features/notes/noteContextMenuTargets.ts`。与原计划的差异：**没有同时改 7 个调用点**，而是把 `components/ContextMenu.tsx` 与 `features/notes/NotesContextMenu.tsx` 改成薄 re-export（含类型与两个辅助函数），调用点 import 零改动；下一步可改为直接 import 新模块后删除两个 shim。同一提交删除了 T4 遗留的死代码 `LibrarySettingsDialog`（全仓零引用，13 个设置字段已在 `readerPreferencesContent` 中）。实机验证：标签栏与笔记块菜单在浅色/深色下各截一张，打开、危险项红色、禁用态、点外部关闭均通过；笔记块长菜单实测到向上钳制。**未覆盖**：文库分类右键是 `LiteratureCategorySidebar` 内的第三套独立实现（无钳制、acrylic 样式），本轮未合并，三处菜单尚未完全一致；横向钳制未构造出触发场景。详见 `docs/changes/2026-11-02-ui-menu-merge.md`。
 
 ### T6　把翻译与 RAG 长任务接入 `TaskCenter`（中风险）
 
