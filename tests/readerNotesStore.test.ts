@@ -78,3 +78,29 @@ test('reader notes store setters preserve note identity and functional updates',
   assert.equal(next.notesSaving, false);
   assert.equal(next.notesError, 'save failed!');
 });
+
+test('reader notes store can clear the active note after deletion', () => {
+  resetStore();
+  const state = useReaderNotesStore.getState();
+  state.setNotes([note('n1')]);
+  state.setActiveNoteId('n1');
+  state.setNotes((current) => current.filter((item) => item.id !== 'n1'));
+  state.setActiveNoteId(null);
+  assert.deepEqual(useReaderNotesStore.getState().notes, []);
+  assert.equal(useReaderNotesStore.getState().activeNoteId, null);
+});
+
+test('reader notes store action identities remain stable across updates', () => {
+  resetStore();
+  const before = useReaderNotesStore.getState();
+  const setError = before.setNotesError;
+  before.setNotesError('error');
+  assert.equal(useReaderNotesStore.getState().setNotesError, setError);
+});
+
+test('reader notes store preserves the source array when setting it directly', () => {
+  resetStore();
+  const notes = [note('n1')];
+  useReaderNotesStore.getState().setNotes(notes);
+  assert.equal(useReaderNotesStore.getState().notes, notes);
+});

@@ -95,3 +95,31 @@ test('bridge comparison preserves no-op updates and detects every bridge field',
   assert.equal(areReaderTabBridgeStatesEqual(base, { ...base, onCloudParse: () => undefined }), false);
   assert.equal(areReaderTabBridgeStatesEqual(base, { ...base, onGenerateSummary: () => undefined }), false);
 });
+
+test('reader bridge registration stores callbacks without executing them', () => {
+  resetStore();
+  let calls = 0;
+  const registered = bridge({ onTranslate: () => { calls += 1; } });
+  useReaderBridgeStore.getState().setBridgeState('reader:a', registered);
+  assert.equal(calls, 0);
+  assert.equal(useReaderBridgeStore.getState().readerBridges['reader:a']?.onTranslate, registered.onTranslate);
+});
+
+test('reader bridge store keeps root state and map references for equal updates', () => {
+  resetStore();
+  const registered = bridge();
+  const action = useReaderBridgeStore.getState().setBridgeState;
+  action('reader:a', registered);
+  const before = useReaderBridgeStore.getState();
+  action('reader:a', { ...registered });
+  const after = useReaderBridgeStore.getState();
+  assert.equal(after, before);
+  assert.equal(after.readerBridges, before.readerBridges);
+});
+
+test('reader bridge store action identity stays stable after registration', () => {
+  resetStore();
+  const action = useReaderBridgeStore.getState().setBridgeState;
+  action('reader:a', bridge());
+  assert.equal(useReaderBridgeStore.getState().setBridgeState, action);
+});

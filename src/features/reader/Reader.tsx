@@ -1009,33 +1009,27 @@ function Reader({ workspaceActive = true }: ReaderProps) {
                     document={item}
                     isActive={workspaceActive && tab.id === activeTabId}
                     settings={settings}
+                    readerApiConfig={readerSecrets}
                     zoteroLocalDataDir={zoteroLocalDataDir}
-                    mineruApiToken={mineruApiToken}
-                    paddleOcrApiToken={paddleOcrApiToken}
-                    translationApiKey={translationApiKey}
-                    summaryApiKey={summaryApiKey}
-                    embeddingApiKey={embeddingApiKey}
-                    qaModelPresets={qaModelPresets}
-                    zoteroApiKey={zoteroApiKey}
-                    zoteroUserId={zoteroUserId}
-                    onZoteroUserIdChange={handleReaderZoteroUserIdChange}
-                    onQaActivePresetChange={handleReaderQaActivePresetChange}
-                    onDocumentResolved={handleWorkspaceItemResolved}
-                    onLibraryPreviewSync={handleLibraryPreviewSync}
-                    onOpenPreferences={handleOpenPreferences}
-                    onOpenStandalonePdf={handleReaderOpenStandalonePdf}
-                    onAttachTranslatedPdf={handleReaderAttachTranslatedPdf}
-                    onBridgeStateChange={handleBridgeStateChange}
-                    onTranslationDisplayModeChange={handleReaderTranslationDisplayModeChange}
-                    translationTargetLanguageLabel={translationTargetLanguageLabel}
-                    notePaperCandidates={notePaperCandidates}
-                    onNotePaperClick={handleNotePaperClick}
+                    readerCallbacks={{
+                      onZoteroUserIdChange: handleReaderZoteroUserIdChange,
+                      onQaActivePresetChange: handleReaderQaActivePresetChange,
+                      onDocumentResolved: handleWorkspaceItemResolved,
+                      onLibraryPreviewSync: handleLibraryPreviewSync,
+                      onOpenPreferences: handleOpenPreferences,
+                      onOpenStandalonePdf: handleReaderOpenStandalonePdf,
+                      onAttachTranslatedPdf: handleReaderAttachTranslatedPdf,
+                      onBridgeStateChange: handleBridgeStateChange,
+                      onTranslationDisplayModeChange: handleReaderTranslationDisplayModeChange,
+                      onNotePaperClick: handleNotePaperClick,
+                      onPendingNoteAnchorJumpHandled: handlePendingNoteAnchorJumpHandled,
+                    }}
                     pendingNoteAnchorJump={
                       isNoteAnchorJumpForWorkspace(pendingNoteAnchorJump, item.workspaceId)
                         ? pendingNoteAnchorJump
                         : null
                     }
-                    onPendingNoteAnchorJumpHandled={handlePendingNoteAnchorJumpHandled}
+                    translationTargetLanguageLabel={translationTargetLanguageLabel}
                     translationSnapshot={libraryTranslationSnapshots[item.workspaceId] ?? null}
                   />
                   ) : null}

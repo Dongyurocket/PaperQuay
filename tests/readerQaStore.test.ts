@@ -78,3 +78,31 @@ test('reader QA store setters preserve functional updates and shared sessions', 
   assert.deepEqual(secondReader.qaRunningSessionIds, ['shared-session']);
   assert.equal(secondReader.qaError, 'failed once');
 });
+
+test('reader QA store can clear transient input and attachments independently', () => {
+  resetStore();
+  const state = useReaderQaStore.getState();
+  state.setQaInput('draft');
+  state.setQaAttachments([{ id: 'a', kind: 'file', name: 'a.txt', mimeType: 'text/plain', size: 1 }]);
+  state.setQaInput('');
+  state.setQaAttachments([]);
+  assert.equal(useReaderQaStore.getState().qaInput, '');
+  assert.deepEqual(useReaderQaStore.getState().qaAttachments, []);
+});
+
+test('reader QA store action identities remain stable across updates', () => {
+  resetStore();
+  const before = useReaderQaStore.getState();
+  const setInput = before.setQaInput;
+  before.setQaInput('changed');
+  assert.equal(useReaderQaStore.getState().setQaInput, setInput);
+});
+
+test('reader QA store updates session arrays without mutating the source', () => {
+  resetStore();
+  const original = [session('s1')];
+  useReaderQaStore.getState().setQaSessions(original);
+  useReaderQaStore.getState().setQaSessions((current) => [...current, session('s2')]);
+  assert.deepEqual(original.map((item) => item.id), ['s1']);
+  assert.deepEqual(useReaderQaStore.getState().qaSessions.map((item) => item.id), ['s1', 's2']);
+});

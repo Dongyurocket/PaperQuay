@@ -75,3 +75,26 @@ test('reader assistant panel width reads and writes the original storage key', (
 
   delete (globalThis as { localStorage?: unknown }).localStorage;
 });
+
+test('reader layout store falls back when persisted width is malformed', () => {
+  const storage = createStorage({ [ASSISTANT_PANEL_WIDTH_STORAGE_KEY]: 'not-a-number' });
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: storage });
+  assert.equal(readStoredReaderAssistantPanelWidth(), DEFAULT_ASSISTANT_PANEL_WIDTH);
+  delete (globalThis as { localStorage?: unknown }).localStorage;
+});
+
+test('reader layout store rounds updater widths before persistence', () => {
+  useReaderLayoutStore.getState().setAssistantPanelWidth(321.6);
+  assert.equal(useReaderLayoutStore.getState().assistantPanelWidth, 322);
+  useReaderLayoutStore.getState().setAssistantPanelWidth((current) => current + 0.4);
+  assert.equal(useReaderLayoutStore.getState().assistantPanelWidth, 322);
+});
+
+test('reader layout store keeps unrelated fields when changing panel width', () => {
+  useReaderLayoutStore.setState({ assistantActivePanel: 'notes', assistantDetached: true, assistantPanelResizing: true });
+  useReaderLayoutStore.getState().setAssistantPanelWidth(500);
+  const state = useReaderLayoutStore.getState();
+  assert.equal(state.assistantActivePanel, 'notes');
+  assert.equal(state.assistantDetached, true);
+  assert.equal(state.assistantPanelResizing, true);
+});

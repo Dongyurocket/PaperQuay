@@ -1,7 +1,7 @@
 # UI 收尾计划（交接用）
 
 - 日期：2026-11-02
-- 状态：**仅剩 T8**（T1–T7 已于 2026-11-02 完成；T9 已关闭）
+- 状态：**已完成**（T1–T8 已于 2026-11-03 完成；T9 已关闭）
 - 前置：三阶段主线已完成并推送。本文件只记录**尚未完成**的部分。
 - 关联：
   - 主线方案：`docs/plans/2026-11-02-ui-logic-and-visual-refinement.md`
@@ -266,6 +266,14 @@ powershell -NoProfile -Command "Start-Process -FilePath \"$env:TEMP\pq-<主题>\
 - 后台不支持按键与修饰键：先发 background，收到 `background_unavailable` 后用 `delivery_mode:"foreground"` 重发（会短暂切换前台并自动恢复，**需用户授权**）。
 - 验证「面板已关闭」这类状态时，用 PIL 采样关键坐标像素值对比比肉眼看图更可靠（例如面板底色 `(250,250,249)` vs 工作区 `(144,148,145)`）。
 - 构建产物在受管浏览器里打开会因缺 Electron 桥接而不渲染，**不能**作为桌面 UI 验证路径。
+
+## 六、T8 完成情况（2026-11-03）
+
+- 五刀已分别提交并 FF 合并到 `main`：布局 `f3a91f8`、QA `771fbd4`、笔记 `7de91a7`、bridge `9c6b01f`、配置/回调打包（见最终提交）。
+- `DocumentReaderTabProps`：62 → 58 → 38 → 28 → 28 → 11。
+- QA 会话仍是所有阅读标签页全局共享；bridge 保留全挂载标签页登记并参与翻译保活；localStorage 键名、默认值和 clamp 边界保持原样。
+- store 测试覆盖默认值、setter、函数式更新、边界、持久化、等值 no-op 与清理；最终 `npm run build` 和 `npm test` 均通过，测试 901/901。
+- 桌面实机回归与截图证据在最终构建后补记；未跟踪个人资产未纳入提交。
 
 ## 六、完成后的收尾
 

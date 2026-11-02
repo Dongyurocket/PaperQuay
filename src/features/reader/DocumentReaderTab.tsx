@@ -94,6 +94,7 @@ import type {
   QaModelPreset,
   RagChunkContextSlice,
   ReaderViewMode,
+  ReaderSecrets,
   ReaderSettings,
   SelectedExcerpt,
   SummaryBlockInput,
@@ -227,6 +228,20 @@ import { formatReaderDocumentSource } from './readerWorkspaceShared';
 
 type StateSetter<T> = (value: T | ((current: T) => T)) => void;
 
+interface DocumentReaderTabCallbacks {
+  onZoteroUserIdChange: (value: string) => void;
+  onQaActivePresetChange: (presetId: string) => void;
+  onDocumentResolved: (item: WorkspaceItem) => void;
+  onLibraryPreviewSync: (payload: LibraryPreviewSyncPayload) => void;
+  onOpenPreferences: () => void;
+  onOpenStandalonePdf: () => void;
+  onAttachTranslatedPdf?: (document: WorkspaceItem) => Promise<boolean>;
+  onBridgeStateChange: (tabId: string, bridge: ReaderTabBridgeState | null) => void;
+  onTranslationDisplayModeChange: (mode: TranslationDisplayMode) => void;
+  onNotePaperClick?: (paperId: string) => void;
+  onPendingNoteAnchorJumpHandled?: (requestId?: string) => void;
+}
+
 const GLOBAL_READER_NOTE_EDITOR_SOURCE_ID = buildReaderNotesEditorSourceId('global');
 
 function requestDeferredReaderStartupWork(callback: () => void) {
@@ -249,30 +264,12 @@ interface DocumentReaderTabProps {
   document: WorkspaceItem;
   isActive: boolean;
   settings: ReaderSettings;
-  embeddingApiKey: string;
+  readerApiConfig: ReaderSecrets;
   zoteroLocalDataDir: string;
-  mineruApiToken: string;
-  paddleOcrApiToken: string;
-  translationApiKey: string;
-  summaryApiKey: string;
-  qaModelPresets: QaModelPreset[];
-  zoteroApiKey: string;
-  zoteroUserId: string;
-  onZoteroUserIdChange: (value: string) => void;
-  onQaActivePresetChange: (presetId: string) => void;
-  onDocumentResolved: (item: WorkspaceItem) => void;
-  onLibraryPreviewSync: (payload: LibraryPreviewSyncPayload) => void;
-  onOpenPreferences: () => void;
-  onOpenStandalonePdf: () => void;
-  /** 为当前文档附加翻译版 PDF（仅 native-library 文档有效） */
-  onAttachTranslatedPdf?: (document: WorkspaceItem) => Promise<boolean>;
-  onBridgeStateChange: (tabId: string, bridge: ReaderTabBridgeState | null) => void;
-  onTranslationDisplayModeChange: (mode: TranslationDisplayMode) => void;
+  readerCallbacks: DocumentReaderTabCallbacks;
   translationTargetLanguageLabel: string;
   notePaperCandidates?: LiteraturePaper[];
-  onNotePaperClick?: (paperId: string) => void;
   pendingNoteAnchorJump?: JumpToNoteAnchorEventDetail | null;
-  onPendingNoteAnchorJumpHandled?: (requestId?: string) => void;
   translationSnapshot?: ReaderDocumentTranslationSnapshot | null;
 }
 
@@ -282,31 +279,37 @@ function DocumentReaderTab({
   document,
   isActive,
   settings,
-  embeddingApiKey,
+  readerApiConfig,
   zoteroLocalDataDir,
-  mineruApiToken,
-  paddleOcrApiToken,
-  translationApiKey,
-  summaryApiKey,
-  qaModelPresets,
-  zoteroApiKey,
-  zoteroUserId,
-  onZoteroUserIdChange,
-  onQaActivePresetChange,
-  onDocumentResolved,
-  onLibraryPreviewSync,
-  onOpenPreferences,
-  onOpenStandalonePdf,
-  onAttachTranslatedPdf,
-  onBridgeStateChange,
-  onTranslationDisplayModeChange,
+  readerCallbacks,
   translationTargetLanguageLabel,
   notePaperCandidates = [],
-  onNotePaperClick,
   pendingNoteAnchorJump = null,
-  onPendingNoteAnchorJumpHandled,
   translationSnapshot = null,
 }: DocumentReaderTabProps) {
+  const {
+    embeddingApiKey,
+    mineruApiToken,
+    paddleOcrApiToken,
+    translationApiKey,
+    summaryApiKey,
+    qaModelPresets,
+    zoteroApiKey,
+    zoteroUserId,
+  } = readerApiConfig;
+  const {
+    onZoteroUserIdChange,
+    onQaActivePresetChange,
+    onDocumentResolved,
+    onLibraryPreviewSync,
+    onOpenPreferences,
+    onOpenStandalonePdf,
+    onAttachTranslatedPdf,
+    onBridgeStateChange,
+    onTranslationDisplayModeChange,
+    onNotePaperClick,
+    onPendingNoteAnchorJumpHandled,
+  } = readerCallbacks;
   const assistantActivePanel = useReaderLayoutStore((state) => state.assistantActivePanel);
   const setAssistantActivePanel = useReaderLayoutStore((state) => state.setAssistantActivePanel);
   const assistantDetached = useReaderLayoutStore((state) => state.assistantDetached);
