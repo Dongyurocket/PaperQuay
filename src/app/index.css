@@ -43,8 +43,8 @@
   --pq-accent-button-text: #ffffff;
   --pq-focus-ring: var(--pq-accent-bg);
   --pq-teal: var(--pq-accent);
-  --pq-success: #059669;
-  --pq-success-bg: rgba(5, 150, 105, 0.1);
+  --pq-success: #16a34a;
+  --pq-success-bg: rgba(22, 163, 74, 0.1);
   --pq-warning: #d97706;
   --pq-warning-bg: rgba(217, 119, 6, 0.1);
   --pq-danger: #dc2626;
@@ -103,25 +103,31 @@
   --pq-text-faint: rgba(255, 255, 255, 0.45);
   --pq-text-tertiary: var(--pq-text-faint);
   --pq-text-quaternary: rgba(255, 255, 255, 0.25);
-  --pq-accent: #86a89f;
-  --pq-accent-hover: #9bb8ae;
-  --pq-accent-strong: #b5cbc3;
-  --pq-accent-light: #b5cbc3;
-  --pq-accent-soft: rgba(134, 168, 159, 0.12);
+  /* 深色 accent 改回与浅色同色相（约 172°）的中饱和变体。
+     旧值 #86a89f 是 164°/16% 的降饱和灰绿，与浅色 #0d9488（174.7°/84%）不同色相也不同性格，
+     品牌色跨主题不连续。现在只提亮、不改变色相族。 */
+  --pq-accent: #2dd4bf;
+  --pq-accent-hover: #5eead4;
+  --pq-accent-strong: #99f6e4;
+  --pq-accent-light: #99f6e4;
+  --pq-accent-soft: rgba(45, 212, 191, 0.14);
   --pq-accent-bg: var(--pq-accent-soft);
-  --pq-accent-bg-hover: rgba(134, 168, 159, 0.18);
-  --pq-accent-border: rgba(134, 168, 159, 0.24);
-  --pq-accent-border-strong: rgba(134, 168, 159, 0.36);
-  --pq-accent-ring: rgba(134, 168, 159, 0.18);
-  --pq-accent-shadow: rgba(134, 168, 159, 0.14);
-  --pq-accent-text: #b5cbc3;
-  --pq-accent-button-bg: #2d3d38;
-  --pq-accent-button-bg-hover: #3a4d47;
-  --pq-accent-button-text: #d4e4df;
+  --pq-accent-bg-hover: rgba(45, 212, 191, 0.2);
+  --pq-accent-border: rgba(45, 212, 191, 0.28);
+  --pq-accent-border-strong: rgba(45, 212, 191, 0.42);
+  --pq-accent-ring: rgba(45, 212, 191, 0.2);
+  --pq-accent-shadow: rgba(45, 212, 191, 0.16);
+  --pq-accent-text: #99f6e4;
+  --pq-accent-button-bg: #115e59;
+  --pq-accent-button-bg-hover: #0f766e;
+  --pq-accent-button-text: #ecfeff;
   --pq-focus-ring: var(--pq-accent-bg);
   --pq-teal: var(--pq-accent);
-  --pq-success: #6ee7b7;
-  --pq-success-bg: rgba(110, 231, 183, 0.12);
+  /* success 移到纯绿（142°），与 accent（172°）拉开 30° 以上。
+     旧值 #6ee7b7 与 accent 只差 8°，且浅色下 accent(#0d9488,174.7°) 与 success(#059669,161.4°)
+     色相只差 13°、亮度饱和度几乎相同，导致「强调」与「成功」在视觉上不可区分。 */
+  --pq-success: #4ade80;
+  --pq-success-bg: rgba(74, 222, 128, 0.14);
   --pq-warning: #fbbf24;
   --pq-warning-bg: rgba(251, 191, 36, 0.12);
   --pq-danger: #f87171;
