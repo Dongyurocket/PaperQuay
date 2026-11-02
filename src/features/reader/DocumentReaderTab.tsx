@@ -76,7 +76,6 @@ import {
   isPaperTaskRunning,
 } from './paperTaskState';
 import type {
-  AssistantPanelKey,
   DocumentChatAttachment,
   DocumentChatCitation,
   DocumentChatMessage,
@@ -174,6 +173,7 @@ import type { LocalRagResolution } from './readerQaContext';
 import { buildQaContext, formatQaContextStatus } from './readerQaContext';
 import { useDocumentTranslation } from './useDocumentTranslation';
 import { usePointerDragResize } from './usePointerDragResize';
+import { useReaderLayoutStore } from '../../stores/useReaderLayoutStore';
 import {
   buildPendingNoteAnchorInsert,
   buildNoteAnchorJumpDetail,
@@ -267,10 +267,6 @@ interface DocumentReaderTabProps {
   onBridgeStateChange: (tabId: string, bridge: ReaderTabBridgeState | null) => void;
   onTranslationDisplayModeChange: (mode: TranslationDisplayMode) => void;
   translationTargetLanguageLabel: string;
-  assistantActivePanel: AssistantPanelKey;
-  setAssistantActivePanel: StateSetter<AssistantPanelKey>;
-  assistantDetached: boolean;
-  setAssistantDetached: StateSetter<boolean>;
   qaSessions: DocumentChatSession[];
   setQaSessions: StateSetter<DocumentChatSession[]>;
   selectedQaSessionId: string;
@@ -333,10 +329,6 @@ function DocumentReaderTab({
   onBridgeStateChange,
   onTranslationDisplayModeChange,
   translationTargetLanguageLabel,
-  assistantActivePanel,
-  setAssistantActivePanel,
-  assistantDetached,
-  setAssistantDetached,
   qaSessions,
   setQaSessions,
   selectedQaSessionId,
@@ -373,6 +365,10 @@ function DocumentReaderTab({
   onPendingNoteAnchorJumpHandled,
   translationSnapshot = null,
 }: DocumentReaderTabProps) {
+  const assistantActivePanel = useReaderLayoutStore((state) => state.assistantActivePanel);
+  const setAssistantActivePanel = useReaderLayoutStore((state) => state.setAssistantActivePanel);
+  const assistantDetached = useReaderLayoutStore((state) => state.assistantDetached);
+  const setAssistantDetached = useReaderLayoutStore((state) => state.setAssistantDetached);
   const locale = useAppLocale();
   const l = useLocaleText();
   const readerNoteEditorSourceId = GLOBAL_READER_NOTE_EDITOR_SOURCE_ID;

@@ -37,7 +37,6 @@ import type {
 import { ATTACHMENT_KIND_TRANSLATED_PDF } from '../../utils/libraryPaper';
 import type { Note } from '../../types/notes';
 import type {
-  AssistantPanelKey,
   DocumentChatAttachment,
   DocumentChatRenderMode,
   DocumentChatSession,
@@ -67,11 +66,10 @@ import {
   buildPaperTaskState as buildLocalizedPaperTaskState,
 } from './paperTaskState';
 import {
-  ASSISTANT_PANEL_WIDTH_STORAGE_KEY,
   MAX_ASSISTANT_PANEL_WIDTH,
   MIN_ASSISTANT_PANEL_WIDTH,
-  loadStoredNumber,
 } from './readerWorkspaceShared';
+import { useReaderLayoutStore } from '../../stores/useReaderLayoutStore';
 import {
   mergeLocalPdfPath,
   createNativeLibraryWorkspaceItem,
@@ -185,12 +183,15 @@ function Reader({ workspaceActive = true }: ReaderProps) {
   const [libraryLoading, setLibraryLoading] = useState(false);
   const [readerBridges, setReaderBridges] = useState<Record<string, ReaderTabBridgeState>>({});
   const [recentReaderTabIds, setRecentReaderTabIds] = useState<string[]>([]);
-  const [readerAssistantActivePanel, setReaderAssistantActivePanel] = useState<AssistantPanelKey>('chat');
-  const [readerAssistantDetached, setReaderAssistantDetached] = useState(false);
-  const [readerAssistantPanelWidth, setReaderAssistantPanelWidth] = useState(() =>
-    loadStoredNumber(ASSISTANT_PANEL_WIDTH_STORAGE_KEY, 408),
-  );
-  const [readerAssistantPanelResizing, setReaderAssistantPanelResizing] = useState(false);
+  const readerAssistantActivePanel = useReaderLayoutStore((state) => state.assistantActivePanel);
+  const setReaderAssistantActivePanel = useReaderLayoutStore((state) => state.setAssistantActivePanel);
+  const readerAssistantDetached = useReaderLayoutStore((state) => state.assistantDetached);
+  const setReaderAssistantDetached = useReaderLayoutStore((state) => state.setAssistantDetached);
+  const readerAssistantPanelWidth = useReaderLayoutStore((state) => state.assistantPanelWidth);
+  const setReaderAssistantPanelWidth = useReaderLayoutStore((state) => state.setAssistantPanelWidth);
+  const readerAssistantPanelResizing = useReaderLayoutStore((state) => state.assistantPanelResizing);
+  const setReaderAssistantPanelResizing = useReaderLayoutStore((state) => state.setAssistantPanelResizing);
+  const persistReaderAssistantPanelWidth = useReaderLayoutStore((state) => state.persistAssistantPanelWidth);
   const latestAssistantPanelWidthRef = useRef(readerAssistantPanelWidth);
   const startAssistantPanelResize = usePointerDragResize();
   const [readerQaSessions, setReaderQaSessions] = useState<DocumentChatSession[]>(() => [
@@ -420,10 +421,7 @@ function Reader({ workspaceActive = true }: ReaderProps) {
       onEnd: () => {
         setReaderAssistantPanelResizing(false);
         // 只在拖拽结束时写一次，避免拖动过程中每帧同步写 localStorage。
-        localStorage.setItem(
-          ASSISTANT_PANEL_WIDTH_STORAGE_KEY,
-          String(Math.round(latestAssistantPanelWidthRef.current)),
-        );
+        persistReaderAssistantPanelWidth();
       },
     });
   };
@@ -1093,10 +1091,6 @@ function Reader({ workspaceActive = true }: ReaderProps) {
                     onBridgeStateChange={handleBridgeStateChange}
                     onTranslationDisplayModeChange={handleReaderTranslationDisplayModeChange}
                     translationTargetLanguageLabel={translationTargetLanguageLabel}
-                    assistantActivePanel={readerAssistantActivePanel}
-                    setAssistantActivePanel={setReaderAssistantActivePanel}
-                    assistantDetached={readerAssistantDetached}
-                    setAssistantDetached={setReaderAssistantDetached}
                     qaSessions={readerQaSessions}
                     setQaSessions={setReaderQaSessions}
                     selectedQaSessionId={readerSelectedQaSessionId}
