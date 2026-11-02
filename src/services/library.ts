@@ -1,5 +1,5 @@
 import { invoke } from '../platform/electron/core';
-import { RAG_INDEX_STATUS_UPDATED_EVENT } from './ragIndexStatus';
+import { emitRagIndexStatusUpdated } from './ragIndexStatus.ts';
 import { listen } from '../platform/electron/event';
 import type {
   AddAttachmentRequest,
@@ -244,9 +244,7 @@ export async function setLibraryRagMembership(
 
     if (typeof window !== 'undefined') {
       for (const paper of result.papers) {
-        window.dispatchEvent(
-          new CustomEvent(RAG_INDEX_STATUS_UPDATED_EVENT, { detail: { documentKey: paper.paperId } }),
-        );
+        emitRagIndexStatusUpdated({ documentKey: paper.paperId });
       }
     }
 

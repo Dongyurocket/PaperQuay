@@ -1,7 +1,7 @@
 # UI 收尾计划（交接用）
 
 - 日期：2026-11-02
-- 状态：**进行中**（T1、T2、T3、T4、T5、T7 已于 2026-11-02 完成，其余待办）
+- 状态：**进行中**（T1、T2、T3、T4、T5、T6、T7 已于 2026-11-02 完成，其余待办）
 - 前置：三阶段主线已完成并推送（`main` = `925ac14`，即 `fe18016` 加上本交接文档的提交）。本文件只记录**尚未完成**的部分。
 - 关联：
   - 主线方案：`docs/plans/2026-11-02-ui-logic-and-visual-refinement.md`
@@ -157,6 +157,8 @@ git grep -n -E "Math\.min\(contextMenu\.(x|y)" -- "src/*.tsx" "src/**/*.tsx"
 **做法**：仿照 `documentParseTasks.ts` 建一个轻量的通用任务注册表（`src/services/backgroundTasks.ts`），字段为 `{ id, kind: 'translate' | 'rag' | 'parse', title, completed, total, status, error }`，`TaskCenter` 订阅它；解析任务可继续用现有注册表，在 `TaskCenter` 内部合并两个来源。
 
 **验收**：启动一次翻译与一次 RAG 索引，切到别的标签页后仍能在右下角看到进度；完成后自动消失；失败保留 60 秒并可读。
+
+**完成情况（2026-11-02）**：新增 `src/services/backgroundTasks.ts`。翻译按真实 `completed/total` 显示百分比，写入节流为 ≥200ms 或百分比变化 ≥2%。RAG 只显示「索引中」，不造百分比；同一文献多个来源全部结束后才完成一次。解析任务仍走 `documentParseTasks`，在 `TaskCenter` 里合并。任务条实际在左下角，没有改到右下角。工具栏原有的翻译进度没改。`npm run build` 通过，`npm test` 878/878。实机：阅读器翻译到 120/188 时任务条为 64%，切到笔记后仍在并升到 74%，完成后任务条消失，阅读器状态为「翻译完成，已生成 188 段译文」。成功 toast 没截到。RAG 没实机跑起来：唯一 pending 记录不在文献库里。详见 `docs/changes/2026-11-02-ui-task-center-translate-rag.md`。
 
 ### T7　验证 `Dialog` 的焦点陷阱边界循环（低风险，纯验证）
 

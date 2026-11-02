@@ -18,17 +18,7 @@ import {
   ragRetrieveDocumentChunks,
   type RagEmbeddingOptions,
 } from './rag';
-import { RAG_INDEX_STATUS_UPDATED_EVENT } from './ragIndexStatus';
-
-function emitRagIndexStatusUpdated(documentKey: string) {
-  if (typeof window === 'undefined') {
-    return;
-  }
-
-  window.dispatchEvent(
-    new CustomEvent(RAG_INDEX_STATUS_UPDATED_EVENT, { detail: { documentKey } }),
-  );
-}
+import { emitRagIndexStatusUpdated } from './ragIndexStatus.ts';
 
 const RAG_INDEX_FAILURE_COOLDOWN_MS = 60_000;
 const RAG_RESULT_MIN_MARGIN = 0.12;
@@ -226,10 +216,22 @@ export async function ensurePreparedSourceIndexed(input: {
         totalChunkCount: input.chunks.length,
         expectedChunkIds: input.chunks.map((chunk) => chunk.chunkId),
       });
-      emitRagIndexStatusUpdated(input.documentKey);
+      emitRagIndexStatusUpdated({
+        documentKey: input.documentKey,
+        status: 'ready',
+        title: input.title,
+        sourceType: input.sourceType,
+      });
     }
     return { outcome: 'ready' };
   }
+
+  emitRagIndexStatusUpdated({
+    documentKey: input.documentKey,
+    status: 'pending',
+    title: input.title,
+    sourceType: input.sourceType,
+  });
 
   try {
     for (const batch of chunkItems(remainingChunks, input.batchSize)) {
@@ -291,12 +293,23 @@ export async function ensurePreparedSourceIndexed(input: {
       input.sourceSignature,
       embeddingModelKey,
     );
-    emitRagIndexStatusUpdated(input.documentKey);
+    emitRagIndexStatusUpdated({
+      documentKey: input.documentKey,
+      status: 'ready',
+      title: input.title,
+      sourceType: input.sourceType,
+    });
     return { outcome: 'ready' };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
 
     if (isRagIndexExcludedMessage(message)) {
+      emitRagIndexStatusUpdated({
+        documentKey: input.documentKey,
+        status: 'excluded',
+        title: input.title,
+        sourceType: input.sourceType,
+      });
       return { outcome: 'excluded', errorMessage: message };
     }
 
@@ -323,7 +336,13 @@ export async function ensurePreparedSourceIndexed(input: {
       // 失败状态写回失败属于次要故障，保留原始错误信息向上传递。
     }
 
-    emitRagIndexStatusUpdated(input.documentKey);
+    emitRagIndexStatusUpdated({
+      documentKey: input.documentKey,
+      status: 'failed',
+      title: input.title,
+      error: message,
+      sourceType: input.sourceType,
+    });
     return { outcome: 'failed', errorMessage: message };
   }
 }

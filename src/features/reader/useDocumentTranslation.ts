@@ -36,6 +36,16 @@ import {
   readTranslationCache,
   writeTranslationCache,
 } from "./readerTranslationCache";
+import {
+  failBackgroundTask,
+  finishBackgroundTask,
+  nextProgressPublishGate,
+  removeBackgroundTask,
+  shouldPublishBackgroundProgress,
+  translationBackgroundTaskId,
+  upsertBackgroundTask,
+  type ProgressPublishGate,
+} from "../../services/backgroundTasks.ts";
 
 type LocaleTextFn = (zh: string, en: string) => string;
 
@@ -124,6 +134,8 @@ export function useDocumentTranslation({
   const selectionRequestKeyRef = useRef("");
   const blockTranslationsRef = useRef<TranslationMap>({});
   const translationProgressTotalRef = useRef(0);
+  const translationPublishGateRef = useRef<ProgressPublishGate | null>(null);
+  const translationTaskIdRef = useRef("");
 
   const [blockTranslations, setBlockTranslations] = useState<TranslationMap>(
     {},
@@ -153,6 +165,62 @@ export function useDocumentTranslation({
   useEffect(() => {
     translationProgressTotalRef.current = translationProgressTotal;
   }, [translationProgressTotal]);
+
+  translationTaskIdRef.current = translationBackgroundTaskId(currentDocument.itemKey);
+
+  const publishTranslationProgress = useCallback(
+    (completed: number, total: number, force = false) => {
+      const now = Date.now();
+
+      if (
+        !force
+        && !shouldPublishBackgroundProgress(
+          translationPublishGateRef.current,
+          completed,
+          total,
+          now,
+        )
+      ) {
+        return;
+      }
+
+      translationPublishGateRef.current = nextProgressPublishGate(completed, total, now);
+      upsertBackgroundTask({
+        id: translationBackgroundTaskId(currentDocument.itemKey),
+        kind: "translate",
+        title: currentDocument.title.trim() || currentDocument.itemKey,
+        completed,
+        total,
+      });
+    },
+    [currentDocument.itemKey, currentDocument.title],
+  );
+
+  const settleTranslationTask = useCallback(
+    (requestId: number, outcome: "success" | "error" | "dismiss", error?: string) => {
+      if (documentTranslationRequestIdRef.current !== requestId) {
+        return;
+      }
+
+      const taskId = translationBackgroundTaskId(currentDocument.itemKey);
+
+      if (outcome === "success") {
+        finishBackgroundTask(taskId);
+        return;
+      }
+
+      if (outcome === "dismiss") {
+        removeBackgroundTask(taskId);
+        return;
+      }
+
+      failBackgroundTask(taskId, error || "翻译失败", {
+        kind: "translate",
+        title: currentDocument.title.trim() || currentDocument.itemKey,
+      });
+    },
+    [currentDocument.itemKey, currentDocument.title],
+  );
 
   const tryLoadSavedTranslations = useCallback(
     async (item: WorkspaceItem) =>
@@ -342,6 +410,8 @@ export function useDocumentTranslation({
     setTranslating(true);
     setTranslationCancelling(false);
     setTranslationProgressTotal(blocksToTranslate.length);
+    translationPublishGateRef.current = null;
+    publishTranslationProgress(0, blocksToTranslate.length, true);
     setError("");
     const translationStartMessage = lRef.current(
       `正在翻译 ${blocksToTranslate.length} 个结构块`,
@@ -381,6 +451,8 @@ export function useDocumentTranslation({
         setTranslationProgressCompleted(0);
       }
 
+      publishTranslationProgress(resumedCount, blocksToTranslate.length, true);
+
       const result = await translateBlocksBestEffort({
         apiKey: translationModelPreset.apiKey.trim(),
         apiMode: translationModelPreset.apiMode,
@@ -401,6 +473,7 @@ export function useDocumentTranslation({
           setBlockTranslations(progress.translations);
           setBlockTranslationTargetLanguage(settings.translationTargetLanguage);
           setTranslationProgressCompleted(progress.translatedCount);
+          publishTranslationProgress(progress.translatedCount, progress.totalBlocks);
 
           if (progress.translatedCount > 0) {
             try {
@@ -477,6 +550,9 @@ export function useDocumentTranslation({
         );
         if (cacheWriteError) {
           setError(translationCacheFailureMessage(cacheWriteError));
+          settleTranslationTask(requestId, "error", finalCancelledMessage);
+        } else {
+          settleTranslationTask(requestId, "dismiss");
         }
         return;
       }
@@ -513,6 +589,12 @@ export function useDocumentTranslation({
           ),
         );
       }
+
+      if (failedCount > 0 || cacheWriteError) {
+        settleTranslationTask(requestId, "error", finalFinishedMessage);
+      } else {
+        settleTranslationTask(requestId, "success");
+      }
     } catch (error) {
       if (documentTranslationRequestIdRef.current !== requestId) {
         return;
@@ -526,6 +608,7 @@ export function useDocumentTranslation({
       setError(message);
       setStatusMessage(message);
       updateLibraryOperation("translation", "error", message, 100, 100);
+      settleTranslationTask(requestId, "error", message);
     } finally {
       if (documentTranslationRequestIdRef.current === requestId) {
         setTranslating(false);
@@ -553,6 +636,8 @@ export function useDocumentTranslation({
     translating,
     translationModelPreset,
     translationSnapshot?.translations,
+    publishTranslationProgress,
+    settleTranslationTask,
     tryLoadSavedTranslations,
     updateLibraryOperation,
     lRef,
@@ -623,6 +708,8 @@ export function useDocumentTranslation({
       setTranslationCancelling(false);
       setTranslationProgressCompleted(0);
       setTranslationProgressTotal(1);
+      translationPublishGateRef.current = null;
+      publishTranslationProgress(0, 1, true);
       setError("");
 
       const startMessage = lRef.current(
@@ -659,6 +746,7 @@ export function useDocumentTranslation({
             setBlockTranslations(mergedTranslations);
             setBlockTranslationTargetLanguage(settings.translationTargetLanguage);
             setTranslationProgressCompleted(progress.translatedCount);
+            publishTranslationProgress(progress.translatedCount, progress.totalBlocks);
 
             if (progress.translatedCount > 0) {
               try {
@@ -721,6 +809,9 @@ export function useDocumentTranslation({
           );
           if (cacheWriteError) {
             setError(translationCacheFailureMessage(cacheWriteError));
+            settleTranslationTask(requestId, "error", finalMessage);
+          } else {
+            settleTranslationTask(requestId, "dismiss");
           }
           return;
         }
@@ -739,6 +830,7 @@ export function useDocumentTranslation({
               "document",
             ),
           );
+          settleTranslationTask(requestId, "error", message);
           return;
         }
 
@@ -757,6 +849,9 @@ export function useDocumentTranslation({
         );
         if (cacheWriteError) {
           setError(translationCacheFailureMessage(cacheWriteError));
+          settleTranslationTask(requestId, "error", finalMessage);
+        } else {
+          settleTranslationTask(requestId, "success");
         }
       } catch (error) {
         if (documentTranslationRequestIdRef.current !== requestId) {
@@ -771,6 +866,7 @@ export function useDocumentTranslation({
         setError(message);
         setStatusMessage(message);
         updateLibraryOperation("translation", "error", message, 1, 1);
+        settleTranslationTask(requestId, "error", message);
       } finally {
         if (documentTranslationRequestIdRef.current === requestId) {
           setTranslating(false);
@@ -793,6 +889,8 @@ export function useDocumentTranslation({
       settings.translationSourceLanguage,
       settings.translationTargetLanguage,
       translating,
+      publishTranslationProgress,
+      settleTranslationTask,
       translationModelPreset,
       updateLibraryOperation,
       lRef,
@@ -998,6 +1096,8 @@ export function useDocumentTranslation({
     documentTranslationAbortControllerRef.current?.abort();
     documentTranslationAbortControllerRef.current = null;
     documentTranslationRequestIdRef.current += 1;
+    translationPublishGateRef.current = null;
+    removeBackgroundTask(translationTaskIdRef.current);
     selectionRequestKeyRef.current = "";
     setBlockTranslations({});
     setBlockTranslationTargetLanguage("");

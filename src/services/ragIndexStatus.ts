@@ -6,10 +6,30 @@ import type { RagDocumentIndexStatus } from '../types/reader';
  * 便于单元测试，也避免在 UI 组件里重复实现。
  */
 
-/** 索引状态发生变化（批量/单篇/自动索引完成）后派发的事件，供各工作区刷新角标。 */
+/** 索引状态发生变化（批量/单篇/自动索引完成，或一次索引开始）后派发的事件，供各工作区刷新角标。 */
 export const RAG_INDEX_STATUS_UPDATED_EVENT = 'paperquay:rag-index-status-updated';
 
 export type RagAggregateStatus = 'ready' | 'pending' | 'failed' | 'none' | 'excluded';
+
+export interface RagIndexStatusUpdatedDetail {
+  documentKey: string;
+  /** 缺省表示只刷新角标，不进入全局任务条。成员变更走这条。 */
+  status?: RagAggregateStatus;
+  title?: string;
+  error?: string;
+  /** 同一文献的 mineru-markdown / pdf-text 分开计数，避免提前报完成。 */
+  sourceType?: string;
+}
+
+export function emitRagIndexStatusUpdated(detail: RagIndexStatusUpdatedDetail): void {
+  if (typeof window === 'undefined' || !detail.documentKey) {
+    return;
+  }
+
+  window.dispatchEvent(
+    new CustomEvent<RagIndexStatusUpdatedDetail>(RAG_INDEX_STATUS_UPDATED_EVENT, { detail }),
+  );
+}
 
 /** 同一文献可能有 mineru-markdown / pdf-text 两个来源：任一失败视为失败，否则任一待建视为待建。 */
 export function aggregateRagIndexStatus(
