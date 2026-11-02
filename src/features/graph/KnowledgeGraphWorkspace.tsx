@@ -17,7 +17,9 @@ import {
   GitBranch,
   Loader2,
   Maximize2,
+  Minus,
   Network,
+  Plus,
   RefreshCw,
   Search,
   Trash2,
@@ -175,15 +177,25 @@ const graphPerspectives: Array<{
   },
 ];
 
+const NODE_COLORS: Record<string, string> = {
+  paper: '#2563eb',
+  note: '#16a34a',
+  tag: '#d97706',
+  category: '#7c3aed',
+  reference: '#64748b',
+};
+
 const graphStyles = [
   {
     selector: 'node',
     style: {
       width: 'data(size)',
       height: 'data(size)',
-      label: 'data(label)',
+      label: 'data(displayLabel)',
       'font-family': 'Inter, ui-sans-serif, system-ui, sans-serif',
-      'font-size': 9,
+      // 字号随节点规模（size 即 hub 程度）微调；配合 displayLabel 的数据驱动抽稀。
+      'font-size': 'mapData(size, 20, 60, 10, 13)',
+      'min-zoomed-font-size': 6,
       'font-weight': 600,
       color: '#1f2937',
       'text-valign': 'bottom',
@@ -199,16 +211,25 @@ const graphStyles = [
       'transition-duration': 120,
     },
   },
-  { selector: 'node[type = "paper"]', style: { 'background-color': '#2563eb' } },
-  { selector: 'node[type = "note"]', style: { 'background-color': '#16a34a' } },
-  { selector: 'node[type = "tag"]', style: { 'background-color': '#d97706' } },
-  { selector: 'node[type = "category"]', style: { 'background-color': '#7c3aed' } },
-  { selector: 'node[type = "reference"]', style: { 'background-color': '#64748b' } },
+  { selector: 'node[type = "paper"]', style: { 'background-color': NODE_COLORS.paper } },
+  { selector: 'node[type = "note"]', style: { 'background-color': NODE_COLORS.note } },
+  { selector: 'node[type = "tag"]', style: { 'background-color': NODE_COLORS.tag } },
+  { selector: 'node[type = "category"]', style: { 'background-color': NODE_COLORS.category } },
+  { selector: 'node[type = "reference"]', style: { 'background-color': NODE_COLORS.reference } },
   {
     selector: 'node:selected',
     style: {
       'border-width': 4,
       'border-color': '#0f172a',
+      // 选中节点总是显示标签，即使它在总览下属于被抽稀的非 hub 节点。
+      label: 'data(label)',
+    },
+  },
+  {
+    // 用户主动放大后（LABEL_ALL_ZOOM）给全部节点恢复标签。
+    selector: 'node.label-all',
+    style: {
+      label: 'data(label)',
     },
   },
   {
@@ -446,14 +467,32 @@ function perspectiveEdgeTypes(perspective: GraphPerspective): Record<KnowledgeGr
   return all;
 }
 
+// 标签抽稀：节点较少时全部标注；节点多时只标 hub。
+// 不用「随缩放阈值显隐」的原因：隐藏标签会让节点包围盒变小，fit 随即放大视图，
+// 标签又重新满足显示条件，形成反馈振荡，总览仍然糊成一片。这里改用确定性的数据驱动标注。
+const LABEL_ALL_BELOW = 40;
+const HUB_LABEL_RATIO = 0.2;
+const LABEL_ALL_ZOOM = 1.15;
+
 function toElements(snapshot: KnowledgeGraphSnapshot): ElementDefinition[] {
+  const nodeSizes = snapshot.nodes.map((node) => node.size ?? 28).sort((left, right) => right - left);
+  const labelAll = snapshot.nodes.length <= LABEL_ALL_BELOW;
+  const hubCount = Math.max(1, Math.round(nodeSizes.length * HUB_LABEL_RATIO));
+  const hubCutoff = nodeSizes[Math.min(nodeSizes.length - 1, hubCount - 1)] ?? 0;
+
   return [
-    ...snapshot.nodes.map((node) => ({
-      data: {
-        ...node,
-        size: node.size ?? 28,
-      },
-    })),
+    ...snapshot.nodes.map((node) => {
+      const size = node.size ?? 28;
+
+      return {
+        data: {
+          ...node,
+          size,
+          // displayLabel 为画布实际绘制的文本；data(label) 保留给选中态与放大态使用。
+          displayLabel: labelAll || size >= hubCutoff ? node.label : '',
+        },
+      };
+    }),
     ...snapshot.edges.map((edge) => ({
       data: edge,
     })),
@@ -554,6 +593,11 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
   const isEnglish = locale === 'en-US';
   const containerRef = useRef<HTMLDivElement | null>(null);
   const cyRef = useRef<Core | null>(null);
+  const resizeTimerRef = useRef<number | null>(null);
+  // 用户手动缩放/平移后不再自动 refit，避免拖拽侧栏或改窗口尺寸时把视图拉回原位。
+  const userAdjustedViewRef = useRef(false);
+  // 当前是否已切换到「全部标签」密度，避免同一 zoom 事件重复加/减类。
+  const labelsExpandedRef = useRef(false);
   const quickRelationSourceRef = useRef<KnowledgeGraphNode | null>(null);
   const renderedNodeIdsRef = useRef<Set<string>>(new Set());
   const renderedEdgeIdsRef = useRef<Set<string>>(new Set());
@@ -815,6 +859,7 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
       renderedLayoutModeRef.current = layoutMode;
       // 工作区以 hidden 常驻挂载（App.tsx），容器为 0x0 时布局会把所有节点压成一团，
       // 这里推迟到工作区激活（workspaceActive）后再补跑。
+      userAdjustedViewRef.current = false;
       if (graphContainerHasSize(containerRef.current)) {
         runGraphLayout(cy, layoutMode);
       } else {
@@ -875,11 +920,24 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
   }, [selectedEdge]);
 
   const fitGraph = () => {
+    userAdjustedViewRef.current = false;
     cyRef.current?.fit(undefined, 36);
+  };
+
+  const zoomGraphBy = (factor: number) => {
+    const cy = cyRef.current;
+    if (!cy) return;
+
+    userAdjustedViewRef.current = true;
+    cy.zoom({
+      level: cy.zoom() * factor,
+      renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 },
+    });
   };
 
   const rerunLayout = () => {
     if (cyRef.current) {
+      userAdjustedViewRef.current = false;
       runGraphLayout(cyRef.current, layoutMode);
     }
   };
@@ -1070,6 +1128,7 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
   useEffect(() => {
     if (!containerRef.current) return;
 
+    let disconnectResizeObserver: (() => void) | null = null;
     const graphTextColor = () => getComputedStyle(containerRef.current!).getPropertyValue('--pq-text').trim() || '#1f2937';
     const resolvedGraphStyles = (): StylesheetJson => {
       const nodeStyle = graphStyles[0] as { selector: string; style: Record<string, unknown> };
@@ -1088,6 +1147,50 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
     cyRef.current = cy;
     const themeObserver = new MutationObserver(() => cy.style(resolvedGraphStyles()));
     themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style'] });
+
+    // 容器尺寸变化（拖拽侧栏、窗口最大化、分屏）时同步画布尺寸；若用户未手动缩放/平移，
+    // 同时重新适配视图，否则图谱会停在旧视口位置（最大化后挤在左侧、右侧大片空白）。
+    if (containerRef.current) {
+      const resizeObserver = new ResizeObserver(() => {
+        if (resizeTimerRef.current !== null) {
+          window.clearTimeout(resizeTimerRef.current);
+        }
+
+        resizeTimerRef.current = window.setTimeout(() => {
+          resizeTimerRef.current = null;
+          const current = cyRef.current;
+          if (!current) return;
+
+          current.resize();
+
+          if (!userAdjustedViewRef.current && current.nodes().length > 0) {
+            current.fit(undefined, 36);
+          }
+        }, 180);
+      });
+
+      resizeObserver.observe(containerRef.current);
+      disconnectResizeObserver = () => resizeObserver.disconnect();
+    }
+
+    const markUserAdjustedView = (event: cytoscape.EventObject) => {
+      if (event.originalEvent) {
+        userAdjustedViewRef.current = true;
+      }
+    };
+
+    // 放大到阈值后恢复全部标签，缩回时收回；用于替代会影响 fit 包围盒的缩放阈值显隐。
+    const syncLabelDensity = () => {
+      const showAll = cy.zoom() >= LABEL_ALL_ZOOM;
+      if (showAll === labelsExpandedRef.current) return;
+
+      labelsExpandedRef.current = showAll;
+      cy.nodes().toggleClass('label-all', showAll);
+    };
+
+    cy.on('zoom', markUserAdjustedView);
+    cy.on('zoom', syncLabelDensity);
+    cy.on('dragpan', markUserAdjustedView);
 
     cy.on('tap', 'node', (event) => {
       const data = event.target.data() as KnowledgeGraphNode;
@@ -1138,6 +1241,11 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
     });
 
     return () => {
+      disconnectResizeObserver?.();
+      if (resizeTimerRef.current !== null) {
+        window.clearTimeout(resizeTimerRef.current);
+        resizeTimerRef.current = null;
+      }
       themeObserver.disconnect();
       cy.destroy();
       cyRef.current = null;
@@ -1609,6 +1717,54 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
 
       <section className="relative min-w-0 flex-1 bg-[radial-gradient(circle_at_1px_1px,var(--pq-border)_1px,transparent_0)] [background-size:22px_22px]">
         <div ref={containerRef} className="h-full w-full" />
+
+        <div className="pointer-events-none absolute bottom-4 right-4 flex flex-col items-end gap-2">
+          <div className="pointer-events-auto flex items-center gap-1 rounded-[var(--pq-radius-sm)] border border-[var(--pq-border)] bg-[var(--pq-surface)] p-1 shadow-[var(--pq-shadow-float)]">
+            <button
+              type="button"
+              onClick={() => zoomGraphBy(1 / 1.25)}
+              className="pq-icon-button h-7 w-7"
+              title={l('缩小', 'Zoom out')}
+              aria-label={l('缩小', 'Zoom out')}
+            >
+              <Minus className="h-4 w-4" strokeWidth={1.9} />
+            </button>
+            <button
+              type="button"
+              onClick={() => zoomGraphBy(1.25)}
+              className="pq-icon-button h-7 w-7"
+              title={l('放大', 'Zoom in')}
+              aria-label={l('放大', 'Zoom in')}
+            >
+              <Plus className="h-4 w-4" strokeWidth={1.9} />
+            </button>
+            <button
+              type="button"
+              onClick={fitGraph}
+              className="pq-icon-button h-7 w-7"
+              title={l('适配视图', 'Fit view')}
+              aria-label={l('适配视图', 'Fit view')}
+            >
+              <Maximize2 className="h-4 w-4" strokeWidth={1.9} />
+            </button>
+          </div>
+          <div className="pointer-events-auto flex max-w-[220px] flex-wrap justify-end gap-x-3 gap-y-1 rounded-[var(--pq-radius-sm)] border border-[var(--pq-border)] bg-[var(--pq-surface)] px-2.5 py-1.5 text-[11px] text-[var(--pq-text-muted)] shadow-[var(--pq-shadow-soft)]">
+            {[
+              { type: 'paper', label: l('文献', 'Papers') },
+              { type: 'note', label: l('笔记', 'Notes') },
+              { type: 'tag', label: l('标签', 'Tags') },
+              { type: 'category', label: l('分类', 'Categories') },
+            ].map((item) => (
+              <span key={item.type} className="inline-flex items-center gap-1 whitespace-nowrap">
+                <span
+                  className="h-2 w-2 rounded-full"
+                  style={{ backgroundColor: NODE_COLORS[item.type] }}
+                />
+                {item.label}
+              </span>
+            ))}
+          </div>
+        </div>
 
         {quickRelationSourceNode ? (
           <div className="absolute left-4 top-4 flex items-center gap-2 rounded-[var(--pq-radius-sm)] border border-[var(--pq-accent-border)] bg-[var(--pq-surface)] px-3 py-2 text-xs text-[var(--pq-text)] shadow-[var(--pq-shadow-md)]">
