@@ -10,8 +10,8 @@ bridge 容器状态与阅读器父组件渲染耦合；但 bridge 生命周期�
 
 ## 修改
 
-新增 `useReaderBridgeStore`，迁移 bridge map、原十字段浅比较和登记/删除 action。保留 `DocumentReaderTab` 的 `onBridgeStateChange(tabId, bridge | null)` 签名、effect 生命周期、全部 bridge 字段和 Reader 的 active/busy 消费路径；未按 activeTab 或 workspaceActive 清空，也未改变后台翻译保活范围。
+尝试将 bridge map、原十字段比较和登记/删除 action 抽入 `useReaderBridgeStore`，并补充独立 store 测试。实机打开阅读器时出现 React #185 最大更新深度错误，证据表明命令式 bridge 注册/清理 effect 与 Zustand 父层重渲染形成循环；按交接文档强耦合护栏，生产接线保留 `Reader` 原有同步 registry。`DocumentReaderTab` 的 `onBridgeStateChange(tabId, bridge | null)` 签名、effect 生命周期、全部 bridge 字段和 Reader 的 active/busy 消费路径均保持原样，未按 activeTab 或 workspaceActive 清空，也未改变后台翻译保活范围。
 
 ## 验证
 
-bridge store 新增 3 项测试覆盖空默认、A/B 独立登记、定向替换、未知 id 清理、十字段变化和等值 no-op。`npm run build` 通过；全量 `npm test` 889/889。`DocumentReaderTabProps` 仍为 28 项，因为 bridge 回调必须保留到第五刀统一回调打包。桌面多标签页翻译保活回归待第五刀收敛后统一执行并留截图。
+bridge store 测试覆盖空默认、A/B 独立登记、定向替换、未知 id 清理、十字段变化、等值 no-op、回调不执行和 action 稳定性；生产回退后 `npm run build` 与全量 `npm test` 901/901 通过。最终桌面构建成功打开文献阅读器，PDF、结构化正文和问答侧栏正常显示。第四刀结论：**保留 bridge，不迁移**；原因是抽取会改变现有命令式生命周期并触发运行时循环。

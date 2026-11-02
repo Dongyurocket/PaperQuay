@@ -10,7 +10,7 @@
 
 ## 修改
 
-新增 `readerApiConfig`（复用现有 `ReaderSecrets` 的 8 项字段）和 `readerCallbacks`（11 项回调，包含 bridge 生命周期回调）。Tab 入口解构对象后继续使用原字段名和原依赖数组；`zoteroLocalDataDir`、语言标签、逐文档笔记候选/跳转/译文快照保持显式传递。未改变 API 配置值、回调签名、可选回调语义或业务流程。
+新增 `readerApiConfig`（复用现有 `ReaderSecrets` 的 8 项字段）和 `readerCallbacks`（11 项回调，包含保留的 bridge 生命周期回调）。Tab 入口解构对象后继续使用原字段名和原依赖数组；`zoteroLocalDataDir`、语言标签、逐文档笔记候选/跳转/译文快照保持显式传递。未改变 API 配置值、回调签名、可选回调语义或业务流程。
 
 ## 验证
 

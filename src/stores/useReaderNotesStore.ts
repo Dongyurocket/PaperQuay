@@ -28,13 +28,24 @@ export const useReaderNotesStore = create<ReaderNotesState>()((set) => ({
   notesLoading: false,
   notesSaving: false,
   notesError: '',
-  setNotes: (value) => set((state) => ({ notes: resolveStateValue(value, state.notes) })),
-  setActiveNoteId: (value) =>
-    set((state) => ({ activeNoteId: resolveStateValue(value, state.activeNoteId) })),
-  setNotesLoading: (value) =>
-    set((state) => ({ notesLoading: resolveStateValue(value, state.notesLoading) })),
-  setNotesSaving: (value) =>
-    set((state) => ({ notesSaving: resolveStateValue(value, state.notesSaving) })),
-  setNotesError: (value) =>
-    set((state) => ({ notesError: resolveStateValue(value, state.notesError) })),
+  setNotes: (value) => set((state) => {
+    const next = resolveStateValue(value, state.notes);
+    return Object.is(next, state.notes) ? state : { notes: next };
+  }),
+  setActiveNoteId: (value) => set((state) => {
+    const next = resolveStateValue(value, state.activeNoteId);
+    return Object.is(next, state.activeNoteId) ? state : { activeNoteId: next };
+  }),
+  setNotesLoading: (value) => set((state) => {
+    const next = resolveStateValue(value, state.notesLoading);
+    return Object.is(next, state.notesLoading) ? state : { notesLoading: next };
+  }),
+  setNotesSaving: (value) => set((state) => {
+    const next = resolveStateValue(value, state.notesSaving);
+    return Object.is(next, state.notesSaving) ? state : { notesSaving: next };
+  }),
+  setNotesError: (value) => set((state) => {
+    const next = resolveStateValue(value, state.notesError);
+    return Object.is(next, state.notesError) ? state : { notesError: next };
+  }),
 }));

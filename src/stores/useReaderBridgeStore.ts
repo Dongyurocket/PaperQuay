@@ -1,6 +1,18 @@
 import { create } from 'zustand';
 import type { ReaderTabBridgeState } from '../features/reader/documentReaderShared.ts';
 
+function areReaderAssistantSidebarPropsEqual(
+  left: ReaderTabBridgeState['assistantSidebarProps'],
+  right: ReaderTabBridgeState['assistantSidebarProps'],
+): boolean {
+  if (left === right) {
+    return true;
+  }
+
+  const keys = new Set([...Object.keys(left), ...Object.keys(right)]);
+  return [...keys].every((key) => Object.is(left[key as keyof typeof left], right[key as keyof typeof right]));
+}
+
 export function areReaderTabBridgeStatesEqual(
   left: ReaderTabBridgeState | null | undefined,
   right: ReaderTabBridgeState | null | undefined,
@@ -16,7 +28,7 @@ export function areReaderTabBridgeStatesEqual(
   return (
     left.translating === right.translating &&
     left.translatedCount === right.translatedCount &&
-    left.assistantSidebarProps === right.assistantSidebarProps &&
+    areReaderAssistantSidebarPropsEqual(left.assistantSidebarProps, right.assistantSidebarProps) &&
     left.onDetachAssistant === right.onDetachAssistant &&
     left.onAttachAssistant === right.onAttachAssistant &&
     left.onTranslate === right.onTranslate &&

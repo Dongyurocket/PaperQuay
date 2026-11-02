@@ -269,11 +269,11 @@ powershell -NoProfile -Command "Start-Process -FilePath \"$env:TEMP\pq-<主题>\
 
 ## 六、T8 完成情况（2026-11-03）
 
-- 五刀已分别提交并 FF 合并到 `main`：布局 `f3a91f8`、QA `771fbd4`、笔记 `7de91a7`、bridge `9c6b01f`、配置/回调打包（见最终提交）。
+- 五刀主提交已分别 FF 合并到 `main`：布局 `f3a91f8`、QA `771fbd4`、笔记 `7de91a7`、bridge 评估 `9c6b01f`、配置/回调打包 `d4cb7ef`；随后以修复提交保留 bridge 的原生产 registry 并修正 store 同值 bailout。
 - `DocumentReaderTabProps`：62 → 58 → 38 → 28 → 28 → 11。
-- QA 会话仍是所有阅读标签页全局共享；bridge 保留全挂载标签页登记并参与翻译保活；localStorage 键名、默认值和 clamp 边界保持原样。
+- QA 会话仍是所有阅读标签页全局共享；bridge 生产实现保留全挂载标签页登记并参与翻译保活；localStorage 键名、默认值和 clamp 边界保持原样。
 - store 测试覆盖默认值、setter、函数式更新、边界、持久化、等值 no-op 与清理；最终 `npm run build` 和 `npm test` 均通过，测试 901/901。
-- 桌面实机回归与截图证据在最终构建后补记；未跟踪个人资产未纳入提交。
+- 最终桌面构建已成功打开阅读器，PDF、结构化正文和问答侧栏正常显示；截图证据为本次会话最终桌面截图。未跟踪个人资产未纳入提交。
 
 ## 六、完成后的收尾
 

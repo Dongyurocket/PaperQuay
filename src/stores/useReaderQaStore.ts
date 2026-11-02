@@ -48,21 +48,44 @@ export const useReaderQaStore = create<ReaderQaState>()((set) => ({
   qaReasoningEffort: 'auto',
   qaRunningSessionIds: [],
   qaError: '',
-  setQaSessions: (value) => set((state) => ({ qaSessions: resolveStateValue(value, state.qaSessions) })),
-  setSelectedQaSessionId: (value) =>
-    set((state) => ({ selectedQaSessionId: resolveStateValue(value, state.selectedQaSessionId) })),
-  setQaInput: (value) => set((state) => ({ qaInput: resolveStateValue(value, state.qaInput) })),
-  setQaAttachments: (value) =>
-    set((state) => ({ qaAttachments: resolveStateValue(value, state.qaAttachments) })),
-  setSelectedQaPresetId: (value) =>
-    set((state) => ({ selectedQaPresetId: resolveStateValue(value, state.selectedQaPresetId) })),
-  setQaRagEnabled: (value) =>
-    set((state) => ({ qaRagEnabled: resolveStateValue(value, state.qaRagEnabled) })),
-  setQaAnswerRenderMode: (value) =>
-    set((state) => ({ qaAnswerRenderMode: resolveStateValue(value, state.qaAnswerRenderMode) })),
-  setQaReasoningEffort: (value) =>
-    set((state) => ({ qaReasoningEffort: resolveStateValue(value, state.qaReasoningEffort) })),
-  setQaRunningSessionIds: (value) =>
-    set((state) => ({ qaRunningSessionIds: resolveStateValue(value, state.qaRunningSessionIds) })),
-  setQaError: (value) => set((state) => ({ qaError: resolveStateValue(value, state.qaError) })),
+  setQaSessions: (value) => set((state) => {
+    const next = resolveStateValue(value, state.qaSessions);
+    return Object.is(next, state.qaSessions) ? state : { qaSessions: next };
+  }),
+  setSelectedQaSessionId: (value) => set((state) => {
+    const next = resolveStateValue(value, state.selectedQaSessionId);
+    return Object.is(next, state.selectedQaSessionId) ? state : { selectedQaSessionId: next };
+  }),
+  setQaInput: (value) => set((state) => {
+    const next = resolveStateValue(value, state.qaInput);
+    return Object.is(next, state.qaInput) ? state : { qaInput: next };
+  }),
+  setQaAttachments: (value) => set((state) => {
+    const next = resolveStateValue(value, state.qaAttachments);
+    return Object.is(next, state.qaAttachments) ? state : { qaAttachments: next };
+  }),
+  setSelectedQaPresetId: (value) => set((state) => {
+    const next = resolveStateValue(value, state.selectedQaPresetId);
+    return Object.is(next, state.selectedQaPresetId) ? state : { selectedQaPresetId: next };
+  }),
+  setQaRagEnabled: (value) => set((state) => {
+    const next = resolveStateValue(value, state.qaRagEnabled);
+    return Object.is(next, state.qaRagEnabled) ? state : { qaRagEnabled: next };
+  }),
+  setQaAnswerRenderMode: (value) => set((state) => {
+    const next = resolveStateValue(value, state.qaAnswerRenderMode);
+    return Object.is(next, state.qaAnswerRenderMode) ? state : { qaAnswerRenderMode: next };
+  }),
+  setQaReasoningEffort: (value) => set((state) => {
+    const next = resolveStateValue(value, state.qaReasoningEffort);
+    return Object.is(next, state.qaReasoningEffort) ? state : { qaReasoningEffort: next };
+  }),
+  setQaRunningSessionIds: (value) => set((state) => {
+    const next = resolveStateValue(value, state.qaRunningSessionIds);
+    return Object.is(next, state.qaRunningSessionIds) ? state : { qaRunningSessionIds: next };
+  }),
+  setQaError: (value) => set((state) => {
+    const next = resolveStateValue(value, state.qaError);
+    return Object.is(next, state.qaError) ? state : { qaError: next };
+  }),
 }));

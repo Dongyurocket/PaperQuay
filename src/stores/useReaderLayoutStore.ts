@@ -59,19 +59,27 @@ export const useReaderLayoutStore = create<ReaderLayoutState>()((set, get) => ({
   assistantPanelWidth: readStoredReaderAssistantPanelWidth(),
   assistantPanelResizing: false,
   setAssistantActivePanel: (value) =>
-    set((state) => ({ assistantActivePanel: resolveStateValue(value, state.assistantActivePanel) })),
+    set((state) => {
+      const next = resolveStateValue(value, state.assistantActivePanel);
+      return Object.is(next, state.assistantActivePanel) ? state : { assistantActivePanel: next };
+    }),
   setAssistantDetached: (value) =>
-    set((state) => ({ assistantDetached: resolveStateValue(value, state.assistantDetached) })),
+    set((state) => {
+      const next = resolveStateValue(value, state.assistantDetached);
+      return Object.is(next, state.assistantDetached) ? state : { assistantDetached: next };
+    }),
   setAssistantPanelWidth: (value) =>
-    set((state) => ({
-      assistantPanelWidth: clampReaderAssistantPanelWidth(
+    set((state) => {
+      const next = clampReaderAssistantPanelWidth(
         resolveStateValue(value, state.assistantPanelWidth),
-      ),
-    })),
+      );
+      return Object.is(next, state.assistantPanelWidth) ? state : { assistantPanelWidth: next };
+    }),
   setAssistantPanelResizing: (value) =>
-    set((state) => ({
-      assistantPanelResizing: resolveStateValue(value, state.assistantPanelResizing),
-    })),
+    set((state) => {
+      const next = resolveStateValue(value, state.assistantPanelResizing);
+      return Object.is(next, state.assistantPanelResizing) ? state : { assistantPanelResizing: next };
+    }),
   persistAssistantPanelWidth: () => {
     writeAssistantPanelWidth(get().assistantPanelWidth);
   },

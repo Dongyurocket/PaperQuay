@@ -3977,6 +3977,36 @@ function DocumentReaderTab({
     };
   }, [currentDocument.workspaceId, isActive]);
 
+  const handleAssistantQaSubmit = useCallback(
+    (inputOverride?: string) => {
+      void handleSubmitQa(inputOverride);
+    },
+    [handleSubmitQa],
+  );
+  const handleAssistantSelectImageAttachments = useCallback(() => {
+    void handleSelectQaAttachments('image');
+  }, [handleSelectQaAttachments]);
+  const handleAssistantSelectFileAttachments = useCallback(() => {
+    void handleSelectQaAttachments('file');
+  }, [handleSelectQaAttachments]);
+  const handleAssistantCaptureScreenshot = useCallback(() => {
+    void handleCaptureSystemScreenshotNative();
+  }, [handleCaptureSystemScreenshotNative]);
+  const handleAssistantUpdateNote = useCallback(
+    (noteId: string, patch: UpdateNoteRequest, options?: NoteMutationOptions) =>
+      handleUpdateNote(noteId, patch, options),
+    [handleUpdateNote],
+  );
+  const handleAssistantDeleteNote = useCallback((noteId: string) => {
+    void handleDeleteNote(noteId);
+  }, [handleDeleteNote]);
+  const handleAssistantAddSelectionToNote = useCallback(() => {
+    void handleAddSelectionToNote();
+  }, [handleAddSelectionToNote]);
+  const handleAssistantTranslateSelectedExcerpt = useCallback(() => {
+    void handleTranslateSelectedExcerpt();
+  }, [handleTranslateSelectedExcerpt]);
+
   const assistantSidebarProps = useMemo(
     () =>
       buildReaderAssistantSidebarProps({
@@ -4018,9 +4048,7 @@ function DocumentReaderTab({
         qaError,
         screenshotLoading: screenshotBusy,
         onQaInputChange: setQaInput,
-        onQaSubmit: (inputOverride?: string) => {
-          void handleSubmitQa(inputOverride);
-        },
+        onQaSubmit: handleAssistantQaSubmit,
         onQaPresetChange: handleQaPresetChange,
         onQaRagEnabledChange: setQaRagEnabled,
         onQaAnswerRenderModeChange: setQaAnswerRenderMode,
@@ -4028,40 +4056,26 @@ function DocumentReaderTab({
         onQaSessionCreate: handleCreateQaSession,
         onQaSessionSelect: handleSelectQaSession,
         onQaSessionDelete: handleDeleteQaSession,
-        onSelectImageAttachments: () => {
-          void handleSelectQaAttachments('image');
-        },
-        onSelectFileAttachments: () => {
-          void handleSelectQaAttachments('file');
-        },
-        onCaptureScreenshot: () => {
-          void handleCaptureSystemScreenshotNative();
-        },
+        onSelectImageAttachments: handleAssistantSelectImageAttachments,
+        onSelectFileAttachments: handleAssistantSelectFileAttachments,
+        onCaptureScreenshot: handleAssistantCaptureScreenshot,
         onRemoveAttachment: handleRemoveAttachment,
         onCitationClick: handleSelectQaCitation,
         onCitationContext: handlePreviewQaCitationContext,
         onCreateStandaloneNote: handleCreateStandaloneNote,
         onSelectNote: handleSelectNote,
-        onUpdateNote: (noteId, patch, options) => {
-          return handleUpdateNote(noteId, patch, options);
-        },
-        onDeleteNote: (noteId) => {
-          void handleDeleteNote(noteId);
-        },
+        onUpdateNote: handleAssistantUpdateNote,
+        onDeleteNote: handleAssistantDeleteNote,
         onJumpToNoteAnchor: handleJumpToNoteAnchor,
         onNotePaperClick,
-        onAddSelectionToNote: () => {
-          void handleAddSelectionToNote();
-        },
+        onAddSelectionToNote: handleAssistantAddSelectionToNote,
         onSaveAssistantMessageAsNote: handleSaveAssistantMessageAsNote,
         selectedExcerpt,
         selectedExcerptTranslation,
         selectedExcerptTranslating,
         selectedExcerptError,
         onAppendSelectedExcerptToQa: handleAppendSelectedExcerptToQa,
-        onTranslateSelectedExcerpt: () => {
-          void handleTranslateSelectedExcerpt();
-        },
+        onTranslateSelectedExcerpt: handleAssistantTranslateSelectedExcerpt,
         onClearSelectedExcerpt: handleClearSelectedExcerpt,
         onOpenPreferences,
       }),
@@ -4074,13 +4088,13 @@ function DocumentReaderTab({
       currentPdfName,
       documentSource,
       flatBlocks.length,
-      handleAddSelectionToNote,
+      handleAssistantAddSelectionToNote,
       handleAppendSelectedExcerptToQa,
-      handleCaptureSystemScreenshotNative,
+      handleAssistantCaptureScreenshot,
       handleClearSelectedExcerpt,
       handleCreateQaSession,
       handleCreateStandaloneNote,
-      handleDeleteNote,
+      handleAssistantDeleteNote,
       handleDeleteQaSession,
       handleJumpToNoteAnchor,
       onNotePaperClick,
@@ -4088,15 +4102,17 @@ function DocumentReaderTab({
       handleQaPresetChange,
       handleReaderNoteExternalUpdateApply,
       handleRemoveAttachment,
+      handleAssistantSelectFileAttachments,
+      handleAssistantSelectImageAttachments,
       handleSaveAssistantMessageAsNote,
       handleSelectNote,
       handleSelectQaAttachments,
       handleSelectQaCitation,
       handlePreviewQaCitationContext,
       handleSelectQaSession,
-      handleSubmitQa,
-      handleTranslateSelectedExcerpt,
-      handleUpdateNote,
+      handleAssistantQaSubmit,
+      handleAssistantTranslateSelectedExcerpt,
+      handleAssistantUpdateNote,
       notePaperCandidates,
       notes,
       notesError,

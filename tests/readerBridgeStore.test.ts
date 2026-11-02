@@ -84,6 +84,13 @@ test('bridge comparison preserves no-op updates and detects every bridge field',
 
   assert.equal(areReaderTabBridgeStatesEqual(base, base), true);
   assert.equal(areReaderTabBridgeStatesEqual(base, { ...base }), true);
+  assert.equal(
+    areReaderTabBridgeStatesEqual(base, {
+      ...base,
+      assistantSidebarProps: { activePanel: 'chat' } as ReaderTabBridgeState['assistantSidebarProps'],
+    }),
+    true,
+  );
   assert.equal(areReaderTabBridgeStatesEqual(base, { ...base, translating: true }), false);
   assert.equal(areReaderTabBridgeStatesEqual(base, { ...base, translatedCount: 1 }), false);
   assert.equal(areReaderTabBridgeStatesEqual(base, { ...base, assistantSidebarProps: {} }), false);

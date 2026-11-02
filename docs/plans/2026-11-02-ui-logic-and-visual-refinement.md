@@ -169,7 +169,7 @@ max-[900px]:grid-cols-[28px_minmax(0,1fr)_64px_86px]          // 降级分支
 
 12. codemod 批次 1（文本与边框语义色）、批次 2（状态色）、批次 3（删除 `.pq-saas-scope` 补丁）。
 13. accent 统一 + 字号令牌 + 密度开关。
-14. 阅读器 store 分片（已实施：布局、QA、笔记、bridge 四刀迁状态，第五刀打包配置与回调；`DocumentReaderTabProps` 由 62 降至 11）。
+14. 阅读器 store 分片（已实施：布局、QA、笔记三刀迁状态；bridge 经评估后保留原 registry；第五刀打包配置与回调；`DocumentReaderTabProps` 由 62 降至 11）。
 15. `docs/ui-design-system.md` 定稿，此后新代码按该文档审查。
 
 完成情况（详见 `docs/changes/2026-11-02-ui-design-tokens.md`）：
@@ -177,7 +177,7 @@ max-[900px]:grid-cols-[28px_minmax(0,1fr)_64px_86px]          // 降级分支
 - **12**：codemod 一次跑完三类映射，共 **1181 处**替换、覆盖 42 个文件；令牌引用由 902 增至 **2824** 处。映射有意收紧：只转「浅底上的语义标注」，实心状态按钮（`bg-emerald-600` 等）与深底浅字（`text-emerald-100` 等）不动，否则暗色模式会文字不可读。`.pq-saas-scope` 补丁层（86 行、40 条选择器）整段删除，连带清掉 5 处 JSX 中的空壳类名。
 - **13**：accent 统一——深色由 `#86a89f`（164°/16%）改为与浅色同色相的 `#2dd4bf`（172°/66%）；`--pq-success` 从 emerald（161°）移到纯绿（142°），与 accent 拉开 30° 以上，解决「强调」与「成功」不可区分。字号下限：50 处 `text-[10px]` 统一提升到 11px。密度开关按已确认决策 ③ 不做。
 - **15**：`docs/ui-design-system.md` 定稿，含令牌表、组件约定、字号间距、六条禁止项与已知约束。
-- **14 已实施（2026-11-03）**：阅读器状态已按布局、QA、笔记、bridge 四刀迁入 Zustand store，并以第五刀打包 API 配置与回调。`DocumentReaderTabProps` 从 62 降至 11；新增 store 测试及边界测试后全量测试达到 901/901。
+- **14 已实施（2026-11-03）**：阅读器布局、QA、笔记状态已迁入 Zustand store；bridge 因命令式生命周期与运行时循环风险保留原 registry；第五刀完成 API 配置与回调打包。`DocumentReaderTabProps` 从 62 降至 11；新增 store 测试及边界测试后全量测试达到 901/901。
 
 ## 验证方法
 
