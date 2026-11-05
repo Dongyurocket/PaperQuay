@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   removeQaSession,
+  removeFailedQaAssistantPlaceholder,
   resolveActiveQaSession,
   resolveQaModelPreset,
   resolveQaSessionSelection,
@@ -70,6 +71,57 @@ test('removeQaSession leaves unknown ids unchanged', () => {
 
   assert.equal(result.removed, false);
   assert.equal(result.sessions, sessions);
+});
+
+test('failed first answer retains question, attachments and session metadata without mutation', () => {
+  const user = { id: 'question', role: 'user' as const, content: 'Question', createdAt: 2,
+    attachments: [{ id: 'file', kind: 'file' as const, name: 'context.txt', mimeType: 'text/plain', size: 15, textContent: 'runtime content' }] };
+  const placeholder = { id: 'pending', role: 'assistant' as const, content: ' \n\t', createdAt: 3 };
+  const target = { ...session('s1'), title: 'Question title', updatedAt: 3, messages: [user, placeholder] };
+  const other = session('s2');
+  const sessions = [target, other];
+  const snapshot = structuredClone(sessions);
+  const result = removeFailedQaAssistantPlaceholder(sessions, 's1', 'pending');
+  assert.deepEqual(sessions, snapshot);
+  assert.notEqual(result, sessions);
+  assert.equal(result[1], other);
+  assert.deepEqual(result[0], { ...target, messages: [user], updatedAt: 2 });
+  assert.equal(result[0].messages[0], user);
+  assert.equal(result[0].messages[0].attachments, user.attachments);
+});
+
+test('failed answer cleanup preserves current history and targets only the supplied id', () => {
+  const history = { id: 'history', role: 'assistant' as const, content: 'Earlier answer', createdAt: 2 };
+  const user = { id: 'question', role: 'user' as const, content: 'Next question', createdAt: 4 };
+  const pending = { id: 'pending', role: 'assistant' as const, content: '', createdAt: 5 };
+  const newer = { id: 'newer', role: 'user' as const, content: 'Current state', createdAt: 6 };
+  const target = { ...session('s1'), updatedAt: 6, messages: [history, user, pending, newer] };
+  const result = removeFailedQaAssistantPlaceholder([target], 's1', 'pending');
+  assert.deepEqual(result[0].messages, [history, user, newer]);
+  assert.equal(result[0].updatedAt, 6);
+  assert.equal(result[0].messages[0], history);
+});
+
+test('failed answer cleanup is a reference-preserving no-op for missing or nonempty targets', () => {
+  for (const message of [
+    { id: 'pending', role: 'assistant' as const, content: 'Partial answer', createdAt: 2 },
+    { id: 'pending', role: 'user' as const, content: '', createdAt: 2 },
+  ]) {
+    const sessions = [{ ...session('s1'), messages: [message] }];
+    assert.equal(removeFailedQaAssistantPlaceholder(sessions, 'missing', 'pending'), sessions);
+    assert.equal(removeFailedQaAssistantPlaceholder(sessions, 's1', 'missing'), sessions);
+    assert.equal(removeFailedQaAssistantPlaceholder(sessions, 's1', 'pending'), sessions);
+  }
+  const empty: DocumentChatSession[] = [];
+  assert.equal(removeFailedQaAssistantPlaceholder(empty, 'missing', 'pending'), empty);
+});
+
+test('removing a sole empty placeholder uses the session creation time', () => {
+  const target = { ...session('s1'), updatedAt: 3,
+    messages: [{ id: 'pending', role: 'assistant' as const, content: '', createdAt: 3 }] };
+  const result = removeFailedQaAssistantPlaceholder([target], 's1', 'pending');
+  assert.deepEqual(result[0].messages, []);
+  assert.equal(result[0].updatedAt, target.createdAt);
 });
 
 test('resolveQaModelPreset returns requested preset or first fallback', () => {

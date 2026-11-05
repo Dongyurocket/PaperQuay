@@ -141,6 +141,7 @@ import {
 import { appendUniqueChatAttachments } from './documentReaderAttachments';
 import {
   removeQaSession,
+  removeFailedQaAssistantPlaceholder,
   resolveActiveQaSession,
   resolveQaModelPreset,
   resolveQaSessionSelection,
@@ -359,6 +360,7 @@ function DocumentReaderTab({
   const paperOpenedAtRef = useRef(Date.now());
   const restoredHistoryRef = useRef('');
   const qaHistoryReadyWorkspaceRef = useRef('');
+  const qaHistoryGenerationRef = useRef(0);
   const qaHistoryExpectedRef = useRef<{
     workspaceId: string;
     qaSessions: DocumentChatSession[];
@@ -3531,10 +3533,6 @@ function DocumentReaderTab({
       return;
     }
 
-    const hadCurrentSession = qaSessions.some((session) => session.id === currentSession.id);
-    const previousSession = currentSession;
-    const previousSelectedSessionId = selectedQaSessionId;
-    const previousAttachments = qaAttachments;
     const nextUserMessage = createChatMessage('user', question, {
       attachments: qaAttachments,
       modelId: activeQaPreset.id,
@@ -3570,10 +3568,15 @@ function DocumentReaderTab({
     );
     setQaError('');
 
+    const requestGeneration = qaHistoryGenerationRef.current;
+    const isRequestCurrent = () =>
+      qaHistoryGenerationRef.current === requestGeneration &&
+      qaHistoryReadyWorkspaceRef.current === currentDocument.workspaceId;
     let streamedAnswer = '';
 
     try {
       const qaRequest = await resolveQaRequest();
+      if (!isRequestCurrent()) return;
 
       if (qaRequest.documentText === '__never__') {
         throw new Error(
@@ -3585,7 +3588,7 @@ function DocumentReaderTab({
       }
 
       const updateStreamingAnswer = (answer: string) => {
-        if (qaHistoryReadyWorkspaceRef.current !== currentDocument.workspaceId) {
+        if (!isRequestCurrent()) {
           return;
         }
 
@@ -3637,30 +3640,25 @@ function DocumentReaderTab({
         updateStreamingAnswer(answer);
       }
 
-      if (qaHistoryReadyWorkspaceRef.current === currentDocument.workspaceId) {
+      if (isRequestCurrent()) {
         setStatusMessage(formatQaContextStatus(qaRequest.qaContext, lRef.current));
       }
     } catch (nextError) {
-      const sessionStillActive =
-        qaHistoryReadyWorkspaceRef.current === currentDocument.workspaceId;
+      const sessionStillActive = isRequestCurrent();
 
       if (!streamedAnswer.trim() && sessionStillActive) {
         setQaSessions((current) =>
-          hadCurrentSession
-            ? updateQaSession(current, previousSession)
-            : current.filter((session) => session.id !== currentSession.id),
+          removeFailedQaAssistantPlaceholder(current, currentSession.id, nextAssistantMessage.id),
         );
-        setSelectedQaSessionId((current) =>
-          current === currentSession.id ? previousSelectedSessionId : current,
-        );
-        setQaAttachments(previousAttachments);
       }
 
       if (sessionStillActive) {
         setQaError(nextError instanceof Error ? nextError.message : lRef.current('文档问答失败', 'Document QA failed'));
       }
     } finally {
-      setQaRunningSessionIds((current) => current.filter((sessionId) => sessionId !== currentSession.id));
+      if (isRequestCurrent()) {
+        setQaRunningSessionIds((current) => current.filter((sessionId) => sessionId !== currentSession.id));
+      }
     }
   }, [
     activeQaPreset,
@@ -3673,14 +3671,13 @@ function DocumentReaderTab({
     qaReasoningEffort,
     qaInput,
     qaRunningSessionIds,
-    qaSessions,
     resolveQaRequest,
-    selectedQaSessionId,
     selectedExcerpt?.text,
   ]);
 
   useEffect(() => {
     const workspaceId = currentDocument.workspaceId;
+    qaHistoryGenerationRef.current += 1;
 
     if (!isActive || !workspaceId) {
       qaHistoryReadyWorkspaceRef.current = '';
@@ -3708,6 +3705,9 @@ function DocumentReaderTab({
     setQaAttachments([]);
     setQaRunningSessionIds([]);
     setQaError('');
+    return () => {
+      qaHistoryGenerationRef.current += 1;
+    };
   }, [currentDocument.workspaceId, isActive]);
 
   useEffect(() => {

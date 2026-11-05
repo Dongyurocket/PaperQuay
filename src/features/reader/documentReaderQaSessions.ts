@@ -54,6 +54,28 @@ export function removeQaSession(
   };
 }
 
+export function removeFailedQaAssistantPlaceholder(
+  sessions: DocumentChatSession[],
+  sessionId: string,
+  assistantMessageId: string,
+): DocumentChatSession[] {
+  const sessionIndex = sessions.findIndex((session) => session.id === sessionId);
+  if (sessionIndex < 0) return sessions;
+  const session = sessions[sessionIndex];
+  const messageIndex = session.messages.findIndex((message) => message.id === assistantMessageId);
+  if (messageIndex < 0) return sessions;
+  const message = session.messages[messageIndex];
+  if (message.role !== 'assistant' || message.content.trim()) return sessions;
+
+  const messages = session.messages.filter((_, index) => index !== messageIndex);
+  const updatedAt = messageIndex === session.messages.length - 1
+    ? (messages[messages.length - 1]?.createdAt ?? session.createdAt)
+    : session.updatedAt;
+  return sessions.map((item, index) => index === sessionIndex
+    ? { ...session, messages, updatedAt }
+    : item);
+}
+
 export function resolveQaModelPreset(
   presets: QaModelPreset[],
   presetId: string,
