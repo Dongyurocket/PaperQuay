@@ -3,7 +3,9 @@ import {
   ArrowUp,
   Bot,
   Camera,
+  Check,
   Code2,
+  Copy,
   Database,
   ExternalLink,
   FilePlus2,
@@ -38,6 +40,11 @@ import type {
 import { cn } from '../../utils/cn';
 import { formatFileSize } from '../../utils/files';
 import { cleanQaAssistantOutput } from '../../utils/qaOutput';
+import { copyTextToClipboard } from '../../utils/clipboard';
+import {
+  createReaderChatCopyFeedbackController,
+  type ReaderChatCopyFeedback,
+} from './readerChatCopyFeedback';
 import { MarkdownPreview, SectionCard } from './assistantSidebarPrimitives';
 import {
   formatQaContextBadge,
@@ -760,6 +767,11 @@ export function ChatWorkspacePanel({
   const [historyOpen, setHistoryOpen] = useState(false);
   const [composerWidth, setComposerWidth] = useState(0);
   const [compactActionsOpen, setCompactActionsOpen] = useState(false);
+  const [copyFeedback, setCopyFeedback] = useState<ReaderChatCopyFeedback | null>(null);
+  const copyFeedbackControllerRef = useRef<ReturnType<typeof createReaderChatCopyFeedbackController> | null>(null);
+  if (!copyFeedbackControllerRef.current) {
+    copyFeedbackControllerRef.current = createReaderChatCopyFeedbackController(setCopyFeedback);
+  }
   const activePreset =
     qaModelPresets.find((preset) => preset.id === selectedQaPresetId) ?? qaModelPresets[0] ?? null;
   const runningSessionIdSet = useMemo(() => new Set(runningSessionIds), [runningSessionIds]);
@@ -773,6 +785,21 @@ export function ChatWorkspacePanel({
   const selectedSessionRunning = Boolean(
     activeSession && runningSessionIdSet.has(activeSession.id),
   );
+  const handleCopyMessage = useCallback(async (messageId: string, content: string) => {
+    const controller = copyFeedbackControllerRef.current;
+    if (!controller || !content.trim()) return;
+    const requestId = controller.begin();
+
+    try {
+      const copied = await copyTextToClipboard(content, { preserveWhitespace: true });
+      controller.resolve(requestId, {
+        messageId,
+        status: copied ? 'success' : 'error',
+      });
+    } catch {
+      controller.resolve(requestId, { messageId, status: 'error' });
+    }
+  }, []);
   const streamingAssistantMessage =
     selectedSessionRunning && messages[messages.length - 1]?.role === 'assistant';
   const handleCreateSessionClick = useCallback(() => {
@@ -863,6 +890,12 @@ export function ChatWorkspacePanel({
     : compactComposer
     ? composerActions.filter((action) => action.key !== 'image' && action.key !== 'file')
     : [];
+
+  useEffect(() => {
+    const controller = copyFeedbackControllerRef.current;
+    controller?.reset();
+    return () => controller?.invalidate();
+  }, [selectedSessionId]);
 
   useEffect(() => {
     const scrollElement = chatScrollRef.current;
@@ -1302,7 +1335,7 @@ export function ChatWorkspacePanel({
                         ) : null}
 
                         {/* Hover-reveal meta + actions row, below the answer */}
-                        <div className="mt-2 flex items-center gap-2 text-[11px] text-[var(--pq-text-faint)] opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover:opacity-100">
+                        <div className={cn('mt-2 flex flex-wrap items-center gap-2 text-[11px] text-[var(--pq-text-faint)] transition-opacity duration-200 focus-within:opacity-100 group-hover:opacity-100', copyFeedback?.messageId === message.id ? 'opacity-100' : 'opacity-0')}>
                           {message.modelLabel ? (
                             <span className="pq-chip px-2 py-0.5 text-[11px]">
                               {message.modelLabel}
@@ -1330,21 +1363,48 @@ export function ChatWorkspacePanel({
                           ) : null}
                           <span>{formatChatSessionTime(message.createdAt, locale)}</span>
                           {rawMessageContent ? (
-                            <button
-                              type="button"
-                              onClick={() =>
-                                onSaveAssistantMessageAsNote?.({
-                                  ...message,
-                                  content: rawMessageContent,
-                                })
-                              }
-                              disabled={!onSaveAssistantMessageAsNote}
-                              className="ml-auto inline-flex h-6 items-center gap-1 rounded-lg px-2 text-[11px] font-medium text-[var(--pq-text-muted)] transition hover:bg-[var(--pq-hover)] hover:text-[var(--pq-text)] disabled:cursor-not-allowed disabled:opacity-50"
-                              title={l('保存为笔记', 'Save as note')}
-                            >
-                              <FilePlus2 className="h-3 w-3" strokeWidth={1.8} />
-                              {l('保存', 'Save')}
-                            </button>
+                            <div className="ml-auto flex max-w-full flex-wrap items-center justify-end gap-1">
+                              <button
+                                type="button"
+                                onClick={() => void handleCopyMessage(message.id, assistantMessage ? rawMessageContent : message.content)}
+                                className="inline-flex min-h-6 items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-[var(--pq-text-muted)] transition hover:bg-[var(--pq-hover)] hover:text-[var(--pq-text)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--pq-accent)]"
+                                title={l('复制原始内容', 'Copy raw content')}
+                                aria-label={l(
+                                  copyFeedback?.messageId === message.id && copyFeedback.status === 'success' ? '已复制' : '复制原始内容',
+                                  copyFeedback?.messageId === message.id && copyFeedback.status === 'success' ? 'Copied' : 'Copy raw content',
+                                )}
+                              >
+                                {copyFeedback?.messageId === message.id && copyFeedback.status === 'success' ? (
+                                  <Check className="h-3.5 w-3.5" strokeWidth={2} />
+                                ) : (
+                                  <Copy className="h-3.5 w-3.5" strokeWidth={1.8} />
+                                )}
+                                {l(
+                                  copyFeedback?.messageId === message.id && copyFeedback.status === 'success' ? '已复制' : '复制原始内容',
+                                  copyFeedback?.messageId === message.id && copyFeedback.status === 'success' ? 'Copied' : 'Copy raw content',
+                                )}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  onSaveAssistantMessageAsNote?.({
+                                    ...message,
+                                    content: rawMessageContent,
+                                  })
+                                }
+                                disabled={!onSaveAssistantMessageAsNote}
+                                className="inline-flex min-h-6 items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-[var(--pq-text-muted)] transition hover:bg-[var(--pq-hover)] hover:text-[var(--pq-text)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--pq-accent)] disabled:cursor-not-allowed disabled:opacity-50"
+                                title={l('保存为笔记', 'Save as note')}
+                              >
+                                <FilePlus2 className="h-3 w-3" strokeWidth={1.8} />
+                                {l('保存', 'Save')}
+                              </button>
+                            </div>
+                          ) : null}
+                          {copyFeedback?.messageId === message.id && copyFeedback.status === 'error' ? (
+                            <span role="status" className="basis-full text-[11px] text-[var(--pq-danger)]">
+                              {l('复制失败，请重试', 'Copy failed. Try again.')}
+                            </span>
                           ) : null}
                         </div>
                       </div>
@@ -1380,9 +1440,34 @@ export function ChatWorkspacePanel({
                           </div>
                         ) : null}
 
-                        <span className="mt-1 px-1 text-[11px] text-[var(--pq-text-faint)] opacity-0 transition-opacity duration-200 group-hover:opacity-100">
-                          {formatChatSessionTime(message.createdAt, locale)}
-                        </span>
+                        <div className={cn('mt-1 flex max-w-full flex-wrap items-center justify-end gap-1 transition-opacity duration-200 focus-within:opacity-100 group-hover:opacity-100', copyFeedback?.messageId === message.id ? 'opacity-100' : 'opacity-0')}>
+                          <span className="px-1 text-[11px] text-[var(--pq-text-faint)]">
+                            {formatChatSessionTime(message.createdAt, locale)}
+                          </span>
+                          {rawMessageContent ? (
+                            <button
+                              type="button"
+                              onClick={() => void handleCopyMessage(message.id, assistantMessage ? rawMessageContent : message.content)}
+                              className="pq-icon-button h-6 w-6 rounded-lg text-[var(--pq-text-muted)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--pq-accent)]"
+                              title={l('复制消息', 'Copy message')}
+                              aria-label={l(
+                                copyFeedback?.messageId === message.id && copyFeedback.status === 'success' ? '已复制' : '复制消息',
+                                copyFeedback?.messageId === message.id && copyFeedback.status === 'success' ? 'Copied' : 'Copy message',
+                              )}
+                            >
+                              {copyFeedback?.messageId === message.id && copyFeedback.status === 'success' ? (
+                                <Check className="h-3.5 w-3.5" strokeWidth={2} />
+                              ) : (
+                                <Copy className="h-3.5 w-3.5" strokeWidth={1.8} />
+                              )}
+                            </button>
+                          ) : null}
+                          {copyFeedback?.messageId === message.id && copyFeedback.status === 'error' ? (
+                            <span role="status" className="basis-full text-right text-[11px] text-[var(--pq-danger)]">
+                              {l('复制失败，请重试', 'Copy failed. Try again.')}
+                            </span>
+                          ) : null}
+                        </div>
                       </div>
                     )}
                   </div>

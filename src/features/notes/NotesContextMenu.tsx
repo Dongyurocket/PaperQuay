@@ -1,4 +1,5 @@
 import { hasActiveTextSelection, isEditableContextTarget } from './noteContextMenuTargets';
+import { copyTextToClipboard as copySharedTextToClipboard } from '../../utils/clipboard';
 
 /**
  * 兼容 shim：菜单实现已合并到 `src/ui/menu.tsx`，文本选择判定已抽到
@@ -16,28 +17,7 @@ export function shouldUseNativeTextContextMenu(target: EventTarget | null) {
   return isEditableContextTarget(target) || hasActiveTextSelection(target);
 }
 
-export async function copyTextToClipboard(value: string) {
-  const text = value.trim();
-  if (!text) return;
-
-  if (window.paperquay?.clipboard?.writeText) {
-    window.paperquay.clipboard.writeText(text);
-    return;
-  }
-
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(text);
-    return;
-  }
-
-  const textarea = document.createElement('textarea');
-  textarea.value = text;
-  textarea.setAttribute('readonly', 'true');
-  textarea.style.position = 'fixed';
-  textarea.style.left = '-9999px';
-  textarea.style.top = '-9999px';
-  document.body.appendChild(textarea);
-  textarea.select();
-  document.execCommand('copy');
-  textarea.remove();
+/** Preserve the existing menu callback's Promise<void> signature. */
+export async function copyTextToClipboard(value: string): Promise<void> {
+  await copySharedTextToClipboard(value);
 }
