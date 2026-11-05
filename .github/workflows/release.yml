@@ -126,9 +126,6 @@ jobs:
           - name: macOS x64
             platform: macos-15-intel
             args: "--mac --x64 --publish never"
-          - name: macOS arm64
-            platform: macos-15
-            args: "--mac --arm64 --publish never"
 
     steps:
       - name: Checkout

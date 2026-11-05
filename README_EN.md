@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.4.17-2563eb?style=flat-square" alt="Version v0.4.17">
+  <img src="https://img.shields.io/badge/version-v0.4.18-2563eb?style=flat-square" alt="Version v0.4.18">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-4b5563?style=flat-square" alt="Windows macOS Linux">
   <img src="https://img.shields.io/badge/built%20with-Electron-47848f?style=flat-square" alt="Electron">
   <img src="https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-0f766e?style=flat-square" alt="React TypeScript">
@@ -54,6 +54,13 @@
 ---
 
 ## Latest Update
+
+### v0.4.18 - Failed questions stay, and chat messages can be copied
+
+- **Questions survive failed answers**: only the empty assistant placeholder is removed. Questions, message attachments, history, new drafts and current conversation selection are preserved; requests from an earlier document activation cannot overwrite current state.
+- **Copy individual messages**: both sidebar and floating chat can copy user messages or cleaned assistant Markdown / HTML source, preserving formulas, code and original citation labels, with inline success and failure feedback.
+- **Release platforms**: future releases retain Windows x64, Linux x64 and macOS x64; macOS arm64 installers are no longer published.
+- **Download**: [v0.4.18 release](https://github.com/Dongyurocket/PaperQuay/releases/tag/app-v0.4.18).
 
 ### v0.4.17 - UI consistency pass and a library card fix
 

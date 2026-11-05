@@ -30,7 +30,7 @@
 
 ### 1.1 安装
 
-1. 从[个人 Fork 的 GitHub Releases](https://github.com/Dongyurocket/PaperQuay/releases) 下载对应平台的安装包：Windows x64 `.exe`、macOS x64 / arm64 `.dmg`，或 Linux x64 `.AppImage` / `.deb` / `.tar.gz`。macOS 按设备架构选择，更新时需从发布页手动下载。
+1. 从[个人 Fork 的 GitHub Releases](https://github.com/Dongyurocket/PaperQuay/releases) 下载对应平台的安装包：Windows x64 `.exe`、macOS x64 `.dmg`，或 Linux x64 `.AppImage` / `.deb` / `.tar.gz`。自 0.4.18 起停止发布 macOS arm64 安装包，历史版本资产保留。macOS 更新时需从发布页手动下载。
 2. 安装后首次启动，应用会自动在系统的用户数据目录下创建 PaperQuay 数据目录，不需要额外初始化步骤。
 3. 从源码运行（开发者）要求 Node.js 18+，使用 `npm ci` 安装依赖、`npm run dev` 启动桌面开发模式；这部分不属于本手册范围。
 

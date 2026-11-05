@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.4.17-2563eb?style=flat-square" alt="Version v0.4.17">
+  <img src="https://img.shields.io/badge/version-v0.4.18-2563eb?style=flat-square" alt="Version v0.4.18">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-4b5563?style=flat-square" alt="Windows macOS Linux">
   <img src="https://img.shields.io/badge/built%20with-Electron-47848f?style=flat-square" alt="Electron">
   <img src="https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-0f766e?style=flat-square" alt="React TypeScript">
@@ -55,6 +55,13 @@
 ---
 
 ## 近期更新
+
+### v0.4.18 - 问答失败保留问题与聊天复制
+
+- **失败后问题不丢失**：只移除本次空助手占位，保留问题、消息附件和历史，不覆盖新草稿或会话选择；切换文档再返回后，旧请求不能覆盖当前状态。
+- **逐条复制消息**：侧栏与浮动问答可复制用户消息或助手 Markdown / HTML 源码，保留公式、代码与原引用编号，成功和失败都有行内反馈。
+- **发行平台**：后续 Release 保留 Windows x64、Linux x64 和 macOS x64，停止发布 macOS arm64 安装包。
+- **下载**：[v0.4.18 Release](https://github.com/Dongyurocket/PaperQuay/releases/tag/app-v0.4.18)。
 
 ### v0.4.17 - 全应用界面一致性与文库卡片修复
 
