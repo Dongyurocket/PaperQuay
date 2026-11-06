@@ -599,4 +599,5 @@ module.exports = {
   normalizeOptions,
   pathInside,
   safeRelativePath,
+  safeSegment,
 };

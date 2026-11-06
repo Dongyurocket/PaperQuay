@@ -285,6 +285,11 @@ app.whenReady().then(async () => {
     if (restoreResult?.error) {
       throw Object.assign(new Error('A pending backup restore record is invalid. Local data was not opened; inspect PaperQuay-restore/pending.error.json.'), { code: 'PENDING_CHECKSUM_INVALID' });
     }
+    try {
+      await backupImport.repairRestoredBackupPaths(appPaths);
+    } catch (error) {
+      console.error('[paperquay] Failed to repair paths left by an earlier backup restore.', error);
+    }
     await backupImport.cleanupOrphanBackupImports(appPaths);
     await require('./backend/backupExport.cjs').cleanupOrphanBackupStages(appPaths);
     if (restoreResult?.rendererRestorePayload) {

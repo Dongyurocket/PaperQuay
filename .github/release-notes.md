@@ -1,12 +1,13 @@
 # PaperQuay v{{VERSION}}
 
-## Encrypted backup and migration
+## Backup restore fixes
 
-- Export and import a password-protected, single-file `.pqbackup` archive. Archives use AES-256-GCM encryption with a password-derived key; forgotten passwords cannot be recovered.
-- The migration preset includes application configuration and API keys, the library/notes/RAG databases, PDFs, Agent memory and conversation history, review drafts, graph relations, reader state, annotations, the notes vault, and MinerU-derived caches.
-- Based on the current sample, a full migration package is about 12.2 GiB. A routine backup is about 2.3 GiB and excludes the RAG database and MinerU cache.
-- Imports validate and stage the package before an offline restart applies it. Pre-import data is retained for rollback and can be removed from Settings after verification.
-- **Breaking change:** WebDAV backup has been removed; this version cannot read old remote backups. Restore with PaperQuay 0.4.x before upgrading, then export a `.pqbackup` archive. Remote files are not deleted automatically.
+- **MinerU results now load after restoring a `.pqbackup`.** Imports no longer keep the package's `default/` or `custom-xxxxxxxx/` folder level, so parse caches land where the reader looks for them. The cache root that was active on the source machine takes priority; duplicate cache folders are skipped as a whole.
+- **PDFs of papers you had opened on the source machine are found again.** Original and translated PDFs are rebound by attachment ID to the restored files, and reading history is rewritten to match. Stored paths written with forward slashes or different letter case also match.
+- **Data already restored with 0.4.19 is repaired automatically.** On first launch after upgrading, PaperQuay moves MinerU cache folders up one level and relinks attachments marked as missing. This runs once and does not touch profiles that never imported a backup. Archives exported by 0.4.19 do not need to be re-exported and can be imported again.
+- Restore folders whose parent is a junction (for example `Documents\BaiduSyncdisk`) are resolved to their real path instead of being rejected; unsafe-destination errors now explain the cause.
+- The restore summary counts restored, unresolved, and not-in-package attachments. Attachment warnings are listed first in the backup preview.
+- Restored attachments keep their original display file names.
 
 ## Downloads
 
@@ -14,25 +15,26 @@
 - Linux x64: `.AppImage`, `.deb`, `.tar.gz`
 - macOS x64: `.dmg`
 
-**Starting with v{{VERSION}}, macOS arm64 installers are not built or published.** Historical release assets remain available.
+macOS arm64 installers are not built or published (since v0.4.18). Historical release assets remain available.
 
 ## Verification
 
-- `npm run build` and all 936 automated tests pass.
-- Windows x64 Electron packaging and MCP bundle generation pass. Isolated-userData desktop export and encrypted manifest preview pass.
-- Full restart-based UI import/rollback and production-scale 12.2 GiB power-loss testing were not performed in this release preparation; automated temporary-SQLite/PDF state-machine tests cover the corresponding core behavior.
+- `npm run build` and all 944 automated tests pass, including 8 new cross-directory restore regression tests.
+- Re-running the pre-fix reproduction (real export with a junction library folder, default and custom MinerU roots, five attachment variants) now restores every attachment and places MinerU results in the correct folder.
+- A real cross-machine desktop import is pending user acceptance.
 
 ---
 
 # PaperQuay v{{VERSION}}
 
-## 加密备份与数据迁移
+## 备份恢复修复
 
-- 支持导出和导入密码保护的 `.pqbackup` 单文件，使用 AES-256-GCM 与密码派生密钥加密；密码遗忘后无法找回。
-- 完整迁移预设包含应用配置与 API Key、文献库/笔记/RAG 数据库、PDF、Agent 记忆与会话历史、综述草稿、知识图谱关系、阅读器状态、批注、笔记 vault 和 MinerU 派生缓存。
-- 按当前样本估算，完整包约 12.2 GiB；日常备份约 2.3 GiB，不含 RAG 数据库和 MinerU 缓存。
-- 导入会先校验并暂存，随后通过离线重启应用；导入前数据保留为回滚点，确认无误后可在设置中删除。
-- **破坏性变更：**新版移除 WebDAV，不能读取旧远端备份。升级前需使用 PaperQuay 0.4.x 恢复旧备份，再导出 `.pqbackup`。新版不会自动删除远端文件。
+- **恢复 `.pqbackup` 后 MinerU 解析结果可以正常读取。**导入时去掉包内 `default/`、`custom-xxxxxxxx/` 这一级目录，缓存装到阅读器查找的位置；源机生效的缓存根优先，同名缓存目录整目录跳过。
+- **源机上打开过的文献，PDF 可以重新找到。**原文和译文按附件 ID 改绑到恢复后的文件，阅读历史同步改写；`stored_path` 含正斜杠或大小写不同也能匹配。
+- **已用 0.4.19 恢复的数据会自动修复。**升级后首次启动时一次性上移 MinerU 缓存目录，并找回标记为缺失的附件；只执行一次，不影响未导入过备份的数据。0.4.19 导出的备份包无需重新导出，可直接重新导入。
+- 恢复目录父级经过 junction（如 `Documents\BaiduSyncdisk`）时解析为真实路径，不再直接拒绝；不安全目录的报错说明具体原因。
+- 恢复摘要记录附件已恢复、未找回和包内缺失的数量；备份预览中附件类警告优先显示。
+- 恢复后保留附件原文件名显示。
 
 ## 下载平台
 
@@ -40,10 +42,10 @@
 - Linux x64：`.AppImage`、`.deb`、`.tar.gz`
 - macOS x64：`.dmg`
 
-**自 v{{VERSION}} 起不再构建或发布 macOS arm64 安装包。**历史版本资产保留。
+自 v0.4.18 起不再构建或发布 macOS arm64 安装包，历史版本资产保留。
 
 ## 验证
 
-- `npm run build` 与全部 936 项自动化测试通过。
-- Windows x64 Electron 打包和 MCP bundle 生成通过；隔离 userData 下的桌面导出与加密清单预览通过。
-- 本次未进行基于重启的完整桌面导入/回滚及 12.2 GiB 生产规模断电测试；对应核心状态机由临时 SQLite/PDF 自动化测试覆盖。
+- `npm run build` 与全部 944 项自动化测试通过，其中新增 8 项跨目录恢复回归测试。
+- 用修复前的复现脚本（真实导出，含 junction 库目录、默认与自定义两个 MinerU 根、5 种附件）重跑：全部附件可找回，MinerU 结果位于正确目录。
+- 真实跨机器桌面导入待用户验收。

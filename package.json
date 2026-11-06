@@ -1,7 +1,7 @@
 {
   "name": "paperquay",
   "private": true,
-  "version": "0.4.19",
+  "version": "0.4.20",
   "description": "AI-assisted desktop literature reader and library manager.",
   "author": {
     "name": "PaperQuay Developers",
@@ -105,12 +105,17 @@
       {
         "from": "packaging/mcp",
         "to": "paperquay-mcp",
-        "filter": ["**/*", "!**/node_modules/**"]
+        "filter": [
+          "**/*",
+          "!**/node_modules/**"
+        ]
       },
       {
         "from": "packaging/mcp/node_modules",
         "to": "paperquay-mcp/node_modules",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "asar": true,

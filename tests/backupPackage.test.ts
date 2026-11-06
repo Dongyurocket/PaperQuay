@@ -122,7 +122,11 @@ test('applies a prepared restore atomically and acknowledges only the matching r
     assert.equal(result.dataDir, temp.dataDir);
     assert.equal(result.rendererRestorePayload.restoreId, id);
     assert.equal(await readFile(path.join(paths.oldDataDir, 'old-marker.txt'), 'utf8'), 'old');
-    assert.deepEqual(JSON.parse(await readFile(path.join(temp.dataDir, '.settings', 'renderer-restore.json'), 'utf8')), payload);
+    // stage 阶段已完成路径映射；写给 preload 的载荷清空映射表，避免二次映射。
+    assert.deepEqual(
+      JSON.parse(await readFile(path.join(temp.dataDir, '.settings', 'renderer-restore.json'), 'utf8')),
+      { ...payload, pathMap: {}, rootMap: {} },
+    );
     assert.equal(getBackupStatus(temp.appPaths).pendingRestore, false);
 
     assert.deepEqual(await handleRendererRestoreAck(temp.appPaths, { restoreId: 'stale-id', failedKeys: [] }), { ok: true, ignored: true });

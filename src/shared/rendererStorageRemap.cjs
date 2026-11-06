@@ -264,4 +264,4 @@ function remapRendererStorage(storageRecord, options = {}) {
   return { state, warnings };
 }
 
-module.exports = { remapRendererStorage };
+module.exports = { canonicalPath, isWindows, remapRendererStorage };

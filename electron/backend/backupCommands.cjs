@@ -21,6 +21,7 @@ const ERROR_MESSAGES = {
   RESTORE_LOCK_CONFLICT: '恢复已暂存，但应用未能自动重启；请手动启动 PaperQuay。',
   BACKUP_DESTINATION_EXISTS: '目标文件已存在，请选择新的文件名。',
   INVALID_DESTINATION: '备份文件不能保存在 PaperQuay 数据或源目录中。',
+  UNSAFE_DESTINATION: '恢复目录不安全：不能位于 PaperQuay 数据目录、旧文献库、MinerU 缓存或笔记 Vault 内，目标目录本身也不能是链接。请改选一个新的空目录。',
   INVALID_PASSWORD: '请输入有效的备份密码。',
 };
 

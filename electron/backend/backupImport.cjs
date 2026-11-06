@@ -6,8 +6,8 @@ const fsp = require('node:fs/promises');
 const path = require('node:path');
 const { DatabaseSync } = require('./nodeSqlite.cjs');
 const defaultContainer = require('./backupContainer.cjs');
-const { remapRendererStorage } = require('../../src/shared/rendererStorageRemap.cjs');
-const { pathInside, safeRelativePath } = require('./backupSources.cjs');
+const { canonicalPath, remapRendererStorage } = require('../../src/shared/rendererStorageRemap.cjs');
+const { pathInside, safeRelativePath, safeSegment } = require('./backupSources.cjs');
 const PACKAGE_VERSION = require('../../package.json').version;
 const SUPPORTED_SCHEMA = { library: 1, notes: 1, rag: 1 };
 const RESTORE_ROOT_NAME = 'PaperQuay-restore';
@@ -197,6 +197,33 @@ async function assertNoLinkPath(target) {
   }
 }
 
+// 目标路径的父级若经过 junction/符号链接（如 Documents\BaiduSyncdisk → C:\BaiduSyncdisk），
+// 先解析成真实路径，再用真实路径做全部安全校验与写入；目标目录自身是链接时保持原样，由 assertNoLinkPath 拒绝。
+function resolveLinkedParents(target) {
+  const resolved = path.resolve(target);
+  try {
+    if (fs.lstatSync(resolved).isSymbolicLink()) return resolved;
+    return fs.realpathSync.native(resolved);
+  } catch {}
+  let ancestor = path.dirname(resolved);
+  const remainder = [path.basename(resolved)];
+  while (ancestor !== path.dirname(ancestor)) {
+    try {
+      fs.statSync(ancestor);
+      return path.join(fs.realpathSync.native(ancestor), ...remainder);
+    } catch {
+      remainder.unshift(path.basename(ancestor));
+      ancestor = path.dirname(ancestor);
+    }
+  }
+  return resolved;
+}
+
+function realpathOrSelf(value) {
+  if (!value) return '';
+  try { return fs.realpathSync.native(value); } catch { return value; }
+}
+
 function sourceRootValue(roots, key) {
   const value = roots?.[key];
   if (typeof value !== 'string' || !value.trim() || value.trim() === '.') return null;
@@ -276,8 +303,57 @@ function addMappedPath(pathMap, value, rootMap) {
   if (mapped && mapped !== value) pathMap[value] = mapped;
 }
 
+function canonicalKey(value) {
+  if (typeof value !== 'string' || !value) return '';
+  const windows = isWindowsAbsolutePath(value);
+  return canonicalPath(windows ? path.win32.normalize(value) : path.posix.normalize(value), windows);
+}
+
+// 包内条目给出的精确映射必须优先于由阅读历史按根推导的映射。
+// 推导值只换根、保留原文件名，而包内 PDF 已改名为 <paperId>-<attachmentId>.pdf；
+// 若推导值覆盖精确值（含大小写/分隔符不同的同一路径），附件会被绑到不存在的文件。
+function mergeEntryPathMap(derivedPathMap, entryPathMap) {
+  const entryKeys = new Set(Object.keys(entryPathMap || {}).map(canonicalKey));
+  const merged = {};
+  for (const [source, target] of Object.entries(derivedPathMap || {})) {
+    if (!entryKeys.has(canonicalKey(source))) merged[source] = target;
+  }
+  return Object.assign(merged, entryPathMap || {});
+}
+
+function createCanonicalLookup(pathMap) {
+  const index = new Map();
+  for (const [source, target] of Object.entries(pathMap || {})) {
+    const key = canonicalKey(source);
+    if (key && typeof target === 'string' && target && !index.has(key)) index.set(key, target);
+  }
+  return (value) => index.get(canonicalKey(value)) || null;
+}
+
+// stage 阶段已用 pathMap/rootMap 映射过阅读状态；这里只按数据库最终改绑结果补一次精确改写，
+// 然后清空映射表，避免 preload 再映射一次（映射非幂等，源根与目标根嵌套时会多嵌一层）。
+function finalizeRendererPayload(payload, reboundPaths) {
+  if (!isRecord(payload) || !isRecord(payload.state)) return payload;
+  const rebound = isRecord(reboundPaths) ? reboundPaths : {};
+  const remapped = Object.keys(rebound).length
+    ? remapRendererStorage(payload.state, {
+      pathMap: rebound,
+      rootMap: {},
+      platform: process.platform,
+      hasMineruCache: payload.hasMineruCache === true,
+    })
+    : { state: payload.state, warnings: [] };
+  return {
+    ...payload,
+    state: remapped.state,
+    pathMap: {},
+    rootMap: {},
+    warnings: [...(Array.isArray(payload.warnings) ? payload.warnings : []), ...remapped.warnings],
+  };
+}
+
 function buildRendererExactPathMap(state, rootMap, existingPathMap = {}) {
-  const pathMap = { ...existingPathMap };
+  const pathMap = {};
   const history = readJsonValue(state?.['paper-reader-paper-history-v1']);
   if (isRecord(history)) {
     for (const record of Object.values(history)) {
@@ -304,7 +380,7 @@ function buildRendererExactPathMap(state, rootMap, existingPathMap = {}) {
     addMappedPath(pathMap, settings.mineruCacheDir, rootMap);
     addMappedPath(pathMap, settings.remotePdfDownloadDir, rootMap);
   }
-  return pathMap;
+  return mergeEntryPathMap(pathMap, existingPathMap);
 }
 
 function readJsonValue(value) {
@@ -367,6 +443,29 @@ function deriveEntryMaps(manifest, targets, warnings) {
     warnings.push('Vault entries were not restored because no notes vault target was selected.');
   }
   return pathMap;
+}
+
+// 按 attachmentId 记录每个附件在目标机上的安装位置，改绑不依赖 stored_path 文本。
+function deriveAttachmentMap(manifest, targets) {
+  const attachmentMap = {};
+  for (const entry of manifest.entries) {
+    if (!['library-pdf', 'translated-pdf'].includes(entry.kind) || !entry.attachmentId) continue;
+    const directory = entry.kind === 'library-pdf' ? targets.libraryStorageDir : targets.translatedPdfDir;
+    if (directory) attachmentMap[String(entry.attachmentId)] = path.join(directory, path.basename(String(entry.packagePath)));
+  }
+  return attachmentMap;
+}
+
+// 与导出端命名一致：<safeSegment(paperId)>-<safeSegment(attachmentId)><ext>（backupSources.cjs）。
+function renamedAttachmentPath(attachment, targets) {
+  const directory = attachment.kind === 'translated-pdf' ? targets.translatedPdfDir : targets.libraryStorageDir;
+  if (!directory || !attachment.paper_id || !attachment.id) return null;
+  const extension = path.extname(String(attachment.stored_path || '')).slice(0, 12) || '.pdf';
+  return path.join(directory, `${safeSegment(attachment.paper_id, 'paper')}-${safeSegment(attachment.id, 'attachment')}${extension}`);
+}
+
+function isRegularFile(filePath) {
+  try { return fs.statSync(filePath).isFile(); } catch { return false; }
 }
 
 function openDatabase(filePath, { rag = false, readOnly = false } = {}) {
@@ -451,8 +550,11 @@ function dbTransaction(db, callback) {
   try { callback(); db.exec('COMMIT'); } catch (error) { try { db.exec('ROLLBACK'); } catch {} throw error; }
 }
 
-function updateLibraryPaths(databasePath, { targets, pathMap, warnings }) {
+function updateLibraryPaths(databasePath, { targets, pathMap, attachmentMap = {}, warnings }) {
   const db = openDatabase(databasePath);
+  const lookup = createCanonicalLookup(pathMap);
+  const rebound = {};
+  const counts = { attachmentsRestored: 0, attachmentsUnresolved: 0, attachmentsNotInPackage: 0 };
   try {
     dbTransaction(db, () => {
       const settings = Object.fromEntries(db.prepare('SELECT key, value_json FROM library_settings').all().map((row) => {
@@ -467,21 +569,45 @@ function updateLibraryPaths(databasePath, { targets, pathMap, warnings }) {
       const writeSetting = db.prepare('INSERT INTO library_settings (key, value_json) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json');
       for (const [key, value] of Object.entries(settings)) writeSetting.run(key, JSON.stringify(value));
 
-      const attachments = db.prepare('SELECT id, stored_path, original_path, content_hash FROM attachments').all();
-      const update = db.prepare('UPDATE attachments SET stored_path=?, relative_path=?, file_name=?, file_size=?, missing=?, original_path=?, content_hash=? WHERE id=?');
+      const attachments = db.prepare('SELECT id, paper_id, kind, stored_path, original_path, content_hash FROM attachments').all();
+      const update = db.prepare('UPDATE attachments SET stored_path=?, relative_path=?, file_size=?, missing=?, original_path=?, content_hash=? WHERE id=?');
       for (const attachment of attachments) {
-        const mappedPath = pathMap[attachment.stored_path] || mapByRoot(attachment.stored_path, targets.rootMap) || attachment.stored_path;
-        const stat = fs.existsSync(mappedPath) ? fs.statSync(mappedPath) : null;
-        const originalPath = attachment.original_path && (pathMap[attachment.original_path] || mapByRoot(attachment.original_path, targets.rootMap)) || attachment.original_path;
+        const storedPath = String(attachment.stored_path || '');
+        const fromEntry = attachmentMap[String(attachment.id)] || null;
+        const fromPath = lookup(storedPath);
+        const fromRename = renamedAttachmentPath(attachment, targets);
+        const fromRoot = mapByRoot(storedPath, targets.rootMap);
+        // 依次尝试：包内条目 → 规范化路径映射 → 导出端改名规则 → 按根映射；取第一个实际存在的文件。
+        // 0.4.19 写下的 pending.pathMap 可能已被阅读历史污染，改名规则兜底可绕过。
+        const candidates = [fromEntry, fromPath, fromRename, fromRoot].filter(Boolean);
+        const resolvedPath = candidates.find(isRegularFile) || null;
+        const mappedPath = resolvedPath || fromEntry || fromPath || fromRoot || storedPath;
+        const stat = resolvedPath ? fs.statSync(resolvedPath) : null;
+        if (stat) counts.attachmentsRestored += 1;
+        else if (!fromEntry && !fromPath) {
+          counts.attachmentsNotInPackage += 1;
+          warnings.push({ code: 'NOT_IN_PACKAGE', kind: attachment.kind === 'translated-pdf' ? 'translated-pdf' : 'library-pdf', detail: String(attachment.id) });
+        } else {
+          counts.attachmentsUnresolved += 1;
+          warnings.push({ code: 'ATTACHMENT_UNRESOLVED', kind: attachment.kind === 'translated-pdf' ? 'translated-pdf' : 'library-pdf', detail: String(attachment.id) });
+        }
+        if (resolvedPath) {
+          for (const previous of [storedPath, fromPath, fromRoot]) {
+            if (previous && previous !== resolvedPath) rebound[previous] = resolvedPath;
+          }
+        }
+        const originalPath = attachment.original_path && (lookup(attachment.original_path) || mapByRoot(attachment.original_path, targets.rootMap)) || attachment.original_path;
         const mappedHash = stat ? hashFile(mappedPath) : null;
         let contentHash = attachment.content_hash;
         if (!contentHash && mappedHash) contentHash = mappedHash;
         else if (contentHash && mappedHash && contentHash !== mappedHash) warnings.push({ code: 'CONTENT_HASH_MISMATCH', kind: 'attachment', detail: String(attachment.id) });
         const relative = stat && pathInside(targets.libraryStorageDir, mappedPath) ? path.relative(targets.libraryStorageDir, mappedPath).split(path.sep).join('/') : null;
-        update.run(mappedPath, relative, stat ? path.basename(mappedPath) : path.basename(mappedPath), stat?.size || 0, stat ? 0 : 1, originalPath || null, contentHash || null, attachment.id);
+        // file_name 保留原值：包内改名只是为了避免冲突，不应改变界面显示的文件名。
+        update.run(mappedPath, relative, stat?.size || 0, stat ? 0 : 1, originalPath || null, contentHash || null, attachment.id);
       }
     });
   } finally { db.close(); }
+  return { rebound, counts };
 }
 
 function hashFile(filePath) {
@@ -577,16 +703,17 @@ async function stageBackupImport(context, input, dependencies) {
   if (typeof packagePath !== 'string' || !path.isAbsolute(packagePath)) throw codedError('INVALID_PACKAGE', 'Package path must be absolute');
   const manifest = assertCompatibleManifest((await container.inspectBackupPackage({ packagePath, password })).manifest);
   const roots = { sourceRoots: manifest.sourceRoots || {}, resolvedRoots: manifest.resolvedRoots || {} };
-  const libraryStorageDir = validateAbsoluteTarget(requestedTargets.libraryStorageDir, 'libraryStorageDir');
-  const translatedPdfDir = validateAbsoluteTarget(requestedTargets.translatedPdfDir || path.join(libraryStorageDir, 'translated-pdfs'), 'translatedPdfDir');
+  const libraryStorageDir = resolveLinkedParents(validateAbsoluteTarget(requestedTargets.libraryStorageDir, 'libraryStorageDir'));
+  const translatedPdfDir = resolveLinkedParents(validateAbsoluteTarget(requestedTargets.translatedPdfDir || path.join(libraryStorageDir, 'translated-pdfs'), 'translatedPdfDir'));
   const hasVault = manifest.entries.some((entry) => entry.kind === 'notes-vault');
-  const notesVaultDir = requestedTargets.notesVaultDir ? validateAbsoluteTarget(requestedTargets.notesVaultDir, 'notesVaultDir') : '';
+  const notesVaultDir = requestedTargets.notesVaultDir ? resolveLinkedParents(validateAbsoluteTarget(requestedTargets.notesVaultDir, 'notesVaultDir')) : '';
   const restoreId = `${new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14)}-${crypto.randomBytes(4).toString('hex')}`;
   const stagingDir = path.join(base.restoreRoot, restoreId);
   const stagingDataDir = path.join(stagingDir, 'data');
   const stagingAssetsDir = path.join(path.dirname(libraryStorageDir), `.pq-import-${restoreId}`);
   const oldLibrarySettings = readLibrarySettings(base.libraryDatabasePath);
   const previousLibraryStorageDir = oldLibrarySettings.storageDir || '';
+  const previousLibraryRealDir = realpathOrSelf(previousLibraryStorageDir);
   const stamp = Date.now();
   const oldLibraryDir = isExistingDirectory(libraryStorageDir)
     ? `${libraryStorageDir}.pre-import-${stamp}`
@@ -616,7 +743,7 @@ async function stageBackupImport(context, input, dependencies) {
   const sourceVaultRoots = [sourceRootValue(roots.sourceRoots, 'notesVaultDir'), sourceRootValue(roots.resolvedRoots, 'notesVaultDir')].filter(Boolean);
   for (const candidate of [packagePath, libraryStorageDir, translatedPdfDir, notesVaultDir].filter(Boolean)) {
     const allowedOldLibraryTarget = candidate === libraryStorageDir || candidate === translatedPdfDir;
-    const insidePreviousLibrary = isUnder(candidate, previousLibraryStorageDir) && !allowedOldLibraryTarget;
+    const insidePreviousLibrary = (isUnder(candidate, previousLibraryStorageDir) || isUnder(candidate, previousLibraryRealDir)) && !allowedOldLibraryTarget;
     if (isUnder(candidate, base.dataDir) || insidePreviousLibrary ||
         sourceMineruRoots.some((root) => isUnder(candidate, root)) || sourceVaultRoots.some((root) => isUnder(candidate, root))) {
       throw codedError('UNSAFE_DESTINATION', 'Package and restore destinations cannot be inside data, library, MinerU cache or vault roots');
@@ -671,6 +798,7 @@ async function stageBackupImport(context, input, dependencies) {
       delete packageState['paper-reader-secrets-v1'];
     }
     const rootMap = makeRootMap(manifest, targets);
+    const attachmentMap = deriveAttachmentMap(manifest, targets);
     const pathMap = buildRendererExactPathMap(packageState, rootMap, deriveEntryMaps(manifest, targets, warnings));
     const remapped = remapRendererStorage(isRecord(packageState) ? packageState : {}, {
       pathMap,
@@ -723,6 +851,7 @@ async function stageBackupImport(context, input, dependencies) {
       resolvedRoots: manifest.resolvedRoots || {},
       pathMap,
       rootMap,
+      attachmentMap,
       warnings,
       restorePayload,
       mode: 'import',
@@ -797,8 +926,59 @@ async function installAssets(pending) {
   }
   await copyTreeNoOverwrite(libraryStage, pending.targets.libraryStorageDir, pending.warnings);
   await copyTreeNoOverwrite(translatedStage, pending.targets.translatedPdfDir, pending.warnings);
-  if (await exists(mineruStage)) await copyTreeNoOverwrite(mineruStage, pending.targets.mineruCacheDir, pending.warnings);
+  if (await exists(mineruStage)) await installMineruCache(mineruStage, pending.targets.mineruCacheDir, pending.sourceRoots, pending.warnings);
   if (pending.targets.notesVaultDir && await exists(vaultStage)) await mergeVault(vaultStage, pending.targets.notesVaultDir, pending.warnings);
+}
+
+const MINERU_ROOT_KEY = /^(?:default|custom-[0-9a-f]{8})$/;
+
+// 与导出端 backupSources.cjs 的 custom-<sha256 前 8 位> 算法一致，用于识别源机实际生效的缓存根。
+function activeMineruRootKey(sourceRoots) {
+  const configured = sourceRootValue(sourceRoots, 'mineruCacheDir');
+  if (!configured) return 'default';
+  return `custom-${crypto.createHash('sha256').update(String(configured)).digest('hex').slice(0, 8)}`;
+}
+
+// 包内 MinerU 缓存按源根分开存放：derived/mineru/<default|custom-xxxxxxxx>/<缓存目录>/...。
+// 阅读器只在 <mineruCacheDir>/<缓存目录> 下查找，所以安装时必须去掉根 key 这一层。
+// 先装源机生效的根，再装其余根；同名缓存目录整目录跳过，避免一个目录混入两个根的文件。
+async function installMineruCache(mineruStage, targetDir, sourceRoots, warnings) {
+  const rootEntries = await fsp.readdir(mineruStage, { withFileTypes: true });
+  const activeKey = activeMineruRootKey(sourceRoots);
+  const rootNames = [];
+  for (const entry of rootEntries) {
+    if (entry.isDirectory() && MINERU_ROOT_KEY.test(entry.name)) rootNames.push(entry.name);
+    else warnings.push({ code: 'MINERU_ROOT_UNKNOWN', kind: 'mineru', originalName: entry.name });
+  }
+  const rank = (name) => (name === activeKey ? 0 : name === 'default' ? 1 : 2);
+  rootNames.sort((left, right) => rank(left) - rank(right) || left.localeCompare(right));
+  await fsp.mkdir(targetDir, { recursive: true });
+  for (const rootName of rootNames) {
+    const rootDir = path.join(mineruStage, rootName);
+    for (const child of await fsp.readdir(rootDir, { withFileTypes: true })) {
+      if (child.name.startsWith('.')) continue;
+      const source = path.join(rootDir, child.name);
+      const destination = path.join(targetDir, child.name);
+      if (child.isDirectory()) {
+        if (await exists(destination)) {
+          warnings.push({ code: 'MINERU_CACHE_CONFLICT', kind: 'mineru', originalName: child.name });
+          continue;
+        }
+        await copyTreeNoOverwrite(source, destination, warnings, child.name);
+      } else if (child.isFile()) {
+        await copyTreeNoOverwriteFile(source, destination, warnings, child.name);
+      }
+    }
+  }
+}
+
+async function copyTreeNoOverwriteFile(source, destination, warnings, relative) {
+  try {
+    await fsp.copyFile(source, destination, fs.constants.COPYFILE_EXCL);
+  } catch (error) {
+    if (error.code !== 'EEXIST') throw error;
+    warnings.push({ code: 'ASSET_CONFLICT', kind: 'asset', originalName: relative });
+  }
 }
 
 async function installRollbackAssets(pending) {
@@ -919,21 +1099,25 @@ async function applyPendingBackupRestore(appPaths, { app, dialog, marker, onErro
       if (!(await exists(base.dataDir))) throw codedError('RESTORE_APPLY_FAILED', 'Neither the new nor old data directory is available');
       if (pending.mode === 'rollback') await installRollbackAssets(pending);
       else {
+        pending.warnings = Array.isArray(pending.warnings) ? pending.warnings : [];
         await installAssets(pending);
         const libraryDbPath = path.join(base.dataDir, 'paperquay-library.sqlite');
         if (await exists(libraryDbPath)) {
-          updateLibraryPaths(libraryDbPath, {
+          const rebind = updateLibraryPaths(libraryDbPath, {
             targets: { ...pending.targets, rootMap: pending.rootMap || {} },
             pathMap: pending.pathMap || {},
-            warnings: pending.warnings || [],
+            attachmentMap: isRecord(pending.attachmentMap) ? pending.attachmentMap : {},
+            warnings: pending.warnings,
           });
+          pending.reboundPaths = rebind.rebound;
+          pending.attachmentCounts = rebind.counts;
         }
       }
       await persistStep(base, pending, 'rebinding');
     }
     if (pending.step === 'rebinding') {
       const restoreFile = path.join(base.dataDir, '.settings', 'renderer-restore.json');
-      const payload = pending.restorePayload;
+      const payload = pending.mode === 'rollback' ? pending.restorePayload : finalizeRendererPayload(pending.restorePayload, pending.reboundPaths);
       if (payload) await writeJsonAtomic(restoreFile, payload);
       const summary = {
         restoreId: pending.restoreId,
@@ -947,6 +1131,9 @@ async function applyPendingBackupRestore(appPaths, { app, dialog, marker, onErro
         oldTranslatedPdfDir: pending.oldTranslatedPdfDir || null,
         sizeEstimate: pending.sizeEstimate || null,
         previous: pending.previous || {},
+        sourceRoots: pending.sourceRoots || {},
+        attachmentCounts: pending.attachmentCounts || null,
+        ...(pending.mode === 'rollback' ? {} : { pathRepair: { version: RESTORE_PATH_REPAIR_VERSION, fixedAtImport: true } }),
         warnings: pending.warnings || [],
       };
       await writeJsonAtomic(path.join(base.dataDir, '.settings', 'restore-summary.json'), summary);
@@ -988,6 +1175,74 @@ async function applyPendingBackupRestore(appPaths, { app, dialog, marker, onErro
     await rollbackFailedRestore(base, pending, error, { dialog, onError });
     throw error;
   }
+}
+
+const RESTORE_PATH_REPAIR_VERSION = 1;
+
+// 一次性修复 0.4.19 导入留下的两类路径问题，在后端打开数据库之前运行：
+// 1) MinerU 缓存多一层 default/ 或 custom-xxxxxxxx/；2) 附件被绑到不存在的原文件名（missing=1）。
+// 只在本机存在导入摘要、且摘要未带 attachmentCounts（修复前版本写下）时执行，完成后写标记，不重复运行。
+async function repairRestoredBackupPaths(appPaths) {
+  const base = rootPaths(getAppPaths(appPaths));
+  const summaryPath = path.join(base.dataDir, '.settings', 'restore-summary.json');
+  const summary = readJsonSync(summaryPath, null);
+  if (!isRecord(summary) || !summary.package?.version || summary.attachmentCounts || summary.pathRepair?.version >= RESTORE_PATH_REPAIR_VERSION) {
+    return { repaired: false };
+  }
+  if (await exists(base.pendingPath)) return { repaired: false };
+  const result = { mineruDirsMoved: 0, mineruDirsSkipped: 0, attachmentsRepaired: 0, attachmentsStillMissing: 0 };
+
+  const cacheDir = base.mineruCacheDir;
+  let cacheEntries = [];
+  try { cacheEntries = await fsp.readdir(cacheDir, { withFileTypes: true }); } catch {}
+  // 旧摘要不含 sourceRoots：源机若设置过自定义缓存目录，custom-* 才是生效的根，default 只可能是残留，故 custom 优先。
+  const activeKey = isRecord(summary.sourceRoots) ? activeMineruRootKey(summary.sourceRoots) : null;
+  const rootNames = cacheEntries.filter((entry) => entry.isDirectory() && MINERU_ROOT_KEY.test(entry.name)).map((entry) => entry.name);
+  const rank = (name) => (name === activeKey ? 0 : activeKey === null ? (name === 'default' ? 2 : 1) : name === 'default' ? 1 : 2);
+  rootNames.sort((left, right) => rank(left) - rank(right) || left.localeCompare(right));
+  for (const rootName of rootNames) {
+    const rootDir = path.join(cacheDir, rootName);
+    for (const child of await fsp.readdir(rootDir, { withFileTypes: true })) {
+      const source = path.join(rootDir, child.name);
+      const destination = path.join(cacheDir, child.name);
+      if (!child.isDirectory() || child.name.startsWith('.')) continue;
+      if (await exists(destination)) { result.mineruDirsSkipped += 1; continue; }
+      await moveDirectory(source, destination);
+      result.mineruDirsMoved += 1;
+    }
+    try { await fsp.rmdir(rootDir); } catch {}
+  }
+
+  const libraryDbPath = base.libraryDatabasePath;
+  if (await exists(libraryDbPath)) {
+    const db = openDatabase(libraryDbPath);
+    try {
+      const settings = Object.fromEntries(db.prepare('SELECT key, value_json FROM library_settings').all().map((row) => {
+        try { return [row.key, JSON.parse(row.value_json)]; } catch { return [row.key, null]; }
+      }));
+      const libraryStorageDir = typeof settings.storageDir === 'string' ? settings.storageDir : '';
+      const translatedPdfDir = typeof settings.translatedPdfDir === 'string' && settings.translatedPdfDir
+        ? settings.translatedPdfDir
+        : (libraryStorageDir ? path.join(libraryStorageDir, 'translated-pdfs') : '');
+      const targets = { libraryStorageDir, translatedPdfDir };
+      const update = db.prepare('UPDATE attachments SET stored_path=?, relative_path=?, file_size=?, missing=0 WHERE id=?');
+      dbTransaction(db, () => {
+        for (const attachment of db.prepare('SELECT id, paper_id, kind, stored_path FROM attachments WHERE missing=1').all()) {
+          const candidate = renamedAttachmentPath(attachment, targets);
+          if (!candidate || !isRegularFile(candidate)) { result.attachmentsStillMissing += 1; continue; }
+          const relative = libraryStorageDir && pathInside(libraryStorageDir, candidate)
+            ? path.relative(libraryStorageDir, candidate).split(path.sep).join('/')
+            : null;
+          update.run(candidate, relative, fs.statSync(candidate).size, attachment.id);
+          result.attachmentsRepaired += 1;
+        }
+      });
+    } finally { db.close(); }
+  }
+
+  summary.pathRepair = { version: RESTORE_PATH_REPAIR_VERSION, completedAt: new Date().toISOString(), ...result };
+  await writeJsonAtomic(summaryPath, summary);
+  return { repaired: true, ...result };
 }
 
 async function rollbackFailedRestore(base, pending, error, { dialog, onError } = {}) {
@@ -1258,6 +1513,7 @@ module.exports = {
   mapByRoot,
   pendingChecksum,
   prepareRollback,
+  repairRestoredBackupPaths,
   stageBackupImport,
   validPending,
 };

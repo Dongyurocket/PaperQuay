@@ -127,10 +127,33 @@ function formatBytes(bytes: number): string {
   return `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(value)} ${units[unitIndex]}`;
 }
 
+const WARNING_LABELS: Record<string, [string, string]> = {
+  FILE_MISSING_AT_EXPORT: ['导出时文件缺失，未打包', 'File was missing at export and was not packed'],
+  NOT_IN_PACKAGE: ['附件不在备份包内', 'Attachment is not in the backup package'],
+  ATTACHMENT_UNRESOLVED: ['附件已打包但未能找回文件', 'Attachment was packed but its file could not be located'],
+  MINERU_CACHE_CONFLICT: ['解析缓存目录重名，已保留先恢复的一份', 'Duplicate parse cache directory; the first restored copy was kept'],
+};
+
+// 附件类警告排在前面：解析缓存可能产生大量警告，不应把附件问题挤出可见范围。
+const WARNING_PRIORITY = ['NOT_IN_PACKAGE', 'ATTACHMENT_UNRESOLVED', 'FILE_MISSING_AT_EXPORT'];
+
+function sortWarningsForDisplay(warnings: Array<string | BackupWarning>): Array<string | BackupWarning> {
+  const rank = (warning: string | BackupWarning) => {
+    if (typeof warning === 'string') return WARNING_PRIORITY.length + 1;
+    const index = WARNING_PRIORITY.indexOf(warning.code);
+    if (index >= 0 && (warning.code !== 'FILE_MISSING_AT_EXPORT' || warning.kind === 'library-pdf' || warning.kind === 'translated-pdf')) return index;
+    return WARNING_PRIORITY.length;
+  };
+  return warnings.map((warning, index) => ({ warning, index }))
+    .sort((left, right) => rank(left.warning) - rank(right.warning) || left.index - right.index)
+    .map((item) => item.warning);
+}
+
 function safeWarningLabel(warning: string | BackupWarning, l: ReaderPreferencesLocalizer): string {
   if (typeof warning === 'string') return l('备份包含警告项', 'The backup contains a warning item');
   const name = warning.originalName?.split(/[\\/]/).filter(Boolean).pop();
-  return [warning.code, warning.kind, name].filter(Boolean).join(' · ');
+  const label = WARNING_LABELS[warning.code];
+  return [label ? l(label[0], label[1]) : warning.code, warning.kind, name].filter(Boolean).join(' · ');
 }
 
 function getErrorMessage(error: unknown, fallback: string, l: ReaderPreferencesLocalizer): string {
@@ -800,7 +823,8 @@ export function BackupTransferSection({ active, l }: BackupTransferSectionProps)
             </dl>
             {inspection.warnings.length > 0 ? (
               <ul className="space-y-1 rounded-lg border border-[color-mix(in_srgb,var(--pq-warning)_28%,transparent)] bg-[var(--pq-warning-bg)] p-3 text-xs text-[var(--pq-warning)]">
-                {inspection.warnings.slice(0, 8).map((warning, index) => <li key={index} className="break-words">{safeWarningLabel(warning, l)}</li>)}
+                {sortWarningsForDisplay(inspection.warnings).slice(0, 8).map((warning, index) => <li key={index} className="break-words">{safeWarningLabel(warning, l)}</li>)}
+                {inspection.warnings.length > 8 ? <li className="text-[var(--pq-text-muted)]">{l(`另有 ${inspection.warnings.length - 8} 条警告未显示`, `${inspection.warnings.length - 8} more warning(s) not shown`)}</li> : null}
               </ul>
             ) : null}
             <label className="block">
