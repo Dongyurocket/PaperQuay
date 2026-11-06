@@ -199,12 +199,21 @@ async function assertNoLinkPath(target) {
 
 // 目标路径的父级若经过 junction/符号链接（如 Documents\BaiduSyncdisk → C:\BaiduSyncdisk），
 // 先解析成真实路径，再用真实路径做全部安全校验与写入；目标目录自身是链接时保持原样，由 assertNoLinkPath 拒绝。
+// 只有父级确实存在链接时才改写路径；没有链接的路径原样保留，
+// 避免 realpath 把 8.3 短名（如 RUNNER~1）等写法展开，改变用户选择的目录文本。
 function resolveLinkedParents(target) {
   const resolved = path.resolve(target);
-  try {
-    if (fs.lstatSync(resolved).isSymbolicLink()) return resolved;
-    return fs.realpathSync.native(resolved);
-  } catch {}
+  const parsed = path.parse(resolved);
+  const parts = resolved.slice(parsed.root.length).split(path.sep).filter(Boolean);
+  let current = parsed.root;
+  let linkedAncestor = null;
+  for (let index = 0; index < parts.length - 1; index += 1) {
+    current = path.join(current, parts[index]);
+    let stat;
+    try { stat = fs.lstatSync(current); } catch { break; }
+    if (stat.isSymbolicLink()) linkedAncestor = index;
+  }
+  if (linkedAncestor === null) return resolved;
   let ancestor = path.dirname(resolved);
   const remainder = [path.basename(resolved)];
   while (ancestor !== path.dirname(ancestor)) {
