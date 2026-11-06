@@ -40,7 +40,6 @@ function createDefaultLibrary(appPaths) {
       fileNamingRule: '{author}_{year}_{title}',
       createCategoryFolders: false,
       folderWatchEnabled: false,
-      backupEnabled: false,
       preserveOriginalPath: true,
       openAlexEnabled: true,
       openAlexApiKey: '',
@@ -58,15 +57,6 @@ function createDefaultLibrary(appPaths) {
       paperCount: 0,
     })),
     papers: [],
-    webdav: {
-      endpointUrl: '',
-      remoteRoot: 'paperquay/backups',
-      username: '',
-      password: '',
-      includePdfs: true,
-      includeDerived: true,
-      updatedAtMs: 0,
-    },
   };
 }
 
@@ -74,13 +64,13 @@ function normalizeLibrary(raw, appPaths) {
   const defaults = createDefaultLibrary(appPaths);
   const rawObject = raw && typeof raw === 'object' ? raw : {};
   const { ragIndexes: _legacyRagIndexes, ...rawLibrary } = rawObject;
+  const { backupEnabled: _legacyBackupEnabled, ...rawSettings } = rawLibrary.settings ?? {};
   const library = {
     ...defaults,
     ...rawLibrary,
-    settings: { ...defaults.settings, ...(rawLibrary.settings ?? {}) },
+    settings: { ...defaults.settings, ...rawSettings },
     categories: Array.isArray(rawLibrary.categories) ? rawLibrary.categories : defaults.categories,
     papers: Array.isArray(rawLibrary.papers) ? rawLibrary.papers : [],
-    webdav: { ...defaults.webdav, ...(rawLibrary.webdav ?? {}) },
   };
   const existingIds = new Set(library.categories.map((category) => category.id));
 
@@ -245,18 +235,6 @@ function sortPapers(papers, request = {}) {
   });
 }
 
-function webdavView(settings) {
-  return {
-    endpointUrl: settings.endpointUrl,
-    remoteRoot: settings.remoteRoot,
-    username: settings.username,
-    passwordConfigured: Boolean(settings.password),
-    includePdfs: settings.includePdfs !== false,
-    includeDerived: settings.includeDerived !== false,
-    updatedAtMs: settings.updatedAtMs || 0,
-  };
-}
-
 module.exports = {
   attachCategoryCounts,
   createAppPaths,
@@ -265,5 +243,4 @@ module.exports = {
   normalizeTag,
   paperMatches,
   sortPapers,
-  webdavView,
 };

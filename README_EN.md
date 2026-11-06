@@ -132,7 +132,7 @@ Versions from v0.4.0 onward introduced Agent capability routing, claim verificat
 ### v0.2.0 - Notes System Overhaul
 
 - **Agents and MCP can read and write notes**: the built-in Agent gains note read tools and a `write_notes` tool behind a dedicated approval card (creates/updates/deletes land only after diff review); the Knowledge MCP server exposes `create_note` / `update_note` / `delete_note` / `list_note_tags` plus folder management, reusing the same write guardrails.
-- **Structured note workspace**: folder tree moved into the database (survives reinstalls, syncs over WebDAV), 8 page types and 11 templates, notes graph and health report (orphans / broken links / untagged / stale 30+ days), and Obsidian-compatible Markdown vault two-way sync where anchor IDs survive the round trip.
+- **Structured note workspace**: folder tree moved into the database (survives reinstalls and is included in encrypted backup packages), 8 page types and 11 templates, notes graph and health report (orphans / broken links / untagged / stale 30+ days), and Obsidian-compatible Markdown vault two-way sync where anchor IDs survive the round trip.
 - **Academic citations and excerpt cards**: inline `paperReference` nodes render as sequential `[n]` with a GB/T 7714 reference list in vault exports; "AI Distill to Card" runs a two-step CoT that cleans OCR noise before paraphrasing, keeps source anchors jumpable back to the exact PDF location, and appends multiple page segments onto one multi-anchor card.
 - **Cleanup**: the legacy one-shot Agent path (~800 lines) and the `agentLegacyMode` toggle were removed; the multi-turn ReAct loop is now the only path.
 
@@ -310,7 +310,7 @@ These items are implemented in the current desktop app.
 | Agent workspace   | Conversation UI with collapsed execution traces, tool cards, paper selection, metadata, rename, tagging, classification and summaries; capability routing and pinning, ordered fragment references, optional content checks and approval plans for writes |
 | Zotero import & sync | Full import of local Zotero collections, tags, and available PDF attachments from `zotero.sqlite`; selective on-demand synchronization with collection browsing, conditional search, diff preview, and triple deduplication |
 | MCP knowledge base | Built-in standard stdio MCP server (development entry `bin/paperquay-mcp.cjs`; installers bundle `resources/paperquay-mcp/`) directly querying local SQLite; `search_knowledge_base` upgraded to vector hybrid retrieval (KNN + FTS5 + RRF) with mode options and channel attribution; 25 tools covering literature, chunks, guarded library and note writes, translated-PDF attachments, and Zotero sync |
-| Backup            | WebDAV backup and restore for the library database, notes database, and local RAG SQLite database                                                |
+| Backup            | Password-protected, single-file `.pqbackup` export and import; forgotten passwords cannot be recovered |
 | Updates           | In-app update checks, Windows and Linux automatic update flow, and macOS release-page handoff                                                    |
 | Knowledge graph   | Paper, note, tag, category, and reference nodes with semantic-similarity edges, Crossref reference syncing, co-author relations, custom and AI relations, fcose force-directed global layout, local concentric view, and PNG/JSON export |
 | Review writing    | Outline blueprints, concurrent section drafting, RAG retrieval context, per-paper coverage tracking with checkpoint resume, delivery quality checks, and Word export with OMML equations, localized headings, references, and inline figures |
@@ -616,7 +616,17 @@ Zotero is an optional compatibility source, not a required dependency. You can b
 
 PaperQuay is local-first. The literature library, notes, and local RAG indexes are stored in SQLite databases, and imported PDFs are stored in the paper storage folder you configure.
 
-Optional WebDAV backup can upload the local library, notes, and RAG databases to the remote server you configure. API keys, local PDFs, parser outputs, and backups should stay out of source control.
+PaperQuay uses password-protected, single-file `.pqbackup` archives. The password cannot be recovered. Backups may contain API keys and personal data; do not commit the archive or password to source control.
+
+The full migration preset includes:
+
+- App configuration, API keys, and the library, notes, and RAG databases.
+- Referenced PDFs, Agent memory and conversation history, and review drafts.
+- Knowledge-graph relations, reader state and annotations, the notes vault, and MinerU-derived caches.
+
+Based on the current sample, a full archive is about 12.2 GiB. A routine backup is about 2.3 GiB and excludes the RAG database and MinerU cache.
+
+The new version removes WebDAV backup and cannot read old WebDAV backups. To keep old data, restore it locally with PaperQuay 0.4.x before upgrading. Remote files are not deleted automatically; remove them yourself after confirming they are no longer needed.
 
 Do not commit local data, API keys, PDFs, parser outputs, notes databases, or backups. The `.gitignore` excludes common local runtime folders, SQLite databases, legacy JSON library data, API key files, build output, backup archives, and private PDFs by default.
 

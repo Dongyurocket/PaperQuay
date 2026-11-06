@@ -30,11 +30,6 @@ function createSchema(db) {
       value_json TEXT NOT NULL
     );
 
-    CREATE TABLE IF NOT EXISTS webdav_settings (
-      key TEXT PRIMARY KEY,
-      value_json TEXT NOT NULL
-    );
-
     CREATE TABLE IF NOT EXISTS categories (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -196,6 +191,8 @@ function createSchema(db) {
   ensureColumn(db, 'papers', 'isbn', 'TEXT');
   ensureColumn(db, 'papers', 'issn', 'TEXT');
   ensureColumn(db, 'papers', 'rag_enabled', 'INTEGER NOT NULL DEFAULT 1');
+
+  db.exec(`DELETE FROM library_settings WHERE key = 'backupEnabled'`);
 }
 
 function ensureColumn(db, tableName, columnName, columnDefinition) {
@@ -498,7 +495,6 @@ function getPaperIdByAttachmentId(db, attachmentId) {
 
 function loadLibraryFromDb(db, appPaths, normalizeLibrary) {
   const settings = loadKeyValueTable(db, 'library_settings');
-  const webdav = loadKeyValueTable(db, 'webdav_settings');
   const categories = db.prepare(`
     SELECT
       id,
@@ -572,7 +568,6 @@ function loadLibraryFromDb(db, appPaths, normalizeLibrary) {
   return normalizeLibrary({
     version: 1,
     settings,
-    webdav,
     categories,
     papers,
   }, appPaths);
@@ -588,7 +583,6 @@ function clearData(db) {
     'papers',
     'categories',
     'library_settings',
-    'webdav_settings',
   ]) {
     db.prepare(`DELETE FROM ${table}`).run();
   }
@@ -961,7 +955,6 @@ function saveLibraryToDb(db, appPaths, normalizeLibrary, library) {
     const ragEnabledCache = loadRagEnabledCache(db);
     clearData(db);
     saveKeyValueTable(db, 'library_settings', normalized.settings);
-    saveKeyValueTable(db, 'webdav_settings', normalized.webdav);
     db.prepare(`
       INSERT INTO library_meta (key, value)
       VALUES ('initialized', '1'), ('version', '1')

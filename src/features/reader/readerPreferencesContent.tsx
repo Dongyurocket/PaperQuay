@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import {
   BookOpenText,
-  Cloud,
+  Archive,
   Database,
   Eye,
   EyeOff,
@@ -40,7 +40,7 @@ import {
   SettingsTextarea,
   ToggleRow,
 } from './readerPreferencesPrimitives';
-import { ReaderPreferencesBackupSection } from './readerPreferencesBackupSection';
+import { BackupTransferSection } from './BackupTransferSection';
 import { AgentMemorySettingsSection } from './AgentMemorySettingsSection';
 import { ReaderPreferencesModelsSection } from './readerPreferencesModelsSection';
 import { ReaderPreferencesMcpSection } from './readerPreferencesMcpSection';
@@ -124,7 +124,6 @@ const DEFAULT_LIBRARY_SETTINGS: LibrarySettings = {
   fileNamingRule: '{author}_{year}_{title}',
   createCategoryFolders: false,
   folderWatchEnabled: false,
-  backupEnabled: false,
   preserveOriginalPath: true,
   openAlexEnabled: true,
   openAlexApiKey: '',
@@ -170,12 +169,12 @@ export function buildReaderPreferencesSections(
     },
     {
       key: 'backup',
-      title: l('备份 / WebDAV', 'Backup / WebDAV'),
+      title: l('备份与迁移', 'Backup & Transfer'),
       description: l(
-        '配置手动远程副本、连接测试和立即备份',
-        'Configure manual remote copies, connection test, and backup now',
+        '导出加密备份包、迁移数据或回滚到导入前版本',
+        'Export encrypted backups, migrate data, or roll back to a previous version',
       ),
-      icon: <Cloud className="h-4 w-4" strokeWidth={1.8} />,
+      icon: <Archive className="h-4 w-4" strokeWidth={1.8} />,
     },
     {
       key: 'translation',
@@ -1106,7 +1105,7 @@ export function ReaderPreferencesContent({
       />
       <AgentMemorySettingsSection active={activeSection === 'models'} l={l} />
 
-      <ReaderPreferencesBackupSection
+      <BackupTransferSection
         active={activeSection === 'backup'}
         l={l}
       />

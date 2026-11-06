@@ -9,7 +9,6 @@ export interface LibrarySettings {
   fileNamingRule: string;
   createCategoryFolders: boolean;
   folderWatchEnabled: boolean;
-  backupEnabled: boolean;
   preserveOriginalPath: boolean;
   openAlexEnabled: boolean;
   openAlexApiKey: string;

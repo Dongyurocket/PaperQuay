@@ -1582,6 +1582,13 @@ class PaperQuayKnowledgeService {
       throw new Error('MCP write tools are disabled (PAPERQUAY_MCP_WRITE=off)');
     }
 
+    const pendingRestorePath = path.join(path.dirname(this.appPaths.dataDir), 'PaperQuay-restore', 'pending.json');
+    if (fs.existsSync(pendingRestorePath)) {
+      throw Object.assign(new Error('PaperQuay backup restore is pending; MCP writes are blocked until startup recovery completes.'), {
+        code: 'BACKUP_RESTORE_PENDING',
+      });
+    }
+
     const running = this.isAppRunning();
     if (allowWhileAppRunning === true) {
       return {

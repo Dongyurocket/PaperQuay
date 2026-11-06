@@ -8,6 +8,7 @@ import path from 'node:path';
 const require = createRequire(import.meta.url);
 const { DatabaseSync } = require('../electron/backend/nodeSqlite.cjs');
 const { createLibraryStore } = require('../electron/backend/libraryStore.cjs');
+const { cleanupLegacyBackupSettings } = require('../electron/backend/legacyBackupCleanup.cjs');
 
 function createAppPaths() {
   const dataDir = mkdtempSync(path.join(tmpdir(), 'paperquay-library-db-test-'));
@@ -31,6 +32,17 @@ function writeJson(filePath: string, value: unknown) {
 
 function readJson(filePath: string) {
   return JSON.parse(readFileSync(filePath, 'utf8'));
+}
+
+function databaseHasTable(databasePath: string, tableName: string) {
+  const db = new DatabaseSync(databasePath);
+  try {
+    return Boolean(
+      db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?").get(tableName),
+    );
+  } finally {
+    db.close();
+  }
 }
 
 function legacyLibrary(appPaths: ReturnType<typeof createAppPaths>) {
@@ -210,7 +222,10 @@ test('library SQLite store migrates legacy JSON and preserves full paper metadat
     assert.equal(paper.attachments[0].storedPath.endsWith('paper-1.pdf'), true);
     assert.equal(migrated.papers.find((item: { id: string }) => item.id === 'paper-2')?.authors[0].id, 'author-1');
     assert.equal(migrated.papers.find((item: { id: string }) => item.id === 'paper-2')?.tags[0].id, 'tag-1');
-    assert.equal(migrated.webdav.endpointUrl, 'https://dav.example.test');
+    assert.equal('webdav' in migrated, false);
+    assert.equal('backupEnabled' in migrated.settings, false);
+    assert.equal('backupEnabled' in store.loadSettings(), false);
+    assert.equal(databaseHasTable(appPaths.libraryDatabasePath, 'webdav_settings'), false);
     assert.equal(existsSync(appPaths.libraryDatabasePath), true);
 
     store.snapshotTo(snapshotPath);
@@ -334,7 +349,8 @@ test('library SQLite store upgrades early author and tag tables with global ids'
         missing INTEGER NOT NULL
       );
       INSERT INTO library_meta (key, value) VALUES ('initialized', '1'), ('version', '1');
-      INSERT INTO library_settings (key, value_json) VALUES ('storageDir', '"D:/papers"');
+      INSERT INTO library_settings (key, value_json)
+      VALUES ('storageDir', '"D:/papers"'), ('backupEnabled', 'true');
       INSERT INTO papers (
         id, title, imported_at, updated_at, reading_progress, is_favorite, source, sort_order
       ) VALUES ('paper-old', 'Old Schema Paper', 1, 1, 0, 0, 'local', 0);
@@ -345,8 +361,13 @@ test('library SQLite store upgrades early author and tag tables with global ids'
     `);
     db.close();
 
+    const legacyCleanup = cleanupLegacyBackupSettings(appPaths.libraryDatabasePath);
+    assert.equal(legacyCleanup.droppedTable, true);
+    assert.equal(legacyCleanup.removedSettings, 1);
     store = createLibraryStore(appPaths);
     const library = store.load();
+    assert.equal(databaseHasTable(appPaths.libraryDatabasePath, 'webdav_settings'), false);
+    assert.equal('backupEnabled' in store.loadSettings(), false);
     const paper = library.papers.find((item: { id: string }) => item.id === 'paper-old');
     assert.ok(paper);
     assert.equal(paper.ragEnabled, true);
@@ -392,7 +413,11 @@ test('library SQLite store upgrades early author and tag tables with global ids'
       attachments: [],
     });
     store.save(library);
+    assert.equal(databaseHasTable(appPaths.libraryDatabasePath, 'webdav_settings'), false);
 
+    store.close();
+    store = createLibraryStore(appPaths);
+    assert.equal(databaseHasTable(appPaths.libraryDatabasePath, 'webdav_settings'), false);
     const reloaded = store.load();
     assert.equal(reloaded.papers.length, 2);
     assert.equal(reloaded.papers.find((item: { id: string }) => item.id === 'paper-old')?.titleZh, '旧结构论文');

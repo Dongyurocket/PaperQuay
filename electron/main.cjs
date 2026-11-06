@@ -1,6 +1,8 @@
+const fs = require('node:fs');
 const path = require('node:path');
-const { app, BrowserWindow, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, dialog } = require('electron');
 const { createBackend } = require('./backend.cjs');
+const { createAppPaths } = require('./backend/libraryStore.cjs');
 const { perfMark, perfMeasure } = require('./perfTrace.cjs');
 const { removeDesktopRunMarker, writeDesktopRunMarker } = require('./backend/desktopRunMarker.cjs');
 const {
@@ -9,8 +11,89 @@ const {
 } = require('./localPdfProtocol.cjs');
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
+const RESTORE_RESUME_ARGUMENT = '--paperquay-restore-resume';
+const isRestoreResume = process.argv.includes(RESTORE_RESUME_ARGUMENT);
 let backend = null;
 let desktopMarkerDataDir = null;
+let rendererRestorePayload = null;
+let restoreResumeLockFile = null;
+let singleInstanceLockAcquired = false;
+
+function processIsAlive(pid) {
+  if (!Number.isSafeInteger(pid) || pid < 1) return null;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    if (error?.code === 'ESRCH') return false;
+    if (error?.code === 'EPERM') return true;
+    return null;
+  }
+}
+
+function acquireRestoreResumeLock() {
+  const lockFile = path.join(app.getPath('userData'), 'PaperQuay-restore-resume.lock');
+  fs.mkdirSync(path.dirname(lockFile), { recursive: true });
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const descriptor = fs.openSync(lockFile, 'wx', 0o600);
+      try {
+        fs.writeFileSync(descriptor, JSON.stringify({ pid: process.pid, startedAt: Date.now() }), 'utf8');
+        fs.fsyncSync(descriptor);
+      } finally {
+        fs.closeSync(descriptor);
+      }
+      return lockFile;
+    } catch (error) {
+      if (error?.code !== 'EEXIST') throw error;
+      let owner = null;
+      let modifiedAt = 0;
+      try {
+        owner = JSON.parse(fs.readFileSync(lockFile, 'utf8'));
+        modifiedAt = fs.statSync(lockFile).mtimeMs;
+      } catch {}
+      const alive = processIsAlive(Number(owner?.pid));
+      if (alive === true || (alive === null && Date.now() - modifiedAt < 24 * 60 * 60 * 1000)) {
+        throw new Error('Another restore-resume process is active');
+      }
+      fs.rmSync(lockFile, { force: true });
+    }
+  }
+  throw new Error('Could not acquire restore-resume lock');
+}
+
+function releaseRestoreResumeLock() {
+  if (!restoreResumeLockFile) return;
+  try {
+    const owner = JSON.parse(fs.readFileSync(restoreResumeLockFile, 'utf8'));
+    if (Number(owner?.pid) === process.pid) fs.rmSync(restoreResumeLockFile, { force: true });
+  } catch {}
+  restoreResumeLockFile = null;
+}
+
+async function waitForSingleInstanceLock() {
+  if (singleInstanceLockAcquired) return true;
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    if (app.requestSingleInstanceLock()) {
+      singleInstanceLockAcquired = true;
+      return true;
+    }
+  }
+  return false;
+}
+
+singleInstanceLockAcquired = app.requestSingleInstanceLock();
+if (isRestoreResume) {
+  try {
+    restoreResumeLockFile = acquireRestoreResumeLock();
+  } catch (error) {
+    dialog.showErrorBox('PaperQuay restore failed', String(error?.message || 'Restore is already running.'));
+    app.quit();
+  }
+} else if (!singleInstanceLockAcquired) {
+  app.quit();
+}
 
 registerLocalPdfProtocolScheme();
 
@@ -144,23 +227,90 @@ ipcMain.handle('paperquay:window-control', (event, action) => {
   }
 });
 
-app.whenReady().then(() => {
+ipcMain.on('paperquay:renderer-restore-sync', (event) => {
+  event.returnValue = rendererRestorePayload;
+});
+
+ipcMain.on('paperquay:renderer-restore-ack', (_event, payload) => {
+  if (!rendererRestorePayload || payload?.restoreId !== rendererRestorePayload.restoreId) return;
+  try {
+    Promise.resolve(require('./backend/backupImport.cjs').handleRendererRestoreAck(
+      createAppPaths(app),
+      payload,
+    )).then((result) => {
+      if (result?.ok !== false) rendererRestorePayload = null;
+    }).catch((error) => {
+      console.error('[paperquay] Failed to persist renderer restore acknowledgement.', error);
+    });
+  } catch (error) {
+    console.error('[paperquay] Failed to persist renderer restore acknowledgement.', error);
+  }
+});
+
+app.on('second-instance', () => {
+  const [window] = BrowserWindow.getAllWindows();
+  if (window) {
+    if (window.isMinimized()) window.restore();
+    window.focus();
+  }
+});
+
+app.whenReady().then(async () => {
   perfMark('app:ready');
 
   if (process.platform === 'win32') {
     app.setAppUserModelId('dev.paperquay.app');
   }
 
+  if (isRestoreResume && !await waitForSingleInstanceLock()) {
+    dialog.showErrorBox('PaperQuay restore could not start', 'The previous instance is still closing. pending.json was kept; launch PaperQuay again to resume recovery.');
+    releaseRestoreResumeLock();
+    app.exit(1);
+    return;
+  }
+  if (!singleInstanceLockAcquired) {
+    app.quit();
+    return;
+  }
+
   registerLocalPdfProtocol();
   let initializedBackend;
   try {
+    const appPaths = createAppPaths(app);
+    writeDesktopRunMarker(appPaths.dataDir);
+    desktopMarkerDataDir = appPaths.dataDir;
+
+    const backupImport = require('./backend/backupImport.cjs');
+    const restoreResult = await backupImport.applyPendingBackupRestore(appPaths, { app, dialog });
+    if (restoreResult?.error) {
+      throw Object.assign(new Error('A pending backup restore record is invalid. Local data was not opened; inspect PaperQuay-restore/pending.error.json.'), { code: 'PENDING_CHECKSUM_INVALID' });
+    }
+    await backupImport.cleanupOrphanBackupImports(appPaths);
+    await require('./backend/backupExport.cjs').cleanupOrphanBackupStages(appPaths);
+    if (restoreResult?.rendererRestorePayload) {
+      rendererRestorePayload = restoreResult.rendererRestorePayload;
+    } else if (typeof backupImport.getRendererRestorePayload === 'function') {
+      rendererRestorePayload = backupImport.getRendererRestorePayload(appPaths);
+    }
+    if (restoreResult?.dataDir) {
+      desktopMarkerDataDir = restoreResult.dataDir;
+      writeDesktopRunMarker(desktopMarkerDataDir);
+    } else {
+      writeDesktopRunMarker(appPaths.dataDir);
+    }
+
     initializedBackend = getBackend();
-    writeDesktopRunMarker(initializedBackend.appPaths.dataDir);
-    desktopMarkerDataDir = initializedBackend.appPaths.dataDir;
   } catch (error) {
-    // Do not expose a development desktop instance without the write guard.
-    console.error('[paperquay] Failed to register desktop run state.', error);
+    console.error('[paperquay] Failed to apply pending backup restore or initialize stores.', error);
+    if (!['RESTORE_APPLY_FAILED', 'STAGING_MISSING', 'PENDING_CHECKSUM_INVALID'].includes(error?.code)) {
+      dialog.showErrorBox('PaperQuay startup failed', error.message || 'PaperQuay could not initialize its local data stores.');
+    }
     backend?.close();
+    if (desktopMarkerDataDir) {
+      removeDesktopRunMarker(desktopMarkerDataDir);
+      desktopMarkerDataDir = null;
+    }
+    releaseRestoreResumeLock();
     app.exit(1);
     return;
   }
@@ -191,6 +341,7 @@ app.on('before-quit', () => {
     removeDesktopRunMarker(desktopMarkerDataDir);
     desktopMarkerDataDir = null;
   }
+  releaseRestoreResumeLock();
   // 兜底：后端资源（如 RAG worker 线程卡在同步 SQLite 调用里）关闭耗时过长时，
   // 3 秒后强制退出，避免留下无窗口的驻留进程，导致覆盖安装被误判为"正在运行"。
   setTimeout(() => app.exit(0), 3000).unref();

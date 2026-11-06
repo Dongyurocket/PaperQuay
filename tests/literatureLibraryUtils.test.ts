@@ -110,7 +110,6 @@ function settings(): LibrarySettings {
     fileNamingRule: '',
     createCategoryFolders: false,
     folderWatchEnabled: false,
-    backupEnabled: false,
     preserveOriginalPath: false,
     openAlexEnabled: false,
     openAlexApiKey: '',

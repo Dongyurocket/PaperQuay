@@ -6,6 +6,25 @@
 
 ## [Unreleased]
 
+## [0.4.19] - 2026-11-06
+
+### 变更
+
+- **备份改为加密单文件**：支持导出和导入密码保护的 `.pqbackup`。
+- **完整迁移包范围**：
+  - 包含应用配置、API Key、文献库/笔记/RAG 数据库和 PDF；
+  - 包含 Agent 记忆、Agent 会话历史、综述草稿和知识图谱关系；
+  - 包含阅读器状态与批注、笔记 vault 和 MinerU 派生缓存。
+- 按当前样本估算，完整包约 12.2 GiB。日常备份约 2.3 GiB，不含 RAG 数据库和 MinerU 缓存。密码无法找回。
+- **WebDAV 迁移兼容性变更**：新版移除 WebDAV，不能读取旧远端备份。
+- 如需保留旧 WebDAV 数据，升级前先用 PaperQuay 0.4.x 恢复到本地，再升级并导出 `.pqbackup`。
+- 新版不会自动删除远端旧文件。确认无需保留后，请自行清理。
+
+### 验证
+
+- `npm run build` 与全部自动化测试通过；Windows x64 Electron 隔离构建及 MCP bundle 检查通过。
+- 隔离 userData 桌面导出与密码解密预览通过；完整 stage/restart 与大包断电演练未在本次覆盖，详见 `docs/changes/2026-11-06-encrypted-backup-package.md`。
+
 ## [0.4.18] - 2026-11-05
 
 ### 修复

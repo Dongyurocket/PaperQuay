@@ -1,4 +1,48 @@
 const { clipboard, contextBridge, ipcRenderer, webUtils } = require('electron');
+const { remapRendererStorage } = require('../src/shared/rendererStorageRemap.cjs');
+
+function restoreRendererStorage() {
+  let payload;
+  try {
+    payload = ipcRenderer.sendSync('paperquay:renderer-restore-sync');
+  } catch {
+    return;
+  }
+  if (!payload?.restoreId || !payload.state || typeof payload.state !== 'object') return;
+
+  const failedKeys = [];
+  const warnings = [];
+  try {
+    const storage = window.localStorage;
+    const remapped = remapRendererStorage(payload.state, {
+      pathMap: payload.pathMap,
+      rootMap: payload.rootMap,
+      platform: process.platform,
+      hasMineruCache: payload.hasMineruCache === true,
+    });
+    warnings.push(...remapped.warnings);
+    storage.clear();
+    for (const [key, value] of Object.entries(remapped.state)) {
+      try {
+        storage.setItem(key, String(value));
+      } catch {
+        failedKeys.push(key);
+      }
+    }
+  } catch {
+    failedKeys.push('__localStorage_restore__');
+  }
+
+  try {
+    ipcRenderer.send('paperquay:renderer-restore-ack', {
+      restoreId: payload.restoreId,
+      failedKeys,
+      warnings,
+    });
+  } catch {}
+}
+
+restoreRendererStorage();
 
 function toFilePath(file) {
   if (webUtils && typeof webUtils.getPathForFile === 'function') {

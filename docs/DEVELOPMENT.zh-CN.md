@@ -108,7 +108,11 @@ npm test
 .\scripts\Build-Local.ps1 -Install
 ```
 
-安装前请先关闭正在运行的 PaperQuay。个人构建与正式版使用同一个应用标识和用户数据目录，首次切换前建议先使用应用内备份功能备份文献库、笔记和 RAG 数据库。
+安装前请先关闭正在运行的 PaperQuay。个人构建与正式版使用同一个应用标识和用户数据目录。
+
+首次切换前，先导出密码保护的 `.pqbackup` 文件。完整迁移包内容见[用户手册 5.7 节](./USER_MANUAL.zh-CN.md#57-加密备份与迁移)。按当前样本估算，完整包约 12.2 GiB。
+
+如需迁移旧 WebDAV 备份，请先用 PaperQuay 0.4.x 恢复到本地。完成恢复后，再升级并导出 `.pqbackup`。新版不读取旧远端备份，也不会自动删除远端文件。确认无需保留后，由用户自行清理。
 
 ### 5. 提交与提 PR
 
@@ -165,7 +169,9 @@ git push origin app-v0.1.26
 
 - API key、Token、密码或证书
 - PDF、解析结果和个人笔记
-- SQLite 数据库、备份包和运行时目录
+- SQLite 数据库、备份包（包括 `.pqbackup`）和运行时目录
 - `release/`、`dist/` 等构建产物
+
+密码保护的 `.pqbackup` 可能包含 API Key 和个人数据；忘记密码后无法恢复包内容。
 
 本仓库继承上游 AGPL-3.0-only 许可证。修改后再分发或通过网络提供修改版时，应遵守 AGPL 和上游 `TRADEMARKS.md` 中的品牌说明。

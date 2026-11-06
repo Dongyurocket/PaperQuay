@@ -1,5 +1,7 @@
 const { createAiCommands } = require('./backend/aiCommands.cjs');
 const { createAgentMemoryStore } = require('./backend/agentMemoryStore.cjs');
+const { createBackupCommands } = require('./backend/backupCommands.cjs');
+const { cleanupLegacyBackupSettings } = require('./backend/legacyBackupCleanup.cjs');
 const { createAppPaths, createLibraryStore } = require('./backend/libraryStore.cjs');
 const { createFileCommands } = require('./backend/fileCommands.cjs');
 const { createIntegrationCommands } = require('./backend/integrationCommands.cjs');
@@ -97,6 +99,7 @@ function createRagStoreSafely(appPaths) {
 function createBackend({ app }) {
   perfMark('backend:init-start');
   const appPaths = createAppPaths(app);
+  cleanupLegacyBackupSettings(appPaths.libraryDatabasePath);
   const store = createLibraryStore(appPaths);
   perfMeasure('backend:init library-store', 'backend:init-start');
   const noteStore = createNoteStore(appPaths);
@@ -151,6 +154,7 @@ function createBackend({ app }) {
     ...createNoteCommands(context),
     ...createAiCommands(context),
     ...createKnowledgeGraphCommands(context),
+    ...createBackupCommands(context),
     ...createIntegrationCommands(context),
     ...createReviewCommands(context),
     ...createUpdateCommands(context),

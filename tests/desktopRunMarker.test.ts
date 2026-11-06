@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 const require = createRequire(import.meta.url);
@@ -33,6 +33,25 @@ test('MCP writes respect the active development marker without an installed app 
   } finally {
     removeDesktopRunMarker(dir);
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('pending backup restore blocks MCP writes even when an explicit override is requested', () => {
+  const { PaperQuayKnowledgeService } = require('../electron/mcp/knowledgeMcpService.cjs');
+  const root = mkdtempSync(path.join(tmpdir(), 'paperquay-restore-guard-'));
+  const dataDir = path.join(root, 'PaperQuay');
+  const restoreDir = path.join(root, 'PaperQuay-restore');
+  try {
+    mkdirSync(dataDir, { recursive: true });
+    mkdirSync(restoreDir, { recursive: true });
+    writeFileSync(path.join(restoreDir, 'pending.json'), '{}');
+    const service = new PaperQuayKnowledgeService({ dataDir, isAppRunning: () => false });
+    assert.throws(() => service.assertWritable(true), (error: Error & { code?: string }) => {
+      assert.equal(error.code, 'BACKUP_RESTORE_PENDING');
+      return /backup restore is pending/i.test(error.message);
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });
 
