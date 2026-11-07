@@ -1,5 +1,7 @@
 # P3：Agent 架构优化详细实施计划
 
+- 状态：**已实施**（2026-08-27，P3-A～P3-F 全部落地；见 `docs/changes/2026-08-27-agent-architecture-p3.md`）
+
 > 来源：`docs/plans/2026-08-26-library-batch-features-and-bugfixes.md` Q7 节（Agent 架构评估与优化路线图）。
 > 本文将该路线图展开为可执行的工程计划，写清数据结构、函数签名、文件改动锚点、分阶段顺序与验证方式。
 > 前置状态（2026-08-26）：P0–P2 已完成，其中路线图第 1 项"统一 RAG 状态透传"已随 P0 落地（`ragNotice`），本文不再包含。

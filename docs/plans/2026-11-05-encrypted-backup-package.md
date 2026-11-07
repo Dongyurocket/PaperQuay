@@ -1,8 +1,8 @@
 # 加密全量备份包（替换 WebDAV 备份）计划
 
 - 日期：2026-11-05
-- 状态：**implemented（2026-11-06）**；代码、文档、自动化测试、隔离导出与桌面密码解密预览已完成。验证证据见 `docs/changes/2026-11-06-encrypted-backup-package.md`。仍待确认导入后的自动重启全流程、12.2 GiB 生产规模导出/导入及断电恢复演练；不将其标记为已通过。
-- 代码基线：本地 `main` = `3d6d1a8`（`app-v0.4.18`）
+- 状态：**verified（2026-11-07）**；代码、文档、自动化测试、隔离导出与桌面密码解密预览已完成，用户于 2026-11-07 在桌面端实测导出与导入恢复，功能正常。验证证据见 `docs/changes/2026-11-06-encrypted-backup-package.md` 与 `docs/changes/2026-11-07-backup-restore-mineru-pdf-paths.md`。断电强杀恢复与低磁盘场景仍未覆盖。
+- 代码基线：方案编写时本地 `main` = `3d6d1a8`（`app-v0.4.18`）；实施随 0.4.19（`e7c206a`）发布，恢复路径修复随 0.4.20（`eee3f19`）。
 - 范围：备份/恢复后端、设置页备份分区、WebDAV 功能彻底移除、数据迁移、测试与文档
 - 目标：一键导出单文件加密包；在另一台电脑导入并输入读取密码后，完整恢复配置、密钥、文献库、笔记、PDF、阅读批注与 Agent 记忆
 - 评审修订（2026-11-06）：对照仓库代码复核后修订 16 项，其中 6 项会直接导致数据错配或应用无法启动（回滚不覆盖浏览器状态、重启与单实例锁冲突、恢复期 MCP 护栏失效、偏移连续性规范自相矛盾、空源根导致全路径误匹配、`content_hash` 覆盖破坏去重）。逐条理由见第十七节。
@@ -255,8 +255,8 @@ Manifest 是 UTF-8 JSON，加密后放包尾。结构：
   "createdAt": "2026-11-05T15:00:00.000Z",
   "app": {
     "name": "PaperQuay",
-    "version": "0.5.0",
-    "minReaderVersion": "0.5.0",
+    "version": "0.4.20",
+    "minReaderVersion": "0.4.20",
     "platform": "win32",
     "arch": "x64"
   },
@@ -919,7 +919,7 @@ localStorage 位于 `%APPDATA%\PaperQuay\Local Storage\leveldb`，在 `dataDir` 
 
 | 阶段 | 内容 | 预计 |
 | --- | --- | ---: |
-| P0 | 方案评审、格式定稿、测试夹具设计、**localStorage document-start 注入 spike（硬门槛）** | 1 天 |
+| P0 | 方案评审、格式定稿、测试夹具设计、**localStorage document-start 注入 spike（已通过，2026-11-06）** | 1 天 |
 | P1 | `backupCrypto` + `backupContainer` + 单测 | 2 天 |
 | P2 | `backupSources` + `backupExport`（含导出后自检、流式背压、取消）+ 进度 | 2 天 |
 | P3 | `backupImport` + pending 状态机 + 双暂存根 + 路径重绑 + vault 合并 + localStorage 回灌与回滚 + 单测 | 3.5 天 |
@@ -1002,7 +1002,7 @@ localStorage 位于 `%APPDATA%\PaperQuay\Local Storage\leveldb`，在 `dataDir` 
 4. **导入模式**：首版只做完整替换；合并导入列为后续需求。
 5. **旧数据保留**：不自动删除，设置页提供手动删除。
 6. **自动任务**：导入后默认关闭自动解析、自动概览、vault 自动同步、文件夹监听。
-7. **版本号**：建议随本功能发布 `0.5.0`（备份格式与设置行为有破坏性变化）。
+7. **版本号**：方案曾建议随本功能发布 `0.5.0`；实际按 `0.4.19` 发布，`0.4.20` 跟进恢复路径修复，未采用 `0.5.0`。
 8. **WebDAV 移除范围**：已确认（2026-11-06）采用完全不保留——无只读入口、无隐藏开关、无 `webdav_settings` 表、无 `webdav` 字段。旧备份迁移的唯一路径是升级前用 0.4.x 恢复到本地（见 8.5），新版本不提供任何兼容入口。
 
 ## 十七、评审记录（2026-11-06）
@@ -1039,5 +1039,5 @@ localStorage 位于 `%APPDATA%\PaperQuay\Local Storage\leveldb`，在 `dataDir` 
 
 - 第 1.1 节的九个入口、1.3 节的体积与条目数、第 8 节的文件与行号，与当前 `main`（`3d6d1a8`）一致，无需修正。
 - 关键可行性假设成立：`snapshotTo` 三处齐备且 RAG 侧可由 `ragWorkerHost` 透出；`nodeSqlite.cjs` 已封装 `node:sqlite`，D9 的「开库前直接改库」可行；`ragStore` 打开即 `allowExtension: true` 加载 sqlite-vec，7.2 的 RAG 完整性校验方式正确；`src/types/backup.ts` 仅被两个待删文件引用，8.3 的删除清单安全。
-- 仍需在 P0 用 spike 证伪的假设只有一条：preload 在 document-start 阶段能否稳定读写目标 origin 的 `localStorage`。若不可行，D8 需退化为「`src/main.tsx` 最前面注入的 prelude 模块」，此时必须逐一确认各 store 的 localStorage 读取发生在 prelude 之后。这也是把该 spike 列为 P0 硬门槛的原因。
+- P0 的 localStorage 注入假设已确认：`electron/preload.cjs` 用 `sendSync('paperquay:renderer-restore-sync')` 在 document-start 阶段注入，并通过 0.4.20 真实导入验证。
 - 一处已确认的决策（2026-11-06）：WebDAV 采用完全不保留，无只读入口、无 `webdav_settings` 表、无 `webdav` 字段；旧备份迁移只能升级前用 0.4.x 完成（见 8.5）。

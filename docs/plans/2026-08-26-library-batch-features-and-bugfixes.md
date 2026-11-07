@@ -3,7 +3,7 @@
 > 本文以问答形式梳理本轮提出的全部需求与问题，给出根因分析、技术方案、涉及文件与实施顺序。
 > 需求来源：用户反馈（2026-08-26），附两张截图（概览重复生成、侧栏 RAG 404）。
 >
-> **状态（2026-08-26 更新）**：P0–P2 已全部完成并通过 `tsc` / `npm test`（195 例）/ `npm run build` 验证，详见 `../changes/2026-08-26-library-batch-ops-and-rag-overview-fixes.md`。P3（Agent 架构优化）尚未开始，仍按 Q7 路线图执行。
+> **状态（2026-08-26 更新）**：P0–P2 已全部完成并通过 `tsc` / `npm test`（195 例）/ `npm run build` 验证，详见 `../changes/2026-08-26-library-batch-ops-and-rag-overview-fixes.md`。P3（Agent 架构优化）已另立计划实施完毕，见 `2026-08-26-agent-architecture-p3-plan.md` 与 `../changes/2026-08-27-agent-architecture-p3.md`。
 
 ## 需求总览
 

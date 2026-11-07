@@ -114,6 +114,8 @@ npm test
 
 如需迁移旧 WebDAV 备份，请先用 PaperQuay 0.4.x 恢复到本地。完成恢复后，再升级并导出 `.pqbackup`。新版不读取旧远端备份，也不会自动删除远端文件。确认无需保留后，由用户自行清理。
 
+恢复路径的回归测试在 `tests/backupRestorePaths.test.ts`，覆盖 MinerU 缓存根展开、附件按 ID 改绑、0.4.19 已污染的 pending 和一次性修复的幂等性。改动 `electron/backend/backupImport.cjs` 后至少运行 `npm test`。
+
 ### 5. 提交与提 PR
 
 ```powershell

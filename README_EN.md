@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.4.18-2563eb?style=flat-square" alt="Version v0.4.18">
+  <img src="https://img.shields.io/badge/version-v0.4.20-2563eb?style=flat-square" alt="Version v0.4.20">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-4b5563?style=flat-square" alt="Windows macOS Linux">
   <img src="https://img.shields.io/badge/built%20with-Electron-47848f?style=flat-square" alt="Electron">
   <img src="https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-0f766e?style=flat-square" alt="React TypeScript">
@@ -54,6 +54,21 @@
 ---
 
 ## Latest Update
+
+### v0.4.20 - MinerU results and PDFs open after a restore
+
+- **MinerU parse results load again**: imports drop the package's `default/` or `custom-xxxxxxxx/` folder level, so caches land where the reader looks. The cache root active on the source machine wins, and duplicate cache folders are skipped as a whole.
+- **PDFs are rebound by attachment ID**: papers opened on the source machine no longer point at a missing original file name, and reading history is rewritten to match. `stored_path` values with forward slashes or different letter case also match.
+- **Data already restored with 0.4.19 repairs itself**: the first launch after upgrading moves MinerU cache folders up one level and relinks missing attachments. Archives exported by 0.4.19 can be imported again directly.
+- **Restore paths resolve only when needed**: a folder whose parent is a junction or symbolic link (for example `Documents\BaiduSyncdisk`) resolves to its real path; other paths keep the text you selected. The restore summary counts restored, unresolved and not-in-package attachments.
+- **Download**: [v0.4.20 release](https://github.com/Dongyurocket/PaperQuay/releases/tag/app-v0.4.20).
+
+### v0.4.19 - Encrypted single-file backup replaces WebDAV
+
+- **`.pqbackup` archives**: a password-protected AES-256-GCM single file. A full migration archive carries configuration and API keys, the three databases, PDFs, agent memory and sessions, survey drafts, graph relations, reading state and annotations, the note vault and MinerU derived caches; about 12.2 GiB full and 2.3 GiB for daily backups. The password cannot be recovered.
+- **Import in four steps**: stage, verify, restart, then swap offline. The previous data directory stays as a rollback point, and MCP writes are guarded during restore.
+- **WebDAV retired**: old remote backups must be restored locally with 0.4.x first; the new version does not read them and does not delete remote files.
+- **Download**: [v0.4.19 release](https://github.com/Dongyurocket/PaperQuay/releases/tag/app-v0.4.19).
 
 ### v0.4.18 - Failed questions stay, and chat messages can be copied
 
@@ -310,7 +325,7 @@ These items are implemented in the current desktop app.
 | Agent workspace   | Conversation UI with collapsed execution traces, tool cards, paper selection, metadata, rename, tagging, classification and summaries; capability routing and pinning, ordered fragment references, optional content checks and approval plans for writes |
 | Zotero import & sync | Full import of local Zotero collections, tags, and available PDF attachments from `zotero.sqlite`; selective on-demand synchronization with collection browsing, conditional search, diff preview, and triple deduplication |
 | MCP knowledge base | Built-in standard stdio MCP server (development entry `bin/paperquay-mcp.cjs`; installers bundle `resources/paperquay-mcp/`) directly querying local SQLite; `search_knowledge_base` upgraded to vector hybrid retrieval (KNN + FTS5 + RRF) with mode options and channel attribution; 25 tools covering literature, chunks, guarded library and note writes, translated-PDF attachments, and Zotero sync |
-| Backup            | Password-protected, single-file `.pqbackup` export and import; forgotten passwords cannot be recovered |
+| Backup            | Password-protected, single-file `.pqbackup` export and import; import swaps data after a restart and keeps the old directory as a rollback point; forgotten passwords cannot be recovered |
 | Updates           | In-app update checks, Windows and Linux automatic update flow, and macOS release-page handoff                                                    |
 | Knowledge graph   | Paper, note, tag, category, and reference nodes with semantic-similarity edges, Crossref reference syncing, co-author relations, custom and AI relations, fcose force-directed global layout, local concentric view, and PNG/JSON export |
 | Review writing    | Outline blueprints, concurrent section drafting, RAG retrieval context, per-paper coverage tracking with checkpoint resume, delivery quality checks, and Word export with OMML equations, localized headings, references, and inline figures |

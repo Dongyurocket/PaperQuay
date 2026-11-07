@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.4.18-2563eb?style=flat-square" alt="Version v0.4.18">
+  <img src="https://img.shields.io/badge/version-v0.4.20-2563eb?style=flat-square" alt="Version v0.4.20">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-4b5563?style=flat-square" alt="Windows macOS Linux">
   <img src="https://img.shields.io/badge/built%20with-Electron-47848f?style=flat-square" alt="Electron">
   <img src="https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-0f766e?style=flat-square" alt="React TypeScript">
@@ -55,6 +55,21 @@
 ---
 
 ## 近期更新
+
+### v0.4.20 - 备份恢复后 MinerU 与 PDF 正常打开
+
+- **MinerU 解析结果恢复可读**：导入时去掉包内 `default/`、`custom-xxxxxxxx/` 一级目录，缓存装到阅读器查找的位置；源机生效的缓存根优先，同名缓存目录整目录跳过。
+- **PDF 按附件 ID 改绑**：源机打开过的文献不再绑到不存在的原文件名，阅读历史同步改写；含正斜杠或大小写不同的 `stored_path` 也能匹配。
+- **0.4.19 已恢复的数据自动修复**：升级后首次启动一次性上移 MinerU 缓存目录并找回缺失附件；0.4.19 导出的备份包可直接重新导入。
+- **恢复目录路径按需解析**：父级确有 junction 或符号链接（如 `Documents\BaiduSyncdisk`）时才解析为真实路径，其余保持所选路径文本；恢复摘要记录附件已恢复、未找回与包内缺失的数量。
+- **下载**：[v0.4.20 Release](https://github.com/Dongyurocket/PaperQuay/releases/tag/app-v0.4.20)。
+
+### v0.4.19 - 加密单文件备份替换 WebDAV
+
+- **`.pqbackup` 加密备份包**：密码保护的 AES-256-GCM 单文件。完整迁移包包含配置与 API Key、三个数据库、PDF、Agent 记忆与会话历史。它还包含综述草稿、知识图谱关系、阅读状态与批注。笔记 vault 和 MinerU 派生缓存也在包内。完整包约 12.2 GiB，日常备份约 2.3 GiB。密码无法找回。
+- **导入分四步**：暂存、校验、重启、离线替换；旧数据目录保留为回滚点，恢复期间 MCP 写入受保护。
+- **WebDAV 退役**：旧远端备份需先用 0.4.x 恢复到本机；新版不读取旧备份，也不自动删除远端文件。
+- **下载**：[v0.4.19 Release](https://github.com/Dongyurocket/PaperQuay/releases/tag/app-v0.4.19)。
 
 ### v0.4.18 - 问答失败保留问题与聊天复制
 
@@ -309,7 +324,7 @@ Agent 工作区不是普通聊天框，而是面向文献库操作设计。它�
 | 元数据 | 支持通过 DOI 或标题优先调用 OpenAlex 补全，可配置 OpenAlex API Key / mailto，Crossref 兜底；中文论文远程未命中时用 LLM 从首页文本智能提取，导入前可手动编辑 |
 | 分类树 | 支持系统分类、自定义分类、子分类、折叠、右键菜单、拖拽排序、层级调整和收藏 |
 | 文献详情 | 支持标题、作者、年份、期刊/会议、DOI、URL、摘要、关键词、标签、笔记、引用、收藏和阅读时间图 |
-| 笔记工作区 | 支持独立 Tiptap 笔记工作区、分类（入库持久化）、搜索、标签、置顶、收藏、大纲、反向链接、参考文献列表与手动保存（`Ctrl/Cmd + S`）；内置 11 个页面类型模板（论文卡片/概念页/综述页/问答页/摘录卡/索引/日志/总览），支持笔记图谱与体检（孤立/断链/无标题/无标签/陈旧） |
+| 笔记工作区 | 支持独立 Tiptap 笔记工作区、分类（入库持久化）、搜索、标签、置顶、收藏、大纲、反向链接、参考文献列表与手动保存（`Ctrl/Cmd + S`）；内置 11 个模板，覆盖 8 种页面类型（论文卡片/概念页/综述页/问答页/摘录卡/索引/日志/总览），支持笔记图谱与体检（孤立/断链/无标题/无标签/陈旧） |
 | 笔记编辑器 | 支持富文本、标题、列表、任务列表、代码块、表格、图片、数学公式、高亮、链接、组件块和斜杠菜单式插入；可从工具栏 / `@` / 斜杠命令插入参考文献，并生成或更新文末列表；内联引用自动编号（`[n]`），支持 GB/T 7714-2015 / APA 7 / IEEE 样式；AI 润色默认检索笔记关联文献 |
 | 内联笔记链接 | 支持 `[[笔记]]` 双向链接、`#标签`、`@paper` 文献引用、补全菜单；点击引用打开对应论文，带页/块位置时可跳到原文 |
 | 摘录与笔记维护 | 划词可一步「AI 提炼为摘录卡」（两步 CoT、锚点保真、提炼正文可改、多段跨页累加），或「加入当前笔记」插入摘录；内置 Agent 的 `search_notes`/`read_note`/`write_notes` 写操作走审批计划卡；MCP 提供笔记创建/更新/删除与分类维护工具；支持 Obsidian 兼容的 Markdown vault 双向同步 |
@@ -321,7 +336,7 @@ Agent 工作区不是普通聊天框，而是面向文献库操作设计。它�
 | Agent 工作区 | 支持对话、默认折叠的执行轨迹、工具调用卡片、文献选择、元数据工具、重命名、打标签、分类和总结；能力路由与钉选、正文顺序编号和片段级参考文献、可选内容检查，写操作经审批 |
 | Zotero 导入与同步 | 支持从 `zotero.sqlite` 全量导入分类、标签和可用 PDF；新增支持基于分类树浏览、条件模糊检索、差量预检与三层防重校验的选择性精准同步 |
 | MCP 知识库服务 | 内置标准 MCP stdio 服务（开发模式 `bin/paperquay-mcp.cjs`，安装包内置 `resources/paperquay-mcp/`），直连本地 SQLite；`search_knowledge_base` 支持向量 KNN + FTS5 + RRF 混合检索（支持 auto/hybrid/keyword 模式与 channels 来源标记及自动降级）；提供文献检索、详情、正文切片、笔记检索与写入（创建/更新/软删除、标签与分类树维护）、Zotero 本地库浏览/检索/差量预检/选择性同步，以及文库写入与翻译版 PDF 附件工具（共 25 个），全部写工具带运行护栏 |
-| 备份 | 支持导出和导入密码保护的 `.pqbackup` 单文件；忘记密码后无法恢复 |
+| 备份 | 支持导出和导入密码保护的 `.pqbackup` 单文件；导入后重启替换，旧目录保留为回滚点；忘记密码后无法恢复 |
 | 软件更新 | 支持应用内检查更新、Windows 和 Linux 自动更新流程，以及 macOS 打开发布页手动下载 |
 | 知识图谱 | 支持文献、笔记、标签、分类和引用节点，语义相似边、Crossref 参考文献同步、共同作者关系、自定义与 AI 关系，fcose 力导向全局布局、局部同心圆视图和 PNG/JSON 导出 |
 | 综述写作 | 支持大纲蓝图、分段并发写作、RAG 检索上下文、逐文献覆盖记录与取消后 checkpoint 继续、交付质量检查，以及 Word 导出（OMML 公式、中英文标题、参考文献和正文插图） |

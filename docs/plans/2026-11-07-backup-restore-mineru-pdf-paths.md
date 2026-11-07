@@ -1,11 +1,11 @@
 # 加密备份包恢复：MinerU 结果与 PDF 路径失效修复计划
 
 - 日期：2026-11-07
-- 状态：**已实施**（2026-11-07，随 0.4.20 发布）。F1–F5 全部落地，R5 采用“解析 junction 后允许”；F4 的 `hasDerived=false` 导入提示沿用预览中已有的“含解析缓存”标签，未另加文案；MinerU manifest `pdfPath` 改写（附带问题）未做。实施与验证见 `docs/changes/2026-11-07-backup-restore-mineru-pdf-paths.md`。下文保留审阅时的原因分析与方案。
+- 状态：**已验证**（2026-11-07，随 0.4.20 发布；当日实测导入恢复通过）。F1–F5 全部落地，R5 采用“解析 junction 后允许”，`eee3f19` 追加修正为仅父级确有链接时才改写目标路径；F4 的 `hasDerived=false` 导入提示沿用预览中已有的“含解析缓存”标签，未另加文案；MinerU manifest `pdfPath` 改写（附带问题）未做。实施与验证见 `docs/changes/2026-11-07-backup-restore-mineru-pdf-paths.md`。下文保留审阅时的原因分析与方案。
 - 基线：`main` 的 `e7c206a`（0.4.19，`feat(backup): replace WebDAV with encrypted archives`）。
 - 用户反馈：用 `.pqbackup` 恢复后，(1) MinerU 解析结果读不出，像是路径错了；(2) 部分 PDF 打不开，提示找不到文件。
 - 证据：在 `%TEMP%\pq-restore-repro-20261107\` 用仓库真实模块（`createLibraryStore`、`runBackupExport`、`stageBackupImport`、`applyPendingBackupRestore`）构造源 profile，导出后导入到另一个 userData 与库目录。两个症状都复现。另有一份独立复现脚本 `..\.scratch-mineru-repro\repro.cjs`。仓库文件与用户真实数据均未改动。
-- 未验证：没有拿到用户实际的 `restore-summary.json` 与恢复警告；本机未找到 PaperQuay 的生产数据目录，故 173 篇中具体哪些附件受影响未逐条核对。
+- 事后核对 `%APPDATA%\paperquay\PaperQuay\.settings\restore-summary.json`：0.4.20 包导入同机另一库目录，`attachmentsRestored=225`、`unresolved=0`、`notInPackage=0`、`warnings=[]`。排查阶段未逐条核对受影响附件，该缺口由这份摘要覆盖。
 
 ## 一、结论
 
@@ -127,7 +127,7 @@ R1、R2 同时解释了两个症状：MinerU 全部失效；PDF 只是“部分�
 - PDF：对 `missing=1` 的附件按 F2 第 3 步的改名候选查找。存在则更新 `stored_path`、`relative_path`（文件在 storageDir 内时才写，口径同 `:480`）、`file_size`、`missing=0`。`file_name` 从 `.pre-import-*` 旧库或包 manifest 的 `entry.fileName` 回填。
 - 同步按 F3 改写 localStorage 阅读历史。
 
-在修复命令发布前，可以手工处理：
+0.4.20 起由启动修复自动执行；以下手工步骤仅适用于仍在 0.4.19 的场景：
 1. 关闭 PaperQuay。
 2. MinerU：在 `%APPDATA%\PaperQuay\PaperQuay\.mineru-cache` 下，把 `custom-xxxxxxxx\` 与 `default\` 里的 `document-*` 目录剪切到上一级，已存在同名目录的跳过。
 3. PDF：少量文献用“重新定位附件”（`libraryCommands.cjs:850-866`）逐个指向 `<库目录>\<paperId>-<attachmentId>.pdf`。
@@ -149,7 +149,7 @@ R1、R2 同时解释了两个症状：MinerU 全部失效；PDF 只是“部分�
 
 每个用例的验证都至少要跑这几项：`npm run check`、`npm test` 全量、`git diff --check`。本机默认 `%TEMP%` 有 esbuild 权限问题，构建与测试需把子进程 `TMP/TEMP` 指向仓库内临时目录。
 
-桌面复验在隔离 userData 进行，不用生产数据：用迁移预设导出一个含 MinerU、含阅读历史的小库，导入到另一个 userData 与库目录，打开读过与未读过的文献各两篇，确认 PDF 与结构块都能加载。
+桌面复验在隔离 userData 进行，不用生产数据：用迁移预设导出一个含 MinerU、含阅读历史的小库，导入到另一个 userData 与库目录，打开读过与未读过的文献各两篇，确认 PDF 与结构块都能加载。2026-11-07 已用 0.4.20 完整包做同机换库目录导入（225 个附件），隔离复验保留为回归步骤。
 
 ## 七、实施顺序与工作量
 
@@ -163,8 +163,8 @@ R1、R2 同时解释了两个症状：MinerU 全部失效；PDF 只是“部分�
 
 阶段 1、2 修好后即可让用户用原包重新导入。阶段 3 面向不想重新导入的已恢复数据。
 
-## 八、待确认
+## 八、已确认
 
-1. 用户本次恢复是跨机器、同机换目录，还是同机原路径。提供 `.settings\restore-summary.json` 或恢复警告可核对受影响附件数。
-2. 是否需要 F5 修复命令，还是直接用修好的版本重新导入。
-3. R5 选“解析 junction 后允许”还是“保持拒绝并给出明确文案”。
+1. 本次恢复为同机换库目录：源库 `BaiduSyncdisk\paperq`，目标 `Downloads\paperquay_pdf1`；摘要见 `restore-summary.json`，225 个附件全部恢复。
+2. F5 修复命令已实现，0.4.20 启动时自动执行。
+3. R5 采用“解析 junction 后允许”；`eee3f19` 限定为父级确有链接时才改写目标路径。

@@ -32,7 +32,7 @@
   - `buildRendererExactPathMap` 改为包内精确映射优先，按规范化键去重。
   - `finalizeRendererPayload` 按数据库最终改绑结果重写阅读历史，并清空给 preload 的 `pathMap/rootMap`，避免二次映射。
   - 恢复摘要新增 `attachmentCounts`（已恢复、未找回、包内缺失），新增 `NOT_IN_PACKAGE` 与 `ATTACHMENT_UNRESOLVED` 警告。
-  - 目标路径父级的 junction 先解析为真实路径，再做全部安全校验；目标目录自身仍不得是链接。
+  - 目标路径父级确有 junction/符号链接时才解析为真实路径，再做全部安全校验；没有链接时保持用户所选路径文本，避免 `realpath` 展开 Windows 8.3 短名（如 `RUNNER~1`）后附件路径与所选目录不一致。目标目录自身仍不得是链接。
   - `repairRestoredBackupPaths`：启动时一次性修复 0.4.19 已恢复的数据。
     - 只在存在导入摘要、且摘要无 `attachmentCounts` 和修复标记时执行。
     - MinerU：把 `default/`、`custom-*` 下的一级目录上移，根下已有同名目录则跳过。
@@ -61,6 +61,7 @@
   - 三篇的 `<cache>\document-xxx\content_list_v2.json` 均存在；
   - 阅读历史中的 `lastPdfPath`、`localPdfPath` 均指向存在的文件；
   - junction 父级目标 stage 成功（修复前报 `UNSAFE_DESTINATION`）。
+- 2026-11-07 桌面实测：0.4.20 导出的完整包导入同机另一库目录（`BaiduSyncdisk\paperq` → `Downloads\paperquay_pdf1`，vault `my-note` → `paperquay_note1`），恢复 225 个附件，0 未找回、0 包内缺失、无警告，MinerU 结果与 PDF 均正常打开。
 - 未覆盖：
-  - 真实跨机器桌面导入，由用户在两台电脑上验收；
   - MinerU 缓存内 `paper_reader_manifest.json` 的 `pdfPath` 仍是源机路径，它只是最后一个兜底候选，本次未改写。
+  - 跨机器迁移、低磁盘和断电强杀演练未做。

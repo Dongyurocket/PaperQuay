@@ -4,7 +4,7 @@
 
 ## 背景
 
-仓库里有一份方案文档：`docs/plans/2026-09-23-performance-reader-outline-and-rag-context.md`。它的 P0、P1、P2 已全部落地，P3 大部分落地。代码在分支 `feat/perf-reader-outline-rag-context` 上，HEAD 是 `cfb1ac6`（同分支另有 `5669585`、`8d30424`、`ab3a9f1`、`cdb221d`）。基线状态：`npx tsc --noEmit` 通过，`npm test` 415/415。
+仓库里有一份方案文档：`docs/plans/2026-09-23-performance-reader-outline-and-rag-context.md`。它的 P0、P1、P2 已全部落地，P3 大部分落地。以下分支与测试数是 2026-09-23 的时点状态，相关提交已并入 `main`：分支 `feat/perf-reader-outline-rag-context`，HEAD 为 `cfb1ac6`（另有 `5669585`、`8d30424`、`ab3a9f1`、`cdb221d`），当时 `npm test` 为 415/415。
 
 P3 还有两条当初刻意收窄了，现在把它们补完。动手前先读方案对应小节，并核对下面的行号（可能有偏移）。开工前先跑一次 `npm run check` 确认基线。
 

@@ -5,6 +5,7 @@
 - `package.json` 的 `version` 已递增。
 - `npm ci`、`npm run build` 和 `npm test` 通过。
 - 已在 Windows 本地安装包上完成核心回归：启动、打开已有论文、导入 PDF、打开笔记、设置页和退出。
+- 涉及备份或恢复的改动：额外执行一次导出与导入 smoke，包内包含 MinerU 缓存和源机上打开过的 PDF，确认恢复后两者都能打开。
 - 没有提交 API key、数据库、PDF、解析结果或构建产物。
 - 已更新用户可见变更说明。
 

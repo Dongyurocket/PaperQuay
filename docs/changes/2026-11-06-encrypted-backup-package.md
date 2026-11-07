@@ -24,5 +24,6 @@
 - `npm run mcp:bundle`：通过；`packaging/mcp/server.cjs` 中 WebDAV 扫描无匹配。
 - `node electron/build.cjs --dir --config.directories.output=release/local-encrypted-backup-final2-20261106`：通过，afterPack 校验 Windows `sqlite-vec` 原生资源。
 - 最终隔离 userData 桌面复验：备份设置 UI 可打开，估算显示 630.1 KiB/5 项；加密导出 UI 完成 5/5、100%，生成 346,649 字节 `.pqbackup`。SHA-256：`32DFDD94A421AB95978AEA835225D836994AAEB841012A1831950D60779A6AF5`；Node 容器 `inspect + verify` 均成功（5 entries）。桌面 UI 使用同一文件和读取密码成功解密并显示版本、计数、路径选择项；因隔离空库未生成知识图谱关系文件，预览显示 1 条 `FILE_MISSING_AT_EXPORT` warning，符合测试数据现状。
-- 未在本轮执行 UI 确认后的完整 `backup_import_stage`、自动重启后的 renderer 回灌/库切换，以及 UI 手工 rollback/delete；这些路径由临时 SQLite/文件夹状态机集成测试覆盖，但尚无桌面级截图/哈希证据。
-- 未执行生产规模约 12.2 GiB 的 RAG 导出、低磁盘、断电强杀恢复演练或真实跨设备文件系统迁移；小型隔离测试不替代这些压力场景。
+- 未在本轮执行 UI 确认后的完整 `backup_import_stage`、自动重启后的 renderer 回灌/库切换，以及 UI 手工 rollback/delete；这些路径由临时 SQLite/文件夹状态机集成测试覆盖，但尚无桌面级截图/哈希证据。2026-11-07 的真实导入已覆盖前者，UI 手工 rollback/delete 仍未覆盖。
+- 未执行低磁盘、断电强杀恢复演练或真实跨设备文件系统迁移；小型隔离测试不替代这些压力场景。
+- 2026-11-07 后续验证：0.4.20 导出的完整包导入同机另一库目录，恢复 225 个附件、0 未找回、无警告，RAG 数据库 8.6 GB 与 MinerU 缓存随包恢复；完整导入与自动重启后的回灌/库切换由这次实测覆盖。低磁盘、断电强杀恢复演练和跨机器迁移仍未覆盖。

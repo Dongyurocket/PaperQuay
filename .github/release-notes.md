@@ -21,7 +21,8 @@ macOS arm64 installers are not built or published (since v0.4.18). Historical re
 
 - `npm run build` and all 944 automated tests pass, including 8 new cross-directory restore regression tests.
 - Re-running the pre-fix reproduction (real export with a junction library folder, default and custom MinerU roots, five attachment variants) now restores every attachment and places MinerU results in the correct folder.
-- A real cross-machine desktop import is pending user acceptance.
+- A desktop import on November 7, 2026 restored 225 attachments with 0 unresolved, 0 missing from the package and no warnings; the 8.6 GB RAG database and MinerU caches came back with the archive. The import moved the library to another folder on the same machine.
+- Not covered: `pdfPath` in MinerU's `paper_reader_manifest.json`, cross-machine migration, low-disk and power-loss drills.
 
 ---
 
@@ -48,4 +49,5 @@ macOS arm64 installers are not built or published (since v0.4.18). Historical re
 
 - `npm run build` 与全部 944 项自动化测试通过，其中新增 8 项跨目录恢复回归测试。
 - 用修复前的复现脚本（真实导出，含 junction 库目录、默认与自定义两个 MinerU 根、5 种附件）重跑：全部附件可找回，MinerU 结果位于正确目录。
-- 真实跨机器桌面导入待用户验收。
+- 2026-11-07 桌面实测：0.4.20 导出的完整包导入同机另一库目录，恢复 225 个附件，0 未找回、0 包内缺失、无警告；8.6 GB 的 RAG 数据库与 MinerU 缓存随包恢复。
+- 未覆盖：MinerU `paper_reader_manifest.json` 的 `pdfPath`、跨机器迁移、低磁盘与断电演练。
