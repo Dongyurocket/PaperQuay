@@ -19,6 +19,8 @@ PaperQuay 提供了基于标准 **Model Context Protocol (MCP)** 的知识库服
 ## 提供的 MCP 工具（Tools）
 
 ### 知识库只读检索工具
+
+> 本表共 7 项；`list_note_tags`、`list_note_folders` 是笔记写入前的发现工具，README 将它们归入笔记维护（8 项）。
 | 工具名称 | 说明 | 核心参数 | 返回内容 |
 | :--- | :--- | :--- | :--- |
 | `search_papers` | 检索文献库元数据 | `query`（关键词）、`tag`（标签）、`categoryId`（分类过滤，含后代分类）、`limit` | 匹配文献列表（ID、中英文标题、作者、年份、DOI、标签、`ragEnabled`） |
@@ -82,7 +84,8 @@ PaperQuay 提供了基于标准 **Model Context Protocol (MCP)** 的知识库服
 2. 检测到运行时，写入被**拒绝**并返回明确错误提示（引导先关闭桌面应用），数据库不产生任何修改；
 3. 明确知道风险时可传 `allowWhileAppRunning: true` 强制写入（桌面应用随后的保存可能覆盖本次写入）；
 4. 运行标记损坏或无法读取时按应用运行处理，避免开发期出现无保护的外部写入；进程探测失败但无运行标记时写入放行，并在返回结果中附带 `warning`；
-5. 设环境变量 `PAPERQUAY_MCP_WRITE=off` 可禁用全部写工具（此时服务等价于纯只读），该开关优先级高于 `allowWhileAppRunning`。
+5. 设环境变量 `PAPERQUAY_MCP_WRITE=off` 可禁用全部写工具（此时服务等价于纯只读），该开关优先级高于 `allowWhileAppRunning`；
+6. 存在待应用的备份恢复（`<数据目录同级>/PaperQuay-restore/pending.json`）时，所有写工具返回 `BACKUP_RESTORE_PENDING`，`allowWhileAppRunning` 不能覆盖，直到启动恢复完成。
 
 Zotero 同步工具（`paperquay_sync_from_zotero`）同样受该护栏保护。建议让 Agent 形成「写前确认桌面应用已关闭」的标准作业程序。
 
@@ -122,7 +125,7 @@ Zotero 同步工具（`paperquay_sync_from_zotero`）同样受该护栏保护。
 }
 ```
 
-路径以设置页或实际安装目录为准。`ELECTRON_RUN_AS_NODE` 不能写 Windows 临时目录；数据目录、文献库目录和翻译版 PDF 目录不受这个限制。若该启动方式不可用，可用系统 Node.js 22.5 或更高版本直接执行同一个 `server.cjs`。
+路径以设置页或实际安装目录为准。若该启动方式不可用，可用系统 Node.js 22.5 或更高版本直接执行同一个 `server.cjs`。
 
 开发模式仍使用源码入口 `bin/paperquay-mcp.cjs`，由系统 Node 启动。下面的示例是开发配置。
 
@@ -195,10 +198,10 @@ args = [
 
 ## 自定义数据目录
 
-服务默认会自动探测操作系统默认的 PaperQuay 数据目录：
-- Windows: `%APPDATA%/PaperQuay`
-- macOS: `~/Library/Application Support/PaperQuay`
-- Linux: `~/.config/PaperQuay`
+服务按以下顺序探测 PaperQuay 数据目录，优先选择包含 `paperquay-library.sqlite` 或 `paperquay-rag.sqlite` 的候选：
+- Windows: `%APPDATA%/PaperQuay/PaperQuay`，其次 `%APPDATA%/paperquay/PaperQuay`、`%APPDATA%/PaperQuay`
+- macOS: `~/Library/Application Support/PaperQuay/PaperQuay`，其次 `~/Library/Application Support/PaperQuay`
+- Linux: `~/.config/PaperQuay/PaperQuay`，其次 `~/.config/PaperQuay`
 
 如果你使用了自定义数据目录或在测试环境运行，可通过以下任一方式指定：
 

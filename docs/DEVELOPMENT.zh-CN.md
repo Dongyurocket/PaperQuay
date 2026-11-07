@@ -13,7 +13,7 @@
 - 本地源码目录：当前工作区根目录
 - 本地已安装版本目录：`C:\Users\yusen\AppData\Local\Programs\PaperQuay`
 - 应用类型：Electron + React + TypeScript + Vite
-- Node.js 要求：18 或更高；当前项目 CI 使用 Node.js 24
+- Node.js 要求：22.18 或更高；当前项目 CI 使用 Node.js 24
 - 许可证：AGPL-3.0-only
 
 ## 第一次配置
@@ -112,7 +112,7 @@ npm test
 
 首次切换前，先导出密码保护的 `.pqbackup` 文件。完整迁移包内容见[用户手册 5.7 节](./USER_MANUAL.zh-CN.md#57-加密备份与迁移)。按当前样本估算，完整包约 12.2 GiB。
 
-如需迁移旧 WebDAV 备份，请先用 PaperQuay 0.4.x 恢复到本地。完成恢复后，再升级并导出 `.pqbackup`。新版不读取旧远端备份，也不会自动删除远端文件。确认无需保留后，由用户自行清理。
+如需迁移旧 WebDAV 备份，请先用 PaperQuay 0.4.18 或更早版本恢复到本地。完成恢复后，再升级并导出 `.pqbackup`。新版不读取旧远端备份，也不会自动删除远端文件。确认无需保留后，由用户自行清理。
 
 恢复路径的回归测试在 `tests/backupRestorePaths.test.ts`，覆盖 MinerU 缓存根展开、附件按 ID 改绑、0.4.19 已污染的 pending 和一次性修复的幂等性。改动 `electron/backend/backupImport.cjs` 后至少运行 `npm test`。
 
@@ -138,14 +138,14 @@ PaperQuay 的 Windows 自动更新依赖 GitHub Release。个人构建必须使�
 推荐流程：
 
 1. 在个人 Fork 的 `main` 上准备一个可发布版本。
-2. 修改 `package.json` 的 `version`，例如从 `0.1.25` 改为 `0.1.26`。
+2. 修改 `package.json` 的 `version`，例如从 `0.4.20` 改为 `0.4.21`。
 3. 更新 `.github/release-notes.md` 为本次实际变更说明（`{{VERSION}}` 为版本占位符），否则 Release 会沿用上一次的内容。
 4. 提交并推送版本变更。
-5. 创建并推送 `app-v0.1.26` 标签：
+5. 创建并推送 `app-v0.4.21` 标签：
 
 ```powershell
-git tag app-v0.1.26
-git push origin app-v0.1.26
+git tag app-v0.4.21
+git push origin app-v0.4.21
 ```
 
 6. GitHub Actions 会构建 Windows、Linux 和 macOS 安装包，先创建 Draft Release，构建全部成功后自动转为正式发布；发现说明或产物有误时，可直接在 GitHub 页面编辑 Release 或按 `docs/RELEASE.md` 回滚。

@@ -65,9 +65,9 @@
 
 ### v0.4.19 - Encrypted single-file backup replaces WebDAV
 
-- **`.pqbackup` archives**: a password-protected AES-256-GCM single file. A full migration archive carries configuration and API keys, the three databases, PDFs, agent memory and sessions, survey drafts, graph relations, reading state and annotations, the note vault and MinerU derived caches; about 12.2 GiB full and 2.3 GiB for daily backups. The password cannot be recovered.
+- **`.pqbackup` archives**: a password-protected AES-256-GCM single file. A full migration archive carries configuration and API keys, the three databases, referenced PDFs, agent memory and sessions, survey drafts, graph relations, reading state and annotations, the note vault and MinerU derived caches; about 12.2 GiB full and 2.3 GiB for daily backups. The password cannot be recovered.
 - **Import in four steps**: stage, verify, restart, then swap offline. The previous data directory stays as a rollback point, and MCP writes are guarded during restore.
-- **WebDAV retired**: old remote backups must be restored locally with 0.4.x first; the new version does not read them and does not delete remote files.
+- **WebDAV retired**: old remote backups must be restored locally with 0.4.18 or earlier first; the new version does not read them and does not delete remote files.
 - **Download**: [v0.4.19 release](https://github.com/Dongyurocket/PaperQuay/releases/tag/app-v0.4.19).
 
 ### v0.4.18 - Failed questions stay, and chat messages can be copied
@@ -85,25 +85,25 @@
 - **Command palette**: `Ctrl/Cmd+K` searches and runs navigation, tab and settings actions; `Ctrl/Cmd+W` closes a tab, `Ctrl/Cmd+,` opens settings.
 - **Long tasks are visible across tabs**: translation and RAG indexing progress now report into a global task bar.
 - **History can no longer be wiped by accident**: clearing agent history and deleting a session now ask for confirmation.
-- **Download**: latest installers on the [v0.4.17 release](https://github.com/Dongyurocket/PaperQuay/releases/tag/app-v0.4.17).
+- **Download**: installers on the [v0.4.17 release](https://github.com/Dongyurocket/PaperQuay/releases/tag/app-v0.4.17).
 
 ### v0.4.16 - Reader panels stop following the mouse after you release
 
 - **The sidebar width sticks now**: HTML answers in the assistant sidebar render in an `iframe`, and releasing the drag over one never reached the parent window, so the panel kept following the mouse. Separators now use Pointer Capture and also end on pointer cancel, lost pointer capture, window blur, or a move with no button held; width transitions are off while dragging, so it stops where you release it. The PDF/translation split and the floating chat panel are fixed the same way.
 - **Sizes are saved once on release**: sidebar width and split ratio no longer write `localStorage` on every mouse move.
-- **Download**: latest installers on the [v0.4.16 release](https://github.com/Dongyurocket/PaperQuay/releases/tag/app-v0.4.16).
+- **Download**: installers on the [v0.4.16 release](https://github.com/Dongyurocket/PaperQuay/releases/tag/app-v0.4.16).
 
 ### v0.4.15 - Hybrid rebuilds finish an interrupted pdf-text index
 
 - **The badge no longer sticks on a partial index**: a paper stayed on "RAG pending" when MinerU was already indexed and pdf-text had stopped mid-batch. Manual and batch rebuilds now read the PDF text and finish pdf-text.
-- **Download**: latest installers on the [v0.4.15 release](https://github.com/Dongyurocket/PaperQuay/releases/tag/app-v0.4.15).
+- **Download**: installers on the [v0.4.15 release](https://github.com/Dongyurocket/PaperQuay/releases/tag/app-v0.4.15).
 
 ### v0.4.14 - Per-paper RAG index opt-out
 
 - **Exclude from the local knowledge base**: the details panel, context menu, and batch bar can remove one paper or a selection from the index. Exclusion deletes that paper's index and keeps the PDF, parsed content, and notes. Rejoining does not rebuild the index.
 - **Retrieval boundary**: excluded papers drop out of knowledge-base search and similarity. Reader QA and single-paper Agent context still fall back to the full text. The list can filter all / included / excluded.
 - **MCP**: `search_papers` and `get_paper_details` return `ragEnabled`. Excluded papers do not appear in `search_knowledge_base` or `read_paper_content`.
-- **Download**: latest installers on the [v0.4.14 release](https://github.com/Dongyurocket/PaperQuay/releases/tag/app-v0.4.14).
+- **Download**: installers on the [v0.4.14 release](https://github.com/Dongyurocket/PaperQuay/releases/tag/app-v0.4.14).
 
 ### v0.4.10–v0.4.13 - MCP ships with the installer, and contract alignment
 
@@ -112,7 +112,7 @@
 - **Install-build fixes**: v0.4.11 fixed `sqlite-vec` missing from the packaged service; v0.4.12 fixed the write guard misidentifying the MCP process itself (`PaperQuay.exe` launched with `ELECTRON_RUN_AS_NODE=1`) as the desktop app, which had made every write tool fail while the desktop app was closed.
 - **MCP contract alignment (v0.4.13)**: the `update_note` description now matches the write-time rich-text rebuild, its documented `pageKind` parameter (8-value whitelist, empty string clears) is restored, and clearing a page kind now actually persists; README and the Chinese user manual refreshed.
 - **Settings and Responses fixes**: numeric settings (context window, max output, temperature) now commit on blur or Enter so values can be typed continuously; Responses `completed` maps to `stop`, and truncated or failed states report diagnosable errors.
-- **Download**: latest installers on the [v0.4.13 release](https://github.com/Dongyurocket/PaperQuay/releases/tag/app-v0.4.13).
+- **Download**: installers on the [v0.4.13 release](https://github.com/Dongyurocket/PaperQuay/releases/tag/app-v0.4.13).
 
 ### v0.4.9 - Survey coverage, delivery quality checks, and budgeted continuation
 
@@ -368,7 +368,7 @@ The server registers 25 standard MCP tools across four operational domains:
 
 #### 3. Library Write & Management Tools (8 tools, guarded)
 
-These tools modify the local library database. Each one checks the desktop app process before writing and **explicitly refuses while it is running** (override with `allowWhileAppRunning: true`; disable all writes globally with `PAPERQUAY_MCP_WRITE=off`).
+These tools modify the local library database, except the read-only `list_categories`. Each one checks the desktop app process before writing and **explicitly refuses while it is running** (override with `allowWhileAppRunning: true`; disable all writes globally with `PAPERQUAY_MCP_WRITE=off`).
 
 | Tool Name | Description | Key Parameters | Return Fields |
 | :--- | :--- | :--- | :--- |
@@ -567,7 +567,7 @@ The Notes editor uses the official Tiptap packages and was implemented against t
 
 ## Requirements
 
-- Node.js 18 or newer
+- Node.js 22.18 or newer (CI uses 24)
 - Windows, macOS, or Linux
 
 Optional external services:
@@ -637,11 +637,11 @@ The full migration preset includes:
 
 - App configuration, API keys, and the library, notes, and RAG databases.
 - Referenced PDFs, Agent memory and conversation history, and review drafts.
-- Knowledge-graph relations, reader state and annotations, the notes vault, and MinerU-derived caches.
+- Knowledge-graph relations, reader state and annotations, the notes vault, and MinerU-derived caches, including translation and summary caches.
 
 Based on the current sample, a full archive is about 12.2 GiB. A routine backup is about 2.3 GiB and excludes the RAG database and MinerU cache.
 
-The new version removes WebDAV backup and cannot read old WebDAV backups. To keep old data, restore it locally with PaperQuay 0.4.x before upgrading. Remote files are not deleted automatically; remove them yourself after confirming they are no longer needed.
+The new version removes WebDAV backup and cannot read old WebDAV backups. To keep old data, restore it locally with PaperQuay 0.4.18 or earlier before upgrading. Remote files are not deleted automatically; remove them yourself after confirming they are no longer needed.
 
 Do not commit local data, API keys, PDFs, parser outputs, notes databases, or backups. The `.gitignore` excludes common local runtime folders, SQLite databases, legacy JSON library data, API key files, build output, backup archives, and private PDFs by default.
 

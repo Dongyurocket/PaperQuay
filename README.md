@@ -66,9 +66,9 @@
 
 ### v0.4.19 - 加密单文件备份替换 WebDAV
 
-- **`.pqbackup` 加密备份包**：密码保护的 AES-256-GCM 单文件。完整迁移包包含配置与 API Key、三个数据库、PDF、Agent 记忆与会话历史。它还包含综述草稿、知识图谱关系、阅读状态与批注。笔记 vault 和 MinerU 派生缓存也在包内。完整包约 12.2 GiB，日常备份约 2.3 GiB。密码无法找回。
+- **`.pqbackup` 加密备份包**：密码保护的 AES-256-GCM 单文件。完整迁移包包含配置与 API Key、三个数据库、文献库引用的 PDF、Agent 记忆与会话历史。它还包含综述草稿、知识图谱关系、阅读状态与批注。笔记 vault 和 MinerU 派生缓存也在包内。完整包约 12.2 GiB，日常备份约 2.3 GiB。密码无法找回。
 - **导入分四步**：暂存、校验、重启、离线替换；旧数据目录保留为回滚点，恢复期间 MCP 写入受保护。
-- **WebDAV 退役**：旧远端备份需先用 0.4.x 恢复到本机；新版不读取旧备份，也不自动删除远端文件。
+- **WebDAV 退役**：旧远端备份需先用 0.4.18 或更早版本恢复到本机；新版不读取旧备份，也不自动删除远端文件。
 - **下载**：[v0.4.19 Release](https://github.com/Dongyurocket/PaperQuay/releases/tag/app-v0.4.19)。
 
 ### v0.4.18 - 问答失败保留问题与聊天复制
@@ -86,25 +86,25 @@
 - **新增命令面板**：`Ctrl/Cmd+K` 可搜索并执行导航、标签、设置等操作；`Ctrl/Cmd+W` 关标签、`Ctrl/Cmd+,` 开设置。
 - **长任务跨标签可见**：翻译与 RAG 索引进度现在在全局任务条显示，切走标签页也能看到。
 - **鼠标不再能误删历史**：Agent「清空历史记录」与「删除单个会话」现在都有确认。
-- **下载**：最新安装包见 [v0.4.17 Release](https://github.com/Dongyurocket/PaperQuay/releases/tag/app-v0.4.17)。
+- **下载**：安装包见 [v0.4.17 Release](https://github.com/Dongyurocket/PaperQuay/releases/tag/app-v0.4.17)。
 
 ### v0.4.16 - 阅读界面拖拽松手后不再跟随鼠标
 
 - **侧栏宽度能固定了**：问答侧栏的 HTML 回答在 `iframe` 内，之前在其上松开鼠标时父窗口收不到 `pointerup`，侧栏会一直跟随鼠标。分隔条改用 Pointer Capture，并以指针取消、捕获丢失、窗口失焦、左键已松开四路兜底结束；拖动期间关闭宽度过渡，松手即停。PDF / 翻译分栏与浮动问答面板同样修复。
 - **尺寸只在松手后写盘**：侧栏宽度与分栏比例不再在拖动中每帧写 `localStorage`。
-- **下载**：最新安装包见 [v0.4.16 Release](https://github.com/Dongyurocket/PaperQuay/releases/tag/app-v0.4.16)。
+- **下载**：安装包见 [v0.4.16 Release](https://github.com/Dongyurocket/PaperQuay/releases/tag/app-v0.4.16)。
 
 ### v0.4.15 - hybrid 重建会补齐中断的 pdf-text 索引
 
 - **角标不再被半成品卡住**：MinerU 已索引完成时，中断的 `pdf-text` 仍会让整篇显示「RAG 待索引」。手动和批量重建现在会读取 PDF 文本并补完 `pdf-text`。
-- **下载**：最新安装包见 [v0.4.15 Release](https://github.com/Dongyurocket/PaperQuay/releases/tag/app-v0.4.15)。
+- **下载**：安装包见 [v0.4.15 Release](https://github.com/Dongyurocket/PaperQuay/releases/tag/app-v0.4.15)。
 
 ### v0.4.14 - 文献级 RAG 索引开关
 
 - **移出本地知识库**：详情、右键和批量栏可以把单篇或一批文献移出索引。移出删除该文献已有索引，PDF、解析结果和笔记保留；重新加入后不会自动重建索引。
 - **检索边界**：已排除文献不再进入知识库检索和相似度；阅读器问答和 Agent 打开这一篇时仍可用全文。列表可按全部 / 已加入 / 已排除筛选。
 - **MCP**：`search_papers` 与 `get_paper_details` 返回 `ragEnabled`。已排除文献不会出现在 `search_knowledge_base` 和 `read_paper_content`。
-- **下载**：最新安装包见 [v0.4.14 Release](https://github.com/Dongyurocket/PaperQuay/releases/tag/app-v0.4.14)。
+- **下载**：安装包见 [v0.4.14 Release](https://github.com/Dongyurocket/PaperQuay/releases/tag/app-v0.4.14)。
 
 ### v0.4.10–v0.4.13 - MCP 随安装包发布与契约对齐
 
@@ -113,7 +113,7 @@
 - **安装版修复**：v0.4.11 修复了 0.4.10 安装包中服务缺少 `sqlite-vec` 的问题；v0.4.12 修复了以 `PaperQuay.exe` 启动的 MCP 进程被写护栏误判为桌面端的问题——桌面端关闭时文库与笔记写工具不再被恒定拒绝。
 - **MCP 契约对齐（v0.4.13）**：`update_note` 描述改为与实现一致的写入边界重建富文本，补回 `pageKind` 参数（8 值白名单、空串清除）并修复页面类型清除不生效的问题；README 与用户手册同步刷新。
 - **设置与模型修复**：设置页「上下文窗口」「最大输出」「温度」改为失焦或回车后归一化保存，可连续输入；Responses 接口的完成态正确映射为 `stop`，截断与失败态给出可诊断错误。
-- **下载**：最新安装包见 [v0.4.13 Release](https://github.com/Dongyurocket/PaperQuay/releases/tag/app-v0.4.13)。
+- **下载**：安装包见 [v0.4.13 Release](https://github.com/Dongyurocket/PaperQuay/releases/tag/app-v0.4.13)。
 
 ### v0.4.9 - 综述覆盖与继续、交付质量检查
 
@@ -377,9 +377,9 @@ PaperQuay 内置了基于标准 **Model Context Protocol (MCP)** 的独立服务
 | `zotero_preview_sync` | **入库前差量比对与去重预检** | `itemKeys`、`collectionKey`、`dataDir` | 差量清单：`ready`（可同步）、`alreadyExists`（已存在去重）、`missingPdf`（缺本地 PDF） |
 | `paperquay_sync_from_zotero` | **精准安全入库** | `itemKeys`、`collectionKey`、`targetCategoryId`、`createCollectionCategory` | 同步报告：成功篇数、跳过篇数、自动创建/关联的分类名称 |
 
-#### 3. 文库写入与管理工具（8 项，带运行护栏）
+#### 3. 文库写入与分类管理工具（8 项，带运行护栏）
 
-以下工具会修改本地文库数据库，执行前自动检测桌面应用运行状态，检测到运行时**显式拒绝**（可传 `allowWhileAppRunning: true` 覆盖；`PAPERQUAY_MCP_WRITE=off` 可全局禁用写入）。
+以下工具中 `list_categories` 只读，其余会修改本地文库数据库。写入前自动检测桌面应用运行状态，检测到运行时**显式拒绝**（可传 `allowWhileAppRunning: true` 覆盖；`PAPERQUAY_MCP_WRITE=off` 可全局禁用写入）。
 
 | 工具名称 | 功能说明 | 核心参数 | 返回关键字段 |
 | :--- | :--- | :--- | :--- |
@@ -394,7 +394,7 @@ PaperQuay 内置了基于标准 **Model Context Protocol (MCP)** 的独立服务
 
 #### 4. 笔记维护工具（8 项，带运行护栏）
 
-笔记库采用逐条 SQL 写入，但应用界面持有内存快照，外部写入后需重新加载界面才能看到，因此同样使用「默认拒绝 + `allowWhileAppRunning` 可覆盖」护栏。
+笔记库采用逐条 SQL 写入，但应用界面持有内存快照，外部写入后需重新加载界面才能看到。`list_note_tags`、`list_note_folders` 只读，其余写入同样使用「默认拒绝 + `allowWhileAppRunning` 可覆盖」护栏。
 
 | 工具名称 | 功能说明 | 核心参数 | 返回关键字段 |
 | :--- | :--- | :--- | :--- |
@@ -418,7 +418,7 @@ PaperQuay 内置了基于标准 **Model Context Protocol (MCP)** 的独立服务
 
 ### 客户端接入配置指南
 
-已安装桌面版不要指向源码仓库。在设置页复制配置，或按下面的形式把 `command` 设为 `PaperQuay.exe`，`args` 指向 `resources/paperquay-mcp/server.cjs`，并设置 `ELECTRON_RUN_AS_NODE=1`。需要指定数据目录时在 args 末尾加 `--data-dir` 和绝对路径。开发模式才使用系统 `node` 与 `bin/paperquay-mcp.cjs`。
+已安装桌面版不要指向源码仓库。在设置页复制配置，或按下面的形式把 `command` 设为 `PaperQuay.exe`，`args` 指向 `resources/paperquay-mcp/server.cjs`，并设置 `ELECTRON_RUN_AS_NODE=1`。需要指定数据目录时在 args 末尾加 `--data-dir` 和绝对路径。开发模式才使用系统 `node` 与 `bin/paperquay-mcp.cjs`。设置页「MCP 服务」生成 Proma / Claude / Codex 片段；下面另列 Proma、Claude、Cursor、Pi 的手工配置。
 
 #### 1. Proma Agent（开发模式）
 在 Proma 工作区设置或 `mcp.json` 中添加：
@@ -580,7 +580,7 @@ PaperQuay 使用 Electron 作为桌面宿主。React 渲染进程通过 IPC 调�
 
 ## 环境要求
 
-- Node.js 18 或更高版本
+- Node.js 22.18 或更高版本（CI 使用 24）
 - Windows、macOS 或 Linux
 
 可选外部服务：
@@ -646,15 +646,15 @@ PaperQuay 使用密码保护的单文件 `.pqbackup`。
 
 默认完整迁移包包含：
 
-- 应用配置、API Key、三个数据库和 PDF；
+- 应用配置、API Key、三个数据库和文献库引用的 PDF；
 - Agent 记忆、会话历史、综述草稿和知识图谱关系；
 - 阅读器状态与批注、笔记 vault 和 MinerU/翻译/摘要缓存。
 
 按当前样本估算，完整包约 12.2 GiB。日常备份约 2.3 GiB，不含 RAG 数据库和 MinerU 缓存。忘记密码后无法恢复备份。备份包可能含密钥和个人数据，不要提交到代码仓库。
 
-新版不兼容旧 WebDAV 备份。需要保留旧数据时，请先用 PaperQuay 0.4.x 恢复到本机，再升级。新版不会自动删除远端旧文件；确认无需保留后，请自行清理。
+新版不兼容旧 WebDAV 备份。需要保留旧数据时，请先用 PaperQuay 0.4.18 或更早版本恢复到本机，再升级。新版不会自动删除远端旧文件；确认无需保留后，请自行清理。
 
-不要提交本地数据、API key、PDF、解析结果、笔记数据库或备份文件。当前 `.gitignore` 已默认排除运行时目录、SQLite 数据库、旧版 JSON 文献库数据、API key 文件、构建产物、备份包和私人 PDF。
+不要提交本地数据、API key、PDF、解析结果、笔记数据库或备份包。当前 `.gitignore` 已默认排除运行时目录、SQLite 数据库、旧版 JSON 文献库数据、API key 文件、构建产物、备份包和私人 PDF。
 
 ---
 
