@@ -9,6 +9,8 @@ import { ReaderWorkspaceHeader } from './readerWorkspaceHeader';
 import { FloatingAssistantPanel, SelectionQuickActions } from './readerWorkspaceOverlays';
 import TranslatedPdfPane from './TranslatedPdfPane';
 import { getFileNameFromPath } from '../../utils/text';
+import { getPdfSourceSignature } from '../pdf/pdfDocumentSource';
+import { resolvePdfCompareLeftSource } from './documentReaderPdfOptions';
 import {
   formatReaderDocumentSource,
   type ReaderWorkspaceDocument,
@@ -281,6 +283,10 @@ function ReadingStage(props: ReaderWorkspaceProps & { immersiveReading: boolean 
   const pdfCompareMode = readingViewMode === 'pdf-compare';
   const showDualPane = readingViewMode === 'dual-pane' || pdfCompareMode;
   const translatedPdfPath = currentDocument.translatedPdfPath ?? '';
+  const leftPdfSource = resolvePdfCompareLeftSource(pdfCompareMode, originalPdfPath, pdfSource);
+  const leftPageSyncContext = pdfCompareMode && originalPdfPath
+    ? getPdfSourceSignature(leftPdfSource)
+    : pdfScrollPosition?.sourceKey ?? '';
   const matchesCurrentDocument = useCallback(
     (paperId?: string | null) => {
       const value = paperId?.trim();
@@ -356,7 +362,6 @@ function ReadingStage(props: ReaderWorkspaceProps & { immersiveReading: boolean 
     pdfScrollPosition?.sourceKey ?? '',
     translatedPdfPath,
   ].join('\u0000');
-  const leftPageSyncContext = pdfScrollPosition?.sourceKey ?? '';
   const rightPageSyncContext = translatedPdfPath ? `local:${translatedPdfPath}` : '';
 
   useEffect(() => {
@@ -458,9 +463,9 @@ function ReadingStage(props: ReaderWorkspaceProps & { immersiveReading: boolean 
             <PdfViewer
               onPageCountChange={props.onPdfPageCountChange}
               onDocumentErrorChange={props.onPdfDocumentErrorChange}
-              source={pdfSource}
-              pdfData={pdfData}
-              scrollPosition={pdfScrollPosition}
+              source={leftPdfSource}
+              pdfData={pdfCompareMode && originalPdfPath ? null : pdfData}
+              scrollPosition={pdfCompareMode && originalPdfPath ? null : pdfScrollPosition}
               pageSyncSignal={leftPageSyncSignal}
               readingHeatmap={pdfReadingHeatmap}
               currentPdfName={currentPdfName}

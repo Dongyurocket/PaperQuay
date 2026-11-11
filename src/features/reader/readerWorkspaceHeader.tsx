@@ -24,6 +24,7 @@ import { WORKSPACE_HEADER_COLLAPSED_STORAGE_KEY, loadStoredBoolean } from './rea
 interface PdfOption {
   path: string;
   label: string;
+  title?: string;
 }
 
 export interface ReaderWorkspaceHeaderProps {
@@ -181,7 +182,7 @@ function HeaderPdfVersionControl({
           <select
             value={currentPdfPath || availablePdfOptions[0]?.path || ''}
             onChange={(event) => onCurrentPdfPathChange(event.target.value)}
-            title={selectedPdfOption?.label || ''}
+            title={selectedPdfOption?.title || selectedPdfOption?.label || ''}
             className="block w-full min-w-0 appearance-none truncate bg-transparent pr-8 text-sm leading-6 text-[var(--pq-text-muted)] outline-none dark:text-[var(--pq-text-muted)]"
           >
             {availablePdfOptions.map((option) => (

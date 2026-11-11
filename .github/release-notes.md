@@ -1,19 +1,14 @@
 # PaperQuay v{{VERSION}}
 
-## PDF storage governance preview
+## Reader fixes
 
-- Added a read-only health report for registered PDF attachments, including file availability, size, and content-hash checks.
-- Added a naming preview that distinguishes managed files from external paths. Previewing does not rename or move files.
-- Reader PDF choices now come from registered attachments instead of treating every PDF in a project folder as a source. Translation language metadata is preserved, and replaced translations retain their attachment records and files.
-- Added persistent asset and location schema foundations without automatic backfill, physical deduplication, or garbage collection.
-
-This release does not yet apply or roll back rename plans, quarantine duplicates, or run garbage collection. Those operations remain disabled until locator migration, recovery, and backup round-trip gates are complete.
+- PDF source choices now use concise localized labels. Translation language is shown when available, with an explicit unconfirmed-language label otherwise; the file name remains available as a tooltip.
+- PDF Compare always opens the original PDF on the left and the attached translation on the right, even when normal reading was switched to the translated PDF.
 
 ## Verification
 
-- `npm run build` and all 955 automated tests pass.
-- The registered-PDF inventory and naming preview are read-only.
-- The health report and naming preview do not change existing PDFs. This version does not automatically rename, move, or delete existing PDFs.
+- Automated regression coverage includes localized PDF source labels and comparison-source selection.
+- Windows desktop acceptance should verify localized source choices and entering PDF Compare from a translated source.
 
 ## Downloads
 
@@ -27,20 +22,15 @@ macOS arm64 installers are not built or published. Historical release assets rem
 
 # PaperQuay v{{VERSION}}
 
-## PDF 存储治理预览
+## 阅读器修复
 
-- 新增文库登记 PDF 的只读体检，展示文件可读性、大小和内容哈希核验结果。
-- 新增文件命名预览，区分 PaperQuay 管理的文件与外部路径；预览不会改名或移动文件。
-- 阅读器的 PDF 来源改为读取已登记附件，不再把项目目录中的任意 PDF 当作文献来源。译版语言信息会保留，替换译版时保留旧版附件记录与文件。
-- 新增资产与位置数据表及其持久化基础，尚未自动回填历史资产，也未启用物理去重或垃圾回收。
-
-此版本尚不能执行或回滚改名计划，也不会隔离重复文件或运行垃圾回收。locator 迁移、恢复流程和备份往返门槛完成前，这些操作保持关闭。
+- PDF 来源选项改为简短的本地化标签；可显示译版语言，缺少语言信息时明确标注“语言待确认”，完整文件名保留在提示中。
+- PDF 对照模式固定显示左侧原版、右侧译版；即使普通阅读当前选中了译版，也不会再出现两栏重复译版。
 
 ## 验证
 
-- `npm run build` 与全部 955 项自动化测试通过。
-- 登记 PDF 体检和命名预览均为只读。
-- 体检和命名预览不会修改已有 PDF；此版本不会自动重命名、移动或删除已有 PDF。
+- 自动化回归覆盖 PDF 来源本地化标签和对照模式来源选择。
+- Windows 桌面验收应验证来源选项本地化，以及从译版直接进入 PDF 对照。
 
 ## 下载平台
 

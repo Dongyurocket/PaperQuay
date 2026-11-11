@@ -11,6 +11,17 @@ import {
 export interface ReaderPdfOption {
   path: string;
   label: string;
+  title: string;
+}
+
+export function resolvePdfCompareLeftSource(
+  pdfCompareMode: boolean,
+  originalPdfPath: string,
+  activePdfSource: PdfSource,
+): PdfSource {
+  return pdfCompareMode && originalPdfPath.trim()
+    ? { kind: 'local-path', path: originalPdfPath }
+    : activePdfSource;
 }
 
 export function resolveOriginalPdfPath(
@@ -93,15 +104,17 @@ export function buildAvailablePdfOptions(options: {
   projectPdfFiles: Array<LocalDirectoryFileEntry & { role?: string }>;
   currentLocalPdfPath: string;
   currentPdfVariantLabel: string;
+  localize: (zh: string, en: string) => string;
 }): ReaderPdfOption[] {
   const {
     originalPdfPath,
     projectPdfFiles,
     currentLocalPdfPath,
     currentPdfVariantLabel,
+    localize,
   } = options;
   const pdfOptions: ReaderPdfOption[] = [];
-  const appendOption = (path: string, label: string) => {
+  const appendOption = (path: string, label: string, title = getFileNameFromPath(path)) => {
     if (!path.trim()) {
       return;
     }
@@ -110,24 +123,35 @@ export function buildAvailablePdfOptions(options: {
       return;
     }
 
-    pdfOptions.push({ path, label });
+    pdfOptions.push({ path, label, title });
   };
 
   if (originalPdfPath) {
-    appendOption(originalPdfPath, `Original - ${getFileNameFromPath(originalPdfPath)}`);
+    appendOption(originalPdfPath, localize('原版 PDF', 'Original PDF'));
   }
 
   projectPdfFiles.forEach((entry) => {
-    const prefix = entry.role || (
+    const role = (entry.role || (
       originalPdfPath && isSameLocalPath(entry.path, originalPdfPath) ? 'Original' : 'Project'
-    );
-    appendOption(entry.path, `${prefix} - ${entry.name}`);
+    )).trim();
+    const translatedMatch = role.match(/^Translated(?:\s*[·:]\s*(.*))?$/i);
+    const translatedLanguage = translatedMatch?.[1]?.trim() ?? '';
+    const label = translatedMatch
+      ? translatedLanguage && !/^(?:und|unknown|undefined)$/i.test(translatedLanguage)
+        ? localize(`译版 · ${translatedLanguage}`, `Translated · ${translatedLanguage}`)
+        : localize('译版 · 语言待确认', 'Translated · language unconfirmed')
+      : /^(?:original|original pdf)$/i.test(role)
+        ? localize('原版 PDF', 'Original PDF')
+        : /^(?:annotated|annotated pdf)$/i.test(role)
+          ? localize('批注版 PDF', 'Annotated PDF')
+          : localize('其他 PDF', 'Other PDF');
+    appendOption(entry.path, label, entry.name || getFileNameFromPath(entry.path));
   });
 
   if (currentLocalPdfPath) {
     appendOption(
       currentLocalPdfPath,
-      `${currentPdfVariantLabel || 'Current'} - ${getFileNameFromPath(currentLocalPdfPath)}`,
+      currentPdfVariantLabel || localize('当前 PDF', 'Current PDF'),
     );
   }
 

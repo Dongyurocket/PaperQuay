@@ -733,8 +733,9 @@ function DocumentReaderTab({
       projectPdfFiles,
       currentLocalPdfPath,
       currentPdfVariantLabel,
+      localize: l,
     }),
-    [currentLocalPdfPath, currentPdfVariantLabel, originalPdfPath, projectPdfFiles],
+    [currentLocalPdfPath, currentPdfVariantLabel, l, originalPdfPath, projectPdfFiles],
   );
 
   useEffect(() => {

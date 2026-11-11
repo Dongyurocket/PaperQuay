@@ -11,6 +11,7 @@ import {
   resolveCurrentLocalPdfPath,
   resolveCurrentPdfVariantLabel,
   resolveOriginalPdfPath,
+  resolvePdfCompareLeftSource,
 } from '../src/features/reader/documentReaderPdfOptions.ts';
 
 function item(overrides: Partial<WorkspaceItem> = {}): WorkspaceItem {
@@ -84,6 +85,17 @@ test('PDF variant labels distinguish remote, original, and annotated copies', ()
   );
 });
 
+test('PDF compare pins its left source to the original while normal reading keeps the selected source', () => {
+  const translatedSource: PdfSource = { kind: 'local-path', path: 'D:/papers/translated.pdf' };
+
+  assert.deepEqual(
+    resolvePdfCompareLeftSource(true, 'D:/papers/original.pdf', translatedSource),
+    { kind: 'local-path', path: 'D:/papers/original.pdf' },
+  );
+  assert.equal(resolvePdfCompareLeftSource(false, 'D:/papers/original.pdf', translatedSource), translatedSource);
+  assert.equal(resolvePdfCompareLeftSource(true, '', translatedSource), translatedSource);
+});
+
 test('annotation save directory prefers MinerU cache, then original PDF, then current PDF', () => {
   const document = item({ itemKey: 'paper:one', title: 'A/B Paper' });
 
@@ -125,11 +137,12 @@ test('available PDF options are deduplicated in original, project, current order
     ],
     currentLocalPdfPath: 'D:/papers/project.pdf',
     currentPdfVariantLabel: '批注版 PDF',
+    localize: zh,
   });
 
   assert.deepEqual(options, [
-    { path: 'D:/papers/original.pdf', label: 'Original - original.pdf' },
-    { path: 'D:/papers/project.pdf', label: 'Project - project.pdf' },
+    { path: 'D:/papers/original.pdf', label: '原版 PDF', title: 'original.pdf' },
+    { path: 'D:/papers/project.pdf', label: '其他 PDF', title: 'project.pdf' },
   ]);
   assert.equal(canSwitchToOriginalPdf('D:/papers/project.pdf', 'D:/papers/original.pdf'), true);
   assert.equal(canSwitchToOriginalPdf('D:/papers/original.pdf', 'D:\\papers\\original.pdf'), false);
@@ -145,11 +158,47 @@ test('registered native library variants retain their attachment roles in reader
     ],
     currentLocalPdfPath: 'C:/library/original.pdf',
     currentPdfVariantLabel: 'Original PDF',
+    localize: zh,
   });
 
-  assert.deepEqual(options.map((item) => item.label), [
-    'Original - original.pdf',
-    'Translated · zh-CN - translated.pdf',
-    'Annotated - annotated.pdf',
+  assert.deepEqual(options, [
+    { path: 'C:/library/original.pdf', label: '原版 PDF', title: 'original.pdf' },
+    { path: 'C:/library/translated.pdf', label: '译版 · zh-CN', title: 'translated.pdf' },
+    { path: 'C:/library/annotated.pdf', label: '批注版 PDF', title: 'annotated.pdf' },
+  ]);
+});
+
+test('translated variants without a confirmed language use a localized short label and keep the filename in the title', () => {
+  const options = buildAvailablePdfOptions({
+    originalPdfPath: 'C:/library/original.pdf',
+    projectPdfFiles: [
+      { path: 'C:/library/translated.pdf', name: 'long_physical_translation_name.pdf', role: 'Translated · und', size: 0, modifiedAtMs: 0 },
+    ],
+    currentLocalPdfPath: 'C:/library/original.pdf',
+    currentPdfVariantLabel: '原始 PDF',
+    localize: zh,
+  });
+
+  assert.deepEqual(options[1], {
+    path: 'C:/library/translated.pdf',
+    label: '译版 · 语言待确认',
+    title: 'long_physical_translation_name.pdf',
+  });
+});
+
+test('PDF option labels and missing-language message support English localization', () => {
+  const options = buildAvailablePdfOptions({
+    originalPdfPath: 'C:/library/original.pdf',
+    projectPdfFiles: [
+      { path: 'C:/library/translated.pdf', name: 'translated.pdf', role: 'Translated', size: 0, modifiedAtMs: 0 },
+    ],
+    currentLocalPdfPath: 'C:/library/original.pdf',
+    currentPdfVariantLabel: 'Original PDF',
+    localize: (_zh, en) => en,
+  });
+
+  assert.deepEqual(options.map((option) => option.label), [
+    'Original PDF',
+    'Translated · language unconfirmed',
   ]);
 });
