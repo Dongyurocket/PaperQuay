@@ -35,17 +35,11 @@ function updateSupportText(status: AppUpdateStatus | null, l: ReaderPreferencesL
   }
 
   if (status.autoUpdateSupported) {
-    return status.autoUpdateChannel === 'appimage'
-      ? l('Linux AppImage 自动更新', 'Linux AppImage automatic updates')
-      : l('Windows 安装包自动更新', 'Windows installer automatic updates');
+    return l('Windows 安装包自动更新', 'Windows installer automatic updates');
   }
 
-  if (status.autoUpdateUnsupportedReason === 'macos-manual') {
-    return l('macOS 当前提供更新检查和手动下载', 'macOS currently supports update checks and manual downloads');
-  }
-
-  if (status.autoUpdateUnsupportedReason === 'linux-non-appimage') {
-    return l('当前 Linux 包需要手动下载新版', 'This Linux package requires manual downloads');
+  if (status.autoUpdateUnsupportedReason === 'self-build-only') {
+    return l('当前平台请自行从源码构建，作者不提供维护和测试', 'Build this platform from source; the author does not maintain or test it');
   }
 
   if (status.autoUpdateUnsupportedReason === 'development') {
@@ -191,8 +185,8 @@ export function ReaderPreferencesUpdateSection({
     <SettingsField
       label={l('软件更新', 'Software Updates')}
       description={l(
-        'Windows 和 Linux AppImage 可自动下载并安装；macOS 当前提供更新检查和手动下载。',
-        'Windows and Linux AppImage can download and install updates automatically. macOS currently checks and opens manual downloads.',
+        '自 0.4.24 起仅发布和测试 Windows x64 安装包。其他平台请自行打包，作者精力有限，不提供维护和测试。',
+        'From 0.4.24, only Windows x64 installers are published and tested. Build other platforms yourself; the author has limited capacity and does not maintain or test them.',
       )}
     >
       <div className="space-y-4">

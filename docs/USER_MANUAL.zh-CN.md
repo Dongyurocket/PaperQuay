@@ -30,7 +30,7 @@
 
 ### 1.1 安装
 
-1. 从[个人 Fork 的 GitHub Releases](https://github.com/Dongyurocket/PaperQuay/releases) 下载对应平台的安装包：Windows x64 `.exe`、macOS x64 `.dmg`，或 Linux x64 `.AppImage` / `.deb` / `.tar.gz`。自 0.4.18 起停止发布 macOS arm64 安装包，历史版本资产保留。macOS 更新时需从发布页手动下载。
+1. 从[个人 Fork 的 GitHub Releases](https://github.com/Dongyurocket/PaperQuay/releases) 下载 Windows x64 `.exe` 安装包。自 0.4.24 起仅发布、维护和测试 Windows 版；作者精力有限，macOS、Linux 等其他平台由用户自行从源码打包，作者不承担维护和测试。历史版本资产保留。
 2. 安装后首次启动，应用会自动在系统的用户数据目录下创建 PaperQuay 数据目录，不需要额外初始化步骤。
 3. 从源码运行（开发者）要求 Node.js 22.18+，使用 `npm ci` 安装依赖、`npm run dev` 启动桌面开发模式；这部分不属于本手册范围。
 
@@ -550,11 +550,11 @@ PaperQuay 使用密码保护的单文件 `.pqbackup`。导出密码至少为 8 �
 | 翻译 | 全文与划词翻译开关、语言、并发与吞吐、翻译缓存清理 |
 | AI 模型 | 模型预设、功能与角色绑定、Embedding 配置 |
 | 概览与问答 | 概览输入来源、批量概览、本地 RAG 开关、检索来源模式、Top-K、索引管理 |
-| 软件更新 | 检查 GitHub 发布版本并安装更新（macOS 跳转发布页手动下载） |
+| 软件更新 | 检查 GitHub 发布版本并安装 Windows 更新；其他平台自行从源码打包 |
 
 ## 13. 更新与排障
 
-- **更新**：设置 → 软件更新；Windows 与 Linux 支持应用内自动更新，macOS 打开发布页手动下载安装包。升级前先导出 `.pqbackup`；旧 WebDAV 备份按 5.7 节在 PaperQuay 0.4.18 或更早版本中恢复。
+- **更新**：设置 → 软件更新；Windows 支持应用内自动更新，其他平台请自行从源码构建。作者仅维护和测试 Windows。升级前先导出 `.pqbackup`；旧 WebDAV 备份按 5.7 节在 PaperQuay 0.4.18 或更早版本中恢复。
 - **入口排障顺序**：解析异常 → 看文档解析状态与缓存；检索/引用异常 → 看 Embedding 与索引统计；翻译/概览异常 → 看 AI 模型预设与连通性测试；文库写入失败（MCP）→ 确认桌面应用已关闭。
 - **性能**：超长文档首屏会分段渐进可用；大文库列表用 SQL 分页与行窗口化，若仍卡顿，优先检查是否有超长解析文档正在后台解析。
 

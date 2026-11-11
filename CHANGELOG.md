@@ -2,9 +2,27 @@
 
 本文档记录 PaperQuay 各版本的主要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循语义化版本。
 
-各平台安装包见 [GitHub Releases](https://github.com/Dongyurocket/PaperQuay/releases)。
+Windows 安装包见 [GitHub Releases](https://github.com/Dongyurocket/PaperQuay/releases)。自 0.4.24 起仅发布、维护和测试 Windows x64；其他平台由用户自行打包，作者不承担维护和测试。
 
 ## [Unreleased]
+
+## [0.4.24] - 2026-11-12
+
+### 修复
+
+- 调整 PDF 分栏、窗口尺寸及重新激活页签后，重新计算适合宽度等适配比例；手动数字缩放保持不变，不重新加载文档。
+- 对照初始同步等待 PDF.js 的 `pagesinit` 完成，避免页节点提前出现时消耗同步 token，随后被初始化恢复到第一页。
+
+### 变更
+
+- Release 仅构建和上传 Windows x64 安装包及更新元数据。macOS、Linux 等其他平台由用户自行从源码打包；作者精力有限，不承担维护和测试。保留历史资产和自行构建配置。
+- 自动更新仅支持 Windows，设置页、中英文 README、用户手册与贡献指南同步维护范围。
+
+### 验证
+
+- `npm run check` 构建和全部 976 项测试通过；新增回归在修复前复现失败，修复后通过。
+- 安装版 0.4.23 的译版直接对照已验证原文和译文可读，各 47 页；本次发现的两项缺陷已修复并纳入回归。0.4.24 安装后的桌面复验待用户更新后进行。
+- 详见[变更与验收记录](docs/changes/2026-11-12-pdf-compare-resize-and-initial-sync.md)。
 
 ## [0.4.23] - 2026-11-12
 

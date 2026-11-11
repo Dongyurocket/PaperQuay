@@ -9,8 +9,8 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.4.20-2563eb?style=flat-square" alt="Version v0.4.20">
-  <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-4b5563?style=flat-square" alt="Windows macOS Linux">
+  <img src="https://img.shields.io/badge/version-v0.4.24-2563eb?style=flat-square" alt="Version v0.4.24">
+  <img src="https://img.shields.io/badge/maintained-Windows%20x64-4b5563?style=flat-square" alt="Maintained: Windows x64">
   <img src="https://img.shields.io/badge/built%20with-Electron-47848f?style=flat-square" alt="Electron">
   <img src="https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-0f766e?style=flat-square" alt="React TypeScript">
   <img src="https://img.shields.io/badge/storage-local%20SQLite-111827?style=flat-square" alt="本地 SQLite 存储">
@@ -56,6 +56,13 @@
 
 ## 近期更新
 
+### v0.4.24 - 对照分栏适配与初始页同步
+
+- **分栏适配**：窗口、分栏尺寸变化和页签恢复后重新计算适配比例，保留手动数字缩放。
+- **初始页同步**：等待 PDF 页面初始化完成后再同步，避免进入对照时译版停留在第一页。
+- **发行与维护范围**：自此仅发布、维护和测试 Windows x64。作者精力有限，macOS、Linux 等其他平台由用户自行打包，作者不承担维护和测试；历史资产保留。
+- **验证与下载**：976 项测试及前端构建通过，安装后的桌面复验待用户更新后进行。见 [v0.4.24 Release](https://github.com/Dongyurocket/PaperQuay/releases/tag/app-v0.4.24) 和[验收记录](./docs/changes/2026-11-12-pdf-compare-resize-and-initial-sync.md)。
+
 ### v0.4.20 - 备份恢复后 MinerU 与 PDF 正常打开
 
 - **MinerU 解析结果恢复可读**：导入时去掉包内 `default/`、`custom-xxxxxxxx/` 一级目录，缓存装到阅读器查找的位置；源机生效的缓存根优先，同名缓存目录整目录跳过。
@@ -75,7 +82,7 @@
 
 - **失败后问题不丢失**：只移除本次空助手占位，保留问题、消息附件和历史，不覆盖新草稿或会话选择；切换文档再返回后，旧请求不能覆盖当前状态。
 - **逐条复制消息**：侧栏与浮动问答可复制用户消息或助手 Markdown / HTML 源码，保留公式、代码与原引用编号，成功和失败都有行内反馈。
-- **发行平台**：后续 Release 保留 Windows x64、Linux x64 和 macOS x64，停止发布 macOS arm64 安装包。
+- **当时的发行平台**：Windows x64、Linux x64 和 macOS x64；自 0.4.24 起按上方 Windows 维护范围执行。
 - **下载**：[v0.4.18 Release](https://github.com/Dongyurocket/PaperQuay/releases/tag/app-v0.4.18)。
 
 ### v0.4.17 - 全应用界面一致性与文库卡片修复
@@ -337,7 +344,7 @@ Agent 工作区不是普通聊天框，而是面向文献库操作设计。它�
 | Zotero 导入与同步 | 支持从 `zotero.sqlite` 全量导入分类、标签和可用 PDF；新增支持基于分类树浏览、条件模糊检索、差量预检与三层防重校验的选择性精准同步 |
 | MCP 知识库服务 | 内置标准 MCP stdio 服务（开发模式 `bin/paperquay-mcp.cjs`，安装包内置 `resources/paperquay-mcp/`），直连本地 SQLite；`search_knowledge_base` 支持向量 KNN + FTS5 + RRF 混合检索（支持 auto/hybrid/keyword 模式与 channels 来源标记及自动降级）；提供文献检索、详情、正文切片、笔记检索与写入（创建/更新/软删除、标签与分类树维护）、Zotero 本地库浏览/检索/差量预检/选择性同步，以及文库写入与翻译版 PDF 附件工具（共 25 个），全部写工具带运行护栏 |
 | 备份 | 支持导出和导入密码保护的 `.pqbackup` 单文件；导入后重启替换，旧目录保留为回滚点；忘记密码后无法恢复 |
-| 软件更新 | 支持应用内检查更新、Windows 和 Linux 自动更新流程，以及 macOS 打开发布页手动下载 |
+| 软件更新 | 支持应用内检查更新及 Windows 安装包自动更新；其他平台由用户自行从源码打包 |
 | 知识图谱 | 支持文献、笔记、标签、分类和引用节点，语义相似边、Crossref 参考文献同步、共同作者关系、自定义与 AI 关系，fcose 力导向全局布局、局部同心圆视图和 PNG/JSON 导出 |
 | 综述写作 | 支持大纲蓝图、分段并发写作、RAG 检索上下文、逐文献覆盖记录与取消后 checkpoint 继续、交付质量检查，以及 Word 导出（OMML 公式、中英文标题、参考文献和正文插图） |
 | 主题 | 支持浅色和深色主题，面向桌面端长时间阅读优化 |
@@ -581,7 +588,7 @@ PaperQuay 使用 Electron 作为桌面宿主。React 渲染进程通过 IPC 调�
 ## 环境要求
 
 - Node.js 22.18 或更高版本（CI 使用 24）
-- Windows、macOS 或 Linux
+- Windows x64（官方发布与测试）；macOS、Linux 需自行打包，作者不维护或测试
 
 可选外部服务：
 
@@ -667,7 +674,6 @@ PaperQuay 使用密码保护的单文件 `.pqbackup`。
 - 深化 PDF 区域、批注和独立笔记之间的双向绑定。
 - 增加文件夹监听和自动导入队列。
 - 支持 LaTeX 草稿导出与更多研究写作能力。
-- 完善签名后的 macOS 发布流程，让安装和更新检查更顺畅。
 - 本地优先模型稳定后，再考虑可选云同步。
 
 ---

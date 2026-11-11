@@ -148,7 +148,7 @@ git tag app-v0.4.21
 git push origin app-v0.4.21
 ```
 
-6. GitHub Actions 会构建 Windows、Linux 和 macOS 安装包，先创建 Draft Release，构建全部成功后自动转为正式发布；发现说明或产物有误时，可直接在 GitHub 页面编辑 Release 或按 `docs/RELEASE.md` 回滚。
+6. 自 0.4.24 起，GitHub Actions 仅构建 Windows x64 安装包，先创建 Draft Release，Windows 构建成功后自动转为正式发布。其他平台由用户自行打包，作者精力有限，不承担维护和测试；历史资产保留。发现说明或产物有误时，可直接在 GitHub 页面编辑 Release 或按 `docs/RELEASE.md` 回滚。
 7. 已安装的个人版本下次检查更新时会从个人 Fork 获取新版本。
 
 版本号必须递增。不要使用与上游相同或更低的版本号，否则更新器会认为没有新版本。

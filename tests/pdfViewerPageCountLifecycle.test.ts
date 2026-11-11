@@ -264,6 +264,8 @@ async function createViewer(onPageCountChange: (count: number) => void, initialP
   const tasks: LoadingTask[] = [];
   const attached: number[] = [];
   const navigation: number[] = [];
+  const viewers: any[] = [];
+  const observers: Array<{ targets: Set<Host>; callback: () => void }> = [];
   const buses: Array<{ dispatch: (name: string, event: any) => void }> = [];
   const __pdf = {
     getDocument(init: any) {
@@ -284,6 +286,12 @@ async function createViewer(onPageCountChange: (count: number) => void, initialP
     PDFLinkService: class { setViewer() {} setDocument() {} },
     PDFViewer: class {
       pagesCount = 0;
+      scaleValue = 'page-width';
+      get currentScaleValue() { return this.scaleValue; }
+      set currentScaleValue(value: string) { this.scaleValue = value; this.fitWidths.push(this.options.container.clientWidth); }
+      fitWidths: number[] = [];
+      options: any;
+      constructor(options: any) { this.options = options; viewers.push(this); }
       setDocument(document: any) { this.pagesCount = document?.numPages ?? 0; if (document) attached.push(document.numPages); }
       scrollPageIntoView({ pageNumber }: { pageNumber: number }) { navigation.push(pageNumber); }
       cleanup() {} update() {}
@@ -304,7 +312,14 @@ async function createViewer(onPageCountChange: (count: number) => void, initialP
     assert.fail('The viewer did not settle after 20 animation frames');
   };
   const document = { addEventListener() {}, removeEventListener() {}, elementsFromPoint: () => [] };
-  class Observer { observe() {} unobserve() {} disconnect() {} }
+  class Observer {
+    targets = new Set<Host>();
+    callback: () => void;
+    constructor(callback: () => void) { this.callback = callback; observers.push(this); }
+    observe(host: Host) { this.targets.add(host); }
+    unobserve(host: Host) { this.targets.delete(host); }
+    disconnect() { this.targets.clear(); }
+  }
   const module = { exports: {} as any };
   const bundle = await bundlePromise;
   new Function('require', 'module', 'exports', '__pdf', '__locale', 'window', 'localStorage', 'document',
@@ -318,8 +333,52 @@ async function createViewer(onPageCountChange: (count: number) => void, initialP
   lifecycle.flush();
   await lifecycle.settle();
   assert.equal(tasks.length, 1, 'The real load effect should create a PDF.js loading task');
-  return { lifecycle, tasks, attached, navigation, runFrames, buses };
+  return { lifecycle, tasks, attached, navigation, runFrames, buses, viewers, observers };
 }
+
+test('fit presets follow container resize while numeric zoom and loading tasks remain stable', async (t) => {
+  const { lifecycle, tasks, buses, viewers, observers, runFrames } = await createViewer(() => {});
+  t.after(() => lifecycle.unmount());
+  materializePages(lifecycle, 47);
+  tasks[0].resolve(pdfDocument(47)); await lifecycle.settle();
+  buses[0].dispatch('pagesinit', {}); await lifecycle.settle(); runFrames();
+  const viewer = viewers[0];
+  const container = viewer.options.container;
+  const resize = observers.find((observer) => observer.targets.has(container));
+  assert.ok(resize, 'the PDF viewport, not just page overlays, must be observed');
+  const before = viewer.fitWidths.length;
+  container.clientWidth = 400; resize.callback(); resize.callback(); runFrames();
+  assert.deepEqual(viewer.fitWidths.slice(before), [400], 'coalesce resize events and recompute fit');
+  viewer.currentScaleValue = '1.25';
+  const numericBefore = viewer.fitWidths.length;
+  container.clientWidth = 900; resize.callback(); runFrames();
+  assert.equal(viewer.fitWidths.length, numericBefore, 'manual numeric zoom must be retained');
+  viewer.currentScaleValue = 'page-width';
+  lifecycle.render({ ...lifecycle.props, active: false }); lifecycle.commit(); lifecycle.flush();
+  container.clientWidth = 700;
+  lifecycle.render({ ...lifecycle.props, active: true }); lifecycle.commit(); lifecycle.flush(); runFrames();
+  assert.equal(viewer.fitWidths.at(-1), 700, 'reactivation recomputes the current fit preset');
+  assert.equal(tasks.length, 1);
+  assert.equal(lifecycle.pageCount, 47);
+});
+
+test('initial comparison sync waits for pagesinit before consuming its token', async (t) => {
+  const applied: number[] = [];
+  const { lifecycle, tasks, buses, runFrames } = await createViewer(() => {}, {
+    pageSyncSignal: { context: 'local:C:/fixture/paper-a.pdf', page: 2, token: 1 },
+    onPageSyncApplied: (page: number) => applied.push(page),
+  });
+  t.after(() => lifecycle.unmount());
+  materializePages(lifecycle, 47);
+  tasks[0].resolve(pdfDocument(47)); await lifecycle.settle(); runFrames(); await lifecycle.settle();
+  assert.deepEqual(applied, [], 'page DOM and page count can exist before pagesinit');
+  buses[0].dispatch('pagesinit', {}); await lifecycle.settle(); runFrames(); await lifecycle.settle();
+  assert.deepEqual(applied, [2]);
+  assert.equal(childProps(lifecycle, 'PdfViewerToolbar').currentPage, 2);
+  buses[0].dispatch('pagerendered', {}); runFrames(); await lifecycle.settle();
+  assert.equal(childProps(lifecycle, 'PdfViewerToolbar').currentPage, 2);
+  assert.equal(tasks.length, 1);
+});
 
 function pdfDocument(numPages: number) {
   return { numPages, cleanup() {}, destroyed: false, destroy() { this.destroyed = true; },

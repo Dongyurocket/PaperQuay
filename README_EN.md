@@ -9,8 +9,8 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.4.20-2563eb?style=flat-square" alt="Version v0.4.20">
-  <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-4b5563?style=flat-square" alt="Windows macOS Linux">
+  <img src="https://img.shields.io/badge/version-v0.4.24-2563eb?style=flat-square" alt="Version v0.4.24">
+  <img src="https://img.shields.io/badge/maintained-Windows%20x64-4b5563?style=flat-square" alt="Maintained: Windows x64">
   <img src="https://img.shields.io/badge/built%20with-Electron-47848f?style=flat-square" alt="Electron">
   <img src="https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-0f766e?style=flat-square" alt="React TypeScript">
   <img src="https://img.shields.io/badge/storage-local%20SQLite-111827?style=flat-square" alt="Local SQLite storage">
@@ -55,6 +55,13 @@
 
 ## Latest Update
 
+### v0.4.24 - Comparison pane fit and initial page synchronization
+
+- **Pane fit**: recalculate fit presets after pane/window resizing and tab reactivation, preserving manual numeric zoom.
+- **Initial page synchronization**: wait for page initialization so the translation does not remain on page one when entering comparison.
+- **Release and maintenance scope**: only Windows x64 is published, maintained, and tested from this release. The author has limited capacity; users build other platforms themselves, and the author does not maintain or test them. Historical assets remain available.
+- **Verification and download**: frontend build and 976 tests passed; installed desktop verification follows the user's update. See [v0.4.24 release](https://github.com/Dongyurocket/PaperQuay/releases/tag/app-v0.4.24) and the [acceptance record](./docs/changes/2026-11-12-pdf-compare-resize-and-initial-sync.md).
+
 ### v0.4.20 - MinerU results and PDFs open after a restore
 
 - **MinerU parse results load again**: imports drop the package's `default/` or `custom-xxxxxxxx/` folder level, so caches land where the reader looks. The cache root active on the source machine wins, and duplicate cache folders are skipped as a whole.
@@ -74,7 +81,7 @@
 
 - **Questions survive failed answers**: only the empty assistant placeholder is removed. Questions, message attachments, history, new drafts and current conversation selection are preserved; requests from an earlier document activation cannot overwrite current state.
 - **Copy individual messages**: both sidebar and floating chat can copy user messages or cleaned assistant Markdown / HTML source, preserving formulas, code and original citation labels, with inline success and failure feedback.
-- **Release platforms**: future releases retain Windows x64, Linux x64 and macOS x64; macOS arm64 installers are no longer published.
+- **Release platforms at that time**: Windows x64, Linux x64, and macOS x64; the Windows-only maintenance scope above applies from 0.4.24.
 - **Download**: [v0.4.18 release](https://github.com/Dongyurocket/PaperQuay/releases/tag/app-v0.4.18).
 
 ### v0.4.17 - UI consistency pass and a library card fix
@@ -326,7 +333,7 @@ These items are implemented in the current desktop app.
 | Zotero import & sync | Full import of local Zotero collections, tags, and available PDF attachments from `zotero.sqlite`; selective on-demand synchronization with collection browsing, conditional search, diff preview, and triple deduplication |
 | MCP knowledge base | Built-in standard stdio MCP server (development entry `bin/paperquay-mcp.cjs`; installers bundle `resources/paperquay-mcp/`) directly querying local SQLite; `search_knowledge_base` upgraded to vector hybrid retrieval (KNN + FTS5 + RRF) with mode options and channel attribution; 25 tools covering literature, chunks, guarded library and note writes, translated-PDF attachments, and Zotero sync |
 | Backup            | Password-protected, single-file `.pqbackup` export and import; import swaps data after a restart and keeps the old directory as a rollback point; forgotten passwords cannot be recovered |
-| Updates           | In-app update checks, Windows and Linux automatic update flow, and macOS release-page handoff                                                    |
+| Updates           | In-app update checks and Windows installer updates; users build other platforms from source                                                    |
 | Knowledge graph   | Paper, note, tag, category, and reference nodes with semantic-similarity edges, Crossref reference syncing, co-author relations, custom and AI relations, fcose force-directed global layout, local concentric view, and PNG/JSON export |
 | Review writing    | Outline blueprints, concurrent section drafting, RAG retrieval context, per-paper coverage tracking with checkpoint resume, delivery quality checks, and Word export with OMML equations, localized headings, references, and inline figures |
 | Themes            | Light and dark UI modes optimized for long desktop reading sessions                                                                               |
@@ -568,7 +575,7 @@ The Notes editor uses the official Tiptap packages and was implemented against t
 ## Requirements
 
 - Node.js 22.18 or newer (CI uses 24)
-- Windows, macOS, or Linux
+- Windows x64 for official releases and testing; macOS and Linux require self-builds and are not maintained or tested by the author
 
 Optional external services:
 
@@ -656,7 +663,6 @@ These items are planned or still being deepened beyond the completed features ab
 - Deeper two-way binding between PDF regions, annotations, and standalone notes.
 - Folder watching and automatic import queues.
 - LaTeX draft export and further research-writing capabilities.
-- Signed macOS release flow for smoother installation and update checks.
 - Optional cloud sync after the local-first model is stable.
 
 ---

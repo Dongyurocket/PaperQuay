@@ -56,7 +56,7 @@ function compareVersions(leftValue, rightValue) {
   return leftPrerelease.localeCompare(rightPrerelease);
 }
 
-function getAutoUpdateSupport(app) {
+function getAutoUpdateSupport(app, platform = process.platform) {
   if (!app.isPackaged) {
     return {
       supported: false,
@@ -64,7 +64,7 @@ function getAutoUpdateSupport(app) {
     };
   }
 
-  if (process.platform === 'win32') {
+  if (platform === 'win32') {
     return {
       supported: true,
       channel: 'nsis',
@@ -72,31 +72,9 @@ function getAutoUpdateSupport(app) {
     };
   }
 
-  if (process.platform === 'linux') {
-    if (process.env.APPIMAGE) {
-      return {
-        supported: true,
-        channel: 'appimage',
-        reason: '',
-      };
-    }
-
-    return {
-      supported: false,
-      reason: 'linux-non-appimage',
-    };
-  }
-
-  if (process.platform === 'darwin') {
-    return {
-      supported: false,
-      reason: 'macos-manual',
-    };
-  }
-
   return {
     supported: false,
-    reason: 'unsupported-platform',
+    reason: 'self-build-only',
   };
 }
 

@@ -11,6 +11,8 @@ Thank you for your interest in improving PaperQuay. This project is an early des
 
 ## Development Setup
 
+From 0.4.24, official releases, maintenance, and testing cover Windows x64 only. The author has limited capacity and does not maintain or test macOS, Linux, or other platforms. Users may build those platforms from source; existing build targets remain available, and historical release assets are retained.
+
 Install dependencies:
 
 ```bash
@@ -34,6 +36,8 @@ Build the desktop installer:
 ```bash
 npm run electron:build
 ```
+
+Self-builds on other platforms can use the retained packaging targets on the corresponding host, for example `npm run electron:build -- --linux --x64 --publish never` or `npm run electron:build -- --mac --x64 --publish never`. Users are responsible for building and testing these packages.
 
 ## Pull Request Guidelines
 

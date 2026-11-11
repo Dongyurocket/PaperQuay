@@ -20,7 +20,9 @@ git tag app-v0.1.26
 git push origin app-v0.1.26
 ```
 
-GitHub Actions 会在个人 Fork 中创建 Release，上传 Windows x64、Linux x64 和 macOS x64 安装包及更新元数据，并在这三种平台构建全部成功后自动将 Draft 转为正式发布。自 `app-v0.4.18` 起不再构建或发布 macOS arm64 安装包；后续版本沿用此范围，历史版本资产保留。Release 说明来自 `.github/release-notes.md`（`{{VERSION}}` 为版本占位符），发布前应先更新该文件为本次实际变更；若发布后才发现说明有误，可直接在 GitHub 页面编辑 Release 内容。
+自 `app-v0.4.24` 起，GitHub Actions 仅构建和上传 Windows x64 安装包、`.blockmap` 及 `stable.yml`，Windows 构建成功后将 Draft 转为正式发布。作者精力有限，macOS、Linux 等其他平台由用户自行从源码打包，作者不承担维护和测试。保留历史发布资产和源码内的其他平台构建配置。
+
+Release 说明来自 `.github/release-notes.md`（`{{VERSION}}` 为版本占位符），发布前应先更新该文件为本次实际变更；若发布后才发现说明有误，可直接在 GitHub 页面编辑 Release 内容。若用户明确安排先发布、由其安装后继续验收，应在发布说明中逐项记录尚未完成的桌面验证，不能将旧版本或诊断包截图当作新安装版通过证据。
 
 ## 更新源
 

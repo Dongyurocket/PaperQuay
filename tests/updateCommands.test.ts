@@ -10,7 +10,7 @@ const {
 } = require('../electron/backend/updateCommands.cjs') as {
   cleanVersion: (value: unknown) => string;
   compareVersions: (left: unknown, right: unknown) => number;
-  getAutoUpdateSupport: (app: { isPackaged: boolean }) => {
+  getAutoUpdateSupport: (app: { isPackaged: boolean }, platform?: string) => {
     supported: boolean;
     channel?: string;
     reason: string;
@@ -33,4 +33,15 @@ test('getAutoUpdateSupport disables automatic install in development', () => {
     supported: false,
     reason: 'development',
   });
+});
+
+test('automatic updates are limited to maintained Windows packages', () => {
+  assert.deepEqual(getAutoUpdateSupport({ isPackaged: true }, 'win32'), {
+    supported: true, channel: 'nsis', reason: '',
+  });
+  for (const platform of ['linux', 'darwin', 'freebsd']) {
+    assert.deepEqual(getAutoUpdateSupport({ isPackaged: true }, platform), {
+      supported: false, reason: 'self-build-only',
+    });
+  }
 });

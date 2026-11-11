@@ -415,6 +415,9 @@ function PdfViewer({
   const [zoomLabel, setZoomLabel] = useState('100%');
   const [loading, setLoading] = useState(false);
   const [renderedDocument, setRenderedDocument] = useState<{ documentInit: PdfJsDocumentInit; revision: number } | null>(null);
+  const [initializedDocument, setInitializedDocument] = useState<{ documentInit: PdfJsDocumentInit; revision: number } | null>(null);
+  const pagesInitialized = initializedDocument?.documentInit === documentInit && initializedDocument.revision === retryRevision;
+  const layoutViewportRef = useRef<{ viewer: unknown; width: number; height: number } | null>(null);
   const firstPageRendered = renderedDocument?.documentInit === documentInit && renderedDocument.revision === retryRevision;
   const [saving, setSaving] = useState(false);
   const [documentErrorSnapshot, setDocumentErrorSnapshot] = useState<{
@@ -1136,12 +1139,25 @@ function PdfViewer({
 
   const refreshPdfViewerLayout = useCallback(() => {
     const pdfViewer = pdfViewerRef.current;
+    const container = containerRef.current;
 
-    if (!activeRef.current || !pdfViewer) {
+    if (!activeRef.current || !pdfViewer || !container || container.clientWidth <= 0 || container.clientHeight <= 0) {
       return;
     }
 
     try {
+      const previous = layoutViewportRef.current;
+      const width = container.clientWidth;
+      const height = container.clientHeight;
+      if (!previous || previous.viewer !== pdfViewer || previous.width !== width || previous.height !== height) {
+        layoutViewportRef.current = { viewer: pdfViewer, width, height };
+        // PDF.js update() renders visible pages but does not recalculate fit scales.
+        // Reapply only fit presets; a user's numeric zoom must survive resizing.
+        const preset = pdfViewer.currentScaleValue;
+        if (['page-width', 'page-fit', 'page-height', 'auto'].includes(preset)) {
+          pdfViewer.currentScaleValue = preset;
+        }
+      }
       pdfViewer.update?.();
     } catch {
       // PDF.js can throw while a document is still being attached.
@@ -1310,6 +1326,7 @@ function PdfViewer({
       !Number.isFinite(pageSyncSignal.page) ||
       pageSyncSignal.page <= 0 ||
       pageCount <= 0 ||
+      !pagesInitialized ||
       !pdfDocumentRef.current
     ) {
       return;
@@ -1337,7 +1354,7 @@ function PdfViewer({
     // 对照同步必须即时定位，避免平滑滚动途经中间页时反向触发另一栏。
     scrollToPage(targetIndex, 'auto');
     onPageSyncApplied?.(appliedPage, pageSyncSignal.token);
-  }, [onPageSyncApplied, pageSyncSignal, pageCount, pageHosts, scrollToPage, sourceSignature]);
+  }, [onPageSyncApplied, pageSyncSignal, pageCount, pageHosts, pagesInitialized, scrollToPage, sourceSignature]);
 
   const scrollToReadingProgress = useCallback(
     (progressRatio: number) => {
@@ -1938,15 +1955,12 @@ function PdfViewer({
       return undefined;
     }
 
+    let resizeFrame = 0;
     const observer = new ResizeObserver(() => {
-      window.requestAnimationFrame(() => {
-        if (!activeRef.current) {
-          return;
-        }
-
-        if (syncPageHosts()) {
-          retrySavedScrollRestore();
-        }
+      if (resizeFrame) return;
+      resizeFrame = window.requestAnimationFrame(() => {
+        resizeFrame = 0;
+        refreshPdfViewerLayout();
       });
     });
     const mutationObserver = new MutationObserver(() => {
@@ -1963,6 +1977,7 @@ function PdfViewer({
 
     resizeObserverRef.current = observer;
     mutationObserverRef.current = mutationObserver;
+    if (containerRef.current) observer.observe(containerRef.current);
     syncPageHosts();
     refreshPdfViewerLayout();
 
@@ -1975,6 +1990,7 @@ function PdfViewer({
     }
 
     return () => {
+      if (resizeFrame) window.cancelAnimationFrame(resizeFrame);
       observer.disconnect();
       mutationObserver.disconnect();
       observedPageElementsRef.current = new Set();
@@ -2179,6 +2195,7 @@ function PdfViewer({
           setStringStateIfChanged(setZoomLabel, lRef.current('Fit Width', 'Fit Width'));
           syncPageHosts();
           restoreSavedScroll({ force: true });
+          setInitializedDocument({ documentInit, revision: retryRevision });
           window.requestAnimationFrame(refreshPdfViewerLayout);
         };
 

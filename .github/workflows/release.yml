@@ -120,22 +120,10 @@ jobs:
           - name: Windows x64
             platform: windows-latest
             args: "--win --x64 --publish never"
-          - name: Linux x64
-            platform: ubuntu-22.04
-            args: "--linux --x64 --publish never"
-          - name: macOS x64
-            platform: macos-15-intel
-            args: "--mac --x64 --publish never"
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Install Linux packaging dependencies
-        if: matrix.platform == 'ubuntu-22.04'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libarchive-tools rpm
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -182,13 +170,8 @@ jobs:
           path: |
             release/*.exe
             release/*.msi
-            release/*.dmg
-            release/*.zip
-            release/*.AppImage
-            release/*.deb
-            release/*.tar.gz
             release/*.blockmap
-            release/stable*.yml
+            release/stable.yml
           if-no-files-found: error
 
       - name: Upload release assets
@@ -203,13 +186,8 @@ jobs:
             const assetPatterns = [
               /\.exe$/i,
               /\.msi$/i,
-              /\.dmg$/i,
-              /\.zip$/i,
-              /\.AppImage$/i,
-              /\.deb$/i,
-              /\.tar\.gz$/i,
               /\.blockmap$/i,
-              /^stable.*\.yml$/i,
+              /^stable\.yml$/i,
             ];
 
             const assets = fs.existsSync(releaseDir)
