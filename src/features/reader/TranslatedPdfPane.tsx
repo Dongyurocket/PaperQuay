@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { BookCopy, FilePlus2, Link2, Unlink2 } from 'lucide-react';
 import PdfViewer from '../pdf/PdfViewer';
 import { useLocaleText } from '../../i18n/uiLanguage';
@@ -54,6 +54,17 @@ export default function TranslatedPdfPane({
     () => translatedPdfPath ? { kind: 'local-path', path: translatedPdfPath } : null,
     [translatedPdfPath],
   );
+  const [pageCountSnapshot, setPageCountSnapshot] = useState({ path: '', count: 0 });
+  const [pageSnapshot, setPageSnapshot] = useState({ path: '', page: 1 });
+  const pageCount = pageCountSnapshot.path === translatedPdfPath ? pageCountSnapshot.count : 0;
+  const currentPage = pageSnapshot.path === translatedPdfPath ? pageSnapshot.page : 1;
+  const handlePageCountChange = useCallback((count: number) => {
+    setPageCountSnapshot({ path: translatedPdfPath, count });
+  }, [translatedPdfPath]);
+  const handlePageChange = useCallback((page: number) => {
+    setPageSnapshot({ path: translatedPdfPath, page });
+    onPageChange?.(page);
+  }, [onPageChange, translatedPdfPath]);
 
   if (!translatedPdfPath) {
     return (
@@ -103,6 +114,11 @@ export default function TranslatedPdfPane({
               {fileName}
             </span>
           ) : null}
+          {pageCount > 0 ? (
+            <span className="shrink-0 text-[11px] text-[var(--pq-text-muted)]">
+              {l(`第 ${Math.min(currentPage, pageCount)}/${pageCount} 页`, `Page ${Math.min(currentPage, pageCount)}/${pageCount}`)}
+            </span>
+          ) : null}
         </div>
         <button
           type="button"
@@ -129,6 +145,8 @@ export default function TranslatedPdfPane({
 
       <div className="min-h-0 flex-1">
         <PdfViewer
+          pane="compare-translated"
+          onPageCountChange={handlePageCountChange}
           source={source}
           pdfData={null}
           pageSyncSignal={syncEnabled ? pageSyncSignal : null}
@@ -146,7 +164,7 @@ export default function TranslatedPdfPane({
           softPageShadow={softPageShadow}
           onBlockHover={noop}
           onBlockSelect={noop}
-          onPageChange={onPageChange}
+          onPageChange={handlePageChange}
         />
       </div>
     </div>

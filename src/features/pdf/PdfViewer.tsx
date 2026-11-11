@@ -135,6 +135,7 @@ type BBoxPageSizeSource = Pick<
 > | null;
 
 interface PdfViewerProps {
+  pane?: 'reader' | 'compare-original' | 'compare-translated';
   onPageCountChange?: (pageCount: number) => void;
   onDocumentErrorChange?: (error: string) => void;
   source: PdfSource;
@@ -305,6 +306,7 @@ async function resolveOutlineDestinationPageIndex(
 }
 
 function PdfViewer({
+  pane = 'reader',
   onPageCountChange,
   onDocumentErrorChange,
   source,
@@ -381,6 +383,9 @@ function PdfViewer({
   const currentPageRef = useRef(1);
   const pageCountRef = useRef(0);
   const firstPageRenderLoggedRef = useRef(false);
+  const loadGenerationRef = useRef(0);
+  const paneRef = useRef(pane);
+  paneRef.current = pane;
   const scrollPositionRef = useRef<PdfScrollPosition | null>(scrollPosition);
   const sourceSignatureRef = useRef('');
   const restoringScrollRef = useRef(false);
@@ -390,12 +395,15 @@ function PdfViewer({
   const lastUserScrollAtRef = useRef(0);
 
   const [editorTool, setEditorTool] = useState<AnnotationEditorTool>('none');
+  const [retryRevision, setRetryRevision] = useState(0);
   const [loadedPageCount, setLoadedPageCount] = useState<{
     documentInit: PdfJsDocumentInit;
+    revision: number;
     count: number;
   } | null>(null);
   // 换源时立即停止使用旧文档页数；缓存页签重新激活时也向父层同步。
-  const pageCount = loadedPageCount?.documentInit === documentInit ? loadedPageCount.count : 0;
+  const pageCount = loadedPageCount?.documentInit === documentInit && loadedPageCount.revision === retryRevision
+    ? loadedPageCount.count : 0;
   pageCountRef.current = pageCount;
   useEffect(() => {
     onPageCountChange?.(pageCount);
@@ -406,8 +414,19 @@ function PdfViewer({
   const [readingProgressRatio, setReadingProgressRatio] = useState(0);
   const [zoomLabel, setZoomLabel] = useState('100%');
   const [loading, setLoading] = useState(false);
+  const [renderedDocument, setRenderedDocument] = useState<{ documentInit: PdfJsDocumentInit; revision: number } | null>(null);
+  const firstPageRendered = renderedDocument?.documentInit === documentInit && renderedDocument.revision === retryRevision;
   const [saving, setSaving] = useState(false);
-  const [documentError, setDocumentError] = useState('');
+  const [documentErrorSnapshot, setDocumentErrorSnapshot] = useState<{
+    documentInit: PdfJsDocumentInit | null;
+    revision: number;
+    message: string;
+  } | null>(null);
+  const documentError = documentErrorSnapshot?.documentInit === documentInit &&
+    documentErrorSnapshot.revision === retryRevision ? documentErrorSnapshot.message : '';
+  const setDocumentError = useCallback((message: string) => {
+    setDocumentErrorSnapshot({ documentInit, revision: retryRevision, message });
+  }, [documentInit, retryRevision]);
   useEffect(() => {
     onDocumentErrorChange?.(documentError);
   }, [onDocumentErrorChange, documentError]);
@@ -710,9 +729,15 @@ function PdfViewer({
     if (activeBlock) indexes.add(activeBlock.pageIndex);
     if (hoveredBlock) indexes.add(hoveredBlock.pageIndex);
     if (activeHighlight) indexes.add(activeHighlight.pageIndex);
+    // A distant sync target needs a host before its token can be acknowledged.
+    // The usual current-page radius alone never materializes that target.
+    if (pageSyncSignal?.context === sourceSignature && pageCount > 0 &&
+      Number.isFinite(pageSyncSignal.page) && pageSyncSignal.page > 0) {
+      indexes.add(Math.min(pageCount - 1, Math.max(0, Math.round(pageSyncSignal.page) - 1)));
+    }
 
     return Array.from(indexes).sort((left, right) => left - right);
-  }, [activeBlock, activeHighlight, currentPage, hoveredBlock, pageCount]);
+  }, [activeBlock, activeHighlight, currentPage, hoveredBlock, pageCount, pageSyncSignal, sourceSignature]);
   const overlayPageIndexesRef = useRef(overlayPageIndexes);
   overlayPageIndexesRef.current = overlayPageIndexes;
 
@@ -2083,6 +2108,7 @@ function PdfViewer({
     }
 
     let cancelled = false;
+    const generation = ++loadGenerationRef.current;
     setLoading(true);
     setDocumentError('');
     firstPageRenderLoggedRef.current = false;
@@ -2093,7 +2119,7 @@ function PdfViewer({
     let handlePagesInit: (() => void) | null = null;
     let handlePageChanging: ((event: { pageNumber?: number }) => void) | null = null;
     let handleScaleChanging: ((event: { scale?: number }) => void) | null = null;
-    let handlePageRendered: (() => void) | null = null;
+    let handlePageRendered: ((event: { error?: unknown }) => void) | null = null;
     let handleAnnotationEditorUiManager: ((event: { uiManager?: unknown }) => void) | null = null;
     let handleEditorStatesChanged:
       | ((event: { details?: { hasSelectedEditor?: boolean } }) => void)
@@ -2172,7 +2198,15 @@ function PdfViewer({
           );
         };
 
-        handlePageRendered = () => {
+        handlePageRendered = (event) => {
+          if (cancelled) return;
+          if (event.error) {
+            const error = event.error;
+            console.error('PDF load failed', { pane: paneRef.current, generation, phase: 'page-render', type: error instanceof Error ? error.name : typeof error });
+            setDocumentError(error instanceof Error ? error.message : lRef.current('PDF 页面渲染失败', 'Failed to render the PDF page'));
+            return;
+          }
+          setRenderedDocument({ documentInit, revision: retryRevision });
           // 基线指标：首个 pagerendered 才是首屏可用的准确信号（loading=false 早于实际绘制）。
           if (!firstPageRenderLoggedRef.current) {
             firstPageRenderLoggedRef.current = true;
@@ -2201,7 +2235,7 @@ function PdfViewer({
         }
 
         pdfDocumentRef.current = pdfDocument;
-        setLoadedPageCount({ documentInit, count: pdfDocument.numPages });
+        setLoadedPageCount({ documentInit, revision: retryRevision, count: pdfDocument.numPages });
 
         if (!cancelled && pdfDocumentRef.current === pdfDocument) {
           pdfViewer.setDocument(pdfDocument);
@@ -2216,11 +2250,7 @@ function PdfViewer({
           return;
         }
 
-        if (isPdfLifecycleCancellation(loadError)) {
-          setLoading(false);
-          return;
-        }
-
+        console.error('PDF load failed', { pane: paneRef.current, generation, phase: 'document-load', type: loadError instanceof Error ? loadError.name : typeof loadError });
         setDocumentError(
           loadError instanceof Error
             ? loadError.message
@@ -2276,7 +2306,7 @@ function PdfViewer({
 
       setLoading(false);
     };
-  }, [documentInit, refreshPdfViewerLayout]);
+  }, [documentInit, refreshPdfViewerLayout, retryRevision]);
 
   useEffect(() => {
     const pdfDocument = pdfDocumentRef.current;
@@ -3011,7 +3041,7 @@ function PdfViewer({
   }, [active, documentInit]);
 
 
-  if (!source) {
+  if (!source && !pdfData) {
     return (
       <EmptyState
         title={l('等待打开 PDF', 'Open a PDF to start')}
@@ -3042,6 +3072,7 @@ function PdfViewer({
     <div
       className="paperquay-pdf-linked flex h-full min-h-0 flex-col bg-[linear-gradient(180deg,#eff4fb,#e9f0f7)] dark:bg-[var(--pq-bg-primary)]"
       data-soft-shadow={softPageShadow ? 'true' : 'false'}
+      data-pdf-phase={documentError ? 'error' : firstPageRendered ? 'page-rendered' : pageCount ? 'document-ready' : 'loading-document'}
     >
       <PdfViewerToolbar
         activeColorTool={activeColorTool}
@@ -3148,12 +3179,22 @@ function PdfViewer({
         />
 
         <div className="relative min-h-0 flex-1">
-          {loading ? (
+          {(loading || (pageCount > 0 && !firstPageRendered && !documentError)) ? (
           <div className="absolute inset-0 z-20 flex items-center justify-center bg-[rgba(241,245,249,0.72)] backdrop-blur-sm dark:bg-[rgba(15,23,42,0.72)]">
             <div className="inline-flex items-center rounded-full border border-white/70 bg-white/92 px-4 py-2 text-sm text-[var(--pq-text-muted)] shadow-[0_14px_34px_rgba(15,23,42,0.08)] dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:text-[var(--pq-text-muted)] dark:shadow-[0_14px_34px_rgba(0,0,0,0.24)]">
-              {l('Loading PDF...', 'Loading PDF...')}
+              {pageCount > 0 ? l('正在绘制 PDF 页面…', 'Rendering PDF page...') : l('正在加载 PDF…', 'Loading PDF...')}
             </div>
           </div>
+          ) : null}
+
+          {!loading && documentError ? (
+            <div role="alert" className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-[var(--pq-surface-1)] px-6 text-center text-sm">
+              <div className="font-medium">{currentPdfName}</div>
+              <div className="text-[var(--pq-danger)]">{documentError}</div>
+              <button type="button" className="rounded border border-[var(--pq-border)] px-3 py-1" onClick={() => setRetryRevision((revision) => revision + 1)}>
+                {l('重试', 'Retry')}
+              </button>
+            </div>
           ) : null}
 
         <div

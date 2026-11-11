@@ -385,28 +385,24 @@ function DocumentReaderTab({
   const [pdfSource, setPdfSource] = useState<PdfSource>(null);
   const [pdfData, setPdfData] = useState<Uint8Array | null>(null);
   const [pdfPageCountSnapshot, setPdfPageCountSnapshot] = useState<{
-    source: PdfSource;
+    sourceKey: string;
     data: Uint8Array | null;
     count: number;
   } | null>(null);
-  // 页数由 PDF 视图负责，父层只接受当前源的快照，避免独立清零后无法重放引用。
-  const pdfPageCount = pdfPageCountSnapshot?.source === pdfSource &&
-    pdfPageCountSnapshot.data === pdfData
-    ? pdfPageCountSnapshot.count
-    : 0;
-  const handlePdfPageCountChange = useCallback((count: number) => {
+  const handlePdfPageCountChange = useCallback((count: number, source: PdfSource, data: Uint8Array | null) => {
+    const sourceKey = getPdfSourceSignature(source);
     setPdfPageCountSnapshot((current) =>
-      current?.source === pdfSource && current.data === pdfData && current.count === count
+      current?.sourceKey === sourceKey && current.data === data && current.count === count
         ? current
-        : { source: pdfSource, data: pdfData, count },
+        : { sourceKey, data, count },
     );
-  }, [pdfData, pdfSource]);
-  const [pdfDocumentError, setPdfDocumentError] = useState('');
+  }, []);
+  const [pdfDocumentErrorSnapshot, setPdfDocumentErrorSnapshot] = useState<{ sourceKey: string; error: string } | null>(null);
+  const handlePdfDocumentErrorChange = useCallback((error: string, source: PdfSource) => {
+    setPdfDocumentErrorSnapshot({ sourceKey: getPdfSourceSignature(source), error });
+  }, []);
   const [pdfOpenFailed, setPdfOpenFailed] = useState(false);
   const [restoringDocumentBlocks, setRestoringDocumentBlocks] = useState(false);
-  useEffect(() => {
-    setPdfDocumentError('');
-  }, [pdfSource]);
   const [pdfPath, setPdfPath] = useState('');
   const pdfScrollPositionsRef = useRef<Record<string, PdfScrollPosition>>({});
   const pdfReadingHeatmapsRef = useRef<Record<string, PdfReadingHeatmap>>({});
@@ -605,9 +601,18 @@ function DocumentReaderTab({
     [document, settings.remotePdfDownloadDir],
   );
   const currentLocalPdfPath = resolveCurrentLocalPdfPath(pdfPath, pdfSource);
+  const compareOriginalPath = readingViewMode === 'pdf-compare' ? originalPdfPath.trim() : '';
+  const effectiveSourceKey = compareOriginalPath
+    ? getPdfSourceSignature({ kind: 'local-path', path: originalPdfPath })
+    : getPdfSourceSignature(pdfSource);
+  const effectivePdfData = compareOriginalPath ? null : pdfData;
+  const pdfPageCount = pdfPageCountSnapshot?.sourceKey === effectiveSourceKey &&
+    pdfPageCountSnapshot.data === effectivePdfData ? pdfPageCountSnapshot.count : 0;
+  const pdfDocumentError = pdfDocumentErrorSnapshot?.sourceKey === effectiveSourceKey
+    ? pdfDocumentErrorSnapshot.error : '';
   const pdfScrollSourceKey = useMemo(
-    () => (pdfSource ? getPdfSourceSignature(pdfSource, pdfPath || currentDocument.workspaceId) : ''),
-    [currentDocument.workspaceId, pdfPath, pdfSource],
+    () => effectiveSourceKey || (pdfSource ? getPdfSourceSignature(pdfSource, pdfPath || currentDocument.workspaceId) : ''),
+    [currentDocument.workspaceId, effectiveSourceKey, pdfPath, pdfSource],
   );
   const pdfScrollPosition = pdfScrollSourceKey
     ? pdfScrollPositionsRef.current[pdfScrollSourceKey] ?? null
@@ -4335,7 +4340,7 @@ function DocumentReaderTab({
     <div className="relative h-full min-h-0" hidden={!isActive}>
       <ReaderWorkspace
         onPdfPageCountChange={handlePdfPageCountChange}
-        onPdfDocumentErrorChange={setPdfDocumentError}
+        onPdfDocumentErrorChange={handlePdfDocumentErrorChange}
         active={isActive}
         currentDocument={currentDocument}
         selectedSectionTitle={

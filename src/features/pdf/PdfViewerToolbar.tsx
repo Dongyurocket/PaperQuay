@@ -234,7 +234,7 @@ export function PdfViewerToolbar({
 
         <div className="flex flex-wrap items-center gap-2">
           <div className="rounded-full border border-[var(--pq-border)] bg-white px-3 py-1 text-xs font-medium text-[var(--pq-text-muted)] dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:text-[var(--pq-text-faint)]">
-            {l(`Page ${currentPage}/${Math.max(pageCount, 1)}`, `Page ${currentPage}/${Math.max(pageCount, 1)}`)}
+            {pageCount > 0 ? l(`第 ${currentPage}/${pageCount} 页`, `Page ${currentPage}/${pageCount}`) : l('页数未知', 'Page count unknown')}
           </div>
           <div className="rounded-full border border-[var(--pq-border)] bg-white px-3 py-1 text-xs font-medium text-[var(--pq-text-muted)] dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:text-[var(--pq-text-faint)]">
             {zoomLabel}

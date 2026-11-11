@@ -10,7 +10,7 @@ import { FloatingAssistantPanel, SelectionQuickActions } from './readerWorkspace
 import TranslatedPdfPane from './TranslatedPdfPane';
 import { getFileNameFromPath } from '../../utils/text';
 import { getPdfSourceSignature } from '../pdf/pdfDocumentSource';
-import { resolvePdfCompareLeftSource } from './documentReaderPdfOptions';
+import { isSameLocalPath } from './documentReaderPdfPaths';
 import {
   formatReaderDocumentSource,
   type ReaderWorkspaceDocument,
@@ -43,8 +43,8 @@ import type {
 } from '../../types/reader';
 
 interface ReaderWorkspaceProps {
-  onPdfPageCountChange?: (pageCount: number) => void;
-  onPdfDocumentErrorChange?: (error: string) => void;
+  onPdfPageCountChange?: (pageCount: number, source: PdfSource, data: Uint8Array | null) => void;
+  onPdfDocumentErrorChange?: (error: string, source: PdfSource) => void;
   active: boolean;
   currentDocument: ReaderWorkspaceDocument;
   selectedSectionTitle: string;
@@ -180,7 +180,7 @@ interface ReaderWorkspaceProps {
   showLibraryToggle?: boolean;
 }
 
-function ReadingStage(props: ReaderWorkspaceProps & { immersiveReading: boolean }) {
+export function ReadingStage(props: ReaderWorkspaceProps & { immersiveReading: boolean }) {
   const l = useLocaleText();
   const {
     blocks,
@@ -283,8 +283,29 @@ function ReadingStage(props: ReaderWorkspaceProps & { immersiveReading: boolean 
   const pdfCompareMode = readingViewMode === 'pdf-compare';
   const showDualPane = readingViewMode === 'dual-pane' || pdfCompareMode;
   const translatedPdfPath = currentDocument.translatedPdfPath ?? '';
-  const leftPdfSource = resolvePdfCompareLeftSource(pdfCompareMode, originalPdfPath, pdfSource);
-  const leftPageSyncContext = pdfCompareMode && originalPdfPath
+  const compareOriginalSource = useMemo<PdfSource>(
+    () => originalPdfPath.trim() ? { kind: 'local-path', path: originalPdfPath } : null,
+    [originalPdfPath],
+  );
+  const originalUnavailable = pdfCompareMode && !compareOriginalSource &&
+    (!pdfSource && !pdfData || Boolean(translatedPdfPath && pdfSource?.kind === 'local-path' &&
+      isSameLocalPath(pdfSource.path, translatedPdfPath)));
+  const leftPdfSource = originalUnavailable ? null : pdfCompareMode && compareOriginalSource ? compareOriginalSource : pdfSource;
+  const leftUsesOriginal = pdfCompareMode && Boolean(compareOriginalSource);
+  const leftPdfData = leftUsesOriginal || originalUnavailable ? null : pdfData;
+  const handleLeftPageCountChange = useCallback((count: number) => {
+    props.onPdfPageCountChange?.(count, leftPdfSource, leftPdfData);
+  }, [leftPdfData, leftPdfSource, props.onPdfPageCountChange]);
+  const handleLeftDocumentErrorChange = useCallback((error: string) => {
+    props.onPdfDocumentErrorChange?.(error, leftPdfSource);
+  }, [leftPdfSource, props.onPdfDocumentErrorChange]);
+  useEffect(() => {
+    if (originalUnavailable) {
+      props.onPdfPageCountChange?.(0, null, null);
+      props.onPdfDocumentErrorChange?.('', null);
+    }
+  }, [originalUnavailable, props.onPdfPageCountChange, props.onPdfDocumentErrorChange]);
+  const leftPageSyncContext = originalUnavailable ? '' : pdfCompareMode && originalPdfPath
     ? getPdfSourceSignature(leftPdfSource)
     : pdfScrollPosition?.sourceKey ?? '';
   const matchesCurrentDocument = useCallback(
@@ -355,11 +376,12 @@ function ReadingStage(props: ReaderWorkspaceProps & { immersiveReading: boolean 
   const lastLeftPageRef = useRef<number | null>(null);
   const lastRightPageRef = useRef<number | null>(null);
   const pendingRightPageSyncTokenRef = useRef<number | null>(null);
+  const pendingLeftPageSyncTokenRef = useRef<number | null>(null);
   const pageSyncTokenRef = useRef(0);
   const pdfCompareContextRef = useRef('');
   const pdfCompareContextKey = [
     currentDocument.workspaceId,
-    pdfScrollPosition?.sourceKey ?? '',
+    leftPageSyncContext,
     translatedPdfPath,
   ].join('\u0000');
   const rightPageSyncContext = translatedPdfPath ? `local:${translatedPdfPath}` : '';
@@ -375,22 +397,23 @@ function ReadingStage(props: ReaderWorkspaceProps & { immersiveReading: boolean 
 
     setLeftPageSyncSignal(null);
     setRightPageSyncSignal(null);
+    pendingLeftPageSyncTokenRef.current = null;
 
-    if (pdfCompareMode && pdfCompareSyncEnabled && rightPageSyncContext) {
+    if (pdfCompareMode && pdfCompareSyncEnabled && leftPageSyncContext && rightPageSyncContext) {
       pageSyncTokenRef.current += 1;
       pendingRightPageSyncTokenRef.current = pageSyncTokenRef.current;
       setRightPageSyncSignal({ context: rightPageSyncContext, page: initialPage, token: pageSyncTokenRef.current });
     } else {
       pendingRightPageSyncTokenRef.current = null;
     }
-  }, [pdfCompareMode, pdfCompareContextKey, pdfCompareSyncEnabled, rightPageSyncContext]);
+  }, [pdfCompareMode, pdfCompareContextKey, pdfCompareSyncEnabled, leftPageSyncContext, rightPageSyncContext]);
 
   const handleLeftPdfPageChange = useCallback(
     (page: number) => {
       const pageChanged = page !== lastLeftPageRef.current;
       lastLeftPageRef.current = page;
 
-      if (!pdfCompareMode || !pdfCompareSyncEnabled || !pageChanged || !rightPageSyncContext) {
+      if (!pdfCompareMode || !pdfCompareSyncEnabled || !pageChanged || !rightPageSyncContext || pendingLeftPageSyncTokenRef.current !== null) {
         return;
       }
 
@@ -421,6 +444,12 @@ function ReadingStage(props: ReaderWorkspaceProps & { immersiveReading: boolean 
     lastRightPageRef.current = page;
   }, []);
 
+  const handleLeftPdfPageSyncApplied = useCallback((page: number, token: number) => {
+    if (pendingLeftPageSyncTokenRef.current !== token) return;
+    pendingLeftPageSyncTokenRef.current = null;
+    lastLeftPageRef.current = page;
+  }, []);
+
   const handleTranslatedPdfPageChange = useCallback(
     (page: number) => {
       if (
@@ -443,6 +472,7 @@ function ReadingStage(props: ReaderWorkspaceProps & { immersiveReading: boolean 
       }
 
       pageSyncTokenRef.current += 1;
+      pendingLeftPageSyncTokenRef.current = pageSyncTokenRef.current;
       setLeftPageSyncSignal({ context: leftPageSyncContext, page, token: pageSyncTokenRef.current });
     },
     [leftPageSyncContext, pdfCompareMode, pdfCompareSyncEnabled],
@@ -460,15 +490,21 @@ function ReadingStage(props: ReaderWorkspaceProps & { immersiveReading: boolean 
               width: showDualPane ? `calc(${(leftPaneWidthRatio * 100).toFixed(2)}% - 4px)` : '100%',
             }}
           >
-            <PdfViewer
-              onPageCountChange={props.onPdfPageCountChange}
-              onDocumentErrorChange={props.onPdfDocumentErrorChange}
+            {originalUnavailable ? (
+              <div className="flex h-full items-center justify-center p-8 text-center text-sm text-[var(--pq-text-muted)]" role="status">
+                {l('原版 PDF 不可用', 'Original PDF unavailable')}
+              </div>
+            ) : <PdfViewer
+              pane={pdfCompareMode ? 'compare-original' : 'reader'}
+              onPageCountChange={handleLeftPageCountChange}
+              onDocumentErrorChange={handleLeftDocumentErrorChange}
               source={leftPdfSource}
-              pdfData={pdfCompareMode && originalPdfPath ? null : pdfData}
-              scrollPosition={pdfCompareMode && originalPdfPath ? null : pdfScrollPosition}
+              pdfData={leftPdfData}
+              scrollPosition={pdfScrollPosition}
               pageSyncSignal={leftPageSyncSignal}
+              onPageSyncApplied={handleLeftPdfPageSyncApplied}
               readingHeatmap={pdfReadingHeatmap}
-              currentPdfName={currentPdfName}
+              currentPdfName={leftUsesOriginal ? getFileNameFromPath(originalPdfPath) : currentPdfName}
               defaultSaveDirectory={pdfAnnotationSaveDirectory}
               originalPdfPath={originalPdfPath}
               translating={translating}
@@ -498,7 +534,7 @@ function ReadingStage(props: ReaderWorkspaceProps & { immersiveReading: boolean 
               onScrollPositionChange={handleLeftPdfScrollPositionChange}
               onReadingHeatmapChange={onPdfReadingHeatmapChange}
               onSaveSuccess={onPdfAnnotationSaveSuccess}
-            />
+            />}
           </section>
 
           {showDualPane ? (

@@ -202,3 +202,18 @@ test('PDF option labels and missing-language message support English localizatio
     'Translated · language unconfirmed',
   ]);
 });
+
+test('unknown language metadata never derives a language from even very long zh filenames', () => {
+  const originalName = `${'original-'.repeat(30)}.pdf`;
+  const translatedName = `${'zh-CN-translated-'.repeat(20)}.pdf`;
+  for (const role of ['Translated', 'Translated · und', 'Translated · unknown', 'Translated · undefined']) {
+    const options = buildAvailablePdfOptions({
+      originalPdfPath: `C:/library/${originalName}`,
+      projectPdfFiles: [{ ...file(`C:/library/${translatedName}`, translatedName), role }],
+      currentLocalPdfPath: '', currentPdfVariantLabel: '', localize: zh,
+    });
+    assert.deepEqual(options.map(({ label }) => label), ['原版 PDF', '译版 · 语言待确认']);
+    assert.equal(options[0].title, originalName);
+    assert.equal(options[1].title, translatedName);
+  }
+});
