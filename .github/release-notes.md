@@ -1,13 +1,19 @@
 # PaperQuay v{{VERSION}}
 
-## Backup restore fixes
+## PDF storage governance preview
 
-- **MinerU results now load after restoring a `.pqbackup`.** Imports no longer keep the package's `default/` or `custom-xxxxxxxx/` folder level, so parse caches land where the reader looks for them. The cache root that was active on the source machine takes priority; duplicate cache folders are skipped as a whole.
-- **PDFs of papers you had opened on the source machine are found again.** Original and translated PDFs are rebound by attachment ID to the restored files, and reading history is rewritten to match. Stored paths written with forward slashes or different letter case also match.
-- **Data already restored with 0.4.19 is repaired automatically.** On first launch after upgrading, PaperQuay moves MinerU cache folders up one level and relinks attachments marked as missing. This runs once and does not touch profiles that never imported a backup. Archives exported by 0.4.19 do not need to be re-exported and can be imported again.
-- Restore folders whose parent is a junction (for example `Documents\BaiduSyncdisk`) are resolved to their real path instead of being rejected; unsafe-destination errors now explain the cause.
-- The restore summary counts restored, unresolved, and not-in-package attachments. Attachment warnings are listed first in the backup preview.
-- Restored attachments keep their original display file names.
+- Added a read-only health report for registered PDF attachments, including file availability, size, and content-hash checks.
+- Added a naming preview that distinguishes managed files from external paths. Previewing does not rename or move files.
+- Reader PDF choices now come from registered attachments instead of treating every PDF in a project folder as a source. Translation language metadata is preserved, and replaced translations retain their attachment records and files.
+- Added persistent asset and location schema foundations without automatic backfill, physical deduplication, or garbage collection.
+
+This release does not yet apply or roll back rename plans, quarantine duplicates, or run garbage collection. Those operations remain disabled until locator migration, recovery, and backup round-trip gates are complete.
+
+## Verification
+
+- `npm run build` and all 955 automated tests pass.
+- The registered-PDF inventory and naming preview are read-only.
+- The health report and naming preview do not change existing PDFs. This version does not automatically rename, move, or delete existing PDFs.
 
 ## Downloads
 
@@ -15,27 +21,26 @@
 - Linux x64: `.AppImage`, `.deb`, `.tar.gz`
 - macOS x64: `.dmg`
 
-macOS arm64 installers are not built or published (since v0.4.18). Historical release assets remain available.
-
-## Verification
-
-- `npm run build` and all 944 automated tests pass, including 8 new cross-directory restore regression tests.
-- Re-running the pre-fix reproduction (real export with a junction library folder, default and custom MinerU roots, five attachment variants) now restores every attachment and places MinerU results in the correct folder.
-- A desktop import on November 7, 2026 restored 225 attachments with 0 unresolved, 0 missing from the package and no warnings; the 8.6 GB RAG database and MinerU caches came back with the archive. The import moved the library to another folder on the same machine.
-- Not covered: `pdfPath` in MinerU's `paper_reader_manifest.json`, cross-machine migration, low-disk and power-loss drills.
+macOS arm64 installers are not built or published. Historical release assets remain available.
 
 ---
 
 # PaperQuay v{{VERSION}}
 
-## 备份恢复修复
+## PDF 存储治理预览
 
-- **恢复 `.pqbackup` 后 MinerU 解析结果可以正常读取。**导入时去掉包内 `default/`、`custom-xxxxxxxx/` 这一级目录，缓存装到阅读器查找的位置；源机生效的缓存根优先，同名缓存目录整目录跳过。
-- **源机上打开过的文献，PDF 可以重新找到。**原文和译文按附件 ID 改绑到恢复后的文件，阅读历史同步改写；`stored_path` 含正斜杠或大小写不同也能匹配。
-- **已用 0.4.19 恢复的数据会自动修复。**升级后首次启动时一次性上移 MinerU 缓存目录，并找回标记为缺失的附件；只执行一次，不影响未导入过备份的数据。0.4.19 导出的备份包无需重新导出，可直接重新导入。
-- 恢复目录父级经过 junction（如 `Documents\BaiduSyncdisk`）时解析为真实路径，不再直接拒绝；不安全目录的报错说明具体原因。
-- 恢复摘要记录附件已恢复、未找回和包内缺失的数量；备份预览中附件类警告优先显示。
-- 恢复后保留附件原文件名显示。
+- 新增文库登记 PDF 的只读体检，展示文件可读性、大小和内容哈希核验结果。
+- 新增文件命名预览，区分 PaperQuay 管理的文件与外部路径；预览不会改名或移动文件。
+- 阅读器的 PDF 来源改为读取已登记附件，不再把项目目录中的任意 PDF 当作文献来源。译版语言信息会保留，替换译版时保留旧版附件记录与文件。
+- 新增资产与位置数据表及其持久化基础，尚未自动回填历史资产，也未启用物理去重或垃圾回收。
+
+此版本尚不能执行或回滚改名计划，也不会隔离重复文件或运行垃圾回收。locator 迁移、恢复流程和备份往返门槛完成前，这些操作保持关闭。
+
+## 验证
+
+- `npm run build` 与全部 955 项自动化测试通过。
+- 登记 PDF 体检和命名预览均为只读。
+- 体检和命名预览不会修改已有 PDF；此版本不会自动重命名、移动或删除已有 PDF。
 
 ## 下载平台
 
@@ -43,11 +48,4 @@ macOS arm64 installers are not built or published (since v0.4.18). Historical re
 - Linux x64：`.AppImage`、`.deb`、`.tar.gz`
 - macOS x64：`.dmg`
 
-自 v0.4.18 起不再构建或发布 macOS arm64 安装包，历史版本资产保留。
-
-## 验证
-
-- `npm run build` 与全部 944 项自动化测试通过，其中新增 8 项跨目录恢复回归测试。
-- 用修复前的复现脚本（真实导出，含 junction 库目录、默认与自定义两个 MinerU 根、5 种附件）重跑：全部附件可找回，MinerU 结果位于正确目录。
-- 2026-11-07 桌面实测：0.4.20 导出的完整包导入同机另一库目录，恢复 225 个附件，0 未找回、0 包内缺失、无警告；8.6 GB 的 RAG 数据库与 MinerU 缓存随包恢复。
-- 未覆盖：MinerU `paper_reader_manifest.json` 的 `pdfPath`、跨机器迁移、低磁盘与断电演练。
+不构建或发布 macOS arm64 安装包，历史版本资产继续保留。

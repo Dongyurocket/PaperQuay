@@ -34,4 +34,4 @@ jobs:
         run: npm run build
 
       - name: Run tests
-        run: node --test "tests/*.test.ts"
+        run: npm test

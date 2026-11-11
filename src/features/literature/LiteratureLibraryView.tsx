@@ -9,7 +9,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from 'react';
 import { createPortal } from 'react-dom';
-import { Database, Sparkles, Star, Tag, Trash2 } from 'lucide-react';
+import { Database, Sparkles, Star, Tag, Trash2, X } from 'lucide-react';
 import { useLocaleText } from '../../i18n/uiLanguage';
 import { localPathsExist } from '../../services/desktop';
 import {
@@ -25,11 +25,13 @@ import {
   deleteLibraryPaper,
   deleteLibraryCategory,
   getLibrarySettings,
+  inspectLibraryPdfAssets,
   importPdfsToLibrary,
   initializeLiteratureLibrary,
   listAllLibraryPaperIds,
   listLibraryCategories,
   queryLibraryPapers,
+  previewLibraryPdfAssetNames,
   moveLibraryCategory,
   removeLibraryAttachment,
   reorderLibraryPapers,
@@ -51,6 +53,8 @@ import type {
   LiteraturePaper,
   LiteraturePaperTaskState,
   ListPapersRequest,
+  PdfAssetInventoryReport,
+  PdfAssetNamePlan,
   UpdatePaperRequest,
 } from '../../types/library';
 import type {
@@ -132,6 +136,7 @@ import {
   type LiteratureLibraryDemoState,
 } from './literatureLibraryUtils';
 import { confirmAction } from '../../ui/confirmHost';
+import { Dialog } from '../../ui/dialog';
 import { Menu, type MenuEntry } from '../../ui/menu';
 import { toast } from '../../ui/toast';
 
@@ -380,6 +385,11 @@ export default function LiteratureLibraryView({
   const [selectionAnchorId, setSelectionAnchorId] = useState<string | null>(null);
   const [batchWorking, setBatchWorking] = useState(false);
   const [bibExportMenuOpen, setBibExportMenuOpen] = useState(false);
+  const [pdfAssetAuditOpen, setPdfAssetAuditOpen] = useState(false);
+  const [pdfAssetAuditLoading, setPdfAssetAuditLoading] = useState(false);
+  const [pdfAssetAuditError, setPdfAssetAuditError] = useState('');
+  const [pdfAssetInventory, setPdfAssetInventory] = useState<PdfAssetInventoryReport | null>(null);
+  const [pdfAssetNamePlan, setPdfAssetNamePlan] = useState<PdfAssetNamePlan | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [ragMembershipFilter, setRagMembershipFilter] = useState<LiteratureRagMembershipFilter>('all');
   const [loading, setLoading] = useState(true);
@@ -436,6 +446,10 @@ export default function LiteratureLibraryView({
   const mineruStatusConfigKeyRef = useRef(mineruStatusConfigKey);
 
   const flatCategories = useMemo(() => flattenCategories(categories), [categories]);
+  const duplicatePdfAttachmentIds = useMemo(
+    () => new Set(pdfAssetInventory?.duplicateGroups.flatMap((group) => group.map((entry) => entry.attachmentId)) ?? []),
+    [pdfAssetInventory],
+  );
   const selectedCategory = useMemo(
     () => categories.find((category) => category.id === selectedCategoryId) ?? null,
     [categories, selectedCategoryId],
@@ -1562,6 +1576,24 @@ export default function LiteratureLibraryView({
         nextError instanceof Error ? nextError.message : l('导入 PDF 失败', 'Failed to import PDFs');
       setError(message);
       setStatusMessage(message);
+    }
+  };
+
+  const handleInspectPdfAssets = async () => {
+    setPdfAssetAuditOpen(true);
+    setPdfAssetAuditLoading(true);
+    setPdfAssetAuditError('');
+    try {
+      const [inventory, names] = await Promise.all([
+        inspectLibraryPdfAssets(),
+        previewLibraryPdfAssetNames(),
+      ]);
+      setPdfAssetInventory(inventory);
+      setPdfAssetNamePlan(names);
+    } catch (nextError) {
+      setPdfAssetAuditError(nextError instanceof Error ? nextError.message : String(nextError));
+    } finally {
+      setPdfAssetAuditLoading(false);
     }
   };
 
@@ -3170,6 +3202,7 @@ export default function LiteratureLibraryView({
             onSortChange={(sortBy, sortDirection) => setPaperSort({ sortBy, sortDirection })}
             onTitleDisplayModeChange={setTitleDisplayMode}
             onImportPdfs={() => void handleImportPdfs()}
+            onInspectPdfAssets={() => void handleInspectPdfAssets()}
             onRefresh={() => void refreshAll()
               .then(() => toast.success(l('文献库已刷新', 'Library refreshed')))
               .catch((nextError: unknown) => toast.error(nextError instanceof Error ? nextError.message : l('刷新失败', 'Refresh failed')))}
@@ -3434,6 +3467,98 @@ export default function LiteratureLibraryView({
         onClose={handleCloseImportDialog}
         onConfirm={() => void handleConfirmImportDrafts()}
       />
+
+      <Dialog
+        open={pdfAssetAuditOpen}
+        onClose={() => setPdfAssetAuditOpen(false)}
+        size="xl"
+        labelledBy="pdf-asset-audit-title"
+        className="max-h-[88vh]"
+      >
+        <div className="flex items-center justify-between border-b border-[var(--pq-border)] px-5 py-4">
+          <div className="min-w-0">
+            <h2 id="pdf-asset-audit-title" className="text-base font-semibold">
+              {l('PDF 存储体检', 'PDF storage audit')}
+            </h2>
+            <p className="mt-1 text-xs text-[var(--pq-text-muted)]">
+              {l('只核查文库已登记的附件；此报告不会移动或删除文件。', 'Checks registered attachments only. This report does not move or delete files.')}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setPdfAssetAuditOpen(false)}
+            className="pq-icon-button h-8 w-8 shrink-0"
+            aria-label={l('关闭', 'Close')}
+          >
+            <X className="h-4 w-4" strokeWidth={1.9} />
+          </button>
+        </div>
+        <div className="max-h-[calc(88vh-72px)] overflow-auto px-5 py-4">
+          {pdfAssetAuditLoading ? (
+            <div className="py-10 text-center text-sm text-[var(--pq-text-muted)]">{l('正在核验已登记的 PDF…', 'Verifying registered PDFs…')}</div>
+          ) : pdfAssetAuditError ? (
+            <div role="alert" className="rounded border border-[var(--pq-danger)]/30 bg-[var(--pq-danger-bg)] p-3 text-sm text-[var(--pq-danger)]">{pdfAssetAuditError}</div>
+          ) : pdfAssetInventory && pdfAssetNamePlan ? (
+            <>
+              <dl className="grid grid-cols-2 gap-x-5 gap-y-3 border-b border-[var(--pq-border)] pb-4 text-sm sm:grid-cols-4">
+                <div><dt className="text-xs text-[var(--pq-text-muted)]">{l('附件', 'Attachments')}</dt><dd className="mt-1 font-medium">{pdfAssetInventory.attachmentCount}</dd></div>
+                <div><dt className="text-xs text-[var(--pq-text-muted)]">{l('已核验 / 唯一内容', 'Verified / unique')}</dt><dd className="mt-1 font-medium">{pdfAssetInventory.verifiedCount} / {pdfAssetInventory.uniqueVerifiedAssetCount}</dd></div>
+                <div><dt className="text-xs text-[var(--pq-text-muted)]">{l('准确重复组', 'Exact duplicate groups')}</dt><dd className="mt-1 font-medium">{pdfAssetInventory.duplicateGroups.length}</dd></div>
+                <div><dt className="text-xs text-[var(--pq-text-muted)]">{l('缺失 / 不可读 / hash 不符', 'Missing / unreadable / hash mismatch')}</dt><dd className="mt-1 font-medium">{pdfAssetInventory.missingCount} / {pdfAssetInventory.unreadableCount} / {pdfAssetInventory.hashMismatchCount}</dd></div>
+              </dl>
+              <div className="mt-4 flex flex-wrap gap-x-5 gap-y-1 text-xs text-[var(--pq-text-muted)]">
+                <span>{l('可管理路径的命名预览', 'Managed-path naming preview')}: {pdfAssetNamePlan.renameCount}</span>
+                <span>{l('外链或未知归属', 'External or unknown ownership')}: {pdfAssetNamePlan.externalCount}</span>
+              </div>
+              <div className="mt-3 overflow-x-auto border-y border-[var(--pq-border)]">
+                <table className="w-full min-w-[760px] table-fixed text-left text-xs">
+                  <thead className="sticky top-0 bg-[var(--pq-bg-primary)] text-[var(--pq-text-muted)]">
+                    <tr>
+                      <th className="w-[22%] px-2 py-2 font-medium">{l('文献 / 角色', 'Paper / role')}</th>
+                      <th className="w-[30%] px-2 py-2 font-medium">{l('当前文件', 'Current file')}</th>
+                      <th className="w-[30%] px-2 py-2 font-medium">{l('命名预览', 'Name preview')}</th>
+                      <th className="w-[18%] px-2 py-2 font-medium">{l('核验 / 归属', 'Verification / ownership')}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pdfAssetInventory.entries.map((entry) => {
+                      const proposed = pdfAssetNamePlan.operations.find((item) => item.attachmentId === entry.attachmentId);
+                      const isExactDuplicate = duplicatePdfAttachmentIds.has(entry.attachmentId);
+                      const status = entry.status === 'verified'
+                        ? l('已核验', 'Verified')
+                        : entry.status === 'missing'
+                          ? l('缺失', 'Missing')
+                          : entry.status === 'hash-mismatch'
+                            ? l('hash 不符', 'Hash mismatch')
+                            : l('不可读', 'Unreadable');
+                      return (
+                        <tr key={entry.attachmentId} className="border-t border-[var(--pq-border-subtle)] align-top">
+                          <td className="px-2 py-2">
+                            <div className="truncate font-medium" title={entry.paperTitle}>{entry.paperTitle}</div>
+                            <div className="mt-1 text-[var(--pq-text-muted)]">{entry.role}</div>
+                          </td>
+                          <td className="px-2 py-2">
+                            <div className="truncate" title={entry.path}>{entry.path}</div>
+                            <div className="mt-1 text-[var(--pq-text-muted)]">{entry.byteLength == null ? '—' : `${entry.byteLength.toLocaleString()} B`}</div>
+                          </td>
+                          <td className="px-2 py-2">
+                            <div className="truncate" title={proposed?.proposedPath}>{proposed ? getFileNameFromPath(proposed.proposedPath) : '—'}</div>
+                            <div className="mt-1 text-[var(--pq-text-muted)]">{proposed?.action === 'unchanged' ? l('已符合规则', 'Already compliant') : proposed?.ownership ? l('预览；未执行', 'Preview only') : l('外部文件不改名', 'External file unchanged')}</div>
+                          </td>
+                          <td className="px-2 py-2">
+                            <div>{status}{isExactDuplicate ? ` · ${l('准确重复', 'Exact duplicate')}` : ''}</div>
+                            <div className="mt-1 text-[var(--pq-text-muted)]">{entry.ownership ? l('受管路径', 'Managed path') : l('外链 / 未知', 'External / unknown')}</div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          ) : null}
+        </div>
+      </Dialog>
 
       <LibraryTextInputDialog
         open={categoryNameDialog !== null}

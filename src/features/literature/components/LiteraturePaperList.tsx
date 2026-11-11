@@ -16,6 +16,7 @@ import {
   Minus,
   FilePlus2,
   GripVertical,
+  HardDrive,
   RefreshCw,
   Search,
   Star,
@@ -81,6 +82,7 @@ interface LiteraturePaperListProps {
   onSortChange: (sortBy: LiteraturePaperListSortBy, sortDirection: LiteraturePaperListSortDirection) => void;
   onTitleDisplayModeChange: (mode: PaperTitleDisplayMode) => void;
   onImportPdfs: () => void;
+  onInspectPdfAssets: () => void;
   onRefresh: () => void;
   onSelectPaper: (paperId: string, modifiers?: { ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean }) => void;
   onOpenPaper: (paper: LiteraturePaper) => void;
@@ -133,6 +135,7 @@ export default function LiteraturePaperList({
   onSortChange,
   onTitleDisplayModeChange,
   onImportPdfs,
+  onInspectPdfAssets,
   onRefresh,
   onSelectPaper,
   onOpenPaper,
@@ -581,6 +584,17 @@ export default function LiteraturePaperList({
           >
             <FilePlus2 className="mr-2 h-4 w-4" strokeWidth={1.9} />
             {l('导入 PDF', 'Import PDF')}
+          </button>
+
+          <button
+            type="button"
+            onClick={onInspectPdfAssets}
+            disabled={working}
+            className="pq-button inline-flex h-9 items-center gap-2 px-3 text-sm disabled:opacity-50"
+            title={l('检查已登记的 PDF 附件与命名预览', 'Inspect registered PDF assets and naming preview')}
+          >
+            <HardDrive className="h-4 w-4" strokeWidth={1.9} />
+            {l('存储体检', 'Storage audit')}
           </button>
 
           <button

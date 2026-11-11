@@ -14,6 +14,7 @@ export interface LocalDirectoryFileEntry {
   name: string;
   size: number;
   modifiedAtMs: number;
+  role?: string;
 }
 
 export interface CapturedScreenshot {

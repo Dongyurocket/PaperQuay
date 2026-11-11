@@ -1,7 +1,7 @@
 {
   "name": "paperquay",
   "private": true,
-  "version": "0.4.20",
+  "version": "0.4.21",
   "description": "AI-assisted desktop literature reader and library manager.",
   "author": {
     "name": "PaperQuay Developers",
@@ -17,7 +17,7 @@
     "mcp": "node bin/paperquay-mcp.cjs",
     "mcp:bundle": "node scripts/bundle-mcp.cjs",
     "build": "tsc && vite build",
-    "test": "node --test \"tests/*.test.ts\"",
+    "test": "node --test \"tests/*.test.ts\" \"tests/*.test.mjs\"",
     "check": "npm run build && npm test",
     "preview": "vite preview --host 127.0.0.1 --port 4173",
     "electron:build": "npm run build && node electron/build.cjs"

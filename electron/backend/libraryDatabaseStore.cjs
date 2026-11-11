@@ -113,6 +113,7 @@ function createSchema(db) {
       original_path TEXT,
       stored_path TEXT NOT NULL,
       relative_path TEXT,
+      language TEXT,
       file_name TEXT NOT NULL,
       mime_type TEXT NOT NULL,
       file_size INTEGER NOT NULL,
@@ -139,6 +140,64 @@ function createSchema(db) {
       FOREIGN KEY (paper_id) REFERENCES papers(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS pdf_assets (
+      asset_id TEXT PRIMARY KEY,
+      sha256 TEXT NOT NULL,
+      byte_length INTEGER NOT NULL,
+      format TEXT NOT NULL DEFAULT 'application/pdf',
+      created_at INTEGER NOT NULL,
+      availability TEXT NOT NULL DEFAULT 'verified'
+    );
+
+    CREATE TABLE IF NOT EXISTS pdf_asset_locations (
+      location_id TEXT PRIMARY KEY,
+      asset_id TEXT NOT NULL,
+      root_id TEXT,
+      relative_path TEXT,
+      absolute_path TEXT NOT NULL,
+      ownership TEXT NOT NULL,
+      replica_role TEXT NOT NULL DEFAULT 'primary',
+      verified_at INTEGER NOT NULL,
+      FOREIGN KEY (asset_id) REFERENCES pdf_assets(asset_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS pdf_attachment_bindings (
+      attachment_id TEXT PRIMARY KEY,
+      paper_id TEXT NOT NULL,
+      asset_id TEXT NOT NULL,
+      role TEXT NOT NULL,
+      language TEXT,
+      derived_from_asset_id TEXT,
+      display_name TEXT,
+      original_filename TEXT,
+      FOREIGN KEY (asset_id) REFERENCES pdf_assets(asset_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS pdf_path_aliases (
+      alias_id TEXT PRIMARY KEY,
+      library_id TEXT NOT NULL,
+      old_locator TEXT NOT NULL,
+      asset_id TEXT NOT NULL,
+      location_id TEXT NOT NULL,
+      operation_id TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      UNIQUE (library_id, old_locator, operation_id),
+      FOREIGN KEY (asset_id) REFERENCES pdf_assets(asset_id),
+      FOREIGN KEY (location_id) REFERENCES pdf_asset_locations(location_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS pdf_asset_operations (
+      operation_id TEXT PRIMARY KEY,
+      schema_version INTEGER NOT NULL,
+      rule_version INTEGER NOT NULL,
+      plan_hash TEXT NOT NULL,
+      status TEXT NOT NULL,
+      plan_json TEXT NOT NULL,
+      progress_json TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
     CREATE INDEX IF NOT EXISTS idx_papers_sort_order ON papers(sort_order);
     CREATE INDEX IF NOT EXISTS idx_papers_imported_at ON papers(imported_at);
     CREATE INDEX IF NOT EXISTS idx_papers_is_favorite ON papers(is_favorite);
@@ -148,6 +207,10 @@ function createSchema(db) {
     CREATE INDEX IF NOT EXISTS idx_paper_categories_category_id ON paper_categories(category_id);
     CREATE INDEX IF NOT EXISTS idx_paper_references_paper_id ON paper_references(paper_id);
     CREATE INDEX IF NOT EXISTS idx_paper_references_doi ON paper_references(doi);
+    CREATE INDEX IF NOT EXISTS idx_pdf_asset_locations_asset ON pdf_asset_locations(asset_id);
+    CREATE INDEX IF NOT EXISTS idx_pdf_attachment_bindings_asset ON pdf_attachment_bindings(asset_id);
+    CREATE INDEX IF NOT EXISTS idx_pdf_path_aliases_locator ON pdf_path_aliases(library_id, old_locator);
+    CREATE INDEX IF NOT EXISTS idx_pdf_asset_operations_status ON pdf_asset_operations(status);
   `);
 
   migrateRepeatedIdListTable(db, 'authors', `
@@ -191,6 +254,7 @@ function createSchema(db) {
   ensureColumn(db, 'papers', 'isbn', 'TEXT');
   ensureColumn(db, 'papers', 'issn', 'TEXT');
   ensureColumn(db, 'papers', 'rag_enabled', 'INTEGER NOT NULL DEFAULT 1');
+  ensureColumn(db, 'attachments', 'language', 'TEXT');
 
   db.exec(`DELETE FROM library_settings WHERE key = 'backupEnabled'`);
 }
@@ -373,6 +437,7 @@ function hydratePaperRows(db, paperRows) {
       original_path AS originalPath,
       stored_path AS storedPath,
       relative_path AS relativePath,
+      language,
       file_name AS fileName,
       mime_type AS mimeType,
       file_size AS fileSize,
@@ -551,6 +616,7 @@ function loadLibraryFromDb(db, appPaths, normalizeLibrary) {
       original_path AS originalPath,
       stored_path AS storedPath,
       relative_path AS relativePath,
+      language,
       file_name AS fileName,
       mime_type AS mimeType,
       file_size AS fileSize,
@@ -864,6 +930,7 @@ function createPaperWriters(db) {
       original_path,
       stored_path,
       relative_path,
+      language,
       file_name,
       mime_type,
       file_size,
@@ -871,7 +938,7 @@ function createPaperWriters(db) {
       created_at,
       missing
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const writers = {
@@ -909,6 +976,7 @@ function createPaperWriters(db) {
           attachment.originalPath ?? null,
           attachment.storedPath,
           attachment.relativePath ?? null,
+          attachment.language ?? null,
           attachment.fileName,
           attachment.mimeType,
           Number(attachment.fileSize) || 0,
@@ -1092,6 +1160,81 @@ function createLibraryDatabaseStore(appPaths, helpers) {
 
     loadSettings() {
       return loadKeyValueTable(db, 'library_settings');
+    },
+
+    savePdfAssetOperation(operation) {
+      const timestamp = Number(operation.updatedAt) || Date.now();
+      db.prepare(`
+        INSERT INTO pdf_asset_operations (
+          operation_id, schema_version, rule_version, plan_hash, status,
+          plan_json, progress_json, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(operation_id) DO UPDATE SET
+          status = excluded.status,
+          progress_json = excluded.progress_json,
+          updated_at = excluded.updated_at
+      `).run(
+        cleanString(operation.operationId), Number(operation.schemaVersion) || 1,
+        Number(operation.ruleVersion) || 1, cleanString(operation.planHash),
+        cleanString(operation.status), JSON.stringify(operation.plan ?? null),
+        JSON.stringify(operation.progress ?? null), Number(operation.createdAt) || timestamp, timestamp,
+      );
+      return this.getPdfAssetOperation(operation.operationId);
+    },
+
+    getPdfAssetOperation(operationId) {
+      const row = db.prepare(`
+        SELECT operation_id AS operationId, schema_version AS schemaVersion,
+          rule_version AS ruleVersion, plan_hash AS planHash, status,
+          plan_json AS planJson, progress_json AS progressJson,
+          created_at AS createdAt, updated_at AS updatedAt
+        FROM pdf_asset_operations WHERE operation_id = ?
+      `).get(cleanString(operationId));
+      if (!row) return null;
+      return {
+        ...row,
+        plan: parseJsonValue(row.planJson),
+        progress: parseJsonValue(row.progressJson),
+      };
+    },
+
+    listPdfAssetOperations({ activeOnly = false } = {}) {
+      const rows = activeOnly
+        ? db.prepare("SELECT operation_id FROM pdf_asset_operations WHERE status NOT IN ('completed', 'rolled-back') ORDER BY created_at").all()
+        : db.prepare('SELECT operation_id FROM pdf_asset_operations ORDER BY created_at DESC').all();
+      return rows.map((row) => this.getPdfAssetOperation(row.operation_id));
+    },
+
+    upsertPdfAsset({ asset, location, binding }) {
+      withTransaction(db, () => {
+        db.prepare(`INSERT INTO pdf_assets (asset_id, sha256, byte_length, format, created_at, availability)
+          VALUES (?, ?, ?, ?, ?, ?)
+          ON CONFLICT(asset_id) DO UPDATE SET sha256=excluded.sha256, byte_length=excluded.byte_length,
+            format=excluded.format, availability=excluded.availability`).run(
+          asset.assetId, asset.sha256, asset.byteLength, asset.format || 'application/pdf',
+          asset.createdAt || Date.now(), asset.availability || 'verified',
+        );
+        if (location) db.prepare(`INSERT INTO pdf_asset_locations
+          (location_id, asset_id, root_id, relative_path, absolute_path, ownership, replica_role, verified_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(location_id) DO UPDATE SET asset_id=excluded.asset_id, absolute_path=excluded.absolute_path,
+            relative_path=excluded.relative_path, ownership=excluded.ownership,
+            replica_role=excluded.replica_role, verified_at=excluded.verified_at`).run(
+          location.locationId, asset.assetId, location.rootId || null, location.relativePath || null,
+          location.absolutePath, location.ownership, location.replicaRole || 'primary',
+          location.verifiedAt || Date.now(),
+        );
+        if (binding) db.prepare(`INSERT INTO pdf_attachment_bindings
+          (attachment_id, paper_id, asset_id, role, language, derived_from_asset_id, display_name, original_filename)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(attachment_id) DO UPDATE SET paper_id=excluded.paper_id, asset_id=excluded.asset_id,
+            role=excluded.role, language=excluded.language, derived_from_asset_id=excluded.derived_from_asset_id,
+            display_name=excluded.display_name, original_filename=excluded.original_filename`).run(
+          binding.attachmentId, binding.paperId, asset.assetId, binding.role,
+          binding.language || null, binding.derivedFromAssetId || null,
+          binding.displayName || null, binding.originalFilename || null,
+        );
+      });
     },
 
     saveReferences(paperId, refs) {

@@ -868,6 +868,7 @@ function Reader({ workspaceActive = true }: ReaderProps) {
           paperId: item.itemKey,
           sourcePath,
           kind: ATTACHMENT_KIND_TRANSLATED_PDF,
+          language: settings.translationTargetLanguage,
         });
 
         const refreshedItem = createNativeLibraryWorkspaceItem(updatedPaper, librarySettings?.storageDir);
@@ -891,6 +892,7 @@ function Reader({ workspaceActive = true }: ReaderProps) {
     },
     [
       l,
+      settings.translationTargetLanguage,
       librarySettings?.storageDir,
       handleWorkspaceItemResolved,
       setError,

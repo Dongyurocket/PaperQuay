@@ -134,3 +134,22 @@ test('available PDF options are deduplicated in original, project, current order
   assert.equal(canSwitchToOriginalPdf('D:/papers/project.pdf', 'D:/papers/original.pdf'), true);
   assert.equal(canSwitchToOriginalPdf('D:/papers/original.pdf', 'D:\\papers\\original.pdf'), false);
 });
+
+test('registered native library variants retain their attachment roles in reader choices', () => {
+  const options = buildAvailablePdfOptions({
+    originalPdfPath: 'C:/library/original.pdf',
+    projectPdfFiles: [
+      { path: 'C:/library/original.pdf', name: 'original.pdf', role: 'Original', size: 0, modifiedAtMs: 0 },
+      { path: 'C:/library/translated.pdf', name: 'translated.pdf', role: 'Translated · zh-CN', size: 0, modifiedAtMs: 0 },
+      { path: 'C:/library/annotated.pdf', name: 'annotated.pdf', role: 'Annotated', size: 0, modifiedAtMs: 0 },
+    ],
+    currentLocalPdfPath: 'C:/library/original.pdf',
+    currentPdfVariantLabel: 'Original PDF',
+  });
+
+  assert.deepEqual(options.map((item) => item.label), [
+    'Original - original.pdf',
+    'Translated · zh-CN - translated.pdf',
+    'Annotated - annotated.pdf',
+  ]);
+});

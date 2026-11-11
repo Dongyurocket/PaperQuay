@@ -1004,6 +1004,22 @@ export function createNativeLibraryWorkspaceItem(
     attachmentFilename: attachment.fileName,
     localPdfPath: path,
     translatedPdfPath: translatedPdfPath ?? undefined,
+    pdfVariants: paper.attachments
+      .filter((item) => item.kind.toLowerCase().includes('pdf') && !item.missing)
+      .map((item) => ({
+        path: item.relativePath && storageDir
+          ? `${storageDir.replace(/[\\/]+$/, '')}${storageDir.includes('\\') ? '\\' : '/'}${item.relativePath.replace(/^[\\/]+/, '')}`
+          : item.storedPath || item.originalPath || '',
+        name: item.fileName,
+        role: item.kind === 'translated-pdf'
+          ? `Translated${item.language ? ` · ${item.language}` : ''}`
+          : item.kind === 'annotated-pdf'
+            ? 'Annotated'
+            : item.kind === 'pdf'
+              ? 'Original'
+              : 'Other',
+      }))
+      .filter((item) => item.path),
     source: 'native-library',
     workspaceId,
     groupKey: workspaceId,

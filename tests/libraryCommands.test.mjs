@@ -102,3 +102,42 @@ test('library_update_settings migrates stored PDFs into the new storage director
     rmSync(appPaths.dataDir, { recursive: true, force: true });
   }
 });
+
+test('library_delete_paper keeps managed files still referenced by another paper', async () => {
+  const appPaths = createAppPaths();
+  let store = null;
+
+  try {
+    const storageDir = path.join(appPaths.dataDir, 'papers');
+    const sharedPath = path.join(storageDir, 'shared.pdf');
+    await mkdir(storageDir, { recursive: true });
+    writeFileSync(sharedPath, '%PDF-1.7\nshared body\n');
+    store = createLibraryStore(appPaths);
+    const library = store.load();
+    library.settings.storageDir = storageDir;
+    const makePaper = (paperId, attachmentId) => ({
+      id: paperId, title: paperId, year: null, publication: null, doi: null, url: null,
+      abstractText: null, keywords: [], importedAt: 1, updatedAt: 1, lastReadAt: null,
+      readingProgress: 0, isFavorite: false, userNote: null, aiSummary: null, citation: null,
+      source: 'local', sortOrder: 0, authors: [], tags: [], categoryIds: [],
+      attachments: [{
+        id: attachmentId, paperId, kind: 'pdf', originalPath: sharedPath, storedPath: sharedPath,
+        relativePath: 'shared.pdf', fileName: 'shared.pdf', mimeType: 'application/pdf',
+        fileSize: 20, contentHash: null, createdAt: 1, missing: false,
+      }],
+    });
+    library.papers.push(makePaper('paper-a', 'att-a'), makePaper('paper-b', 'att-b'));
+    await store.save(library);
+
+    const commands = createLibraryCommands({ appPaths, store });
+    await commands.library_delete_paper({ request: { paperId: 'paper-a', deleteFiles: true } });
+    assert.equal(existsSync(sharedPath), true);
+    assert.equal(store.load().papers.length, 1);
+
+    await commands.library_delete_paper({ request: { paperId: 'paper-b', deleteFiles: true } });
+    assert.equal(existsSync(sharedPath), false);
+  } finally {
+    store?.close();
+    rmSync(appPaths.dataDir, { recursive: true, force: true });
+  }
+});

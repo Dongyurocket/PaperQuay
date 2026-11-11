@@ -90,7 +90,7 @@ export function resolveAnnotationSaveDirectory(options: {
 
 export function buildAvailablePdfOptions(options: {
   originalPdfPath: string;
-  projectPdfFiles: LocalDirectoryFileEntry[];
+  projectPdfFiles: Array<LocalDirectoryFileEntry & { role?: string }>;
   currentLocalPdfPath: string;
   currentPdfVariantLabel: string;
 }): ReaderPdfOption[] {
@@ -118,8 +118,9 @@ export function buildAvailablePdfOptions(options: {
   }
 
   projectPdfFiles.forEach((entry) => {
-    const prefix =
-      originalPdfPath && isSameLocalPath(entry.path, originalPdfPath) ? 'Original' : 'Project';
+    const prefix = entry.role || (
+      originalPdfPath && isSameLocalPath(entry.path, originalPdfPath) ? 'Original' : 'Project'
+    );
     appendOption(entry.path, `${prefix} - ${entry.name}`);
   });
 

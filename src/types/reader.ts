@@ -583,6 +583,8 @@ export interface WorkspaceItem extends ZoteroLibraryItem {
   source: WorkspaceItemSource;
   workspaceId: string;
   groupKey: string;
+  /** PDF files explicitly registered on the native library paper. */
+  pdfVariants?: Array<{ path: string; name: string; role: string }>;
   /** 文献级 RAG 成员。false 表示已移出本地知识库；缺省按可能加入处理。 */
   ragEnabled?: boolean;
 }

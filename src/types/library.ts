@@ -48,6 +48,7 @@ export interface LiteratureAttachment {
   originalPath: string | null;
   storedPath: string;
   relativePath: string | null;
+  language?: string | null;
   fileName: string;
   mimeType: string;
   fileSize: number;
@@ -151,6 +152,50 @@ export interface LibrarySnapshot {
   papers: LiteraturePaper[];
 }
 
+export interface PdfAssetInventoryEntry {
+  paperId: string;
+  paperTitle: string;
+  attachmentId: string;
+  role: string;
+  path: string;
+  ownership: boolean;
+  expectedHash: string | null;
+  status: 'verified' | 'missing' | 'unreadable' | 'hash-mismatch' | string;
+  byteLength: number | null;
+  sha256: string | null;
+}
+
+export interface PdfAssetInventoryReport {
+  createdAt: number;
+  attachmentCount: number;
+  verifiedCount: number;
+  missingCount: number;
+  unreadableCount: number;
+  hashMismatchCount: number;
+  uniqueVerifiedAssetCount: number;
+  duplicateGroups: PdfAssetInventoryEntry[][];
+  entries: PdfAssetInventoryEntry[];
+}
+
+export interface PdfAssetNameOperation {
+  paperId: string;
+  attachmentId: string;
+  role: string;
+  currentPath: string;
+  proposedPath: string;
+  contentHash: string | null;
+  action: 'unchanged' | 'rename-preview' | string;
+  ownership: boolean;
+}
+
+export interface PdfAssetNamePlan {
+  createdAt: number;
+  namingVersion: number;
+  operations: PdfAssetNameOperation[];
+  renameCount: number;
+  externalCount: number;
+}
+
 export interface ListPapersRequest {
   categoryId?: string | null;
   tagId?: string | null;
@@ -234,6 +279,7 @@ export interface AddAttachmentRequest {
   paperId: string;
   sourcePath: string;
   kind: 'translated-pdf';
+  language?: string | null;
 }
 
 export interface RemoveAttachmentRequest {

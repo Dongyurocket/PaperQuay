@@ -10,6 +10,7 @@ const {
   now,
   safeFileName,
 } = require('./utils.cjs');
+const { buildPdfAssetFileName } = require('./pdfAssetGovernance.cjs');
 
 function comparablePath(filePath) {
   const resolved = path.resolve(filePath);
@@ -39,7 +40,7 @@ function storageDirFor(settings, appPaths) {
   return cleanString(settings?.storageDir) || path.join(appPaths.dataDir, 'paperquay-data');
 }
 
-function canDeleteOwnedFile(listAttachmentsByStoredPath, attachment, allowedDirs) {
+async function canDeleteOwnedFile(listAttachmentsByStoredPath, attachment, allowedDirs) {
   if (!attachment?.storedPath) {
     return false;
   }
@@ -47,7 +48,23 @@ function canDeleteOwnedFile(listAttachmentsByStoredPath, attachment, allowedDirs
   const dirs = (Array.isArray(allowedDirs) ? allowedDirs : [allowedDirs])
     .map(cleanString)
     .filter(Boolean);
-  if (!dirs.some((dir) => isSubPath(dir, attachment.storedPath))) {
+  let realFile;
+  try {
+    realFile = await fsp.realpath(attachment.storedPath);
+  } catch {
+    return false;
+  }
+  let insideManagedRoot = false;
+  for (const dir of dirs) {
+    try {
+      const realRoot = await fsp.realpath(dir);
+      if (isSubPath(realRoot, realFile)) {
+        insideManagedRoot = true;
+        break;
+      }
+    } catch {}
+  }
+  if (!insideManagedRoot) {
     return false;
   }
 
@@ -63,7 +80,7 @@ async function cleanupReplacedAttachments(replaced, storedPath, allowedDirs, lis
     if (
       attachment?.storedPath &&
       !isSamePath(attachment.storedPath, storedPath) &&
-      canDeleteOwnedFile(listAttachmentsByStoredPath, attachment, allowedDirs)
+      await canDeleteOwnedFile(listAttachmentsByStoredPath, attachment, allowedDirs)
     ) {
       await fsp.rm(attachment.storedPath, { force: true }).catch(() => {});
     }
@@ -105,6 +122,7 @@ async function addTranslatedPdfAttachment({
   paper,
   sourcePath,
   kind = 'translated-pdf',
+  language = 'und',
   settings,
   appPaths,
   persist,
@@ -114,6 +132,7 @@ async function addTranslatedPdfAttachment({
 
   const cleanSource = cleanString(sourcePath);
   const attachmentKind = cleanString(kind) || 'translated-pdf';
+  const attachmentLanguage = cleanString(language) || 'und';
   if (!cleanSource) throw new Error('Missing source path');
   if (attachmentKind !== 'translated-pdf') throw new Error('Only translated-pdf attachments are supported');
   if (!isPdf(cleanSource)) throw new Error('Only PDF files can be attached');
@@ -125,10 +144,28 @@ async function addTranslatedPdfAttachment({
 
   const bytes = await fsp.readFile(cleanSource);
   const contentHash = hashBytes(bytes);
+  const existingTranslated = (paper.attachments || []).find((attachment) =>
+    attachment.kind === attachmentKind && attachment.contentHash === contentHash &&
+    attachment.missing !== true,
+  );
+  if (existingTranslated) {
+    return { attachment: existingTranslated, replaced: false, duplicate: true, pageCountMismatch: null };
+  }
   const fileName = safeFileName(fileNameFromPath(cleanSource));
   const attachmentId = id('att');
-  const storedPath = path.join(targetDir, `${paper.id}-translated-${attachmentId}-${fileName}`);
+  const storedName = buildPdfAssetFileName({
+    author: paper.authors?.[0]?.name,
+    institution: paper.institution || paper.publisher,
+    year: paper.year,
+    title: paper.title,
+    role: 'translated',
+    language: attachmentLanguage,
+    stableId: attachmentId,
+    fileNamingRule: settings?.fileNamingRule,
+  });
+  const storedPath = path.join(targetDir, storedName);
   const replaced = (paper.attachments || []).filter((attachment) => attachment.kind === attachmentKind);
+  const createdAt = Math.max(now(), ...replaced.map((attachment) => (Number(attachment.createdAt) || 0) + 1));
   const copiedToLibrary = !isSamePath(cleanSource, storedPath);
   const pageCountMismatch = await compareTranslatedPdfPageCounts(paper, cleanSource);
   const previousAttachments = paper.attachments;
@@ -136,7 +173,7 @@ async function addTranslatedPdfAttachment({
 
   try {
     if (copiedToLibrary) {
-      await fsp.copyFile(cleanSource, storedPath);
+      await fsp.copyFile(cleanSource, storedPath, require('node:fs').constants.COPYFILE_EXCL);
     }
     const stat = await fsp.stat(storedPath);
     const attachment = {
@@ -148,24 +185,18 @@ async function addTranslatedPdfAttachment({
       relativePath: isSubPath(storageDir, storedPath)
         ? path.relative(storageDir, storedPath).replace(/\\/g, '/')
         : null,
+      language: attachmentLanguage,
       fileName,
       mimeType: 'application/pdf',
       fileSize: stat.size,
       contentHash,
-      createdAt: now(),
+      createdAt,
       missing: false,
     };
 
-    paper.attachments = (paper.attachments || []).filter((item) => item.kind !== attachmentKind);
-    paper.attachments.push(attachment);
+    paper.attachments = [...(paper.attachments || []), attachment];
     paper.updatedAt = now();
     await persist();
-    await cleanupReplacedAttachments(
-      replaced,
-      storedPath,
-      [storageDir, targetDir],
-      listAttachmentsByStoredPath,
-    );
 
     return {
       attachment,
@@ -216,7 +247,7 @@ async function removeTranslatedPdfAttachment({
   const targetDir = resolveTranslatedPdfStorageDir(settings, appPaths);
   if (
     deleteFile !== false &&
-    canDeleteOwnedFile(listAttachmentsByStoredPath, attachment, [storageDir, targetDir])
+    await canDeleteOwnedFile(listAttachmentsByStoredPath, attachment, [storageDir, targetDir])
   ) {
     await fsp.rm(attachment.storedPath, { force: true }).catch(() => {});
   }

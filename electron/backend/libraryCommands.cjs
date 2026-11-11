@@ -24,6 +24,12 @@ const {
   removeTranslatedPdfAttachment,
   resolveTranslatedPdfStorageDir,
 } = require('./translatedPdfAttachments.cjs');
+const {
+  inspectPdfAssets,
+  planPdfAssetNames,
+  isManagedPath,
+  isRealManagedFilePath,
+} = require('./pdfAssetGovernance.cjs');
 
 const OPENALEX_API_BASE = 'https://api.openalex.org';
 const LIBRARY_REFERENCE_PROGRESS_EVENT = 'paperquay://library-reference-progress';
@@ -51,10 +57,13 @@ async function copyFileIfNeeded(sourcePath, targetPath) {
   await fsp.mkdir(path.dirname(targetPath), { recursive: true });
 
   if (await pathExists(targetPath)) {
+    if ((await hashFile(sourcePath)) !== (await hashFile(targetPath))) {
+      throw new Error(`Storage migration target contains different data: ${targetPath}`);
+    }
     return false;
   }
 
-  await fsp.copyFile(sourcePath, targetPath);
+  await fsp.copyFile(sourcePath, targetPath, require('node:fs').constants.COPYFILE_EXCL);
   return true;
 }
 
@@ -671,6 +680,22 @@ function createLibraryCommands(context) {
       return store.countPapers(request);
     },
 
+    async library_inspect_pdf_assets() {
+      return inspectPdfAssets(store.load());
+    },
+
+    async library_plan_pdf_asset_names() {
+      const library = store.load();
+      const operations = planPdfAssetNames(library);
+      return {
+        createdAt: now(),
+        namingVersion: 1,
+        operations,
+        renameCount: operations.filter((item) => item.action === 'rename-preview' && item.ownership).length,
+        externalCount: operations.filter((item) => !item.ownership).length,
+      };
+    },
+
     async library_reorder_papers({ request }) {
       const library = store.load();
       const order = new Map((request.paperIds ?? []).map((paperId, index) => [paperId, index]));
@@ -683,6 +708,7 @@ function createLibraryCommands(context) {
     async library_import_pdfs({ request }) {
       const library = store.load();
       const results = [];
+      const moveSourcesAfterCommit = [];
       const storageDir = library.settings.storageDir || path.join(appPaths.dataDir, 'paperquay-data');
       await fsp.mkdir(storageDir, { recursive: true });
 
@@ -704,15 +730,32 @@ function createLibraryCommands(context) {
 
           const metadata = request.metadata?.[sourcePath] ?? {};
           const paperId = id('paper');
-          const fileName = safeFileName(fileNameFromPath(sourcePath));
+          const originalFileName = safeFileName(fileNameFromPath(sourcePath));
+          const attachmentId = id('att');
+          const firstAuthor = Array.isArray(metadata.authors) ? metadata.authors[0] : '';
+          const author = typeof firstAuthor === 'string' ? firstAuthor : firstAuthor?.name || '';
+          const fileName = originalFileName;
           let storedPath = sourcePath;
           let relativePath = null;
           const importMode = request.importMode || library.settings.importMode;
 
           if (importMode !== 'keep') {
-            storedPath = path.join(storageDir, `${paperId}-${fileName}`);
-            if (importMode === 'move') await fsp.rename(sourcePath, storedPath);
-            else await fsp.copyFile(sourcePath, storedPath);
+            const { buildPdfAssetFileName } = require('./pdfAssetGovernance.cjs');
+            const storedName = library.settings.autoRenameFiles === false
+              ? `${paperId}-${fileName}`
+              : buildPdfAssetFileName({
+                  author,
+                  institution: metadata.institution || metadata.publisher,
+                  year: metadata.year,
+                  title: metadata.title || path.basename(fileName, path.extname(fileName)),
+                  role: 'original',
+                  stableId: attachmentId,
+                  fileNamingRule: library.settings.fileNamingRule,
+                });
+            storedPath = path.join(storageDir, storedName);
+            if (await pathExists(storedPath)) throw new Error(`PDF destination already exists: ${storedPath}`);
+            await fsp.copyFile(sourcePath, storedPath, require('node:fs').constants.COPYFILE_EXCL);
+            if (importMode === 'move') moveSourcesAfterCommit.push(sourcePath);
             relativePath = path.relative(storageDir, storedPath);
           }
 
@@ -749,12 +792,13 @@ function createLibraryCommands(context) {
             tags: [],
             categoryIds: request.targetCategoryId ? [request.targetCategoryId] : [],
             attachments: [{
-              id: id('att'),
+              id: attachmentId,
               paperId,
               kind: 'pdf',
               originalPath: sourcePath,
               storedPath,
               relativePath,
+              language: metadata.language ?? null,
               fileName,
               mimeType: 'application/pdf',
               fileSize: stat.size,
@@ -771,6 +815,11 @@ function createLibraryCommands(context) {
       }
 
       await store.save(library);
+      for (const sourcePath of moveSourcesAfterCommit) {
+        await fsp.rm(sourcePath, { force: true }).catch((error) => {
+          console.warn(`[PaperQuay] Imported file is stored but the original could not be removed: ${sourcePath}`, error);
+        });
+      }
       for (const result of results) {
         const paper = result.status === 'imported' ? result.paper : null;
         if (!paper?.id || !paper.doi) {
@@ -840,8 +889,13 @@ function createLibraryCommands(context) {
       const paper = store.getPaper(request.paperId);
 
       if (request.deleteFiles && paper) {
+        const settings = store.loadSettings();
         for (const attachment of paper.attachments) {
-          await fsp.rm(attachment.storedPath, { force: true }).catch(() => {});
+          const references = store.findAttachmentsByStoredPath(attachment.storedPath);
+          const shared = references.some((entry) => entry.paperId !== paper.id || entry.id !== attachment.id);
+          if (!shared && await isRealManagedFilePath(attachment.storedPath, settings)) {
+            await fsp.rm(attachment.storedPath, { force: true }).catch(() => {});
+          }
         }
       }
 
@@ -857,6 +911,10 @@ function createLibraryCommands(context) {
       await ensureFile(request.newPath);
       const stat = await fsp.stat(request.newPath);
       attachment.storedPath = request.newPath;
+      const storageDir = cleanString(store.loadSettings().storageDir);
+      attachment.relativePath = storageDir && isSubPath(storageDir, request.newPath)
+        ? path.relative(storageDir, request.newPath).replace(/\\/g, '/')
+        : null;
       attachment.fileName = fileNameFromPath(request.newPath);
       attachment.fileSize = stat.size;
       attachment.contentHash = await hashFile(request.newPath);
@@ -880,6 +938,7 @@ function createLibraryCommands(context) {
         paper,
         sourcePath: request.sourcePath,
         kind: request.kind,
+        language: request.language,
         settings,
         appPaths,
         persist: async () => {

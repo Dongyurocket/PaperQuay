@@ -19,6 +19,8 @@ import type {
   LiteratureAttachment,
   LiteratureCategory,
   LiteraturePaper,
+  PdfAssetInventoryReport,
+  PdfAssetNamePlan,
   MoveCategoryRequest,
   RelocateAttachmentRequest,
   RemoveAttachmentRequest,
@@ -62,6 +64,22 @@ export async function getLibrarySettings(): Promise<LibrarySettings> {
     return await invoke<LibrarySettings>('library_get_settings');
   } catch (error) {
     throw new Error(toErrorMessage(error, '读取文献库设置失败'));
+  }
+}
+
+export async function inspectLibraryPdfAssets(): Promise<PdfAssetInventoryReport> {
+  try {
+    return await invoke<PdfAssetInventoryReport>('library_inspect_pdf_assets');
+  } catch (error) {
+    throw new Error(toErrorMessage(error, '盘点 PDF 附件失败'));
+  }
+}
+
+export async function previewLibraryPdfAssetNames(): Promise<PdfAssetNamePlan> {
+  try {
+    return await invoke<PdfAssetNamePlan>('library_plan_pdf_asset_names');
+  } catch (error) {
+    throw new Error(toErrorMessage(error, '生成 PDF 命名预览失败'));
   }
 }
 

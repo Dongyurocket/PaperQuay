@@ -749,6 +749,20 @@ function DocumentReaderTab({
         ]
       : [];
 
+    // Native library attachments define this document's sources. A cache directory is
+    // not an ownership boundary, so don't promote unrelated PDFs found there.
+    if (document.source === 'native-library') {
+      const registeredFiles: LocalDirectoryFileEntry[] = (document.pdfVariants ?? []).map((variant) => ({
+        path: variant.path,
+        name: variant.name,
+        role: variant.role,
+        size: 0,
+        modifiedAtMs: 0,
+      }));
+      setProjectPdfFiles(registeredFiles.length > 0 ? registeredFiles : fallbackFiles);
+      return;
+    }
+
     if (!annotationSaveDirectory.trim()) {
       setProjectPdfFiles(fallbackFiles);
       return;

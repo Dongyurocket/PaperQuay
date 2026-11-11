@@ -80,13 +80,13 @@ test('attach_translated_pdf copies, replaces, and removes the stored translation
     const second = await service.attachTranslatedPdf({ paperId, sourcePath: secondSource });
     assert.equal(second.replaced, true);
     assert.notEqual(second.attachmentId, first.attachmentId);
-    assert.equal(existsSync(first.storedPath), false);
+    assert.equal(existsSync(first.storedPath), true);
     assert.equal(existsSync(second.storedPath), true);
 
     const replacedDetails = service.getPaperDetails({ paperId });
     assert.equal(
       replacedDetails.attachments.filter((item: { kind: string }) => item.kind === 'translated-pdf').length,
-      1,
+      2,
     );
 
     const removed = await service.removeTranslatedPdf({ paperId, deleteFile: true });
@@ -95,9 +95,10 @@ test('attach_translated_pdf copies, replaces, and removes the stored translation
     assert.equal(existsSync(secondSource), true);
     const afterRemove = service.getPaperDetails({ paperId });
     assert.equal(
-      afterRemove.attachments.some((item: { kind: string }) => item.kind === 'translated-pdf'),
-      false,
+      afterRemove.attachments.filter((item: { kind: string }) => item.kind === 'translated-pdf').length,
+      1,
     );
+    assert.equal(afterRemove.attachments.find((item: { kind: string }) => item.kind === 'translated-pdf').id, first.attachmentId);
   } finally {
     cleanupDir(dir);
   }

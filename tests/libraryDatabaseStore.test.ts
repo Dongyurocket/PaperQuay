@@ -600,3 +600,40 @@ test('rag_enabled survives savePaper and full save, and can be toggled', () => {
     rmSync(appPaths.dataDir, { recursive: true, force: true });
   }
 });
+
+test('PDF asset registry and operation ledger survive library rewrites and SQLite snapshots', () => {
+  const appPaths = createAppPaths();
+  const snapshotPath = path.join(appPaths.dataDir, 'snapshot', 'library.sqlite');
+  let store: ReturnType<typeof createLibraryStore> | null = null;
+
+  try {
+    store = createLibraryStore(appPaths);
+    store.upsertPdfAsset({
+      asset: { assetId: 'asset-1', sha256: 'a'.repeat(64), byteLength: 10, createdAt: 1 },
+      location: { locationId: 'location-1', absolutePath: 'C:/papers/a.pdf', ownership: 'managed', verifiedAt: 2 },
+      binding: { attachmentId: 'att-1', paperId: 'paper-1', role: 'original', originalFilename: 'source.pdf' },
+    });
+    store.savePdfAssetOperation({
+      operationId: 'op-1', schemaVersion: 1, ruleVersion: 1, planHash: 'plan-hash',
+      status: 'staged', plan: { attachmentId: 'att-1' }, progress: { step: 1 }, createdAt: 3, updatedAt: 4,
+    });
+
+    store.save(store.load());
+    assert.equal(store.getPdfAssetOperation('op-1').status, 'staged');
+    store.snapshotTo(snapshotPath);
+
+    store.close();
+    store = createLibraryStore(appPaths);
+    assert.deepEqual(store.listPdfAssetOperations({ activeOnly: true }).map((item: { operationId: string }) => item.operationId), ['op-1']);
+
+    const snapshotStore = createLibraryStore({ ...appPaths, libraryDatabasePath: snapshotPath });
+    try {
+      assert.equal(snapshotStore.getPdfAssetOperation('op-1').progress.step, 1);
+    } finally {
+      snapshotStore.close();
+    }
+  } finally {
+    store?.close();
+    rmSync(appPaths.dataDir, { recursive: true, force: true });
+  }
+});

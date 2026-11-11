@@ -98,6 +98,7 @@ test('translated PDF attachments can be added, replaced, and removed', async () 
         paperId: 'paper-translated',
         sourcePath: firstSourcePath,
         kind: 'translated-pdf',
+        language: 'zh-CN',
       },
     });
     const firstAttachment = firstUpdate.attachments.find(
@@ -105,8 +106,19 @@ test('translated PDF attachments can be added, replaced, and removed', async () 
     ) as AttachmentResult | undefined;
     assert.ok(firstAttachment);
     assert.equal(firstAttachment.storedPath.includes('translated-pdfs'), true);
+    assert.match(firstAttachment.storedPath, /translated-zh-CN/);
+    assert.equal(firstAttachment.language, 'zh-CN');
     assert.equal(existsSync(firstAttachment.storedPath), true);
     assert.equal(readFileSync(firstAttachment.storedPath, 'utf8'), '%PDF-1.7\ntranslated-v1\n');
+    const duplicateUpdate = await commands.library_add_attachment({
+      request: {
+        paperId: 'paper-translated',
+        sourcePath: firstSourcePath,
+        kind: 'translated-pdf',
+      },
+    });
+    assert.equal(duplicateUpdate.attachments.filter((item: AttachmentResult) => item.kind === 'translated-pdf').length, 1);
+    assert.equal(duplicateUpdate.attachments.find((item: AttachmentResult) => item.kind === 'translated-pdf')?.id, firstAttachment.id);
     await assert.rejects(
       commands.library_remove_attachment({
         request: { attachmentId: 'att-primary', deleteFile: true },
@@ -125,21 +137,25 @@ test('translated PDF attachments can be added, replaced, and removed', async () 
     const translatedAttachments = secondUpdate.attachments.filter(
       (item: AttachmentResult) => item.kind === 'translated-pdf',
     ) as AttachmentResult[];
-    assert.equal(translatedAttachments.length, 1);
-    assert.notEqual(translatedAttachments[0].id, firstAttachment.id);
-    assert.notEqual(translatedAttachments[0].storedPath, firstAttachment.storedPath);
-    assert.equal(existsSync(firstAttachment.storedPath), false);
-    assert.equal(existsSync(translatedAttachments[0].storedPath), true);
-    assert.equal(readFileSync(translatedAttachments[0].storedPath, 'utf8'), '%PDF-1.7\ntranslated-v2\n');
+    assert.equal(translatedAttachments.length, 2);
+    const latestTranslation = translatedAttachments.find((item) => item.id !== firstAttachment.id);
+    assert.ok(latestTranslation);
+    assert.notEqual(latestTranslation.storedPath, firstAttachment.storedPath);
+    assert.equal(existsSync(firstAttachment.storedPath), true);
+    assert.equal(existsSync(latestTranslation.storedPath), true);
+    assert.equal(readFileSync(latestTranslation.storedPath, 'utf8'), '%PDF-1.7\ntranslated-v2\n');
 
     const removed = await commands.library_remove_attachment({
-      request: { attachmentId: translatedAttachments[0].id, deleteFile: true },
+      request: { attachmentId: latestTranslation.id, deleteFile: true },
     });
     assert.equal(
-      removed.attachments.some((item: AttachmentResult) => item.kind === 'translated-pdf'),
-      false,
+      removed.attachments.some((item: AttachmentResult) => item.id === firstAttachment.id),
+      true,
     );
-    assert.equal(existsSync(translatedAttachments[0].storedPath), false);
+    assert.equal(existsSync(latestTranslation.storedPath), false);
+    assert.equal(existsSync(firstAttachment.storedPath), true);
+    await commands.library_remove_attachment({ request: { attachmentId: firstAttachment.id, deleteFile: true } });
+    assert.equal(existsSync(firstAttachment.storedPath), false);
     assert.equal(existsSync(firstSourcePath), true);
     assert.equal(existsSync(secondSourcePath), true);
   } finally {

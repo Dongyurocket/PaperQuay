@@ -2318,7 +2318,9 @@ class PaperQuayKnowledgeService {
       const library = store.load();
       const paper = library.papers.find((item) => item.id === targetId);
       if (!paper) throw new Error(`Paper does not exist: ${targetId}`);
-      const attachment = (paper.attachments || []).find((item) => item.kind === 'translated-pdf');
+      const attachment = (paper.attachments || [])
+        .filter((item) => item.kind === 'translated-pdf')
+        .sort((left, right) => Number(right.createdAt) - Number(left.createdAt))[0];
       if (!attachment) throw new Error('Translated PDF attachment does not exist');
 
       const result = await removeTranslatedPdfAttachment({
