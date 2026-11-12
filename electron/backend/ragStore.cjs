@@ -2000,6 +2000,26 @@ function createRagStore(appPaths, options = {}) {
       return [];
     }
 
+    // 文档级平均向量缓存会合并 source_type。跨表示类型的平均向量没有明确语义，
+    // 因此仅允许单一 source_type 且模型身份明确的缓存参与比较。
+    const modelKeysByDocumentDimension = new Map();
+    for (const row of db.prepare(`
+      SELECT document_key AS documentKey,
+             embedding_dimension AS dimension,
+             embedding_model_key AS embeddingModelKey
+      FROM rag_indexes
+      WHERE status = 'ready' AND embedding_dimension > 0 AND source_type <> 'note'
+    `).all()) {
+      const documentKey = cleanString(row.documentKey);
+      const dimension = Number(row.dimension);
+      const modelKey = cleanString(row.embeddingModelKey);
+      if (!documentKey || !Number.isSafeInteger(dimension) || dimension < 1 || !modelKey) continue;
+      const key = `${documentKey}::${dimension}`;
+      const modelKeys = modelKeysByDocumentDimension.get(key) ?? new Set();
+      modelKeys.add(modelKey);
+      modelKeysByDocumentDimension.set(key, modelKeys);
+    }
+
     // 只读文档级平均向量缓存（由 indexDocument/reportFailure 维护、旧库一次性回填），
     // 避免每次全量解码 chunk 向量阻塞主进程。
     const documents = db.prepare(`
@@ -2017,8 +2037,11 @@ function createRagStore(appPaths, options = {}) {
       .map((row) => {
         const documentKey = cleanString(row.documentKey);
         const dimension = Number(row.dimension);
+        const modelKeys = modelKeysByDocumentDimension.get(`${documentKey}::${dimension}`);
+        const sourceTypes = parseSourceTypesJson(row.sourceTypesJson);
 
-        if (!documentKey || (allowedDocumentKeys && !allowedDocumentKeys.has(documentKey))) {
+        if (!documentKey || !modelKeys || modelKeys.size !== 1 || sourceTypes.length !== 1 ||
+          (allowedDocumentKeys && !allowedDocumentKeys.has(documentKey))) {
           return null;
         }
 
@@ -2030,8 +2053,9 @@ function createRagStore(appPaths, options = {}) {
         return {
           documentKey,
           dimension,
+          embeddingModelKey: [...modelKeys][0],
           vector,
-          sourceTypes: parseSourceTypesJson(row.sourceTypesJson),
+          sourceType: sourceTypes[0],
         };
       })
       .filter(Boolean);
@@ -2043,7 +2067,8 @@ function createRagStore(appPaths, options = {}) {
         const left = documents[leftIndex];
         const right = documents[rightIndex];
 
-        if (left.dimension !== right.dimension) {
+        if (left.dimension !== right.dimension || left.embeddingModelKey !== right.embeddingModelKey ||
+          left.sourceType !== right.sourceType) {
           continue;
         }
 
@@ -2057,7 +2082,7 @@ function createRagStore(appPaths, options = {}) {
           sourceDocumentKey: left.documentKey,
           targetDocumentKey: right.documentKey,
           similarity,
-          sourceTypes: Array.from(new Set([...left.sourceTypes, ...right.sourceTypes])).sort(),
+          sourceTypes: [left.sourceType],
         });
       }
     }

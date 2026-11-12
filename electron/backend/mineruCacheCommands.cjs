@@ -48,7 +48,17 @@ async function writeTextFileAtomically(filePath, content) {
 
   try {
     await fsp.writeFile(temporaryPath, content, 'utf8');
-    await fsp.rename(temporaryPath, filePath);
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        await fsp.rename(temporaryPath, filePath);
+        break;
+      } catch (error) {
+        const transientWindowsLock = process.platform === 'win32' &&
+          ['EPERM', 'EACCES', 'EBUSY'].includes(error?.code);
+        if (!transientWindowsLock || attempt >= 5) throw error;
+        await new Promise((resolve) => setTimeout(resolve, 20 * (attempt + 1)));
+      }
+    }
   } catch (error) {
     await fsp.rm(temporaryPath, { force: true }).catch(() => undefined);
     throw error;

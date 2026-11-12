@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -8,6 +9,7 @@ import test from 'node:test';
 
 const require = createRequire(import.meta.url);
 const { DatabaseSync } = require('../electron/backend/nodeSqlite.cjs');
+const { createKnowledgeStore } = require('../electron/backend/knowledgeStore.cjs');
 const { writeBackupPackage } = require('../electron/backend/backupContainer.cjs');
 const {
   applyPendingBackupRestore,
@@ -238,6 +240,33 @@ test('real encrypted container and temporary SQLite round-trip stages, applies, 
     notesDb.prepare('INSERT INTO notes (id) VALUES (?)').run('note-1');
     notesDb.close();
 
+    const knowledgeStore = createKnowledgeStore({
+      dataDir: temp.dataDir,
+      knowledgeDatabasePath: path.join(temp.dataDir, 'paperquay-knowledge.sqlite'),
+    });
+    knowledgeStore.saveRelation({ id: 'restored-relation', source: 'paper:one', target: 'paper:two',
+      type: 'custom_relation', label: 'depends_on', description: 'backup round trip', createdAt: 10, updatedAt: 11 });
+    const generationId = '44444444-4444-4444-8444-444444444444';
+    const sourceMineruCacheDir = path.join(temp.userDataDir, 'source-mineru-cache');
+    const generationArtifactDir = path.join(sourceMineruCacheDir, '.document-generations', 'source-hash', generationId);
+    await mkdir(generationArtifactDir, { recursive: true });
+    const generationText = 'backed up generation artifact';
+    await writeFile(path.join(generationArtifactDir, 'full.md'), generationText);
+    const generationHash = createHash('sha256').update(generationText).digest('hex');
+    knowledgeStore.beginGeneration({ sourceId: 'paper:fixture', sourceKind: 'pdf', sourceVersion: 'source-hash', generationId,
+      partitions: [{ index: 0, startPage: 1, endPage: 1, inputHash: 'partition-hash' }] });
+    knowledgeStore.setPartitionStatus(generationId, 0, 'running');
+    knowledgeStore.setPartitionRemoteJobId(generationId, 0, 'backup-job-7');
+    knowledgeStore.setPartitionArtifacts(generationId, 0, { stagedPath: generationArtifactDir,
+      manifest: [{ path: 'full.md', size: Buffer.byteLength(generationText), sha256: generationHash }], pageCount: 1, blockCount: 1 });
+    knowledgeStore.setPartitionStatus(generationId, 0, 'complete');
+    knowledgeStore.setGenerationArtifacts(generationId, { artifactPath: generationArtifactDir,
+      manifest: [{ path: 'full.md', size: Buffer.byteLength(generationText), sha256: generationHash }] });
+    assert.equal(knowledgeStore.publishGeneration(generationId, { sourceVersion: 'source-hash', expectedPageCount: 1 }), true);
+    const knowledgeSnapshotPath = path.join(temp.userDataDir, 'paperquay-knowledge-package.sqlite');
+    knowledgeStore.snapshotTo(knowledgeSnapshotPath);
+    knowledgeStore.close();
+
     const config = Buffer.from(JSON.stringify({
       version: 1,
       settings: { mineruCacheDir: '', remotePdfDownloadDir: '' },
@@ -260,7 +289,7 @@ test('real encrypted container and temporary SQLite round-trip stages, applies, 
       createdAt: '2026-11-06T00:00:00.000Z',
       app: { name: 'PaperQuay', version: '0.4.18', minReaderVersion: '0.4.18', platform: process.platform, arch: process.arch },
       schema: { library: 1, notes: 1, rag: 0 },
-      sourceRoots: { dataDir: temp.dataDir, libraryStorageDir: libraryDir },
+      sourceRoots: { dataDir: temp.dataDir, libraryStorageDir: libraryDir, mineruCacheDir: sourceMineruCacheDir },
       resolvedRoots: {},
       counts: { papers: 1, attachments: 1, notes: 1, noteFolders: 0 },
       warnings: [],
@@ -268,6 +297,7 @@ test('real encrypted container and temporary SQLite round-trip stages, applies, 
     const entries = [
       { kind: 'database', databaseKind: 'library', schemaVersion: 1, sourceRoot: 'dataDir', relativePath: 'paperquay-library.sqlite', packagePath: 'data/paperquay-library.sqlite', data: readFileSync(libraryDbPath) },
       { kind: 'database', databaseKind: 'notes', schemaVersion: 1, sourceRoot: 'dataDir', relativePath: 'paperquay-notes.sqlite', packagePath: 'data/paperquay-notes.sqlite', data: readFileSync(notesDbPath) },
+      { kind: 'database', databaseKind: 'knowledge', schemaVersion: 1, sourceRoot: 'dataDir', relativePath: 'paperquay-knowledge.sqlite', packagePath: 'data/paperquay-knowledge.sqlite', data: readFileSync(knowledgeSnapshotPath) },
       { kind: 'config', encoding: 'utf8', sourceRoot: 'dataDir', relativePath: '.settings/paperquay.config.json', packagePath: 'config/paperquay.config.json', data: config },
       { kind: 'renderer-local-storage', encoding: 'utf8', sourceRoot: 'dataDir', relativePath: 'renderer-local-storage.json', packagePath: 'renderer/local-storage.json', data: Buffer.from(JSON.stringify(rendererState)) },
       { kind: 'library-pdf', paperId: 'paper-1', attachmentId: 'attachment-1', fileName: 'paper.pdf', expectedContentHash: '', sourceRoot: 'libraryStorageDir', relativePath: 'paper.pdf', packagePath: 'library/paper.pdf', data: newPdf },
@@ -289,6 +319,26 @@ test('real encrypted container and temporary SQLite round-trip stages, applies, 
     assert.equal(staged.ok, true);
     const applied = await applyPendingBackupRestore(temp.appPaths);
     assert.equal(applied.restored, true);
+    const restoredKnowledge = new DatabaseSync(path.join(temp.dataDir, 'paperquay-knowledge.sqlite'), { readOnly: true });
+    try {
+      assert.equal(restoredKnowledge.prepare('PRAGMA integrity_check').get().integrity_check, 'ok');
+      assert.equal(restoredKnowledge.prepare("SELECT label FROM kg_custom_relations WHERE id='restored-relation'").get().label, 'depends_on');
+      assert.equal(restoredKnowledge.prepare("SELECT current_generation FROM source_documents WHERE source_id='paper:fixture'").get().current_generation, generationId);
+      const restoredPartition = restoredKnowledge.prepare('SELECT status,remote_job_id,staged_manifest FROM parse_partitions WHERE generation_id=?')
+        .get(generationId);
+      assert.equal(restoredPartition.status, 'complete');
+      assert.equal(restoredPartition.remote_job_id, 'backup-job-7');
+      assert.deepEqual(JSON.parse(restoredPartition.staged_manifest), {
+        version: 1, entries: [{ path: 'full.md', size: Buffer.byteLength(generationText), sha256: generationHash }], pageCount: 1, blockCount: 1,
+      });
+      const restoredArtifact = JSON.parse(restoredKnowledge.prepare('SELECT artifact_manifest FROM document_generations WHERE generation_id=?').get(generationId).artifact_manifest);
+      assert.deepEqual(restoredArtifact, [{ path: 'full.md', size: Buffer.byteLength(generationText), sha256: generationHash }]);
+      const restoredArtifactPath = restoredKnowledge.prepare('SELECT artifact_path FROM document_generations WHERE generation_id=?').get(generationId).artifact_path;
+      assert.equal(restoredArtifactPath, path.join(temp.appPaths.mineruCacheDir, '.document-generations', 'source-hash', generationId));
+      assert.equal(existsSync(restoredArtifactPath), false, 'omitted large artifacts remain clearly unavailable instead of resolving against the restored current cache');
+      assert.equal(restoredKnowledge.prepare('SELECT staged_path FROM parse_partitions WHERE generation_id=?').get(generationId).staged_path,
+        path.join(temp.appPaths.mineruCacheDir, '.document-generations', 'source-hash', generationId));
+    } finally { restoredKnowledge.close(); }
     assert.equal((await readFile(pdfPath)).toString(), newPdf.toString());
     const restoredHistory = JSON.parse(applied.rendererRestorePayload.state['paper-reader-paper-history-v1']);
     assert.equal(restoredHistory['workspace-1'].document.localPdfPath, pdfPath);

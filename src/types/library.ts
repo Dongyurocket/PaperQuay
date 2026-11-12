@@ -206,6 +206,58 @@ export interface ListPapersRequest {
   offset?: number;
   /** true 只看已加入，false 只看已排除，null/缺省为全部。 */
   ragEnabled?: boolean | null;
+  /** Exact normalized citation type; unsupported values are rejected by the query service. */
+  itemType?: LiteratureItemType | null;
+  /** Filter favorites when explicitly true or false; null/omitted means all. */
+  isFavorite?: boolean | null;
+  /** Filter by whether a valid reading timestamp exists. */
+  isRead?: boolean | null;
+  /** Inclusive reading progress bounds, represented as percentages from 0 to 100. */
+  progressFrom?: number | null;
+  progressTo?: number | null;
+  /** Inclusive epoch-millisecond bounds for import and most recent reading times. */
+  importedAtFrom?: number | null;
+  importedAtTo?: number | null;
+  lastReadAtFrom?: number | null;
+  lastReadAtTo?: number | null;
+  /** Filter by an attachment role/status; unsupported values are rejected. */
+  attachmentRole?: 'any' | 'original-pdf' | 'translated-pdf' | 'missing' | 'none' | null;
+  /** Fields considered missing when applicable to a paper's citation type. */
+  missingMetadataFields?: string[] | null;
+  /** Persisted parse-artifact check; unknown includes missing or invalidated projections. */
+  mineruParseStatus?: 'unknown' | 'available' | 'missing' | 'error' | null;
+  /** Inclusive publication year bounds; years are read from a leading four-digit year. */
+  yearFrom?: number | null;
+  yearTo?: number | null;
+  /** Return entries with no parseable publication year. */
+  unknownYearOnly?: boolean | null;
+  /** Case-insensitive substring filters within their respective metadata dimensions. */
+  authorQuery?: string | null;
+  publicationQuery?: string | null;
+  keywordQuery?: string | null;
+  /** Case-insensitive tag names; any selected name matches within this dimension. */
+  tagNames?: string[] | null;
+}
+
+/** Editable property filters shared by the literature list and its query builder. */
+export interface LiteratureStructuredFilters {
+  yearFrom: string;
+  yearTo: string;
+  unknownYearOnly: boolean;
+  authorQuery: string;
+  publicationQuery: string;
+  keywordQuery: string;
+  tagNames: string;
+  readingState: 'all' | 'unread' | 'read';
+  progressFrom: string;
+  progressTo: string;
+  importedFrom: string;
+  importedTo: string;
+  lastReadFrom: string;
+  lastReadTo: string;
+  attachmentRole: 'any' | 'original-pdf' | 'translated-pdf' | 'missing' | 'none';
+  mineruParseStatus: 'all' | 'unknown' | 'available' | 'missing' | 'error';
+  missingMetadataFields: string[];
 }
 
 /** SQL 分页查询结果（P2-1）：total 为当前筛选的完整匹配数，不受 offset/limit 限制。 */
@@ -214,6 +266,12 @@ export interface QueryPapersResult {
   total: number;
   offset: number;
   limit: number;
+}
+
+/** Full paper lookup for a frozen selection; order follows requested IDs. */
+export interface PapersByIdsResult {
+  papers: LiteraturePaper[];
+  missingIds: string[];
 }
 
 export interface CreateCategoryRequest {
@@ -312,6 +370,10 @@ export interface AssignPaperCategoryRequest {
 
 export interface UpdatePaperRequest {
   paperId: string;
+  /** Reject a stale metadata edit when the persisted paper changed after the form opened. */
+  expectedUpdatedAt?: number;
+  /** Values observed when editing began; lets the main process merge unrelated field updates safely. */
+  expectedValues?: Partial<Record<PaperMetadataField, string | string[] | boolean | null>>;
   title?: string | null;
   titleZh?: string | null;
   year?: string | null;
@@ -336,6 +398,12 @@ export interface UpdatePaperRequest {
   citation?: string | null;
   isFavorite?: boolean | null;
 }
+
+export type PaperMetadataField =
+  | 'title' | 'titleZh' | 'year' | 'publication' | 'doi' | 'url' | 'abstractText'
+  | 'itemType' | 'publisher' | 'institution' | 'reportNumber' | 'volume' | 'issue'
+  | 'pages' | 'isbn' | 'issn' | 'keywords' | 'authors' | 'tags' | 'userNote'
+  | 'citation' | 'isFavorite';
 
 export interface DeletePaperRequest {
   paperId: string;

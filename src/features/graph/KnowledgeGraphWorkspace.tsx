@@ -14,6 +14,7 @@ import {
   Link2,
   FileText,
   Filter,
+  FolderOpen,
   GitBranch,
   Loader2,
   Maximize2,
@@ -39,6 +40,7 @@ import {
   listenLibraryReferenceProgress,
 } from '../../services/library';
 import { readReaderConfigFile } from '../../services/readerConfig';
+import LiteratureFileLocationsDialog from '../literature/components/LiteratureFileLocationsDialog';
 import { useTabsStore } from '../../stores/useTabsStore';
 import type {
   KnowledgeGraphAiRelationSuggestion,
@@ -611,6 +613,7 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
   const [relationSourceNode, setRelationSourceNode] = useState<KnowledgeGraphNode | null>(null);
   const [quickRelationSourceNode, setQuickRelationSourceNode] = useState<KnowledgeGraphNode | null>(null);
   const [contextMenu, setContextMenu] = useState<GraphContextMenuState>(null);
+  const [fileLocationPaper, setFileLocationPaper] = useState<{ paperId: string; title: string } | null>(null);
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [perspective, setPerspective] = useState<GraphPerspective>('mixed');
@@ -1803,6 +1806,20 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
               <FileText className="h-3.5 w-3.5" strokeWidth={1.8} />
               {l('打开', 'Open')}
             </button>
+            {contextMenu.node.type === 'paper' && contextMenu.node.paperId ? (
+              <button
+                type="button"
+                onClick={() => {
+                  const node = contextMenu.node;
+                  setFileLocationPaper({ paperId: node.paperId!, title: node.label });
+                  setContextMenu(null);
+                }}
+                className="flex h-8 w-full items-center gap-2 px-3 text-left text-[var(--pq-text-muted)] hover:bg-[var(--pq-bg-secondary)] hover:text-[var(--pq-text)]"
+              >
+                <FolderOpen className="h-3.5 w-3.5" strokeWidth={1.8} />
+                {l('打开所在位置', 'Open file location')}
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={() => {
@@ -2016,6 +2033,13 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
               ) : null}
             </div>
           </div>
+        ) : null}
+        {fileLocationPaper ? (
+          <LiteratureFileLocationsDialog
+            paperId={fileLocationPaper.paperId}
+            paperTitle={fileLocationPaper.title}
+            onClose={() => setFileLocationPaper(null)}
+          />
         ) : null}
       </section>
     </div>

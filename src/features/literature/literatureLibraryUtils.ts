@@ -250,6 +250,7 @@ export function buildImportDraftsFromPdfPaths(options: {
 export function defaultPaperListStatus(paper: LiteraturePaper): LiteraturePaperListStatus {
   return {
     mineruParsed: false,
+    mineruStatus: 'unknown',
     overviewGenerated: Boolean(paper.aiSummary?.trim()),
     checkingMineru: false,
   };
@@ -275,6 +276,7 @@ export function markPaperStatusesCheckingMineru(
     const previous = current[paper.id];
     const nextStatus: LiteraturePaperListStatus = {
       mineruParsed: previous?.mineruParsed ?? false,
+      mineruStatus: previous?.mineruStatus ?? 'unknown',
       overviewGenerated: Boolean(paper.aiSummary?.trim()),
       checkingMineru: checkingPaperIds.has(paper.id),
     };
@@ -282,6 +284,7 @@ export function markPaperStatusesCheckingMineru(
     if (
       !previous ||
       previous.mineruParsed !== nextStatus.mineruParsed ||
+      previous.mineruStatus !== nextStatus.mineruStatus ||
       previous.overviewGenerated !== nextStatus.overviewGenerated ||
       previous.checkingMineru !== nextStatus.checkingMineru
     ) {
@@ -299,6 +302,7 @@ function getExistingPaperStatus(
 ): LiteraturePaperListStatus {
   return current[paperId] ?? {
     mineruParsed: false,
+    mineruStatus: 'unknown',
     overviewGenerated: false,
     checkingMineru: false,
   };
@@ -328,6 +332,7 @@ export function applyPaperMineruStatusUpdate(
     [paperId]: {
       ...getExistingPaperStatus(current, paperId),
       mineruParsed,
+      mineruStatus: mineruParsed ? 'available' : 'missing',
       checkingMineru: false,
     },
   };

@@ -9,7 +9,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from 'react';
 import { createPortal } from 'react-dom';
-import { Database, Sparkles, Star, Tag, Trash2, X } from 'lucide-react';
+import { Database, FolderOpen, Sparkles, Star, Tag, Trash2, X } from 'lucide-react';
 import { useLocaleText } from '../../i18n/uiLanguage';
 import { localPathsExist } from '../../services/desktop';
 import {
@@ -24,6 +24,8 @@ import {
   createLibraryCategory,
   deleteLibraryPaper,
   deleteLibraryCategory,
+  getLibraryPaper,
+  getLibraryPapersByIds,
   getLibrarySettings,
   inspectLibraryPdfAssets,
   importPdfsToLibrary,
@@ -41,6 +43,8 @@ import {
   updateTranslatedPdfLanguages,
   updateLibraryCategory,
   updateLibrarySettings,
+  getLibraryMineruParseStatuses,
+  saveLibraryMineruParseStatuses,
 } from '../../services/library';
 import {
   detectLocalZoteroDataDir,
@@ -51,8 +55,10 @@ import {
 import type {
   LibrarySettings,
   LiteratureCategory,
+  LiteratureItemType,
   LiteraturePaper,
   LiteraturePaperTaskState,
+  LiteratureStructuredFilters,
   ListPapersRequest,
   PdfAssetInventoryReport,
   PdfAssetNamePlan,
@@ -65,6 +71,7 @@ import type {
 } from '../../types/reader';
 import type { MetadataLookupResult } from '../../types/metadata';
 import { getFileNameFromPath } from '../../utils/text';
+import { paperHasMissingMetadataField } from './metadataFilterFields';
 import ImportConfirmationDialog from './components/ImportConfirmationDialog';
 import LibraryConfirmDialog from './components/LibraryConfirmDialog';
 import LibraryTextInputDialog from './components/LibraryTextInputDialog';
@@ -76,6 +83,7 @@ import {
 import type { ImportDraftItem } from './importTypes';
 import LiteratureCategorySidebar from './components/LiteratureCategorySidebar';
 import LiteraturePaperDetails from './components/LiteraturePaperDetails';
+import LiteratureFileLocationsDialog from './components/LiteratureFileLocationsDialog';
 import TranslatedPdfLanguageBatchDialog, { type TranslatedPdfLanguageBatchEntry } from './components/TranslatedPdfLanguageBatchDialog';
 import TranslatedPdfLanguageConfirmDialog from './components/TranslatedPdfLanguageConfirmDialog';
 import LiteraturePaperList, {
@@ -287,6 +295,57 @@ const PAPER_SORT_STORAGE_KEY = 'paperquay-literature-paper-sort-v1';
 /** SQL 分页每页条数（P2-1）：首屏只取一页，滚动接近底部再追加。 */
 const PAPER_PAGE_SIZE = 500;
 
+const EMPTY_STRUCTURED_FILTERS: LiteratureStructuredFilters = {
+  yearFrom: '',
+  yearTo: '',
+  unknownYearOnly: false,
+  authorQuery: '',
+  publicationQuery: '',
+  keywordQuery: '',
+  tagNames: '',
+  readingState: 'all',
+  progressFrom: '',
+  progressTo: '',
+  importedFrom: '',
+  importedTo: '',
+  lastReadFrom: '',
+  lastReadTo: '',
+  attachmentRole: 'any',
+  mineruParseStatus: 'all',
+  missingMetadataFields: [],
+};
+
+function structuredFilterRequest(filters: LiteratureStructuredFilters): Pick<ListPapersRequest,
+  'yearFrom' | 'yearTo' | 'unknownYearOnly' | 'authorQuery' | 'publicationQuery' | 'keywordQuery' | 'tagNames' | 'isRead' | 'progressFrom' | 'progressTo' | 'importedAtFrom' | 'importedAtTo' | 'lastReadAtFrom' | 'lastReadAtTo' | 'attachmentRole' | 'mineruParseStatus' | 'missingMetadataFields'> {
+  const parseBound = (value: string) => value.trim() === '' ? null : Number(value);
+  const dateBound = (value: string, inclusiveEnd: boolean) => {
+    if (!value) return null;
+    const [year, month, day] = value.split('-').map(Number);
+    return inclusiveEnd
+      ? new Date(year, month - 1, day + 1).getTime() - 1
+      : new Date(year, month - 1, day).getTime();
+  };
+  return {
+    yearFrom: parseBound(filters.yearFrom),
+    yearTo: parseBound(filters.yearTo),
+    unknownYearOnly: filters.unknownYearOnly || null,
+    authorQuery: filters.authorQuery.trim() || null,
+    publicationQuery: filters.publicationQuery.trim() || null,
+    keywordQuery: filters.keywordQuery.trim() || null,
+    tagNames: filters.tagNames.split(',').map((name) => name.trim()).filter(Boolean),
+    isRead: filters.readingState === 'all' ? null : filters.readingState === 'read',
+    progressFrom: parseBound(filters.progressFrom),
+    progressTo: parseBound(filters.progressTo),
+    importedAtFrom: dateBound(filters.importedFrom, false),
+    importedAtTo: dateBound(filters.importedTo, true),
+    lastReadAtFrom: dateBound(filters.lastReadFrom, false),
+    lastReadAtTo: dateBound(filters.lastReadTo, true),
+    attachmentRole: filters.attachmentRole === 'any' ? null : filters.attachmentRole,
+    mineruParseStatus: filters.mineruParseStatus === 'all' ? null : filters.mineruParseStatus,
+    missingMetadataFields: filters.missingMetadataFields,
+  };
+}
+
 /** 需要「全库文献」的后台任务（MinerU 状态/批量元数据）按页取齐，不再受 1000 条硬上限截断。 */
 async function fetchAllLibraryPapers(): Promise<LiteraturePaper[]> {
   const all: LiteraturePaper[] = [];
@@ -367,6 +426,7 @@ export default function LiteratureLibraryView({
   const [papersLoadingMore, setPapersLoadingMore] = useState(false);
   const papersRef = useRef<LiteraturePaper[]>([]);
   const papersQueryGenerationRef = useRef(0);
+  const selectAllRequestRef = useRef(0);
 
   useEffect(() => {
     papersRef.current = papers;
@@ -384,6 +444,9 @@ export default function LiteratureLibraryView({
     categoryId: string | null;
     search: string;
     ragMembershipFilter: LiteratureRagMembershipFilter;
+    itemTypeFilter: LiteratureItemType | null;
+    favoriteFilter: boolean | null;
+    structuredFilters: LiteratureStructuredFilters;
   } | null>(null);
   const [selectionAnchorId, setSelectionAnchorId] = useState<string | null>(null);
   const [batchWorking, setBatchWorking] = useState(false);
@@ -395,6 +458,21 @@ export default function LiteratureLibraryView({
   const [pdfAssetNamePlan, setPdfAssetNamePlan] = useState<PdfAssetNamePlan | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [ragMembershipFilter, setRagMembershipFilter] = useState<LiteratureRagMembershipFilter>('all');
+  const [itemTypeFilter, setItemTypeFilter] = useState<LiteratureItemType | null>(null);
+  const [favoriteFilter, setFavoriteFilter] = useState<boolean | null>(null);
+  const [structuredFilters, setStructuredFilters] = useState(EMPTY_STRUCTURED_FILTERS);
+  const selectionQueryKey = JSON.stringify({
+    categoryId: selectedCategoryId,
+    search: searchQuery,
+    ragMembershipFilter,
+    itemTypeFilter,
+    favoriteFilter,
+    structuredFilters,
+  });
+  const selectionQueryKeyRef = useRef(selectionQueryKey);
+  selectionQueryKeyRef.current = selectionQueryKey;
+  const demoLibraryRef = useRef(demoLibrary);
+  demoLibraryRef.current = demoLibrary;
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState(false);
   const [metadataWorking, setMetadataWorking] = useState(false);
@@ -418,6 +496,8 @@ export default function LiteratureLibraryView({
     useState<LibraryConfirmDialogState | null>(null);
   const [paperContextMenu, setPaperContextMenu] =
     useState<PaperContextMenuState | null>(null);
+  const [paperContextMenuInitialFocus, setPaperContextMenuInitialFocus] = useState(false);
+  const [fileLocationPaper, setFileLocationPaper] = useState<LiteraturePaper | null>(null);
   const [metadataDialog, setMetadataDialog] = useState<MetadataDialogState | null>(null);
   const [metadataDialogBusy, setMetadataDialogBusy] = useState(false);
   const [translatedPdfLanguageBatch, setTranslatedPdfLanguageBatch] = useState<{ entries: TranslatedPdfLanguageBatchEntry[]; skippedCount: number } | null>(null);
@@ -442,6 +522,7 @@ export default function LiteratureLibraryView({
   });
   const selectedCategoryIdRef = useRef<string | null>(null);
   const checkedMineruPaperIdsRef = useRef<Set<string>>(new Set());
+  const mineruStatusEventRevisionRef = useRef<Map<string, number>>(new Map());
   // init/refreshAll 拉取的全量文献快照，供 MinerU 状态检查复用，避免启动时重复全库查询。
   const allPapersSnapshotRef = useRef<LiteraturePaper[]>([]);
   const mineruStatusConfigKey = useMemo(
@@ -477,7 +558,7 @@ export default function LiteratureLibraryView({
   );
 
   useEffect(() => {
-    const nextFilter = { categoryId: selectedCategoryId, search: searchQuery, ragMembershipFilter };
+    const nextFilter = { categoryId: selectedCategoryId, search: searchQuery, ragMembershipFilter, itemTypeFilter, favoriteFilter, structuredFilters };
     const previousFilter = selectionFilterRef.current;
     selectionFilterRef.current = nextFilter;
     if (
@@ -486,6 +567,9 @@ export default function LiteratureLibraryView({
         previousFilter.categoryId === nextFilter.categoryId
         && previousFilter.search === nextFilter.search
         && previousFilter.ragMembershipFilter === nextFilter.ragMembershipFilter
+        && previousFilter.itemTypeFilter === nextFilter.itemTypeFilter
+        && previousFilter.favoriteFilter === nextFilter.favoriteFilter
+        && JSON.stringify(previousFilter.structuredFilters) === JSON.stringify(nextFilter.structuredFilters)
       )
       || paperSelectionRef.current.ids.length === 0
     ) {
@@ -496,7 +580,7 @@ export default function LiteratureLibraryView({
     setStatusMessage(
       l('筛选条件已变化，选择已清空。', 'The filter changed, so the selection was cleared.'),
     );
-  }, [l, ragMembershipFilter, searchQuery, selectedCategoryId]);
+  }, [favoriteFilter, itemTypeFilter, l, ragMembershipFilter, searchQuery, selectedCategoryId, structuredFilters]);
 
   const clearMultiSelection = useCallback(() => {
     setPaperSelection(EMPTY_PAPER_SELECTION);
@@ -542,52 +626,20 @@ export default function LiteratureLibraryView({
   );
 
   const resolveSelectedPapers = useCallback(async (ids: string[]) => {
-    const wanted = new Set(ids);
-    const found = new Map<string, LiteraturePaper>();
-
-    for (const paper of papersRef.current) {
-      if (wanted.has(paper.id)) {
-        found.set(paper.id, paper);
-      }
+    if (demoLibrary) {
+      const byId = new Map(demoLibrary.papers.map((paper) => [paper.id, paper]));
+      return ids.flatMap((id) => byId.has(id) ? [byId.get(id)!] : []);
     }
 
-    if (!demoLibrary && found.size < wanted.size) {
-      let offset = 0;
-      const pageSize = 500;
-
-      while (found.size < wanted.size) {
-        const result = await queryLibraryPapers({
-          categoryId: selectedCategoryId,
-          search: searchQuery,
-          sortBy: paperSort.sortBy,
-          sortDirection: paperSort.sortDirection,
-          ragEnabled: ragMembershipFilter === 'included'
-            ? true
-            : ragMembershipFilter === 'excluded'
-              ? false
-              : null,
-          limit: pageSize,
-          offset,
-        });
-
-        for (const paper of result.papers) {
-          if (wanted.has(paper.id)) {
-            found.set(paper.id, paper);
-          }
-        }
-
-        offset += result.papers.length;
-        if (result.papers.length === 0 || offset >= result.total) {
-          break;
-        }
-      }
+    const result = await getLibraryPapersByIds(ids);
+    if (result.missingIds.length > 0) {
+      setStatusMessage(l(
+        `所选快照中有 ${result.missingIds.length} 篇文献已不存在，已跳过；其余 ${result.papers.length} 篇仍按所选 ID 读取。`,
+        `${result.missingIds.length} papers from the frozen selection no longer exist and were skipped; the remaining ${result.papers.length} were loaded by ID.`,
+      ));
     }
-
-    return ids.flatMap((id) => {
-      const paper = found.get(id);
-      return paper ? [paper] : [];
-    });
-  }, [demoLibrary, paperSort.sortBy, paperSort.sortDirection, searchQuery, selectedCategoryId]);
+    return result.papers;
+  }, [demoLibrary, l]);
 
   const resolveDemoPapers = useCallback(
     (nextCategoryId = selectedCategoryId) => {
@@ -599,12 +651,59 @@ export default function LiteratureLibraryView({
         if (ragMembershipFilter === 'included') return paper.ragEnabled !== false;
         if (ragMembershipFilter === 'excluded') return paper.ragEnabled === false;
         return true;
+      }).filter((paper) => {
+        if (itemTypeFilter && (paper.itemType || 'journalArticle') !== itemTypeFilter) return false;
+        if (favoriteFilter !== null && Boolean(paper.isFavorite) !== favoriteFilter) return false;
+        if (structuredFilters.readingState === 'read' && paper.lastReadAt == null) return false;
+        if (structuredFilters.readingState === 'unread' && paper.lastReadAt != null) return false;
+        if (structuredFilters.progressFrom.trim() && paper.readingProgress * 100 < Number(structuredFilters.progressFrom)) return false;
+        if (structuredFilters.progressTo.trim() && paper.readingProgress * 100 > Number(structuredFilters.progressTo)) return false;
+        const dateStart = (value: string) => value ? new Date(`${value}T00:00:00`).getTime() : null;
+        const dateEnd = (value: string) => {
+          if (!value) return null;
+          const [year, month, day] = value.split('-').map(Number);
+          return new Date(year, month - 1, day + 1).getTime() - 1;
+        };
+        const importedFrom = dateStart(structuredFilters.importedFrom);
+        const importedTo = dateEnd(structuredFilters.importedTo);
+        const readFrom = dateStart(structuredFilters.lastReadFrom);
+        const readTo = dateEnd(structuredFilters.lastReadTo);
+        if (importedFrom != null && paper.importedAt < importedFrom) return false;
+        if (importedTo != null && paper.importedAt > importedTo) return false;
+        if (readFrom != null && (paper.lastReadAt == null || paper.lastReadAt < readFrom)) return false;
+        if (readTo != null && (paper.lastReadAt == null || paper.lastReadAt > readTo)) return false;
+        const attachments = paper.attachments ?? [];
+        if (structuredFilters.attachmentRole === 'original-pdf' && !attachments.some((item) => ['pdf', 'original-pdf'].includes(item.kind) && !item.missing)) return false;
+        if (structuredFilters.attachmentRole === 'translated-pdf' && !attachments.some((item) => item.kind === 'translated-pdf' && !item.missing)) return false;
+        if (structuredFilters.attachmentRole === 'missing' && !attachments.some((item) => item.missing)) return false;
+        if (structuredFilters.attachmentRole === 'none' && attachments.length) return false;
+        if (structuredFilters.mineruParseStatus !== 'all') {
+          const status = demoLibrary?.paperStatuses?.[paper.id];
+          const resolved = !status || status.checkingMineru
+            ? 'unknown'
+            : status.mineruStatus ?? (status.mineruParsed ? 'available' : 'unknown');
+          if (resolved !== structuredFilters.mineruParseStatus) return false;
+        }
+        if (structuredFilters.missingMetadataFields.length && !structuredFilters.missingMetadataFields.some((field) => paperHasMissingMetadataField(paper, field))) return false;
+        const year = /^(\d{4})/.exec(paper.year ?? '')?.[1];
+        if (structuredFilters.unknownYearOnly && year) return false;
+        if (!structuredFilters.unknownYearOnly && structuredFilters.yearFrom && (!year || Number(year) < Number(structuredFilters.yearFrom))) return false;
+        if (!structuredFilters.unknownYearOnly && structuredFilters.yearTo && (!year || Number(year) > Number(structuredFilters.yearTo))) return false;
+        if (structuredFilters.authorQuery.trim() && !paper.authors.some((author) => author.name.toLowerCase().includes(structuredFilters.authorQuery.trim().toLowerCase()))) return false;
+        if (structuredFilters.publicationQuery.trim() && !(paper.publication ?? '').toLowerCase().includes(structuredFilters.publicationQuery.trim().toLowerCase())) return false;
+        if (structuredFilters.keywordQuery.trim() && !paper.keywords.some((keyword) => keyword.toLowerCase().includes(structuredFilters.keywordQuery.trim().toLowerCase()))) return false;
+        const tagNames = structuredFilters.tagNames.split(',').map((name) => name.trim().toLowerCase()).filter(Boolean);
+        if (tagNames.length && !paper.tags.some((tag) => tagNames.includes(tag.name.trim().toLowerCase()))) return false;
+        return true;
       });
     },
-    [demoLibrary, ragMembershipFilter, searchQuery, selectedCategoryId],
+    [demoLibrary, favoriteFilter, itemTypeFilter, ragMembershipFilter, searchQuery, selectedCategoryId, structuredFilters],
   );
 
   const handleToggleSelectAll = useCallback(async () => {
+    const requestId = ++selectAllRequestRef.current;
+    const requestQueryKey = selectionQueryKeyRef.current;
+    const requestDemoLibrary = demoLibraryRef.current;
     if (selectionCheckState(paperSelectionRef.current, papersTotal) === 'all') {
       setPaperSelection(EMPTY_PAPER_SELECTION);
       return;
@@ -624,8 +723,12 @@ export default function LiteratureLibraryView({
             : ragMembershipFilter === 'excluded'
               ? false
               : null,
+          itemType: itemTypeFilter,
+          isFavorite: favoriteFilter,
+          ...structuredFilterRequest(structuredFilters),
         });
 
+      if (requestId !== selectAllRequestRef.current || requestQueryKey !== selectionQueryKeyRef.current || requestDemoLibrary !== demoLibraryRef.current) return;
       setPaperSelection(capturePaperSelection(ids));
       setStatusMessage(
         ids.length === 0
@@ -636,15 +739,16 @@ export default function LiteratureLibraryView({
           ),
       );
     } catch (nextError) {
+      if (requestId !== selectAllRequestRef.current || requestQueryKey !== selectionQueryKeyRef.current || requestDemoLibrary !== demoLibraryRef.current) return;
       const message = nextError instanceof Error
         ? nextError.message
         : l('全选当前筛选失败', 'Failed to select the current filter');
       setError(message);
       setStatusMessage(message);
     } finally {
-      setBatchWorking(false);
+      if (requestId === selectAllRequestRef.current) setBatchWorking(false);
     }
-  }, [demoLibrary, l, papersTotal, ragMembershipFilter, resolveDemoPapers, searchQuery, selectedCategoryId]);
+  }, [demoLibrary, favoriteFilter, itemTypeFilter, l, papersTotal, ragMembershipFilter, resolveDemoPapers, searchQuery, selectedCategoryId, structuredFilters]);
 
   const showDemoLockedMessage = useCallback(() => {
     setStatusMessage(
@@ -671,6 +775,12 @@ export default function LiteratureLibraryView({
         (paper) => !checkedMineruPaperIdsRef.current.has(paper.id),
       );
       const uncheckedPaperIds = new Set(uncheckedPapers.map((paper) => paper.id));
+      const eventRevisionByPaperId = new Map(uncheckedPapers.map((paper) => [
+        paper.id,
+        mineruStatusEventRevisionRef.current.get(paper.id) ?? 0,
+      ]));
+      const isPaperRevisionCurrent = (paperId: string) =>
+        (mineruStatusEventRevisionRef.current.get(paperId) ?? 0) === eventRevisionByPaperId.get(paperId);
 
       setPaperStatuses((current) =>
         markPaperStatusesCheckingMineru(current, uniquePapers, uncheckedPaperIds),
@@ -694,7 +804,7 @@ export default function LiteratureLibraryView({
 
         const rollbackUncheckedMarks = (papersToRollback: LiteraturePaper[]) => {
           for (const paper of papersToRollback) {
-            checkedMineruPaperIdsRef.current.delete(paper.id);
+            if (isPaperRevisionCurrent(paper.id)) checkedMineruPaperIdsRef.current.delete(paper.id);
           }
         };
 
@@ -704,7 +814,9 @@ export default function LiteratureLibraryView({
             // checking 状态，避免没有后续运行时界面永久停在“检测中”。
             rollbackUncheckedMarks(uncheckedPapers.slice(processedCount));
             const remainingPaperIds = new Set(
-              uncheckedPapers.slice(processedCount).map((paper) => paper.id),
+              uncheckedPapers.slice(processedCount)
+                .filter((paper) => isPaperRevisionCurrent(paper.id))
+                .map((paper) => paper.id),
             );
             setPaperStatuses((current) =>
               Object.fromEntries(
@@ -721,9 +833,37 @@ export default function LiteratureLibraryView({
 
           // 汇总本批候选路径，单次 IPC 批量检查，避免每篇文献多次 IPC 往返。
           const batch = uncheckedPapers.slice(start, start + MINERU_STATUS_BATCH_SIZE);
+          let sourceSnapshots: Awaited<ReturnType<typeof getLibraryMineruParseStatuses>> = [];
 
           try {
-            const candidatesByPaper = batch.map((paper) => ({
+            sourceSnapshots = await getLibraryMineruParseStatuses(batch.map((paper) => paper.id));
+            const snapshotByPaperId = new Map(sourceSnapshots.map((item) => [item.paperId, item]));
+            const freshnessCutoff = Date.now() - 24 * 60 * 60 * 1000;
+            const cachedPapers = batch.filter((paper) => {
+              if (!isPaperRevisionCurrent(paper.id)) return false;
+              const status = snapshotByPaperId.get(paper.id);
+              return Boolean(status &&
+                (status.status === 'available' || status.status === 'missing') &&
+                status.checkedAt != null && status.checkedAt >= freshnessCutoff);
+            });
+            if (cachedPapers.length > 0) {
+              setPaperStatuses((current) => ({
+                ...current,
+                ...Object.fromEntries(cachedPapers.map((paper) => [paper.id, {
+                  mineruParsed: snapshotByPaperId.get(paper.id)?.status === 'available',
+                  mineruStatus: snapshotByPaperId.get(paper.id)?.status ?? 'unknown',
+                  overviewGenerated: Boolean(paper.aiSummary?.trim()),
+                  checkingMineru: false,
+                }])),
+              }));
+            }
+            const papersToCheck = batch.filter((paper) => !cachedPapers.some((cached) => cached.id === paper.id));
+            if (papersToCheck.length === 0) {
+              processedCount = start + batch.length;
+              continue;
+            }
+
+            const candidatesByPaper = papersToCheck.map((paper) => ({
               paper,
               candidates: mineruOutputPathCandidatesForPaper(
                 paper,
@@ -740,7 +880,9 @@ export default function LiteratureLibraryView({
             if (shouldCancel()) {
               rollbackUncheckedMarks(uncheckedPapers.slice(processedCount));
               const remainingPaperIds = new Set(
-                uncheckedPapers.slice(processedCount).map((paper) => paper.id),
+                uncheckedPapers.slice(processedCount)
+                  .filter((paper) => isPaperRevisionCurrent(paper.id))
+                  .map((paper) => paper.id),
               );
               setPaperStatuses((current) =>
                 Object.fromEntries(
@@ -756,34 +898,82 @@ export default function LiteratureLibraryView({
             }
 
             const existsByPath = new Map(uniquePaths.map((candidate, index) => [candidate, existence[index] === true]));
+            const checkedAt = Date.now();
+            const currentCandidates = candidatesByPaper.filter(({ paper }) => isPaperRevisionCurrent(paper.id));
+            const statusEntries = currentCandidates.map(({ paper, candidates }) => ({
+              paperId: paper.id,
+              sourceVersion: snapshotByPaperId.get(paper.id)?.sourceVersion ?? '',
+              status: candidates.some((candidate) => existsByPath.get(candidate) === true)
+                ? 'available' as const : 'missing' as const,
+              checkedAt,
+            }));
+            await saveLibraryMineruParseStatuses(statusEntries);
+            const confirmedStatuses = await getLibraryMineruParseStatuses(statusEntries.map((item) => item.paperId));
+            const confirmedByPaperId = new Map(confirmedStatuses.map((item) => [item.paperId, item]));
+            const stalePaperIds = new Set<string>();
             const batchEntries: Array<[string, LiteraturePaperListStatus]> = [];
 
-            for (const { paper, candidates } of candidatesByPaper) {
-              batchEntries.push([
-                paper.id,
-                {
-                  mineruParsed: candidates.some((candidate) => existsByPath.get(candidate) === true),
-                  overviewGenerated: Boolean(paper.aiSummary?.trim()),
-                  checkingMineru: false,
-                },
-              ]);
+            for (const { paper } of candidatesByPaper) {
+              if (!isPaperRevisionCurrent(paper.id)) continue;
+              const expected = statusEntries.find((item) => item.paperId === paper.id);
+              const confirmed = confirmedByPaperId.get(paper.id);
+              if (!expected || !confirmed ||
+                confirmed.sourceVersion !== expected.sourceVersion ||
+                confirmed.checkedAt !== checkedAt ||
+                confirmed.status !== expected.status) {
+                stalePaperIds.add(paper.id);
+                continue;
+              }
+              batchEntries.push([paper.id, {
+                mineruParsed: expected.status === 'available',
+                mineruStatus: expected.status,
+                overviewGenerated: Boolean(paper.aiSummary?.trim()),
+                checkingMineru: false,
+              }]);
+            }
+
+            for (const paperId of stalePaperIds) {
+              if (isPaperRevisionCurrent(paperId)) checkedMineruPaperIdsRef.current.delete(paperId);
             }
 
             setPaperStatuses((current) => ({
               ...current,
-              ...Object.fromEntries(batchEntries),
+              ...Object.fromEntries([...stalePaperIds].filter(isPaperRevisionCurrent).map((paperId) => [paperId, {
+                mineruParsed: false,
+                mineruStatus: 'unknown' as const,
+                overviewGenerated: Boolean(batch.find((paper) => paper.id === paperId)?.aiSummary?.trim()),
+                checkingMineru: false,
+              }])),
+              ...Object.fromEntries(batchEntries.filter(([paperId]) => isPaperRevisionCurrent(paperId))),
             }));
             processedCount = start + batch.length;
           } catch {
             // 本批检查失败时回滚标记并清除 checking 状态，允许后续重试；其余批次继续。
             rollbackUncheckedMarks(batch);
-            const failedBatchIds = new Set(batch.map((paper) => paper.id));
+            const currentBatch = batch.filter((paper) => isPaperRevisionCurrent(paper.id));
+            const failedBatchIds = new Set(currentBatch.map((paper) => paper.id));
+            if (sourceSnapshots.length > 0) {
+              const checkedAt = Date.now();
+              const sourceVersionByPaperId = new Map(sourceSnapshots.map((snapshot) => [snapshot.paperId, snapshot.sourceVersion]));
+              try {
+                await saveLibraryMineruParseStatuses(currentBatch.flatMap((paper) => {
+                  const sourceVersion = sourceVersionByPaperId.get(paper.id);
+                  return sourceVersion
+                    ? [{ paperId: paper.id, sourceVersion, status: 'error' as const, checkedAt }]
+                    : [];
+                }));
+              } catch {
+                // 保留下面的本次错误状态；存储不可用时不再重复抛错阻断后续批次。
+              }
+            }
 
             setPaperStatuses((current) =>
               Object.fromEntries(
                 Object.entries(current).map(([paperId, status]) => [
                   paperId,
-                  failedBatchIds.has(paperId) ? { ...status, checkingMineru: false } : status,
+                  failedBatchIds.has(paperId)
+                    ? { ...status, mineruStatus: 'error', checkingMineru: false }
+                    : status,
                 ]),
               ),
             );
@@ -823,6 +1013,9 @@ export default function LiteratureLibraryView({
           : ragMembershipFilter === 'excluded'
             ? false
             : null,
+        itemType: itemTypeFilter,
+        isFavorite: favoriteFilter,
+        ...structuredFilterRequest(structuredFilters),
         limit: PAPER_PAGE_SIZE,
         offset: 0,
       });
@@ -836,7 +1029,7 @@ export default function LiteratureLibraryView({
       setSelectedPaperId((current) => resolveSelectedPaperId(current, nextPapers));
       return nextPapers;
     },
-    [demoLibrary, paperSort.sortBy, paperSort.sortDirection, ragMembershipFilter, resolveDemoPapers, searchQuery, selectedCategoryId],
+    [demoLibrary, favoriteFilter, itemTypeFilter, paperSort.sortBy, paperSort.sortDirection, ragMembershipFilter, resolveDemoPapers, searchQuery, selectedCategoryId, structuredFilters],
   );
 
   // 滚动接近底部时按当前筛选追加下一页；按 id 去重防止翻页期间并发写入造成重复行。
@@ -857,6 +1050,9 @@ export default function LiteratureLibraryView({
           : ragMembershipFilter === 'excluded'
             ? false
             : null,
+        itemType: itemTypeFilter,
+        isFavorite: favoriteFilter,
+        ...structuredFilterRequest(structuredFilters),
         limit: PAPER_PAGE_SIZE,
         offset: snapshot.length,
       });
@@ -879,6 +1075,9 @@ export default function LiteratureLibraryView({
     }
   }, [
     demoLibrary,
+    favoriteFilter,
+    itemTypeFilter,
+    structuredFilters,
     paperSort.sortBy,
     paperSort.sortDirection,
     papersLoadingMore,
@@ -1209,10 +1408,68 @@ export default function LiteratureLibraryView({
         return;
       }
 
+      const revision = (mineruStatusEventRevisionRef.current.get(detail.paperId) ?? 0) + 1;
+      mineruStatusEventRevisionRef.current.set(detail.paperId, revision);
       checkedMineruPaperIdsRef.current.add(detail.paperId);
       setPaperStatuses((current) =>
         applyPaperMineruStatusUpdate(current, detail.paperId, detail.mineruParsed),
       );
+
+      void (async () => {
+        let sourceVersion = '';
+        try {
+          const [snapshot] = await getLibraryMineruParseStatuses([detail.paperId]);
+          if (mineruStatusEventRevisionRef.current.get(detail.paperId) !== revision || !snapshot) return;
+          sourceVersion = snapshot.sourceVersion;
+          const checkedAt = Date.now();
+          const nextStatus = detail.mineruParsed ? 'available' : 'missing';
+          await saveLibraryMineruParseStatuses([{
+            paperId: detail.paperId,
+            sourceVersion,
+            status: nextStatus,
+            checkedAt,
+          }]);
+          if (mineruStatusEventRevisionRef.current.get(detail.paperId) !== revision) return;
+          const [confirmed] = await getLibraryMineruParseStatuses([detail.paperId]);
+          if (!confirmed || confirmed.sourceVersion !== sourceVersion
+            || confirmed.checkedAt !== checkedAt || confirmed.status !== nextStatus) {
+            checkedMineruPaperIdsRef.current.delete(detail.paperId);
+            return;
+          }
+          setPaperStatuses((current) => ({
+            ...current,
+            [detail.paperId]: {
+              ...current[detail.paperId],
+              mineruParsed: nextStatus === 'available',
+              mineruStatus: nextStatus,
+              checkingMineru: false,
+            },
+          }));
+        } catch {
+          if (mineruStatusEventRevisionRef.current.get(detail.paperId) !== revision) return;
+          checkedMineruPaperIdsRef.current.delete(detail.paperId);
+          setPaperStatuses((current) => ({
+            ...current,
+            [detail.paperId]: {
+              ...current[detail.paperId],
+              mineruStatus: 'error',
+              checkingMineru: false,
+            },
+          }));
+          if (sourceVersion) {
+            try {
+              await saveLibraryMineruParseStatuses([{
+                paperId: detail.paperId,
+                sourceVersion,
+                status: 'error',
+                checkedAt: Date.now(),
+              }]);
+            } catch {
+              // The local error badge remains visible; a later refresh can reconcile it.
+            }
+          }
+        }
+      })();
     };
 
     const handleNativePaperUpdated = (event: Event) => {
@@ -1222,11 +1479,33 @@ export default function LiteratureLibraryView({
         return;
       }
 
+      mineruStatusEventRevisionRef.current.set(
+        detail.paper.id,
+        (mineruStatusEventRevisionRef.current.get(detail.paper.id) ?? 0) + 1,
+      );
+
+      // The persisted source signature includes title and registered attachment identity.
+      // Forget the session projection too, then reconcile this paper from its new source.
+      checkedMineruPaperIdsRef.current.delete(detail.paper.id);
+      allPapersSnapshotRef.current = allPapersSnapshotRef.current.map((paper) =>
+        paper.id === detail.paper.id ? detail.paper : paper,
+      );
+      setPaperStatuses((current) => ({
+        ...current,
+        [detail.paper.id]: {
+          mineruParsed: false,
+          mineruStatus: 'unknown',
+          overviewGenerated: Boolean(detail.paper.aiSummary?.trim()),
+          checkingMineru: false,
+        },
+      }));
+
       setPapers((current) =>
         current.some((paper) => paper.id === detail.paper.id)
           ? current.map((paper) => (paper.id === detail.paper.id ? detail.paper : paper))
           : current,
       );
+      void refreshMineruStatusesForPapers([detail.paper]);
     };
 
     window.addEventListener('paperquay:native-summary-updated', handleNativeSummaryUpdated);
@@ -1238,7 +1517,7 @@ export default function LiteratureLibraryView({
       window.removeEventListener('paperquay:native-mineru-status-updated', handleNativeMineruStatusUpdated);
       window.removeEventListener(NATIVE_PAPER_UPDATED_EVENT, handleNativePaperUpdated);
     };
-  }, []);
+  }, [refreshMineruStatusesForPapers]);
 
   useEffect(() => {
     if (demoLibrary) {
@@ -2142,6 +2421,9 @@ export default function LiteratureLibraryView({
           : ragMembershipFilter === 'excluded'
             ? false
             : null,
+        itemType: itemTypeFilter,
+        isFavorite: favoriteFilter,
+        ...structuredFilterRequest(structuredFilters),
         limit: PAPER_PAGE_SIZE,
         offset: 0,
       }),
@@ -2165,7 +2447,7 @@ export default function LiteratureLibraryView({
   const handleSavePaper = async (request: UpdatePaperRequest) => {
     if (demoMode) {
       showDemoLockedMessage();
-      return;
+      return 'failed' as const;
     }
 
     setPaperSaving(true);
@@ -2173,13 +2455,46 @@ export default function LiteratureLibraryView({
 
     try {
       const updatedPaper = await updateLibraryPaper(request);
-      await reloadAfterPaperUpdate(updatedPaper);
-      setStatusMessage(l('文献信息已保存', 'Paper metadata saved'));
+      try {
+        await reloadAfterPaperUpdate(updatedPaper);
+        setStatusMessage(l('文献信息已保存', 'Paper metadata saved'));
+      } catch (refreshError) {
+        const refreshMessage = refreshError instanceof Error
+          ? refreshError.message
+          : l('列表刷新失败', 'List refresh failed');
+        const message = l(
+          `文献信息已写入，但列表刷新失败：${refreshMessage}`,
+          `Metadata was saved, but the list could not refresh: ${refreshMessage}`,
+        );
+        setError(message);
+        setStatusMessage(message);
+      }
+      return 'saved' as const;
     } catch (nextError) {
       const message =
         nextError instanceof Error ? nextError.message : l('保存文献信息失败', 'Failed to save paper metadata');
+      if (message.includes('Paper changed after editing began')) {
+        try {
+          const latestPaper = await getLibraryPaper(request.paperId);
+          setPapers((current) => current.map((paper) => paper.id === latestPaper.id ? latestPaper : paper));
+          const conflictMessage = l(
+            '文献已被其他操作修改。你的草稿已保留，请核对最新版本后选择是否继续保存。',
+            'This paper changed elsewhere. Your draft is preserved; review the latest version before choosing whether to save again.',
+          );
+          setError(conflictMessage);
+          setStatusMessage(conflictMessage);
+          return {
+            status: 'conflict' as const,
+            latestPaper,
+            conflictFields: message.match(/fields: (.+)$/)?.[1].split(', ').filter(Boolean) ?? [],
+          };
+        } catch {
+          // Keep the original conflict visible if the refresh itself is unavailable.
+        }
+      }
       setError(message);
       setStatusMessage(message);
+      return 'failed' as const;
     } finally {
       setPaperSaving(false);
     }
@@ -2692,12 +3007,19 @@ export default function LiteratureLibraryView({
   ) => {
     event.preventDefault();
     event.stopPropagation();
+    setPaperContextMenuInitialFocus(false);
     setSelectedPaperId(paper.id);
     setPaperContextMenu({
       paper,
       x: event.clientX,
       y: event.clientY,
     });
+  };
+
+  const handlePaperKeyboardContextMenu = (paper: LiteraturePaper, rect: DOMRect) => {
+    setPaperContextMenuInitialFocus(true);
+    setSelectedPaperId(paper.id);
+    setPaperContextMenu({ paper, x: rect.left, y: rect.bottom });
   };
 
   const handleOpenTagDialogFromContextMenu = () => {
@@ -2932,6 +3254,9 @@ export default function LiteratureLibraryView({
             : ragMembershipFilter === 'excluded'
               ? false
               : null,
+        itemType: itemTypeFilter,
+        isFavorite: favoriteFilter,
+        ...structuredFilterRequest(structuredFilters),
           limit: PAPER_PAGE_SIZE,
           offset: 0,
         }),
@@ -2996,6 +3321,16 @@ export default function LiteratureLibraryView({
 
     const paper = paperContextMenu.paper;
     const entries: MenuEntry[] = [
+      {
+        id: 'open-file-locations',
+        label: l('打开所在位置', 'Open file location'),
+        icon: <FolderOpen className="h-4 w-4 text-[var(--pq-accent)]" strokeWidth={1.9} />,
+        onSelect: () => {
+          // Capture the row object from the context-menu snapshot; current detail selection may differ.
+          setFileLocationPaper(paper);
+          setPaperContextMenu(null);
+        },
+      },
       {
         id: 'toggle-favorite',
         label: paper.isFavorite
@@ -3280,11 +3615,18 @@ export default function LiteratureLibraryView({
           onPaperDropOnCategory={handlePaperDropOnCategory}
           onPaperPointerDragOverCategory={setPaperDragOverCategoryId}
           onPaperContextMenu={handlePaperContextMenu}
+          onPaperKeyboardContextMenu={handlePaperKeyboardContextMenu}
           ragBadgeByDocumentKey={ragBadgeByDocumentKey}
           ragIndexingDocumentKey={ragIndexingDocumentKey}
           ragIndexAvailable={ragIndexAvailable}
           ragMembershipFilter={ragMembershipFilter}
           onRagMembershipFilterChange={setRagMembershipFilter}
+          itemTypeFilter={itemTypeFilter}
+          onItemTypeFilterChange={setItemTypeFilter}
+          favoriteFilter={favoriteFilter}
+          onFavoriteFilterChange={setFavoriteFilter}
+          structuredFilters={structuredFilters}
+          onStructuredFiltersChange={setStructuredFilters}
         />
         </div>
       </div>
@@ -3351,7 +3693,8 @@ export default function LiteratureLibraryView({
             titleDisplayMode={titleDisplayMode}
             saving={paperSaving}
             onOpenPaper={onOpenPaper}
-            onSavePaper={(request) => void handleSavePaper(request)}
+            onShowFileLocations={setFileLocationPaper}
+            onSavePaper={handleSavePaper}
             actionState={selectedPaper ? paperActionStates[selectedPaper.id] ?? null : null}
             onRunMineruParse={onRunMineruParse}
             onTranslatePaper={onTranslatePaper}
@@ -3421,6 +3764,15 @@ export default function LiteratureLibraryView({
           title={paperContextMenu.paper.title}
           entries={paperContextMenuEntries()}
           onClose={() => setPaperContextMenu(null)}
+          initialFocus={paperContextMenuInitialFocus}
+        />
+      ) : null}
+
+      {fileLocationPaper ? (
+        <LiteratureFileLocationsDialog
+          paperId={fileLocationPaper.id}
+          paperTitle={fileLocationPaper.title}
+          onClose={() => setFileLocationPaper(null)}
         />
       ) : null}
 

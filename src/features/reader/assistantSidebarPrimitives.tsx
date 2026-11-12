@@ -242,6 +242,7 @@ type SummaryTabKey =
 
 function SummaryPanel({
   paperSummary,
+  summaryVersionUnverified = false,
   loading,
   error,
   hasBlocks,
@@ -250,6 +251,7 @@ function SummaryPanel({
   onGenerateSummary,
 }: {
   paperSummary: PaperSummary | null;
+  summaryVersionUnverified?: boolean;
   loading: boolean;
   error: string;
   hasBlocks: boolean;
@@ -326,7 +328,7 @@ function SummaryPanel({
         </div>
       ) : null}
 
-      {loading ? (
+      {loading && !paperSummary ? (
         <div className="space-y-3">
           <div className="h-24 animate-pulse rounded-2xl bg-[var(--pq-surface-2)]" />
           <div className="h-24 animate-pulse rounded-2xl bg-[var(--pq-surface-2)]" />
@@ -334,11 +336,14 @@ function SummaryPanel({
         </div>
       ) : null}
 
-      {!loading && paperSummary ? (
+      {paperSummary ? (
         <div className="space-y-4">
           <div className="rounded-[22px] border border-slate-200/80 bg-[linear-gradient(180deg,rgba(248,250,252,0.96),rgba(255,255,255,0.86))] px-5 py-5">
             <div className="flex flex-wrap items-center gap-2">
               <StatusBadge tone="accent">{l('概览已生成', 'Overview Ready')}</StatusBadge>
+              {summaryVersionUnverified ? (
+                <StatusBadge>{l('来源版本待核对', 'Source version unverified')}</StatusBadge>
+              ) : null}
               <StatusBadge>
                 {l(`${paperSummary.keywords.length} 个关键词`, `${paperSummary.keywords.length} keywords`)}
               </StatusBadge>

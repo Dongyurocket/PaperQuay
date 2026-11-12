@@ -1,5 +1,6 @@
 import type { MineruBlockBase, MineruPage, PositionedMineruBlock } from '../../types/reader.ts';
 import { flattenMineruPages } from '../../services/mineru.ts';
+import type { PersistedDocumentStructure } from '../../services/documentStructure.ts';
 
 export const MINERU_PARSE_PAGE_BATCH = 25;
 
@@ -31,6 +32,35 @@ export interface MineruDocumentParts {
   metadata: MineruDocumentMetadata;
   outlineIndex: MineruOutlineIndexItem[];
   segments: MineruPageSegment[];
+}
+
+/** Convert a persisted, source-version-validated chapter tree into page-addressable reader outline items. */
+export function persistedStructureToMineruOutlineIndex(
+  structure: PersistedDocumentStructure | null | undefined,
+): MineruOutlineIndexItem[] {
+  if (!structure) return [];
+  const units = structure.units.filter((unit) => unit.unitKind !== 'document' && unit.title?.trim());
+  const byId = new Map(units.map((unit) => [unit.unitId, unit]));
+  const depthOf = (unitId: string): number => {
+    let depth = 1;
+    let parentId = byId.get(unitId)?.parentUnitId ?? null;
+    const visited = new Set([unitId]);
+    while (parentId && byId.has(parentId) && !visited.has(parentId)) {
+      visited.add(parentId);
+      depth += 1;
+      parentId = byId.get(parentId)?.parentUnitId ?? null;
+    }
+    return Math.min(depth, 6);
+  };
+  return units
+    .slice()
+    .sort((left, right) => left.ordinal - right.ordinal || left.unitId.localeCompare(right.unitId))
+    .map((unit) => ({
+      blockId: `persisted-outline:${unit.unitId}`,
+      pageIndex: unit.physicalStart - 1,
+      level: depthOf(unit.unitId),
+      title: unit.title!.trim(),
+    }));
 }
 
 export function sliceMineruPages<T>(pages: readonly T[], start: number, count: number): T[] {

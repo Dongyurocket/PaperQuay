@@ -2,6 +2,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const {
   cleanString,
+  hashFile,
   id,
   openAiChat,
   parseJsonObject,
@@ -153,9 +154,8 @@ function normalizeCustomRelation(input = {}) {
   };
 }
 
-function listCustomRelations(appPaths) {
-  return readRelationStore(appPaths)
-    .relations
+function listCustomRelations(appPaths, knowledgeStore) {
+  return (knowledgeStore ? knowledgeStore.listRelations() : readRelationStore(appPaths).relations)
     .map(normalizeCustomRelation)
     .filter(Boolean);
 }
@@ -409,9 +409,10 @@ function matchesSearch(node, search) {
   ].filter(Boolean).join('\n').toLowerCase().includes(search);
 }
 
-function filterLocalGraph(snapshot, localNodeId, depth) {
-  if (!localNodeId || depth <= 0 || !snapshot.nodes.some((node) => node.id === localNodeId)) {
-    return snapshot;
+function filterLocalGraph(snapshot, localNodeId, depth, localScopeRequested) {
+  if (!localScopeRequested) return snapshot;
+  if (!localNodeId || !Number.isInteger(depth) || depth < 0 || depth > 4 || !snapshot.nodes.some((node) => node.id === localNodeId)) {
+    return { ...snapshot, nodes: [], edges: [] };
   }
 
   const adjacency = new Map();
@@ -459,7 +460,19 @@ async function createKnowledgeGraphSnapshot(context, request = {}) {
     : 0.82;
   const search = cleanString(request.search).toLowerCase();
   const localNodeId = cleanString(request.localNodeId);
-  const localDepth = normalizeLimit(request.localDepth, 1, 0, 4);
+  const hasLocalDepth = Object.prototype.hasOwnProperty.call(request, 'localDepth');
+  const rawLocalDepth = request.localDepth;
+  const numericLocalDepth = Number(rawLocalDepth);
+  const localScopeRequested = Boolean(localNodeId) || (
+    hasLocalDepth && (!Number.isFinite(numericLocalDepth) || numericLocalDepth !== 0)
+  );
+  const localDepthIsValid = !hasLocalDepth || (
+    rawLocalDepth !== null && String(rawLocalDepth).trim() !== '' &&
+    Number.isInteger(numericLocalDepth) && numericLocalDepth >= 0 && numericLocalDepth <= 4
+  );
+  const localDepth = localDepthIsValid
+    ? normalizeLimit(rawLocalDepth, 1, 0, 4)
+    : Number.NaN;
   const library = store.load();
   const notes = includeNotes ? noteStore.listNotes({ limit: 5000 }) : [];
   const nodes = new Map();
@@ -726,7 +739,7 @@ async function createKnowledgeGraphSnapshot(context, request = {}) {
   }
 
   if (includeCustomRelations) {
-    for (const relation of listCustomRelations(appPaths)) {
+    for (const relation of listCustomRelations(appPaths, context.knowledgeStore)) {
       if (!nodes.has(relation.source) || !nodes.has(relation.target)) continue;
       edges.set(relation.id, {
         id: relation.id,
@@ -764,7 +777,7 @@ async function createKnowledgeGraphSnapshot(context, request = {}) {
     };
   }
 
-  return filterLocalGraph(snapshot, localNodeId, localDepth);
+  return filterLocalGraph(snapshot, localNodeId, localDepth, localScopeRequested);
 }
 
 function graphItemText(node, library, notes) {
@@ -938,11 +951,37 @@ async function suggestAiRelations(context, request = {}, options = {}) {
 
 function createKnowledgeGraphCommands(context) {
   return {
+    async knowledge_document_structure_get({ sourceId, pdfPath }) {
+      const id = cleanString(sourceId);
+      if (!id || !context.knowledgeStore) return null;
+      const current = context.knowledgeStore.listGenerations(id)
+        .find((generation) => generation.status === 'published' && generation.currentGeneration === generation.generationId &&
+          generation.activeSourceVersion === generation.sourceVersion);
+      if (!current) return null;
+      if (cleanString(pdfPath)) {
+        const paper = context.store?.getPaper(id);
+        const requestedPath = path.resolve(cleanString(pdfPath));
+        const attachment = paper?.attachments?.find((item) => item.kind === 'pdf' && item.missing !== true &&
+          cleanString(item.storedPath) && path.resolve(item.storedPath).toLowerCase() === requestedPath.toLowerCase());
+        if (!attachment || !cleanString(attachment.contentHash) || attachment.contentHash !== current.sourceVersion) return null;
+        try {
+          if (await hashFile(requestedPath) !== attachment.contentHash) return null;
+        } catch {
+          return null;
+        }
+      }
+      return {
+        generationId: current.generationId,
+        sourceVersion: current.sourceVersion,
+        units: context.knowledgeStore.listDocumentUnits(current.generationId),
+        pages: context.knowledgeStore.listDocumentPages(current.generationId),
+      };
+    },
     async knowledge_graph_get({ request = {} }) {
       return createKnowledgeGraphSnapshot(context, request);
     },
     knowledge_graph_list_relations() {
-      return listCustomRelations(context.appPaths);
+      return listCustomRelations(context.appPaths, context.knowledgeStore);
     },
     knowledge_graph_create_relation({ request = {} }) {
       const relation = normalizeCustomRelation(request);
@@ -951,16 +990,15 @@ function createKnowledgeGraphCommands(context) {
         throw new Error('Invalid graph relation.');
       }
 
+      if (context.knowledgeStore) return context.knowledgeStore.saveRelation(relation);
       const store = readRelationStore(context.appPaths);
-      const nextRelations = [
-        ...store.relations.filter((item) => cleanString(item.id) !== relation.id),
-        relation,
-      ];
+      const nextRelations = [...store.relations.filter((item) => cleanString(item.id) !== relation.id), relation];
       writeRelationStore(context.appPaths, { version: 1, relations: nextRelations });
       return relation;
     },
     knowledge_graph_delete_relation({ relationId }) {
       const targetId = cleanString(relationId);
+      if (context.knowledgeStore) return { deleted: context.knowledgeStore.deleteRelation(targetId) };
       const store = readRelationStore(context.appPaths);
       const nextRelations = store.relations.filter((item) => cleanString(item.id) !== targetId);
       writeRelationStore(context.appPaths, { version: 1, relations: nextRelations });

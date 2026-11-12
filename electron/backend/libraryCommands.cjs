@@ -35,6 +35,23 @@ const OPENALEX_API_BASE = 'https://api.openalex.org';
 const LIBRARY_REFERENCE_PROGRESS_EVENT = 'paperquay://library-reference-progress';
 const MAX_CROSSREF_REFERENCES_PER_PAPER = 200;
 
+function touchPaper(paper) {
+  paper.updatedAt = Math.max(now(), (Number(paper.updatedAt) || 0) + 1);
+}
+
+function paperMetadataComparableValue(paper, key) {
+  if (key === 'authors') return (paper.authors ?? []).map((author) => cleanString(author?.name));
+  if (key === 'tags') return (paper.tags ?? []).map((tag) => cleanString(tag?.name));
+  if (key === 'keywords') return (paper.keywords ?? []).map(cleanString);
+  if (key === 'isFavorite') return Boolean(paper.isFavorite);
+  if (key === 'itemType') return cleanString(paper.itemType) || 'journalArticle';
+  return paper[key] ?? null;
+}
+
+function metadataValuesEqual(left, right) {
+  return JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
+}
+
 function comparablePath(filePath) {
   const resolved = path.resolve(filePath);
   return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
@@ -117,7 +134,7 @@ async function migrateLibraryStorageDirectory(library, previousStorageDir, nextS
         attachment.fileName = attachment.fileName || fileNameFromPath(nextPath);
         attachment.missing = !(await pathExists(nextPath));
         updatedAttachments += 1;
-        paper.updatedAt = now();
+        touchPaper(paper);
       }
     }
   }
@@ -165,7 +182,7 @@ async function migrateTranslatedPdfDirectory(library, previousDir, nextDir, stor
         attachment.fileName = attachment.fileName || fileName;
         attachment.missing = !(await pathExists(nextPath));
         updatedAttachments += 1;
-        paper.updatedAt = now();
+        touchPaper(paper);
       }
     }
   }
@@ -441,6 +458,26 @@ async function lookupOpenAlexMetadata({ doi, title, settings }) {
   return mapOpenAlexWork(item);
 }
 
+async function lookupOpenAlexMetadataCandidates({ doi, title, settings }) {
+  if (settings?.openAlexEnabled === false) return { status: 'disabled', candidates: [] };
+  const params = { api_key: settings?.openAlexApiKey, mailto: settings?.openAlexMailto };
+  const endpoint = doi
+    ? buildUrl(`${OPENALEX_API_BASE}/works/${encodeURIComponent(doiUrl(doi))}`, params)
+    : title
+      ? buildUrl(`${OPENALEX_API_BASE}/works`, { ...params, filter: `title.search:${title}`, 'per-page': '10' })
+      : '';
+  if (!endpoint) return { status: 'no-match', candidates: [] };
+
+  const data = await readRequestJson(await fetch(endpoint), 'OpenAlex metadata');
+  const works = doi ? [data] : (Array.isArray(data?.results) ? data.results : [])
+    .map((item) => ({ item, score: titleSimilarity(title, firstString(item?.title, item?.display_name)) }))
+    .filter(({ score }) => score >= 0.45)
+    .sort((left, right) => right.score - left.score)
+    .slice(0, 5)
+    .map(({ item }) => item);
+  return { status: works.length ? 'success' : 'no-match', candidates: works.map(mapOpenAlexWork).filter(Boolean) };
+}
+
 async function lookupCrossrefMetadata({ doi, title }) {
   const endpoint = doi
     ? `https://api.crossref.org/works/${encodeURIComponent(doi)}`
@@ -455,6 +492,40 @@ async function lookupCrossrefMetadata({ doi, title }) {
   const data = await readRequestJson(await fetch(endpoint), 'Crossref metadata');
   const item = doi ? data.message : data.message?.items?.[0];
   return mapCrossrefWork(item);
+}
+
+async function lookupCrossrefMetadataCandidates({ doi, title }) {
+  const endpoint = doi
+    ? `https://api.crossref.org/works/${encodeURIComponent(doi)}`
+    : title
+      ? `https://api.crossref.org/works?rows=10&query.title=${encodeURIComponent(title)}`
+      : '';
+  if (!endpoint) return { status: 'no-match', candidates: [] };
+
+  const data = await readRequestJson(await fetch(endpoint), 'Crossref metadata');
+  const works = doi ? [data.message] : (Array.isArray(data.message?.items) ? data.message.items : []);
+  return { status: works.length ? 'success' : 'no-match', candidates: works.map(mapCrossrefWork).filter(Boolean) };
+}
+
+function metadataCandidate(candidate, index, query) {
+  const provider = cleanString(candidate.source);
+  const fields = [
+    'doi', 'title', 'authors', 'year', 'publication', 'url', 'abstractText',
+    'publisher', 'volume', 'issue', 'pages', 'issn', 'keywords', 'itemType',
+  ];
+  const fieldSources = {};
+  for (const field of fields) {
+    const value = candidate[field];
+    if (Array.isArray(value) ? value.length > 0 : cleanString(value)) fieldSources[field] = provider;
+  }
+  const identity = cleanString(candidate.doi).toLowerCase() || normalizeTitleForMatching(candidate.title) || String(index);
+  return {
+    id: `${provider}:${encodeURIComponent(identity)}:${index}`,
+    provider,
+    query: { ...query },
+    metadata: candidate,
+    fieldSources,
+  };
 }
 
 function emitLibraryReferenceProgress(sender, payload) {
@@ -544,6 +615,29 @@ function createLibraryCommands(context) {
 
     async library_get_settings() {
       return store.load().settings;
+    },
+
+    async library_get_paper({ paperId }) {
+      const id = cleanString(paperId);
+      if (!id) throw new Error('paperId is required');
+      const paper = store.getPaper(id);
+      if (!paper) throw new Error('Paper does not exist');
+      return paper;
+    },
+
+    /** Resolve a frozen selection by identity, independent of later list filters or sorting. */
+    async library_get_papers_by_ids({ paperIds }) {
+      if (!Array.isArray(paperIds)) throw new Error('paperIds must be an array');
+      if (paperIds.length > 500) throw new Error('At most 500 paperIds can be requested at once');
+      const ids = [...new Set(paperIds.map(cleanString).filter(Boolean))];
+      const papers = [];
+      const missingIds = [];
+      for (const paperId of ids) {
+        const paper = store.getPaper(paperId);
+        if (paper) papers.push(paper);
+        else missingIds.push(paperId);
+      }
+      return { papers, missingIds };
     },
 
     async library_update_settings({ settings }) {
@@ -675,9 +769,28 @@ function createLibraryCommands(context) {
       return store.listPaperIds(request);
     },
 
+    /** Read the complete filtered ID set in one main-process turn so writes cannot shift page offsets. */
+    async library_list_all_paper_ids({ request = {} }) {
+      const total = store.countPapers(request);
+      const ids = [];
+      const pageSize = 5000;
+      for (let offset = 0; offset < total; offset += pageSize) {
+        ids.push(...store.listPaperIds({ ...request, limit: pageSize, offset }));
+      }
+      return ids;
+    },
+
     /** 当前筛选的完整匹配计数（供全选三态与批量目标校验，P2-2）。 */
     async library_count_papers({ request = {} }) {
       return store.countPapers(request);
+    },
+
+    async library_get_mineru_parse_statuses({ paperIds }) {
+      return store.getMineruParseStatuses(paperIds);
+    },
+
+    async library_save_mineru_parse_statuses({ entries }) {
+      return store.saveMineruParseStatuses(entries);
     },
 
     async library_inspect_pdf_assets() {
@@ -843,7 +956,7 @@ function createLibraryCommands(context) {
       const paper = store.getPaper(request.paperId);
       if (!paper) throw new Error('Paper does not exist');
       if (!paper.categoryIds.includes(request.categoryId)) paper.categoryIds.push(request.categoryId);
-      paper.updatedAt = now();
+      touchPaper(paper);
       store.savePaper(paper);
       return paper;
     },
@@ -851,6 +964,36 @@ function createLibraryCommands(context) {
     async library_update_paper({ request }) {
       const paper = store.getPaper(request.paperId);
       if (!paper) throw new Error('Paper does not exist');
+      if (request.expectedUpdatedAt !== undefined) {
+        const expectedUpdatedAt = Number(request.expectedUpdatedAt);
+        if (!Number.isSafeInteger(expectedUpdatedAt) || expectedUpdatedAt < 0) {
+          throw new Error('expectedUpdatedAt must be a non-negative integer');
+        }
+        if (paper.updatedAt !== expectedUpdatedAt && !request.expectedValues) {
+          throw new Error('Paper changed after editing began. Review the latest metadata and retry your save.');
+        }
+      }
+
+      const expectedValues = request.expectedValues && typeof request.expectedValues === 'object'
+        ? request.expectedValues
+        : null;
+      const metadataKeys = [
+        'title', 'titleZh', 'year', 'publication', 'doi', 'url', 'abstractText', 'itemType',
+        'publisher', 'institution', 'reportNumber', 'volume', 'issue', 'pages', 'isbn',
+        'issn', 'userNote', 'citation', 'keywords', 'authors', 'tags', 'isFavorite',
+      ];
+      const changedKeys = metadataKeys.filter((key) => (
+        expectedValues && Object.prototype.hasOwnProperty.call(expectedValues, key) &&
+        request[key] !== undefined &&
+        !metadataValuesEqual(request[key], expectedValues[key])
+      ));
+      const conflictFields = changedKeys.filter((key) => (
+        !metadataValuesEqual(paperMetadataComparableValue(paper, key), expectedValues[key]) &&
+        !metadataValuesEqual(paperMetadataComparableValue(paper, key), request[key])
+      ));
+      if (conflictFields.length > 0) {
+        throw new Error(`Paper changed after editing began in fields: ${conflictFields.join(', ')}`);
+      }
 
       for (const key of [
         'title',
@@ -873,13 +1016,13 @@ function createLibraryCommands(context) {
         'aiSummary',
         'citation',
       ]) {
-        if (request[key] !== undefined) paper[key] = request[key];
+        if (request[key] !== undefined && (!expectedValues || changedKeys.includes(key))) paper[key] = request[key];
       }
-      if (request.keywords) paper.keywords = request.keywords.map(cleanString).filter(Boolean);
-      if (request.authors) paper.authors = request.authors.map(cleanString).filter(Boolean).map(normalizeAuthor);
-      if (request.tags) paper.tags = request.tags.map(cleanString).filter(Boolean).map(normalizeTag);
-      if (request.isFavorite != null) paper.isFavorite = Boolean(request.isFavorite);
-      paper.updatedAt = now();
+      if (request.keywords && (!expectedValues || changedKeys.includes('keywords'))) paper.keywords = request.keywords.map(cleanString).filter(Boolean);
+      if (request.authors && (!expectedValues || changedKeys.includes('authors'))) paper.authors = request.authors.map(cleanString).filter(Boolean).map(normalizeAuthor);
+      if (request.tags && (!expectedValues || changedKeys.includes('tags'))) paper.tags = request.tags.map(cleanString).filter(Boolean).map(normalizeTag);
+      if (request.isFavorite != null && (!expectedValues || changedKeys.includes('isFavorite'))) paper.isFavorite = Boolean(request.isFavorite);
+      touchPaper(paper);
 
       store.savePaper(paper);
       return paper;
@@ -919,7 +1062,7 @@ function createLibraryCommands(context) {
       attachment.fileSize = stat.size;
       attachment.contentHash = await hashFile(request.newPath);
       attachment.missing = false;
-      paper.updatedAt = now();
+      touchPaper(paper);
 
       store.savePaper(paper);
       return attachment;
@@ -1105,6 +1248,36 @@ function createLibraryCommands(context) {
       ]);
 
       return mergeMetadataResults(openAlexResult, crossrefResult);
+    },
+
+    async lookup_literature_metadata_candidates({ request }) {
+      const library = store.load();
+      const doi = normalizeDoi(request?.doi);
+      const title = cleanString(request?.title);
+      if (!doi && !title) return { query: null, providers: {}, candidates: [] };
+      const query = doi ? { kind: 'doi', value: doi } : { kind: 'title', value: title };
+      const results = await Promise.allSettled([
+        lookupOpenAlexMetadataCandidates({ doi, title, settings: library.settings }),
+        lookupCrossrefMetadataCandidates({ doi, title }),
+      ]);
+      const providerNames = ['openalex', 'crossref'];
+      const providers = {};
+      const candidates = [];
+      results.forEach((result, providerIndex) => {
+        const provider = providerNames[providerIndex];
+        if (result.status === 'rejected') {
+          providers[provider] = {
+            status: 'failed',
+            error: result.reason instanceof Error ? result.reason.message : String(result.reason ?? 'Unknown error'),
+          };
+          return;
+        }
+        providers[provider] = { status: result.value.status, error: null };
+        result.value.candidates.forEach((candidate, index) => {
+          candidates.push(metadataCandidate(candidate, index, query));
+        });
+      });
+      return { query, providers, candidates };
     },
   };
 

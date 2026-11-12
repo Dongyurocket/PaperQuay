@@ -62,6 +62,35 @@ test('repairMineruCacheImages rewrites missing refs to the unique part_N_ file',
   }
 });
 
+test('repairMineruCacheImages retries a transient Windows replacement lock', async (context) => {
+  const directory = await createCacheFixture({
+    images: ['part_1_aaa.jpg'],
+    contentList: [{ 0: { type: 'image', content: { image_source: { path: 'images/aaa.jpg' } } } }],
+  });
+  const originalRename = fsp.rename;
+  let transientFailureCount = 0;
+  context.after(() => { fsp.rename = originalRename; });
+  fsp.rename = async (...args: Parameters<typeof fsp.rename>) => {
+    if (transientFailureCount === 0) {
+      transientFailureCount += 1;
+      const error = new Error('simulated Windows file lock') as NodeJS.ErrnoException;
+      error.code = 'EPERM';
+      throw error;
+    }
+    return originalRename(...args);
+  };
+
+  try {
+    const report = await repairMineruCacheImages({ directory });
+    assert.equal(transientFailureCount, 1);
+    assert.equal(report.fixed, 1);
+    assert.equal(report.changedFiles.length, 1);
+  } finally {
+    fsp.rename = originalRename;
+    await fsp.rm(directory, { recursive: true, force: true });
+  }
+});
+
 test('repairMineruCacheImages is idempotent and leaves correct refs untouched', async () => {
   const directory = await createCacheFixture({
     images: ['part_1_aaa.jpg', 'present.jpg'],

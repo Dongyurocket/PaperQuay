@@ -334,14 +334,15 @@ test('paper status helpers initialize and merge MinerU and summary status', () =
   const initial = buildInitialPaperStatuses(targetPapers);
 
   assert.deepEqual(initial, {
-    p1: { mineruParsed: false, overviewGenerated: true, checkingMineru: false },
-    p2: { mineruParsed: false, overviewGenerated: false, checkingMineru: false },
+    p1: { mineruParsed: false, mineruStatus: 'unknown', overviewGenerated: true, checkingMineru: false },
+    p2: { mineruParsed: false, mineruStatus: 'unknown', overviewGenerated: false, checkingMineru: false },
   });
 
   const checking = markPaperStatusesCheckingMineru(initial, targetPapers, new Set(['p2']));
 
   assert.deepEqual(checking.p2, {
     mineruParsed: false,
+    mineruStatus: 'unknown',
     overviewGenerated: false,
     checkingMineru: true,
   });
@@ -354,6 +355,7 @@ test('paper status helpers initialize and merge MinerU and summary status', () =
   const mineruUpdated = applyPaperMineruStatusUpdate(summarized, 'p2', true);
   assert.deepEqual(mineruUpdated.p2, {
     mineruParsed: true,
+    mineruStatus: 'available',
     overviewGenerated: true,
     checkingMineru: false,
   });

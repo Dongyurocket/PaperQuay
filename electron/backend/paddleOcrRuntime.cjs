@@ -1,5 +1,4 @@
 const { randomUUID } = require('node:crypto');
-const { prepareMineruCacheForReparse, finishMineruCacheReparse } = require('./mineruCacheCommands.cjs');
 
 const PADDLE_PROGRESS_EVENT = 'paperquay://document-parse-progress';
 
@@ -83,14 +82,12 @@ function createPaddleTaskRegistry() {
       publish({ status: 'running', stage: 'preparing', completed: 0, total: 100 });
       try {
         const deadline = Date.now() + Math.max(1, options.timeoutSecs ?? 3600) * 1000;
-        if (options.reparse && options.extractDir) await prepareMineruCacheForReparse({ directory: options.extractDir });
         const result = await execute({
           ...options,
           deadline,
           onProgress: (patch) => publish({ status: 'running', ...patch }),
         });
         if (Date.now() >= deadline) throw new Error('PaddleOCR-VL 任务总时限已到');
-        if (options.reparse && options.extractDir) await finishMineruCacheReparse({ directory: options.extractDir, success: true });
         publish({ status: 'success', stage: 'done', completed: 100, total: 100,
           contentJsonPath: result.contentJsonPath, blockCount: result.blockCount });
         return { ...result, taskId };

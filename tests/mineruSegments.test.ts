@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   extractMineruOutlineIndex,
+  persistedStructureToMineruOutlineIndex,
   splitMineruPagesIntoParts,
   type MineruOutlineIndexItem,
 } from '../src/features/reader/mineruSegments.ts';
@@ -96,6 +97,26 @@ test('progressive availability: outline is ready from index without waiting for 
   const allBlocksProgressive = parts.segments.flatMap((seg) => seg.blocks);
   const totalBlocks = parts.metadata.blockCount;
   assert.equal(allBlocksProgressive.length, totalBlocks);
+});
+
+test('persisted chapter units become a page-addressable outline with hierarchy', () => {
+  const outline = persistedStructureToMineruOutlineIndex({
+    generationId: 'g1', sourceVersion: 'sha256', pages: [],
+    units: [
+      { unitId: 'root', parentUnitId: null, unitKind: 'document', ordinal: 0, title: null,
+        physicalStart: 1, physicalEnd: 20, printedStart: null, printedEnd: null, unitRevision: 'r0' },
+      { unitId: 'chapter', parentUnitId: 'root', unitKind: 'chapter', ordinal: 1, title: 'Chapter 1',
+        physicalStart: 3, physicalEnd: 20, printedStart: null, printedEnd: null, unitRevision: 'r1' },
+      { unitId: 'section', parentUnitId: 'chapter', unitKind: 'section', ordinal: 2, title: '1.1 Method',
+        physicalStart: 5, physicalEnd: 8, printedStart: null, printedEnd: null, unitRevision: 'r2' },
+    ],
+  });
+  assert.deepEqual(outline.map(({ title, pageIndex, level }) => ({ title, pageIndex, level })), [
+    { title: 'Chapter 1', pageIndex: 2, level: 1 },
+    { title: '1.1 Method', pageIndex: 4, level: 2 },
+  ]);
+  assert.ok(outline.every((item) => item.blockId.startsWith('persisted-outline:')));
+  assert.deepEqual(persistedStructureToMineruOutlineIndex(null), []);
 });
 
 test('parseMineruPagesOffThread and parseMineruDocumentOffThread support progressive callbacks', async () => {

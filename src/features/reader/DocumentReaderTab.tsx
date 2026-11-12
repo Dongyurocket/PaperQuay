@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import ReaderWorkspace from './ReaderWorkspace';
+import LiteratureFileLocationsDialog from '../literature/components/LiteratureFileLocationsDialog';
 import { getDocumentParseTask, subscribeDocumentParseTasks } from '../../services/documentParseTasks';
+import { getPersistedDocumentStructure } from '../../services/documentStructure';
 import { shouldShowParseTask, toPaperParseTaskState } from './documentParseTaskState';
 import {
   captureSystemScreenshot,
@@ -207,6 +209,7 @@ import {
   resolveCurrentPdfVariantLabel,
   resolveOriginalPdfPath,
 } from './documentReaderPdfOptions.ts';
+import { persistedStructureToMineruOutlineIndex } from './mineruSegments.ts';
 import {
   writeMineruParseCache,
   writePreviewSummaryCache,
@@ -350,6 +353,7 @@ function DocumentReaderTab({
   const readerNoteEditorSourceId = GLOBAL_READER_NOTE_EDITOR_SOURCE_ID;
   const layoutRef = useRef<HTMLDivElement>(null);
   const summaryRequestIdRef = useRef(0);
+  const persistedOutlineRequestIdRef = useRef(0);
   const openDocumentRequestIdRef = useRef(0);
   const lastDocumentSignatureRef = useRef('');
   const lastCapturedSelectionRef = useRef<{
@@ -382,6 +386,7 @@ function DocumentReaderTab({
 
   const [currentDocument, setCurrentDocument] = useState<WorkspaceItem>(document);
   const [attachTranslatedPdfBusy, setAttachTranslatedPdfBusy] = useState(false);
+  const [fileLocationsTarget, setFileLocationsTarget] = useState<{ paperId: string; title: string } | null>(null);
   const [pdfSource, setPdfSource] = useState<PdfSource>(null);
   const [pdfData, setPdfData] = useState<Uint8Array | null>(null);
   const [pdfPageCountSnapshot, setPdfPageCountSnapshot] = useState<{
@@ -410,6 +415,7 @@ function DocumentReaderTab({
   const [mineruPages, setMineruPages] = useState<MineruPage[]>([]);
   const [flatBlocks, setFlatBlocks] = useState<PositionedMineruBlock[]>([]);
   const [mineruOutlineIndex, setMineruOutlineIndex] = useState<MineruOutlineIndexItem[] | null>(null);
+  const [persistedOutlineIndex, setPersistedOutlineIndex] = useState<MineruOutlineIndexItem[] | null>(null);
   const [activeBlockId, setActiveBlockId] = useState<string | null>(null);
   const [hoveredBlockId, setHoveredBlockId] = useState<string | null>(null);
   const [activePdfHighlight, setActivePdfHighlight] = useState<PdfHighlightTarget | null>(null);
@@ -600,6 +606,29 @@ function DocumentReaderTab({
     () => resolveOriginalPdfPath(document, settings.remotePdfDownloadDir),
     [document, settings.remotePdfDownloadDir],
   );
+
+  useEffect(() => {
+    const requestId = ++persistedOutlineRequestIdRef.current;
+    setPersistedOutlineIndex(null);
+    const displayedPath = pdfSource?.kind === 'local-path' ? pdfSource.path : '';
+    const nativePaperId = currentDocument.source === 'native-library' && currentDocument.workspaceId.startsWith('native-library:')
+      ? currentDocument.workspaceId.slice('native-library:'.length)
+      : '';
+    if (!nativePaperId || !displayedPath || !originalPdfPath || !isSameLocalPath(displayedPath, originalPdfPath)) {
+      return () => {
+        if (persistedOutlineRequestIdRef.current === requestId) persistedOutlineRequestIdRef.current += 1;
+      };
+    }
+    void getPersistedDocumentStructure(nativePaperId, displayedPath).then((structure) => {
+      if (persistedOutlineRequestIdRef.current !== requestId) return;
+      setPersistedOutlineIndex(persistedStructureToMineruOutlineIndex(structure));
+    }).catch(() => {
+      if (persistedOutlineRequestIdRef.current === requestId) setPersistedOutlineIndex(null);
+    });
+    return () => {
+      if (persistedOutlineRequestIdRef.current === requestId) persistedOutlineRequestIdRef.current += 1;
+    };
+  }, [currentDocument.source, currentDocument.workspaceId, originalPdfPath, pdfSource]);
   const currentLocalPdfPath = resolveCurrentLocalPdfPath(pdfPath, pdfSource);
   const compareOriginalPath = readingViewMode === 'pdf-compare' ? originalPdfPath.trim() : '';
   const effectiveSourceKey = compareOriginalPath
@@ -929,6 +958,7 @@ function DocumentReaderTab({
     // Allow the next opened document, including reopening the same workspace item,
     // to restore cached reading history before any auto-generation runs.
     restoredHistoryRef.current = '';
+    summaryRequestIdRef.current += 1;
     setMineruPath('');
     setMineruPages([]);
     setFlatBlocks([]);
@@ -1126,27 +1156,58 @@ function DocumentReaderTab({
 
   const tryLoadSavedSummary = useCallback(
     async (item: WorkspaceItem, sourceKey: string) => {
-      const result = await loadSavedSummaryCache({
+      return loadSavedSummaryCache({
         item,
         mineruCacheDir: settings.mineruCacheDir,
         sourceKey,
         legacySourceKeys: paperSummaryLegacySourceKeys,
         readText: readLocalTextFileIfExists,
       });
-
-      if (result && result.matchedSourceKey !== sourceKey && sourceKey.trim()) {
-        await writePreviewSummaryCache({
-          item,
-          mineruCacheDir: settings.mineruCacheDir,
-          sourceKey,
-          summary: result.summary,
-        }).catch(() => undefined);
-      }
-
-      return result?.summary ?? null;
     },
     [paperSummaryLegacySourceKeys, settings.mineruCacheDir],
   );
+
+  useEffect(() => {
+    if (!currentDocument?.workspaceId || paperSummaryLoading) {
+      return;
+    }
+    if (paperSummary && paperSummarySourceKey === paperSummaryNextSourceKey) {
+      return;
+    }
+
+    const requestId = summaryRequestIdRef.current + 1;
+    summaryRequestIdRef.current = requestId;
+    let cancelled = false;
+
+    void tryLoadSavedSummary(currentDocument, paperSummaryNextSourceKey).then((result) => {
+      if (
+        cancelled ||
+        !result ||
+        summaryRequestIdRef.current !== requestId ||
+        (paperSummary && (
+          result.matchedSourceKey !== paperSummaryNextSourceKey ||
+          paperSummarySourceKey === result.matchedSourceKey
+        ))
+      ) {
+        return;
+      }
+
+      setPaperSummary(result.summary);
+      setPaperSummarySourceKey(result.matchedSourceKey);
+      setPaperSummaryError('');
+    }).catch(() => undefined);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    currentDocument,
+    paperSummary,
+    paperSummaryLoading,
+    paperSummaryNextSourceKey,
+    paperSummarySourceKey,
+    tryLoadSavedSummary,
+  ]);
 
   const tryLoadSavedMineruPages = useCallback(
     async (item: WorkspaceItem) => {
@@ -2168,7 +2229,7 @@ function DocumentReaderTab({
   ]);
 
   const handleGeneratePaperSummary = useCallback(
-    async (openPreferencesOnMissingKey = true) => {
+    async ({ forceRefresh = false, openPreferencesOnMissingKey = true } = {}) => {
       if (paperSummaryLoading || isPaperTaskRunning(libraryOperation, 'overview')) {
         return;
       }
@@ -2178,7 +2239,6 @@ function DocumentReaderTab({
       }
 
       if (settings.summarySourceMode === 'mineru-markdown' && summaryBlockInputs.length === 0) {
-        setPaperSummary(null);
         const message = lRef.current(
           '请先加载 MinerU JSON，再基于 MinerU Markdown 生成概览。',
           'Load a MinerU JSON file before generating an overview from MinerU Markdown.',
@@ -2190,7 +2250,6 @@ function DocumentReaderTab({
       }
 
       if (!summaryModelPreset || !summaryModelPreset.baseUrl.trim()) {
-        setPaperSummary(null);
         const message = lRef.current(
           '请先在设置中填写概览模型的 OpenAI 兼容 Base URL。',
           'Configure the overview model OpenAI-compatible Base URL in Settings first.',
@@ -2208,7 +2267,6 @@ function DocumentReaderTab({
 
       if (!summaryModelPreset || !summaryModelPreset.apiKey.trim()) {
         setStatusMessage(lRef.current('缺少概览接口 API Key', 'Missing overview API key'));
-        setPaperSummary(null);
         const message = lRef.current(
           '请先在设置中填写概览模型的 API Key。',
           'Configure the overview model API key in Settings first.',
@@ -2224,7 +2282,6 @@ function DocumentReaderTab({
       }
 
       if (!summaryModelPreset || !summaryModelPreset.model.trim()) {
-        setPaperSummary(null);
         const message = lRef.current(
           '请先在设置中填写概览模型名称。',
           'Configure the overview model name in Settings first.',
@@ -2249,17 +2306,20 @@ function DocumentReaderTab({
       setStatusMessage(runningMessage);
       updateLibraryOperation('overview', 'running', runningMessage, 25, 100);
 
+      let persistingGeneratedSummary = false;
       try {
         const summaryRequest = await resolveSummaryRequest();
-        const cachedSummary = await tryLoadSavedSummary(currentDocument, paperSummaryNextSourceKey);
+        const cachedSummary = forceRefresh
+          ? null
+          : await tryLoadSavedSummary(currentDocument, paperSummaryNextSourceKey);
 
         if (cachedSummary) {
           if (summaryRequestIdRef.current !== requestId) {
             return;
           }
 
-          setPaperSummary(cachedSummary);
-          setPaperSummarySourceKey(paperSummaryNextSourceKey);
+          setPaperSummary(cachedSummary.summary);
+          setPaperSummarySourceKey(cachedSummary.matchedSourceKey);
           const successMessage = lRef.current('已从本地缓存恢复论文概览', 'Restored the paper overview from the local cache');
           setStatusMessage(successMessage);
           updateLibraryOperation('overview', 'success', successMessage, 100, 100);
@@ -2285,11 +2345,15 @@ function DocumentReaderTab({
           return;
         }
 
+        persistingGeneratedSummary = true;
+        await saveSummaryCache(currentDocument, paperSummaryNextSourceKey, summary);
+        if (summaryRequestIdRef.current !== requestId) {
+          return;
+        }
+        persistingGeneratedSummary = false;
+
         setPaperSummary(summary);
         setPaperSummarySourceKey(paperSummaryNextSourceKey);
-        await saveSummaryCache(currentDocument, paperSummaryNextSourceKey, summary).catch(
-          () => undefined,
-        );
         const successMessage = lRef.current('论文概览已生成', 'Paper overview generated');
         setStatusMessage(successMessage);
         updateLibraryOperation('overview', 'success', successMessage, 100, 100);
@@ -2298,11 +2362,16 @@ function DocumentReaderTab({
           return;
         }
 
-        setPaperSummary(null);
-        const message =
+        const detail =
           nextError instanceof Error
             ? nextError.message
             : lRef.current('生成论文概览失败', 'Failed to generate the paper overview');
+        const message = persistingGeneratedSummary
+          ? lRef.current(
+              `新概览未能保存，仍保留旧概览。请重试。${detail ? ` ${detail}` : ''}`,
+              `The new overview could not be saved; the previous overview is still available. Retry. ${detail}`,
+            )
+          : detail;
         setPaperSummaryError(message);
         setStatusMessage(lRef.current('论文概览生成失败', 'Failed to generate the paper overview'));
         updateLibraryOperation('overview', 'error', message, 100, 100);
@@ -3748,7 +3817,7 @@ function DocumentReaderTab({
   }, [currentDocument.workspaceId, isActive, qaSessions, selectedQaSessionId]);
 
   useEffect(() => {
-    if (!currentDocument.workspaceId || !pdfSource) {
+    if (!currentDocument.workspaceId) {
       return;
     }
 
@@ -3778,7 +3847,6 @@ function DocumentReaderTab({
     }
   }, [
     currentDocument.workspaceId,
-    pdfSource,
   ]);
 
   useEffect(() => {
@@ -4201,7 +4269,7 @@ function DocumentReaderTab({
 
     autoSummarySourceKeyRef.current = paperSummaryNextSourceKey;
 
-    void handleGeneratePaperSummary(false);
+    void handleGeneratePaperSummary({ openPreferencesOnMissingKey: false });
   }, [
     currentDocument,
     handleGeneratePaperSummary,
@@ -4298,8 +4366,8 @@ function DocumentReaderTab({
   }, [handleCloudParse]);
 
   const handleBridgeGenerateSummary = useCallback(() => {
-    void handleGeneratePaperSummary();
-  }, [handleGeneratePaperSummary]);
+    void handleGeneratePaperSummary({ forceRefresh: Boolean(paperSummary) });
+  }, [handleGeneratePaperSummary, paperSummary]);
 
   const bridgeState = useMemo<ReaderTabBridgeState>(
     () => ({
@@ -4383,7 +4451,7 @@ function DocumentReaderTab({
         onPdfScrollPositionChange={handlePdfScrollPositionChange}
         onPdfReadingHeatmapChange={handlePdfReadingHeatmapChange}
         blocks={flatBlocks}
-        mineruOutlineIndex={mineruOutlineIndex}
+        mineruOutlineIndex={persistedOutlineIndex?.length ? persistedOutlineIndex : mineruOutlineIndex}
         translations={blockTranslations}
         translationDisplayMode={settings.translationDisplayMode}
         translationLanguageLabel={translationTargetLanguageLabel}
@@ -4419,6 +4487,12 @@ function DocumentReaderTab({
         onTranslateDocument={() => void handleTranslateDocument()}
         onCancelTranslateDocument={handleCancelDocumentTranslation}
         onOpenPreferences={onOpenPreferences}
+        onOpenFileLocations={currentDocument.source === 'native-library' && currentDocument.workspaceId.startsWith('native-library:')
+          ? () => setFileLocationsTarget({
+            paperId: currentDocument.workspaceId.slice('native-library:'.length),
+            title: currentDocument.title,
+          })
+          : undefined}
         notes={notes}
         onAddSelectionToNote={() => void handleAddSelectionToNote()}
         onDistillSelectionToNote={() => void handleDistillSelectionToNote()}
@@ -4429,9 +4503,12 @@ function DocumentReaderTab({
         selectedAnnotationId={selectedAnnotationId}
         onSelectAnnotation={handleSelectAnnotation}
         paperSummary={paperSummary}
+        paperSummaryVersionUnverified={Boolean(
+          paperSummary && (!paperSummaryNextSourceKey || paperSummarySourceKey !== paperSummaryNextSourceKey),
+        )}
         paperSummaryLoading={paperSummaryLoading}
         paperSummaryError={paperSummaryError}
-        onGenerateSummary={() => void handleGeneratePaperSummary()}
+        onGenerateSummary={handleBridgeGenerateSummary}
         qaSessions={qaSessions}
         selectedQaSessionId={selectedQaSessionId}
         qaMessages={qaMessages}
@@ -4478,6 +4555,13 @@ function DocumentReaderTab({
         onAttachAssistant={handleAttachAssistant}
         showLibraryToggle={false}
       />
+      {fileLocationsTarget ? (
+        <LiteratureFileLocationsDialog
+          paperId={fileLocationsTarget.paperId}
+          paperTitle={fileLocationsTarget.title}
+          onClose={() => setFileLocationsTarget(null)}
+        />
+      ) : null}
       {distillPreview ? (
         <NoteDistillPreviewPanel
           state={distillPreview}

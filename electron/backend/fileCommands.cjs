@@ -10,6 +10,7 @@ const {
   safeFileName,
   now,
 } = require('./utils.cjs');
+const { listEvidenceFileLocations, listLiteratureFileLocations } = require('./literatureFileLocations.cjs');
 
 const MINERU_CACHE_MARKER_FILE = '.paperquay-mineru-cache.json';
 const MINERU_OUTPUT_FILE_NAMES = new Set([
@@ -111,7 +112,8 @@ async function hasLooseMineruOutputFiles(directory) {
 }
 
 function createFileCommands(context) {
-  const { appPaths, approvedWritePaths, store } = context;
+  const { appPaths, approvedWritePaths, store, knowledgeStore } = context;
+  const shellApi = context.shellApi || shell;
   const configuredMineruCacheDir = cleanString(
     readJson(appPaths.configPath, null)?.settings?.mineruCacheDir,
   );
@@ -169,6 +171,52 @@ function createFileCommands(context) {
   }
 
   return {
+    async list_literature_file_locations({ paperId, evidenceId }) {
+      const id = cleanString(paperId);
+      if (!id) throw new Error('paperId is required');
+      const library = store.load();
+      const paper = library.papers.find((item) => item.id === id);
+      if (!paper) throw new Error('Paper not found');
+      if (cleanString(evidenceId)) return listEvidenceFileLocations({ paper, knowledgeStore, evidenceId });
+      return listLiteratureFileLocations({
+        paper,
+        appPaths: { ...appPaths, mineruCacheDir: configuredMineruCacheDir || appPaths.mineruCacheDir },
+        settings: library.settings,
+        knowledgeStore,
+      });
+    },
+
+    async reveal_literature_file_location({ paperId, locationId, evidenceId }) {
+      const id = cleanString(paperId);
+      const requestedLocationId = cleanString(locationId);
+      if (!id || !requestedLocationId) throw new Error('paperId and locationId are required');
+      const library = store.load();
+      const paper = library.papers.find((item) => item.id === id);
+      if (!paper) throw new Error('Paper not found');
+      const locations = cleanString(evidenceId)
+        ? await listEvidenceFileLocations({ paper, knowledgeStore, evidenceId })
+        : await listLiteratureFileLocations({
+        paper,
+        appPaths: { ...appPaths, mineruCacheDir: configuredMineruCacheDir || appPaths.mineruCacheDir },
+        settings: library.settings,
+        knowledgeStore,
+      });
+      const location = locations.find((item) => item.id === requestedLocationId);
+      if (!location) throw new Error('File location changed; refresh the location list');
+      if (location.status !== 'available' || !location.path) {
+        if (location.status === 'remote-only') throw new Error('No local file exists for this remote source');
+        if (location.status === 'version-mismatch') throw new Error('The associated file version no longer matches its recorded artifact');
+        throw new Error('The associated file is missing');
+      }
+      if (location.targetKind === 'directory') {
+        const error = await shellApi.openPath(location.path);
+        if (error) throw new Error(error);
+      } else {
+        shellApi.showItemInFolder(location.path);
+      }
+      return { opened: true, locationId: location.id };
+    },
+
     async get_app_default_paths() {
       await fsp.mkdir(appPaths.mineruCacheDir, { recursive: true });
       await fsp.mkdir(appPaths.remotePdfDownloadDir, { recursive: true });

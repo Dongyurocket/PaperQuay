@@ -15,6 +15,8 @@
  */
 
 const fsp = require('node:fs/promises');
+const fs = require('node:fs');
+const crypto = require('node:crypto');
 const path = require('node:path');
 const {
   cleanString,
@@ -26,6 +28,7 @@ const { getPdfPageCount, planPdfSplits, splitPdfFiles } = require('./pdfSplitter
 const { mergeMineruParseResults } = require('./mineruMerge.cjs');
 const { normalizePaddleOcrDocument } = require('./paddleOcrNormalize.cjs');
 const { fetchPaddleResource, mapConcurrent, createPaddleTaskRegistry } = require('./paddleOcrRuntime.cjs');
+const { deriveDocumentOutline } = require('./documentOutline.cjs');
 
 const PADDLE_OCR_DEFAULT_BASE_URL = 'https://paddleocr.aistudio-app.com';
 const PADDLE_OCR_DEFAULT_MODEL = 'PaddleOCR-VL-1.6';
@@ -33,6 +36,140 @@ const PADDLE_OCR_DEFAULT_MODEL = 'PaddleOCR-VL-1.6';
 // 官方同步服务默认只处理前 100 页。异步云任务的上限未在文档中固定，
 // 因此按同一口径保守切分，并在结果页数不足时显式报错而不是静默丢页。
 const PADDLE_OCR_MAX_PAGES_PER_JOB = 100;
+
+async function hashFile(filePath) {
+  const hash = crypto.createHash('sha256');
+  await new Promise((resolve, reject) => {
+    const stream = fs.createReadStream(filePath);
+    stream.on('data', (chunk) => hash.update(chunk));
+    stream.on('error', reject);
+    stream.on('end', resolve);
+  });
+  return hash.digest('hex');
+}
+
+function generationStagingDirectory(cacheRoot, generation) {
+  if (!generation || !cleanString(cacheRoot)) return null;
+  const sourceKey = crypto.createHash('sha256').update(generation.sourceId).digest('hex').slice(0, 24);
+  return path.join(path.resolve(cacheRoot), '.document-generations', sourceKey, generation.generationId);
+}
+
+async function stageCompatibilityCacheReplacement(cacheRoot, generationId, journal, journalPath) {
+  const directory = path.resolve(cacheRoot);
+  const names = ['content_list_v2.json', 'content_list.json', 'middle.json', 'full.md', 'images', 'translations', 'summaries'];
+  const backups = [];
+  await fsp.mkdir(directory, { recursive: true });
+  try {
+    for (const name of names) {
+      const target = path.join(directory, name);
+      const backup = `${target}.generation-backup-${generationId}`;
+      const stat = await fsp.lstat(target).catch((error) => error?.code === 'ENOENT' ? null : Promise.reject(error));
+      if (!stat) continue;
+      if (await fsp.lstat(backup).then(() => true, () => false)) {
+        throw new Error('A previous cache publication needs recovery before this generation can replace it.');
+      }
+      journal.moved.push({ target: path.relative(directory, target), backup: path.relative(directory, backup) });
+      journal.backups.push(path.relative(directory, backup));
+      await writePublicationJournal(journalPath, journal);
+      await fsp.rename(target, backup);
+      backups.push({ target, backup });
+    }
+  } catch (error) {
+    for (const item of backups.reverse()) await fsp.rename(item.backup, item.target).catch(() => undefined);
+    throw error;
+  }
+  return { directory, backups, writtenPaths: [] };
+}
+
+function publicationJournalDirectory(cacheRoot) {
+  return path.join(path.resolve(cacheRoot), '.paperquay-publication-journals');
+}
+
+async function writePublicationJournal(journalPath, journal) {
+  await fsp.mkdir(path.dirname(journalPath), { recursive: true });
+  const temporary = `${journalPath}.${process.pid}.${crypto.randomUUID()}.tmp`;
+  try {
+    await fsp.writeFile(temporary, `${JSON.stringify(journal, null, 2)}\n`, { flag: 'wx' });
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        await fsp.rename(temporary, journalPath);
+        break;
+      } catch (error) {
+        const transientWindowsLock = process.platform === 'win32' &&
+          ['EPERM', 'EACCES', 'EBUSY'].includes(error?.code);
+        if (!transientWindowsLock || attempt >= 5) throw error;
+        await new Promise((resolve) => setTimeout(resolve, 20 * (attempt + 1)));
+      }
+    }
+  } finally {
+    await fsp.rm(temporary, { force: true }).catch(() => undefined);
+  }
+}
+
+function safeJournalPath(cacheRoot, relativePath) {
+  if (typeof relativePath !== 'string' || !relativePath || path.isAbsolute(relativePath)) return null;
+  const root = path.resolve(cacheRoot);
+  const target = path.resolve(root, relativePath);
+  return target.startsWith(`${root}${path.sep}`) ? target : null;
+}
+
+async function recoverCompatibilityCachePublications(cacheRoot, knowledgeStore) {
+  const directory = publicationJournalDirectory(cacheRoot);
+  const names = await fsp.readdir(directory).catch((error) => error?.code === 'ENOENT' ? [] : Promise.reject(error));
+  const recovered = [];
+  for (const name of names.filter((item) => item.endsWith('.json')).sort()) {
+    const journalPath = path.join(directory, name);
+    const journal = JSON.parse(await fsp.readFile(journalPath, 'utf8'));
+    if (path.resolve(journal.cacheRoot || '') !== path.resolve(cacheRoot) || !/^[a-f0-9-]{16,}$/i.test(journal.generationId || '') || !journal.sourceId) {
+      throw new Error(`Invalid compatibility-cache recovery journal: ${name}`);
+    }
+    const generation = knowledgeStore?.listGenerations(journal.sourceId)
+      .find((item) => item.generationId === journal.generationId);
+    const committed = generation?.currentGeneration === journal.generationId;
+    if (committed) {
+      for (const backup of journal.backups || []) {
+        const backupPath = safeJournalPath(cacheRoot, backup);
+        if (!backupPath) throw new Error(`Unsafe cache backup path in recovery journal: ${name}`);
+        await fsp.rm(backupPath, { recursive: true, force: true });
+      }
+    } else {
+      for (const written of [...(journal.written || [])].reverse()) {
+        const writtenPath = safeJournalPath(cacheRoot, written);
+        if (!writtenPath) throw new Error(`Unsafe cache output path in recovery journal: ${name}`);
+        await fsp.rm(writtenPath, { recursive: true, force: true });
+      }
+      for (const entry of [...(journal.moved || [])].reverse()) {
+        const targetPath = safeJournalPath(cacheRoot, entry.target);
+        const backupPath = safeJournalPath(cacheRoot, entry.backup);
+        if (!targetPath || !backupPath) throw new Error(`Unsafe cache restore path in recovery journal: ${name}`);
+        const backupExists = await fsp.lstat(backupPath).then(() => true, (error) => error?.code === 'ENOENT' ? false : Promise.reject(error));
+        if (backupExists) {
+          await fsp.rm(targetPath, { recursive: true, force: true });
+          await fsp.rename(backupPath, targetPath);
+        }
+      }
+    }
+    await fsp.rm(journalPath, { force: true });
+    recovered.push({ generationId: journal.generationId, committed });
+  }
+  return recovered;
+}
+
+async function restoreCompatibilityCacheReplacement(preparation) {
+  if (!preparation) return;
+  for (const target of preparation.writtenPaths.slice().reverse()) {
+    await fsp.rm(target, { recursive: true, force: true }).catch(() => undefined);
+  }
+  for (const item of preparation.backups.slice().reverse()) {
+    await fsp.rm(item.target, { recursive: true, force: true }).catch(() => undefined);
+    await fsp.rename(item.backup, item.target);
+  }
+}
+
+async function finishCompatibilityCacheReplacement(preparation) {
+  if (!preparation) return;
+  for (const item of preparation.backups) await fsp.rm(item.backup, { recursive: true, force: true });
+}
 
 const IMAGE_MAGIC_BYTES = [
   [0xff, 0xd8, 0xff], // JPEG
@@ -239,6 +376,7 @@ async function submitPaddleOcrJob({ apiBaseUrl, token, pdfPath, fileName, model,
     throw new Error(describePaddleFailure(parsed));
   }
 
+  await options.onJobSubmitted?.(jobId);
   return jobId;
 }
 
@@ -441,18 +579,14 @@ async function runSinglePaddleOcrParse({
   model,
   options,
   extractDir,
+  existingJobId = '',
 }) {
   await fsp.mkdir(extractDir, { recursive: true });
 
   const expectedPageCount = await getPdfPageCount(pdfPath).catch(() => 0);
 
-  const jobId = await submitPaddleOcrJob({
-    apiBaseUrl,
-    token,
-    pdfPath,
-    fileName,
-    model,
-    options,
+  const jobId = cleanString(existingJobId) || await submitPaddleOcrJob({
+    apiBaseUrl, token, pdfPath, fileName, model, options,
   });
 
   const { jsonUrl } = await pollPaddleOcrJob({
@@ -516,22 +650,216 @@ function createPaddleOcrCommands(context) {
         console.warn(`[PaddleOCR-VL] Failed to read page count for ${fileName}:`, err);
       }
 
+      const knowledgeStore = context.knowledgeStore;
+      if (knowledgeStore && options.extractDir) {
+        await recoverCompatibilityCachePublications(options.extractDir, knowledgeStore);
+      }
+      const sourceVersion = knowledgeStore && totalPageCount > 0 ? await hashFile(pdfPath) : '';
+      const sourceId = cleanString(options.documentKey) || (sourceVersion
+        ? `local-pdf:${crypto.createHash('sha256').update(path.resolve(pdfPath)).digest('hex')}`
+        : '');
+      const generationForPlans = (plans) => {
+        if (!knowledgeStore || !sourceId || !sourceVersion) return null;
+        const partitions = plans.map((plan, index) => ({
+          index,
+          startPage: plan.startPage,
+          endPage: plan.endPage,
+          inputHash: crypto.createHash('sha256')
+            .update(`${sourceVersion}:${model}:${plan.startPage}:${plan.endPage}`)
+            .digest('hex'),
+        }));
+        const resumable = knowledgeStore.findBuildingGeneration?.(sourceId, sourceVersion, partitions);
+        if (resumable) return resumable;
+        return knowledgeStore.beginGeneration({
+          sourceId,
+          sourceKind: 'pdf',
+          sourceVersion,
+          partitions,
+        });
+      };
+      const runTrackedPartition = async (generation, index, parse) => {
+        if (!generation) return parse();
+        const partition = knowledgeStore.listGenerationPartitions(generation.generationId)
+          .find((item) => item.partitionIndex === index);
+        if (!partition) throw new Error('Parse partition is missing from its persisted generation.');
+        const expectedPages = partition.endPage - partition.startPage + 1;
+        const readVerifiedStage = async () => {
+          const staged = partition.stagedManifest;
+          const root = path.resolve(partition.stagedPath || '');
+          if (!staged || staged.version !== 1 || staged.pageCount !== expectedPages || !Array.isArray(staged.entries) || !root) return null;
+          const expected = new Set(staged.entries.map((entry) => entry.path));
+          if (!expected.size || expected.size !== staged.entries.length || (await listRelativeFiles(root)).length !== expected.size) return null;
+          for (const entry of staged.entries) {
+            if (!entry || !cleanString(entry.path) || path.isAbsolute(entry.path)) return null;
+            const target = path.resolve(root, ...entry.path.split('/'));
+            if (!target.startsWith(`${root}${path.sep}`)) return null;
+            const stat = await fsp.lstat(target).catch(() => null);
+            if (!stat?.isFile() || stat.isSymbolicLink() || stat.size !== entry.size || await hashFile(target) !== entry.sha256) return null;
+          }
+          const contentJsonPath = path.join(root, 'content_list_v2.json');
+          const markdownPath = path.join(root, 'full.md');
+          const [contentJsonText, markdownText] = await Promise.all([
+            fsp.readFile(contentJsonPath, 'utf8').catch(() => null),
+            fsp.readFile(markdownPath, 'utf8').catch(() => null),
+          ]);
+          if (contentJsonText == null || markdownText == null) return null;
+          let blocks;
+          try { blocks = JSON.parse(contentJsonText); } catch { return null; }
+          if (!Array.isArray(blocks) || blocks.length !== expectedPages) return null;
+          return { batchId: partition.remoteJobId || `recovered-${index}`, contentJsonText, markdownText,
+            contentJsonPath, markdownPath, assetRootDir: root, pageCount: expectedPages,
+            blockCount: staged.blockCount, zipEntries: [...expected] };
+        };
+        const reused = await readVerifiedStage();
+        if (reused) {
+          if (partition.status !== 'complete' && !knowledgeStore.setPartitionStatus(generation.generationId, index, 'complete')) {
+            throw new Error('Recovered partition artifacts no longer match the active source version.');
+          }
+          return reused;
+        }
+        if (!knowledgeStore.setPartitionStatus(generation.generationId, index, 'running')) {
+          throw new Error('Parse partition is no longer eligible for this source version.');
+        }
+        if (partition.stagedPath) {
+          const generationRoot = path.resolve(generationStagingDirectory(appPaths.mineruCacheDir, generation));
+          const previousStage = path.resolve(partition.stagedPath);
+          if (previousStage === generationRoot || previousStage.startsWith(`${generationRoot}${path.sep}`)) {
+            knowledgeStore.clearPartitionArtifacts(generation.generationId, index);
+            await fsp.rm(previousStage, { recursive: true, force: true });
+          }
+        }
+        try {
+          const onJobSubmitted = (remoteJobId) => {
+            if (!knowledgeStore.setPartitionRemoteJobId(generation.generationId, index, remoteJobId)) {
+              throw new Error('Remote job identity could not be persisted for this source partition.');
+            }
+          };
+          const result = await parse(onJobSubmitted, partition.remoteJobId || '');
+          const stageRoot = path.resolve(result.assetRootDir || '');
+          const files = await listRelativeFiles(stageRoot);
+          const manifest = [];
+          for (const relativePath of files) {
+            const target = path.resolve(stageRoot, ...relativePath.split('/'));
+            if (!target.startsWith(`${stageRoot}${path.sep}`)) throw new Error('Partition artifact escaped its staging directory.');
+            const stat = await fsp.lstat(target);
+            if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('Partition staging contains a non-regular file.');
+            manifest.push({ path: relativePath, size: stat.size, sha256: await hashFile(target) });
+          }
+          if (!knowledgeStore.setPartitionArtifacts(generation.generationId, index, {
+            stagedPath: stageRoot, manifest, pageCount: result.pageCount, blockCount: result.blockCount || 0,
+          })) throw new Error('Partition artifacts could not be persisted for this source generation.');
+          if (!knowledgeStore.setPartitionStatus(generation.generationId, index, 'complete')) {
+            throw new Error('Parse partition lost its source version before commit.');
+          }
+          return result;
+        } catch (error) {
+          knowledgeStore.setPartitionStatus(generation.generationId, index, 'error');
+          throw error;
+        }
+      };
+      const publishGeneration = async (generation, artifactRoot) => {
+        if (generation && await hashFile(pdfPath) !== sourceVersion) {
+          throw new Error('The source PDF changed while parsing; the staged generation was not published.');
+        }
+        let manifest = [];
+        let pageMappings;
+        if (generation) {
+          const root = path.resolve(artifactRoot || '');
+          const files = await listRelativeFiles(root);
+          if (!root || files.length === 0) throw new Error('Parsed artifact staging is empty; previous published generation was preserved.');
+          manifest = [];
+          for (const relativePath of files) {
+            const target = path.resolve(root, ...relativePath.split('/'));
+            if (target === root || !target.startsWith(`${root}${path.sep}`)) throw new Error('Parsed artifact path escaped its staging directory.');
+            const stat = await fsp.lstat(target);
+            if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('Parsed artifact staging contains a non-regular file.');
+            manifest.push({ path: relativePath, size: stat.size, sha256: await hashFile(target) });
+          }
+          if (!knowledgeStore.setGenerationArtifacts(generation.generationId, { artifactPath: root, manifest })) {
+            throw new Error('Parsed artifacts could not be registered to the current source generation.');
+          }
+          for (const entry of manifest) {
+            const target = path.resolve(root, ...entry.path.split('/'));
+            const stat = await fsp.lstat(target);
+            if (!stat.isFile() || stat.isSymbolicLink() || stat.size !== entry.size || await hashFile(target) !== entry.sha256) {
+              throw new Error('Parsed artifact staging changed during validation; previous published generation was preserved.');
+            }
+          }
+          const contentEntry = manifest.find((entry) => /^(?:content_list_v2|content_list)\.json$/i.test(entry.path));
+          let parsedContentList = [];
+          if (contentEntry) {
+            try {
+              const contentPath = path.resolve(root, ...contentEntry.path.split('/'));
+              parsedContentList = JSON.parse(await fsp.readFile(contentPath, 'utf8'));
+            } catch {
+              // The generation remains page-addressable even if an optional outline source cannot be read.
+              parsedContentList = [];
+            }
+          }
+          const outline = deriveDocumentOutline(parsedContentList, { generationId: generation.generationId, sourceVersion, pageCount: totalPageCount });
+          if (!knowledgeStore.upsertDocumentUnits(generation.generationId, outline.units)) {
+            throw new Error('Document structure could not be registered to the staged generation.');
+          }
+          pageMappings = outline.pages;
+        }
+        let cachePreparation = null;
+        let journalPath = null;
+        let journal = null;
+        try {
+          const cacheRoot = path.resolve(options.extractDir || '');
+          const generationRoot = path.resolve(artifactRoot || '');
+          if (generation && options.extractDir && cacheRoot !== generationRoot) {
+            journalPath = path.join(publicationJournalDirectory(cacheRoot), `${generation.generationId}.json`);
+            journal = { version: 1, cacheRoot, sourceId: generation.sourceId, generationId: generation.generationId,
+              moved: [], backups: [], written: [] };
+            await writePublicationJournal(journalPath, journal);
+            cachePreparation = await stageCompatibilityCacheReplacement(cacheRoot, generation.generationId, journal, journalPath);
+            for (const entry of manifest) {
+              const source = path.resolve(generationRoot, ...entry.path.split('/'));
+              const destination = path.resolve(cacheRoot, ...entry.path.split('/'));
+              if (!source.startsWith(`${generationRoot}${path.sep}`) || !destination.startsWith(`${cacheRoot}${path.sep}`)) {
+                throw new Error('Parsed output path escaped its managed directory.');
+              }
+              await fsp.mkdir(path.dirname(destination), { recursive: true });
+              cachePreparation.writtenPaths.push(destination);
+              journal.written.push(path.relative(cacheRoot, destination));
+              await writePublicationJournal(journalPath, journal);
+              await fsp.copyFile(source, destination);
+              const copied = await fsp.stat(destination);
+              if (!copied.isFile() || copied.size !== entry.size || await hashFile(destination) !== entry.sha256) {
+                throw new Error('Compatibility cache copy failed integrity validation; previous cache files were restored.');
+              }
+            }
+          }
+          if (generation && !knowledgeStore.publishGeneration(generation.generationId, {
+            sourceVersion, expectedPageCount: totalPageCount, pageMappings,
+          })) {
+            throw new Error('Parsed output failed page coverage or source version validation; previous published generation was preserved.');
+          }
+          if (cachePreparation) await finishCompatibilityCacheReplacement(cachePreparation);
+          if (journalPath) await fsp.rm(journalPath, { force: true });
+        } catch (error) {
+          if (journalPath) await recoverCompatibilityCachePublications(path.dirname(path.dirname(journalPath)), knowledgeStore).catch(() => undefined);
+          else if (cachePreparation) await restoreCompatibilityCacheReplacement(cachePreparation).catch(() => undefined);
+          throw error;
+        }
+      };
       if (totalPageCount <= PADDLE_OCR_MAX_PAGES_PER_JOB) {
         const singleExtractDir = options.extractDir || path.join(
           appPaths.mineruCacheDir,
           `${path.basename(fileName, '.pdf')}-paddle-${now()}`,
         );
 
-        return await runSinglePaddleOcrParse({
-          pdfPath,
-          fileName,
-          dataId,
-          token,
-          apiBaseUrl,
-          model,
-          options,
-          extractDir: singleExtractDir,
-        });
+        const generation = totalPageCount > 0 ? generationForPlans([{ startPage: 1, endPage: totalPageCount }]) : null;
+        const outputDir = generationStagingDirectory(appPaths.mineruCacheDir, generation) || singleExtractDir;
+        try {
+          const result = await runTrackedPartition(generation, 0, (onJobSubmitted, existingJobId) => runSinglePaddleOcrParse({
+            pdfPath, fileName, dataId, token, apiBaseUrl, model,
+            options: { ...options, onJobSubmitted }, extractDir: outputDir, existingJobId,
+          }));
+          await publishGeneration(generation, result.assetRootDir);
+          return result;
+        } catch (error) { throw error; }
       }
 
       const splitPlans = planPdfSplits(totalPageCount, PADDLE_OCR_MAX_PAGES_PER_JOB);
@@ -552,33 +880,36 @@ function createPaddleOcrCommands(context) {
           `${path.basename(fileName, '.pdf')}-paddle-${now()}`,
         );
 
-        return await runSinglePaddleOcrParse({
-          pdfPath,
-          fileName,
-          dataId,
-          token,
-          apiBaseUrl,
-          model,
-          options,
-          extractDir: singleExtractDir,
-        });
+        const generation = generationForPlans([{ startPage: 1, endPage: totalPageCount }]);
+        const outputDir = generationStagingDirectory(appPaths.mineruCacheDir, generation) || singleExtractDir;
+        try {
+          const result = await runTrackedPartition(generation, 0, (onJobSubmitted, existingJobId) => runSinglePaddleOcrParse({
+            pdfPath, fileName, dataId, token, apiBaseUrl, model,
+            options: { ...options, onJobSubmitted }, extractDir: outputDir, existingJobId,
+          }));
+          await publishGeneration(generation, result.assetRootDir);
+          return result;
+        } catch (error) { throw error; }
       }
+
+      const generation = generationForPlans(splitPdfResults);
 
       const partResults = [];
 
       try {
         for (const part of splitPdfResults) {
-          const partExtractDir = path.join(splitWorkDir, `paddle_part_${part.partIndex + 1}`);
-          const partParsed = await runSinglePaddleOcrParse({
+          const partExtractDir = path.join(generationStagingDirectory(appPaths.mineruCacheDir, generation),
+            'partitions', `part_${String(part.partIndex + 1).padStart(4, '0')}`);
+          const partParsed = await runTrackedPartition(generation, part.partIndex, (onJobSubmitted, existingJobId) => runSinglePaddleOcrParse({
             pdfPath: part.path,
             fileName: path.basename(part.path),
             dataId: `paper_reader_paddle_part_${part.partIndex + 1}_${now()}`,
             token,
             apiBaseUrl,
             model,
-            options,
+            options: { ...options, onJobSubmitted }, existingJobId,
             extractDir: partExtractDir,
-          });
+          }));
 
           partResults.push({
             partIndex: part.partIndex,
@@ -589,37 +920,43 @@ function createPaddleOcrCommands(context) {
             extracted: partParsed,
           });
         }
+      } catch (error) {
+        throw error;
       } finally {
         for (const part of splitPdfResults) {
           await fsp.unlink(part.path).catch(() => {});
         }
       }
 
-      const finalExtractDir = options.extractDir || path.join(
+      const finalExtractDir = generationStagingDirectory(appPaths.mineruCacheDir, generation) || options.extractDir || path.join(
         appPaths.mineruCacheDir,
         `${path.basename(fileName, '.pdf')}-paddle-${now()}`,
       );
 
-      options.onProgress?.({ stage: 'merging', completed: 0, total: null });
-      if (Date.now() >= (options.deadline ?? Infinity)) throw new Error('PaddleOCR-VL 任务总时限已到');
-      const merged = await mergeMineruParseResults(partResults, finalExtractDir);
-      if (Date.now() >= (options.deadline ?? Infinity)) throw new Error('PaddleOCR-VL 任务总时限已到');
-
-      await fsp.rm(splitWorkDir, { recursive: true, force: true }).catch(() => {});
-
-      return {
-        batchId: partResults.map((part) => part.extracted.batchId).join(','),
-        dataId,
-        fileName,
-        state: 'done',
-        fullZipUrl: partResults[0]?.extracted.fullZipUrl || '',
-        usedToken: maskToken(token),
-        isSplitMerged: true,
-        splitPartCount: partResults.length,
-        totalPageCount,
-        ...merged,
-        blockCount: partResults.reduce((sum, part) => sum + (part.extracted.blockCount || 0), 0),
-      };
+      try {
+        options.onProgress?.({ stage: 'merging', completed: 0, total: null });
+        if (Date.now() >= (options.deadline ?? Infinity)) throw new Error('PaddleOCR-VL 任务总时限已到');
+        const merged = await mergeMineruParseResults(partResults, finalExtractDir);
+        if (Date.now() >= (options.deadline ?? Infinity)) throw new Error('PaddleOCR-VL 任务总时限已到');
+        await publishGeneration(generation, merged.assetRootDir);
+        return {
+          batchId: partResults.map((part) => part.extracted.batchId).join(','),
+          dataId,
+          fileName,
+          state: 'done',
+          fullZipUrl: partResults[0]?.extracted.fullZipUrl || '',
+          usedToken: maskToken(token),
+          isSplitMerged: true,
+          splitPartCount: partResults.length,
+          totalPageCount,
+          ...merged,
+          blockCount: partResults.reduce((sum, part) => sum + (part.extracted.blockCount || 0), 0),
+        };
+      } catch (error) {
+        throw error;
+      } finally {
+        await fsp.rm(splitWorkDir, { recursive: true, force: true }).catch(() => {});
+      }
       });
     },
   };
@@ -640,5 +977,6 @@ module.exports = {
   pollPaddleOcrJob,
   readPaddleResponse,
   resolvePaddleApiBaseUrl,
+  recoverCompatibilityCachePublications,
   submitPaddleOcrJob,
 };

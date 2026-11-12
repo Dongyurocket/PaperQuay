@@ -16,6 +16,7 @@ export interface ReaderWorkspaceOverviewProps {
   translationProgressCompleted: number;
   translationProgressTotal: number;
   paperSummary: PaperSummary | null;
+  paperSummaryVersionUnverified: boolean;
   paperSummaryLoading: boolean;
   paperSummaryError: string;
   onGenerateSummary: () => void;
@@ -75,6 +76,7 @@ export function ReaderWorkspaceOverview({
   translationProgressCompleted,
   translationProgressTotal,
   paperSummary,
+  paperSummaryVersionUnverified,
   paperSummaryLoading,
   paperSummaryError,
   onGenerateSummary,
@@ -189,6 +191,7 @@ export function ReaderWorkspaceOverview({
           <div data-tour="ai-summary">
             <SummaryPanel
               paperSummary={paperSummary}
+              summaryVersionUnverified={paperSummaryVersionUnverified}
               loading={paperSummaryLoading}
               error={paperSummaryError}
               hasBlocks={blocks.length > 0}

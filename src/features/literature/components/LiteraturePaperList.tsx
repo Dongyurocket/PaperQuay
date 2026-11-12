@@ -20,10 +20,11 @@ import {
   RefreshCw,
   Search,
   Star,
+  X,
 } from 'lucide-react';
 import { useAppLocale, useLocaleText } from '../../../i18n/uiLanguage';
 import { useWheelScrollDelegate } from '../../../hooks/useWheelScrollDelegate';
-import type { ListPapersRequest, LiteraturePaper } from '../../../types/library';
+import type { ListPapersRequest, LiteratureItemType, LiteraturePaper, LiteratureStructuredFilters } from '../../../types/library';
 import type { PdfReadingHeatmap } from '../../../types/reader';
 import {
   loadPaperHistoryMap,
@@ -41,9 +42,12 @@ import {
 } from '../titleDisplay';
 import LiteratureReadingHeatmapPreview from './LiteratureReadingHeatmapPreview';
 import type { SelectionCheckState } from '../paperSelection';
+import { applicableMetadataFilterFields } from '../metadataFilterFields';
 
 export interface LiteraturePaperListStatus {
   mineruParsed: boolean;
+  /** 持久化来源成果状态；缺省表示旧的演示数据或尚未核实。 */
+  mineruStatus?: 'unknown' | 'available' | 'missing' | 'error';
   overviewGenerated: boolean;
   checkingMineru?: boolean;
 }
@@ -101,6 +105,7 @@ interface LiteraturePaperListProps {
     event: MouseEvent<HTMLDivElement>,
     paper: LiteraturePaper,
   ) => void;
+  onPaperKeyboardContextMenu?: (paper: LiteraturePaper, rect: DOMRect) => void;
   /** 本地 RAG 索引角标：paper id（即 rag_indexes.document_key）→ 聚合状态。 */
   ragBadgeByDocumentKey?: Record<string, LiteraturePaperRagStatus>;
   /** 正在建立索引的文献 id（批量或单篇索引运行时）。 */
@@ -109,6 +114,12 @@ interface LiteraturePaperListProps {
   ragIndexAvailable?: boolean;
   ragMembershipFilter?: LiteratureRagMembershipFilter;
   onRagMembershipFilterChange?: (value: LiteratureRagMembershipFilter) => void;
+  itemTypeFilter?: LiteratureItemType | null;
+  onItemTypeFilterChange?: (value: LiteratureItemType | null) => void;
+  favoriteFilter?: boolean | null;
+  onFavoriteFilterChange?: (value: boolean | null) => void;
+  structuredFilters?: LiteratureStructuredFilters;
+  onStructuredFiltersChange?: (value: LiteratureStructuredFilters) => void;
 }
 
 export default function LiteraturePaperList({
@@ -144,15 +155,23 @@ export default function LiteraturePaperList({
   onPaperDropOnCategory,
   onPaperPointerDragOverCategory,
   onPaperContextMenu,
+  onPaperKeyboardContextMenu,
   ragBadgeByDocumentKey,
   ragIndexingDocumentKey = '',
   ragIndexAvailable = false,
   ragMembershipFilter = 'all',
   onRagMembershipFilterChange,
+  itemTypeFilter = null,
+  onItemTypeFilterChange,
+  favoriteFilter = null,
+  onFavoriteFilterChange,
+  structuredFilters,
+  onStructuredFiltersChange,
 }: LiteraturePaperListProps) {
   const l = useLocaleText();
   const locale = useAppLocale();
   const rootRef = useRef<HTMLElement | null>(null);
+  const filterDetailsRef = useRef<HTMLDetailsElement | null>(null);
   const handleWheelCapture = useWheelScrollDelegate({ rootRef });
   const [dropIndicator, setDropIndicator] = useState<{
     paperId: string;
@@ -176,10 +195,58 @@ export default function LiteraturePaperList({
   const [categoryDraggingPaperId, setCategoryDraggingPaperId] = useState<string | null>(null);
   const [suppressClickPaperId, setSuppressClickPaperId] = useState<string | null>(null);
   const [heatmapRevision, setHeatmapRevision] = useState(0);
+  const [structuredFilterDraft, setStructuredFilterDraft] = useState<LiteratureStructuredFilters | undefined>(structuredFilters);
+  const [metadataFieldSearch, setMetadataFieldSearch] = useState('');
+  const activeStructuredFilterCount = structuredFilters
+    ? Number(Boolean(structuredFilters.yearFrom || structuredFilters.yearTo || structuredFilters.unknownYearOnly))
+      + Number(Boolean(structuredFilters.authorQuery.trim()))
+      + Number(Boolean(structuredFilters.publicationQuery.trim()))
+      + Number(Boolean(structuredFilters.keywordQuery.trim()))
+      + Number(Boolean(structuredFilters.tagNames.trim()))
+      + Number(structuredFilters.readingState !== 'all')
+      + Number(Boolean(structuredFilters.progressFrom.trim() || structuredFilters.progressTo.trim()))
+      + Number(Boolean(structuredFilters.importedFrom || structuredFilters.importedTo))
+      + Number(Boolean(structuredFilters.lastReadFrom || structuredFilters.lastReadTo))
+      + Number(structuredFilters.attachmentRole !== 'any')
+      + Number(structuredFilters.mineruParseStatus !== 'all')
+      + Number(structuredFilters.missingMetadataFields.length > 0)
+    : 0;
+  const yearFromDraft = structuredFilterDraft?.yearFrom.trim() ?? '';
+  const yearToDraft = structuredFilterDraft?.yearTo.trim() ?? '';
+  const parsedYearFrom = yearFromDraft === '' ? null : Number(yearFromDraft);
+  const parsedYearTo = yearToDraft === '' ? null : Number(yearToDraft);
+  const yearDraftInvalid = Boolean(structuredFilterDraft) && !structuredFilterDraft?.unknownYearOnly && (
+    (parsedYearFrom !== null && (!Number.isInteger(parsedYearFrom) || parsedYearFrom < 1 || parsedYearFrom > 9999))
+    || (parsedYearTo !== null && (!Number.isInteger(parsedYearTo) || parsedYearTo < 1 || parsedYearTo > 9999))
+    || (parsedYearFrom !== null && parsedYearTo !== null && parsedYearFrom > parsedYearTo)
+  );
+  const parsedProgressFrom = structuredFilterDraft?.progressFrom.trim() ? Number(structuredFilterDraft.progressFrom) : null;
+  const parsedProgressTo = structuredFilterDraft?.progressTo.trim() ? Number(structuredFilterDraft.progressTo) : null;
+  const progressDraftInvalid = Boolean(structuredFilterDraft) && (
+    (parsedProgressFrom !== null && (!Number.isFinite(parsedProgressFrom) || parsedProgressFrom < 0 || parsedProgressFrom > 100))
+    || (parsedProgressTo !== null && (!Number.isFinite(parsedProgressTo) || parsedProgressTo < 0 || parsedProgressTo > 100))
+    || (parsedProgressFrom !== null && parsedProgressTo !== null && parsedProgressFrom > parsedProgressTo)
+  );
+  const timeDraftInvalid = structuredFilterDraft ? (
+    (['importedFrom', 'importedTo', 'lastReadFrom', 'lastReadTo'] as const).some((key) => {
+      const value = structuredFilterDraft[key];
+      if (!value) return false;
+      const [year, month, day] = value.split('-').map(Number);
+      const date = new Date(year, month - 1, day);
+      return !Number.isFinite(date.getTime()) || date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day;
+    }) || Boolean(
+      (structuredFilterDraft.importedFrom && structuredFilterDraft.importedTo && structuredFilterDraft.importedFrom > structuredFilterDraft.importedTo)
+      || (structuredFilterDraft.lastReadFrom && structuredFilterDraft.lastReadTo && structuredFilterDraft.lastReadFrom > structuredFilterDraft.lastReadTo)
+    )
+  ) : false;
   const manualSortingEnabled = sortBy === 'manual';
   const sortValue = `${sortBy}:${sortDirection}`;
   const multiSelectedSet = useMemo(() => new Set(multiSelectedPaperIds), [multiSelectedPaperIds]);
   const multiSelectActive = multiSelectedPaperIds.length > 0;
+  const metadataFieldOptions = applicableMetadataFilterFields(itemTypeFilter).filter((field) => {
+    const query = metadataFieldSearch.trim().toLowerCase();
+    return !query || field.labels.some((label) => label.toLowerCase().includes(query)) || field.key.toLowerCase().includes(query);
+  });
   const resolvedTotal = typeof papersTotal === 'number' ? Math.max(papersTotal, papers.length) : papers.length;
   const hasMorePapers = papers.length < resolvedTotal;
   const handleListScroll = useCallback(
@@ -465,6 +532,12 @@ export default function LiteraturePaperList({
     event: KeyboardEvent<HTMLDivElement>,
     paper: LiteraturePaper,
   ) => {
+    if (event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey)) {
+      event.preventDefault();
+      onPaperKeyboardContextMenu?.(paper, event.currentTarget.getBoundingClientRect());
+      return;
+    }
+
     if (event.key === 'Enter') {
       onOpenPaper(paper);
       return;
@@ -562,6 +635,241 @@ export default function LiteraturePaperList({
           </select>
 
           <select
+            value={itemTypeFilter ?? 'all'}
+            onChange={(event) => onItemTypeFilterChange?.(event.target.value === 'all' ? null : event.target.value as LiteratureItemType)}
+            className="pq-input h-9 w-[150px] px-3 text-sm"
+            title={l('文献类型筛选', 'Entry type filter')}
+          >
+            <option value="all">{l('类型：全部', 'Type: All')}</option>
+            <option value="journalArticle">{l('期刊论文', 'Journal Article')}</option>
+            <option value="book">{l('书籍', 'Book')}</option>
+            <option value="bookSection">{l('书籍章节', 'Book Section')}</option>
+            <option value="conferencePaper">{l('会议论文', 'Conference Paper')}</option>
+            <option value="thesis">{l('学位论文', 'Thesis')}</option>
+            <option value="report">{l('报告', 'Report')}</option>
+            <option value="preprint">{l('预印本', 'Preprint')}</option>
+            <option value="misc">{l('其他', 'Misc')}</option>
+          </select>
+
+          <select
+            value={favoriteFilter === true ? 'favorites' : favoriteFilter === false ? 'not-favorites' : 'all'}
+            onChange={(event) => onFavoriteFilterChange?.(event.target.value === 'favorites' ? true : event.target.value === 'not-favorites' ? false : null)}
+            className="pq-input h-9 w-[140px] px-3 text-sm"
+            title={l('收藏筛选', 'Favorite filter')}
+          >
+            <option value="all">{l('收藏：全部', 'Favorites: All')}</option>
+            <option value="favorites">{l('仅收藏', 'Favorites only')}</option>
+            <option value="not-favorites">{l('未收藏', 'Not favorited')}</option>
+          </select>
+
+          {structuredFilters && onStructuredFiltersChange ? (
+            <details ref={filterDetailsRef} className="relative" onToggle={(event) => {
+              if (event.currentTarget.open) setStructuredFilterDraft(structuredFilters);
+            }}>
+              <summary className="pq-button flex h-9 cursor-pointer list-none items-center px-3 text-sm">
+                {activeStructuredFilterCount > 0
+                  ? l(`更多属性筛选 · ${activeStructuredFilterCount}`, `More property filters · ${activeStructuredFilterCount}`)
+                  : l('更多属性筛选', 'More property filters')}
+              </summary>
+              <div className="absolute right-0 top-10 z-20 grid w-[min(92vw,440px)] grid-cols-2 gap-2 rounded-lg border border-[var(--pq-border)] bg-[var(--pq-surface)] p-3 shadow-lg">
+                <label className="flex flex-col gap-1 text-xs text-[var(--pq-text-muted)]">
+                  {l('年份从', 'Year from')}
+                  <input type="number" min="1" max="9999" value={structuredFilterDraft?.yearFrom ?? structuredFilters.yearFrom} disabled={structuredFilterDraft?.unknownYearOnly}
+                    onChange={(event) => setStructuredFilterDraft((current) => ({ ...(current ?? structuredFilters), yearFrom: event.target.value }))}
+                    className="pq-input h-9 px-2 text-sm" />
+                </label>
+                <label className="flex flex-col gap-1 text-xs text-[var(--pq-text-muted)]">
+                  {l('年份至', 'Year to')}
+                  <input type="number" min="1" max="9999" value={structuredFilterDraft?.yearTo ?? structuredFilters.yearTo} disabled={structuredFilterDraft?.unknownYearOnly}
+                    onChange={(event) => setStructuredFilterDraft((current) => ({ ...(current ?? structuredFilters), yearTo: event.target.value }))}
+                    className="pq-input h-9 px-2 text-sm" />
+                </label>
+                <label className="flex items-center gap-2 text-sm text-[var(--pq-text)]">
+                  <input type="checkbox" checked={structuredFilterDraft?.unknownYearOnly ?? structuredFilters.unknownYearOnly}
+                    onChange={(event) => setStructuredFilterDraft((current) => ({ ...(current ?? structuredFilters), unknownYearOnly: event.target.checked, ...(event.target.checked ? { yearFrom: '', yearTo: '' } : {}) }))} />
+                  {l('未知年份', 'Unknown year')}
+                </label>
+                <select value={structuredFilterDraft?.readingState ?? structuredFilters.readingState}
+                  onChange={(event) => setStructuredFilterDraft((current) => ({ ...(current ?? structuredFilters), readingState: event.target.value as LiteratureStructuredFilters['readingState'] }))}
+                  className="pq-input h-9 px-2 text-sm" aria-label={l('阅读状态', 'Reading state')}>
+                  <option value="all">{l('阅读状态：全部', 'Reading: All')}</option>
+                  <option value="unread">{l('未读', 'Unread')}</option>
+                  <option value="read">{l('已读', 'Read')}</option>
+                </select>
+                <label className="flex flex-col gap-1 text-xs text-[var(--pq-text-muted)]">
+                  {l('阅读进度下限（%）', 'Progress from (%)')}
+                  <input type="number" min="0" max="100" value={structuredFilterDraft?.progressFrom ?? structuredFilters.progressFrom}
+                    onChange={(event) => setStructuredFilterDraft((current) => ({ ...(current ?? structuredFilters), progressFrom: event.target.value }))}
+                    className="pq-input h-9 px-2 text-sm" />
+                </label>
+                <label className="flex flex-col gap-1 text-xs text-[var(--pq-text-muted)]">
+                  {l('阅读进度上限（%）', 'Progress to (%)')}
+                  <input type="number" min="0" max="100" value={structuredFilterDraft?.progressTo ?? structuredFilters.progressTo}
+                    onChange={(event) => setStructuredFilterDraft((current) => ({ ...(current ?? structuredFilters), progressTo: event.target.value }))}
+                    className="pq-input h-9 px-2 text-sm" />
+                </label>
+                <label className="flex flex-col gap-1 text-xs text-[var(--pq-text-muted)]">
+                  {l('导入日期从', 'Imported from')}
+                  <input type="date" value={structuredFilterDraft?.importedFrom ?? structuredFilters.importedFrom}
+                    onChange={(event) => setStructuredFilterDraft((current) => ({ ...(current ?? structuredFilters), importedFrom: event.target.value }))}
+                    className="pq-input h-9 px-2 text-sm" />
+                </label>
+                <label className="flex flex-col gap-1 text-xs text-[var(--pq-text-muted)]">
+                  {l('导入日期至', 'Imported to')}
+                  <input type="date" value={structuredFilterDraft?.importedTo ?? structuredFilters.importedTo}
+                    onChange={(event) => setStructuredFilterDraft((current) => ({ ...(current ?? structuredFilters), importedTo: event.target.value }))}
+                    className="pq-input h-9 px-2 text-sm" />
+                </label>
+                <label className="flex flex-col gap-1 text-xs text-[var(--pq-text-muted)]">
+                  {l('最近阅读从', 'Last read from')}
+                  <input type="date" value={structuredFilterDraft?.lastReadFrom ?? structuredFilters.lastReadFrom}
+                    onChange={(event) => setStructuredFilterDraft((current) => ({ ...(current ?? structuredFilters), lastReadFrom: event.target.value }))}
+                    className="pq-input h-9 px-2 text-sm" />
+                </label>
+                <label className="flex flex-col gap-1 text-xs text-[var(--pq-text-muted)]">
+                  {l('最近阅读至', 'Last read to')}
+                  <input type="date" value={structuredFilterDraft?.lastReadTo ?? structuredFilters.lastReadTo}
+                    onChange={(event) => setStructuredFilterDraft((current) => ({ ...(current ?? structuredFilters), lastReadTo: event.target.value }))}
+                    className="pq-input h-9 px-2 text-sm" />
+                </label>
+                <select value={structuredFilterDraft?.attachmentRole ?? structuredFilters.attachmentRole}
+                  onChange={(event) => setStructuredFilterDraft((current) => ({ ...(current ?? structuredFilters), attachmentRole: event.target.value as LiteratureStructuredFilters['attachmentRole'] }))}
+                  className="pq-input col-span-2 h-9 px-2 text-sm" aria-label={l('附件角色', 'Attachment role')}>
+                  <option value="any">{l('附件：全部', 'Attachments: All')}</option>
+                  <option value="original-pdf">{l('有原文 PDF', 'Has original PDF')}</option>
+                  <option value="translated-pdf">{l('有译文 PDF', 'Has translated PDF')}</option>
+                  <option value="missing">{l('有缺失附件', 'Has missing attachment')}</option>
+                  <option value="none">{l('无已登记附件', 'No registered attachments')}</option>
+                </select>
+                <select value={structuredFilterDraft?.mineruParseStatus ?? structuredFilters.mineruParseStatus}
+                  onChange={(event) => setStructuredFilterDraft((current) => ({ ...(current ?? structuredFilters), mineruParseStatus: event.target.value as LiteratureStructuredFilters['mineruParseStatus'] }))}
+                  className="pq-input col-span-2 h-9 px-2 text-sm" aria-label={l('解析成果状态', 'Parse artifact status')}>
+                  <option value="all">{l('解析：全部', 'Parse: All')}</option>
+                  <option value="available">{l('解析成果可用', 'Parse artifact available')}</option>
+                  <option value="missing">{l('解析成果不存在', 'Parse artifact missing')}</option>
+                  <option value="unknown">{l('解析状态待核实', 'Parse status unverified')}</option>
+                  <option value="error">{l('解析状态检查失败', 'Parse status check failed')}</option>
+                </select>
+                <div className="col-span-2 rounded-md border border-[var(--pq-border)] p-2">
+                  <label className="mb-2 block text-xs text-[var(--pq-text-muted)]">{l('筛选适用元数据缺项（任一匹配）', 'Missing applicable metadata (any selected field)')}</label>
+                  <input type="search" value={metadataFieldSearch} onChange={(event) => setMetadataFieldSearch(event.target.value)}
+                    placeholder={l('搜索字段', 'Search fields')} className="pq-input mb-2 h-8 w-full px-2 text-xs" />
+                  <div className="grid max-h-32 grid-cols-2 gap-1 overflow-y-auto">
+                    {metadataFieldOptions.map((field) => {
+                      const selected = (structuredFilterDraft?.missingMetadataFields ?? structuredFilters.missingMetadataFields).includes(field.key);
+                      return <label key={field.key} className="flex min-w-0 items-center gap-1.5 truncate text-xs" title={l(...field.labels)}>
+                        <input type="checkbox" checked={selected} onChange={(event) => setStructuredFilterDraft((current) => {
+                          const base = current ?? structuredFilters;
+                          const next = new Set(base.missingMetadataFields);
+                          if (event.target.checked) next.add(field.key); else next.delete(field.key);
+                          return { ...base, missingMetadataFields: [...next] };
+                        })} />
+                        <span className="truncate">{l(...field.labels)}</span>
+                      </label>;
+                    })}
+                    {metadataFieldOptions.length === 0 ? <span className="col-span-2 text-xs text-[var(--pq-text-faint)]">{l('没有匹配字段', 'No matching fields')}</span> : null}
+                  </div>
+                </div>
+                <input value={structuredFilterDraft?.authorQuery ?? structuredFilters.authorQuery} placeholder={l('作者', 'Author')}
+                  onChange={(event) => setStructuredFilterDraft((current) => ({ ...(current ?? structuredFilters), authorQuery: event.target.value }))}
+                  className="pq-input h-9 px-2 text-sm" />
+                <input value={structuredFilterDraft?.publicationQuery ?? structuredFilters.publicationQuery} placeholder={l('刊物／会议', 'Publication / venue')}
+                  onChange={(event) => setStructuredFilterDraft((current) => ({ ...(current ?? structuredFilters), publicationQuery: event.target.value }))}
+                  className="pq-input h-9 px-2 text-sm" />
+                <input value={structuredFilterDraft?.keywordQuery ?? structuredFilters.keywordQuery} placeholder={l('关键词', 'Keyword')}
+                  onChange={(event) => setStructuredFilterDraft((current) => ({ ...(current ?? structuredFilters), keywordQuery: event.target.value }))}
+                  className="pq-input h-9 px-2 text-sm" />
+                <input value={structuredFilterDraft?.tagNames ?? structuredFilters.tagNames} placeholder={l('标签（逗号分隔，任一匹配）', 'Tags (comma separated, any match)')}
+                  onChange={(event) => setStructuredFilterDraft((current) => ({ ...(current ?? structuredFilters), tagNames: event.target.value }))}
+                  className="pq-input col-span-2 h-9 px-2 text-sm" />
+                {yearDraftInvalid ? <p className="col-span-2 text-xs text-[var(--pq-danger)]" role="alert">{l('请输入有效年份范围，且起始年份不能晚于结束年份。', 'Enter a valid year range with the start no later than the end.')}</p> : null}
+                {progressDraftInvalid ? <p className="col-span-2 text-xs text-[var(--pq-danger)]" role="alert">{l('阅读进度需为 0–100，且下限不能高于上限。', 'Progress must be 0–100, with the lower bound no greater than the upper bound.')}</p> : null}
+                {timeDraftInvalid ? <p className="col-span-2 text-xs text-[var(--pq-danger)]" role="alert">{l('日期范围无效或起始日期晚于结束日期。', 'Date ranges must be valid and start no later than end.')}</p> : null}
+                <div className="col-span-2 flex justify-between gap-2 border-t border-[var(--pq-border)] pt-2">
+                  <button type="button" className="pq-button h-8 px-2 text-xs" onClick={() => setStructuredFilterDraft({ yearFrom: '', yearTo: '', unknownYearOnly: false, authorQuery: '', publicationQuery: '', keywordQuery: '', tagNames: '', readingState: 'all', progressFrom: '', progressTo: '', importedFrom: '', importedTo: '', lastReadFrom: '', lastReadTo: '', attachmentRole: 'any', mineruParseStatus: 'all', missingMetadataFields: [] })}>{l('清空', 'Clear')}</button>
+                  <div className="flex gap-2">
+                    <button type="button" className="pq-button h-8 px-2 text-xs" onClick={() => { filterDetailsRef.current?.removeAttribute('open'); }}>{l('取消', 'Cancel')}</button>
+                    <button type="button" disabled={yearDraftInvalid || progressDraftInvalid || timeDraftInvalid} className="pq-button-primary h-8 px-3 text-xs disabled:opacity-50" onClick={() => { if (structuredFilterDraft) onStructuredFiltersChange(structuredFilterDraft); filterDetailsRef.current?.removeAttribute('open'); }}>{l('应用筛选', 'Apply filters')}</button>
+                  </div>
+                </div>
+              </div>
+            </details>
+          ) : null}
+
+          {structuredFilters && onStructuredFiltersChange && activeStructuredFilterCount > 0 ? (
+            <div className="flex min-w-0 flex-wrap items-center gap-1.5" aria-label={l('已应用的属性筛选', 'Applied property filters')}>
+              {structuredFilters.unknownYearOnly || structuredFilters.yearFrom || structuredFilters.yearTo ? (
+                <button type="button" className="pq-chip inline-flex items-center gap-1" onClick={() => onStructuredFiltersChange({ ...structuredFilters, yearFrom: '', yearTo: '', unknownYearOnly: false })}>
+                  {structuredFilters.unknownYearOnly ? l('未知年份', 'Unknown year') : `${l('年份', 'Year')} ${structuredFilters.yearFrom || '…'}–${structuredFilters.yearTo || '…'}`}<X className="h-3 w-3" aria-hidden="true" />
+                  <span className="sr-only">{l('移除年份筛选', 'Remove year filter')}</span>
+                </button>
+              ) : null}
+              {structuredFilters.readingState !== 'all' ? (
+                <button type="button" className="pq-chip inline-flex items-center gap-1" onClick={() => onStructuredFiltersChange({ ...structuredFilters, readingState: 'all' })}>
+                  {structuredFilters.readingState === 'read' ? l('已读', 'Read') : l('未读', 'Unread')}<X className="h-3 w-3" aria-hidden="true" />
+                  <span className="sr-only">{l('移除阅读状态筛选', 'Remove reading state filter')}</span>
+                </button>
+              ) : null}
+              {structuredFilters.progressFrom || structuredFilters.progressTo ? (
+                <button type="button" className="pq-chip inline-flex items-center gap-1" onClick={() => onStructuredFiltersChange({ ...structuredFilters, progressFrom: '', progressTo: '' })}>
+                  {`${l('进度', 'Progress')} ${structuredFilters.progressFrom || '0'}–${structuredFilters.progressTo || '100'}%`}<X className="h-3 w-3" aria-hidden="true" />
+                  <span className="sr-only">{l('移除进度筛选', 'Remove progress filter')}</span>
+                </button>
+              ) : null}
+              {structuredFilters.importedFrom || structuredFilters.importedTo ? (
+                <button type="button" className="pq-chip inline-flex items-center gap-1" onClick={() => onStructuredFiltersChange({ ...structuredFilters, importedFrom: '', importedTo: '' })}>
+                  {`${l('导入', 'Imported')} ${structuredFilters.importedFrom || '…'}–${structuredFilters.importedTo || '…'}`}<X className="h-3 w-3" aria-hidden="true" />
+                  <span className="sr-only">{l('移除导入日期筛选', 'Remove import date filter')}</span>
+                </button>
+              ) : null}
+              {structuredFilters.lastReadFrom || structuredFilters.lastReadTo ? (
+                <button type="button" className="pq-chip inline-flex items-center gap-1" onClick={() => onStructuredFiltersChange({ ...structuredFilters, lastReadFrom: '', lastReadTo: '' })}>
+                  {`${l('最近阅读', 'Last read')} ${structuredFilters.lastReadFrom || '…'}–${structuredFilters.lastReadTo || '…'}`}<X className="h-3 w-3" aria-hidden="true" />
+                  <span className="sr-only">{l('移除最近阅读筛选', 'Remove last read filter')}</span>
+                </button>
+              ) : null}
+              {structuredFilters.attachmentRole !== 'any' ? (
+                <button type="button" className="pq-chip inline-flex items-center gap-1" onClick={() => onStructuredFiltersChange({ ...structuredFilters, attachmentRole: 'any' })}>
+                  {structuredFilters.attachmentRole === 'original-pdf' ? l('原文 PDF', 'Original PDF')
+                    : structuredFilters.attachmentRole === 'translated-pdf' ? l('译文 PDF', 'Translated PDF')
+                      : structuredFilters.attachmentRole === 'missing' ? l('缺失附件', 'Missing attachment') : l('无附件', 'No attachments')}<X className="h-3 w-3" aria-hidden="true" />
+                  <span className="sr-only">{l('移除附件筛选', 'Remove attachment filter')}</span>
+                </button>
+              ) : null}
+              {structuredFilters.mineruParseStatus !== 'all' ? (
+                <button type="button" className="pq-chip inline-flex items-center gap-1" onClick={() => onStructuredFiltersChange({ ...structuredFilters, mineruParseStatus: 'all' })}>
+                  {structuredFilters.mineruParseStatus === 'available' ? l('解析可用', 'Parse available')
+                    : structuredFilters.mineruParseStatus === 'missing' ? l('解析缺失', 'Parse missing')
+                      : structuredFilters.mineruParseStatus === 'error' ? l('解析检查失败', 'Parse check failed')
+                        : l('解析待核实', 'Parse unverified')}<X className="h-3 w-3" aria-hidden="true" />
+                  <span className="sr-only">{l('移除解析状态筛选', 'Remove parse status filter')}</span>
+                </button>
+              ) : null}
+              {structuredFilters.missingMetadataFields.map((field) => {
+                const definition = applicableMetadataFilterFields().find((option) => option.key === field);
+                const label = definition ? l(...definition.labels) : field;
+                return <button key={field} type="button" className="pq-chip inline-flex items-center gap-1" onClick={() => onStructuredFiltersChange({ ...structuredFilters, missingMetadataFields: structuredFilters.missingMetadataFields.filter((value) => value !== field) })}>
+                  {l('缺项', 'Missing')}: {label}<X className="h-3 w-3" aria-hidden="true" />
+                  <span className="sr-only">{l(`移除${label}缺项筛选`, `Remove missing ${label} filter`)}</span>
+                </button>;
+              })}
+              {(['authorQuery', 'publicationQuery', 'keywordQuery', 'tagNames'] as const).map((field) => {
+                const value = structuredFilters[field].trim();
+                if (!value) return null;
+                const label = field === 'authorQuery' ? l('作者', 'Author')
+                  : field === 'publicationQuery' ? l('刊物', 'Publication')
+                    : field === 'keywordQuery' ? l('关键词', 'Keyword') : l('标签', 'Tags');
+                return (
+                  <button key={field} type="button" className="pq-chip inline-flex items-center gap-1" onClick={() => onStructuredFiltersChange({ ...structuredFilters, [field]: '' })}>
+                    {label}: {value}<X className="h-3 w-3" aria-hidden="true" />
+                    <span className="sr-only">{l(`移除${label}筛选`, `Remove ${label} filter`)}</span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
+
+          <select
             value={titleDisplayMode}
             onChange={(event) => {
               const nextMode = event.target.value as PaperTitleDisplayMode;
@@ -652,6 +960,7 @@ export default function LiteraturePaperList({
                 dropIndicator?.paperId === paper.id && dropIndicator.placement === 'after';
               const status = paperStatuses[paper.id];
               const mineruParsed = status?.mineruParsed ?? false;
+              const mineruStatus = status?.mineruStatus ?? (mineruParsed ? 'available' : 'unknown');
               const overviewGenerated =
                 status?.overviewGenerated ?? Boolean(paper.aiSummary?.trim());
               const indexingRag = ragIndexingDocumentKey === paper.id;
@@ -781,16 +1090,22 @@ export default function LiteraturePaperList({
                             'rounded-full border px-2 py-0.5 text-[11px] font-semibold',
                             status?.checkingMineru
                               ? 'border-[var(--pq-border-strong)] bg-[var(--pq-surface-2)] text-[var(--pq-text-muted)] dark:border-white/10 dark:bg-white/[0.06] dark:text-[#a0a0a0]'
-                              : mineruParsed
+                              : mineruStatus === 'available'
                                 ? 'border-[color-mix(in_srgb,var(--pq-success)_28%,transparent)] bg-[var(--pq-success-bg)] text-[var(--pq-success)] '
-                                : 'border-[color-mix(in_srgb,var(--pq-warning)_28%,transparent)] bg-[var(--pq-warning-bg)] text-[var(--pq-warning)] ',
+                                : mineruStatus === 'missing' || mineruStatus === 'error'
+                                  ? 'border-[color-mix(in_srgb,var(--pq-warning)_28%,transparent)] bg-[var(--pq-warning-bg)] text-[var(--pq-warning)] '
+                                  : 'border-[var(--pq-border)] bg-[var(--pq-surface-2)] text-[var(--pq-text-muted)] dark:border-white/10 dark:bg-white/[0.06] dark:text-[#a0a0a0]',
                           )}
                         >
                           {status?.checkingMineru
                             ? l('MinerU 检测中', 'Checking MinerU')
-                            : mineruParsed
+                            : mineruStatus === 'available'
                               ? l('MinerU 已解析', 'MinerU Parsed')
-                              : l('MinerU 未解析', 'MinerU Not Parsed')}
+                              : mineruStatus === 'missing'
+                                ? l('MinerU 未解析', 'MinerU Not Parsed')
+                                : mineruStatus === 'error'
+                                  ? l('MinerU 检查失败', 'MinerU Check Failed')
+                                  : l('MinerU 状态待核实', 'MinerU Status Unverified')}
                         </span>
                         {ragIndexAvailable || ragStatus === 'excluded' ? (
                           <span

@@ -228,6 +228,7 @@ function readCountsFast(databasePath, kind) {
       notes: Number(db.prepare('SELECT COUNT(*) AS n FROM notes').get().n) || 0,
       noteFolders: Number(db.prepare('SELECT COUNT(*) AS n FROM note_folders').get().n) || 0,
     };
+    if (kind === 'knowledge') return {};
     return {
       ragIndexes: Number(db.prepare('SELECT COUNT(*) AS n FROM rag_indexes').get().n) || 0,
       ragDocuments: Number(db.prepare('SELECT COUNT(DISTINCT document_key) AS n FROM rag_chunks').get().n) || 0,
@@ -251,6 +252,7 @@ function readCounts(databasePath, kind) {
         noteFolders: Number(db.prepare('SELECT COUNT(*) AS n FROM note_folders').get().n) || 0,
       };
     }
+    if (kind === 'knowledge') return {};
     return {
       ragIndexes: Number(db.prepare('SELECT COUNT(*) AS n FROM rag_indexes').get().n) || 0,
       ragDocuments: Number(db.prepare('SELECT COUNT(DISTINCT document_key) AS n FROM rag_chunks').get().n) || 0,
@@ -363,6 +365,7 @@ async function collectBackupSources(context, {
     const snapshotsToCreate = [
       ['library', context.store, context.appPaths.libraryDatabasePath, 'paperquay-library.sqlite'],
       ['notes', context.noteStore, context.appPaths.notesDatabasePath, 'paperquay-notes.sqlite'],
+      ...(context.knowledgeStore ? [['knowledge', context.knowledgeStore, context.appPaths.knowledgeDatabasePath, 'paperquay-knowledge.sqlite']] : []),
     ];
     for (const [kind, store, sourcePath, fileName] of snapshotsToCreate) {
       if (signal?.aborted) throw Object.assign(new Error('Backup source scan cancelled'), { code: 'CANCELLED' });
@@ -401,6 +404,7 @@ async function collectBackupSources(context, {
     const databaseSources = [
       ['library', context.appPaths.libraryDatabasePath, 'paperquay-library.sqlite'],
       ['notes', context.appPaths.notesDatabasePath, 'paperquay-notes.sqlite'],
+      ...(context.knowledgeStore ? [['knowledge', context.appPaths.knowledgeDatabasePath, 'paperquay-knowledge.sqlite']] : []),
       ...(options.includeRag && context.ragStore?.available && context.ragStore.execution === 'worker'
         ? [['rag', context.appPaths.ragDatabasePath, 'paperquay-rag.sqlite']]
         : []),
@@ -453,8 +457,10 @@ async function collectBackupSources(context, {
     await addMemoryEntry('renderer-local-storage', 'dataDir', 'renderer-local-storage.json', 'renderer/local-storage.json', Buffer.from(JSON.stringify(rendererState || {})), { encoding: 'utf8' });
   }
 
-  const graphPath = path.join(context.appPaths.dataDir, 'paperquay-knowledge-graph-relations.json');
-  await addPathEntry('knowledge-graph', graphPath, 'data/knowledge-graph-relations.json', {}, 'deflate-raw');
+  if (!context.knowledgeStore) {
+    const graphPath = path.join(context.appPaths.dataDir, 'paperquay-knowledge-graph-relations.json');
+    await addPathEntry('knowledge-graph', graphPath, 'data/knowledge-graph-relations.json', {}, 'deflate-raw');
+  }
 
   const memoryRoot = context.appPaths.agentMemoryDir;
   const memoryFiles = await walkFiles(memoryRoot, { warnings, kind: 'agent-memory', startedAt, signal });

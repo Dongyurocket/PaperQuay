@@ -4,6 +4,20 @@ export interface MetadataLookupRequest {
   path?: string | null;
 }
 
+export interface MetadataCandidate {
+  id: string;
+  provider: string;
+  query: { kind: 'doi' | 'title'; value: string };
+  metadata: MetadataLookupResult;
+  fieldSources: Record<string, string>;
+}
+
+export interface MetadataCandidateSearchResult {
+  query: { kind: 'doi' | 'title'; value: string } | null;
+  providers: Record<string, { status: 'success' | 'no-match' | 'failed' | 'disabled'; error: string | null }>;
+  candidates: MetadataCandidate[];
+}
+
 export interface MetadataLookupResult {
   source: string;
   doi: string | null;

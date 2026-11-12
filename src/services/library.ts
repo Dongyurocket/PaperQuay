@@ -17,6 +17,7 @@ import type {
   LibrarySnapshot,
   ListPapersRequest,
   QueryPapersResult,
+  PapersByIdsResult,
   PaperReference,
   LiteratureAttachment,
   LiteratureCategory,
@@ -151,6 +152,36 @@ export async function listLibraryPapers(
   }
 }
 
+export async function getLibraryPaper(paperId: string): Promise<LiteraturePaper> {
+  try {
+    return await invoke<LiteraturePaper>('library_get_paper', { paperId });
+  } catch (error) {
+    throw new Error(toErrorMessage(error, '读取文献失败'));
+  }
+}
+
+const PAPER_LOOKUP_ID_BATCH_SIZE = 200;
+
+/** Read a frozen paper-ID selection without applying the current list filters. */
+export async function getLibraryPapersByIds(paperIds: string[]): Promise<PapersByIdsResult> {
+  const ids = [...new Set(paperIds.map((id) => id.trim()).filter(Boolean))];
+  const papersById = new Map<string, LiteraturePaper>();
+  const requested = new Set(ids);
+  for (let start = 0; start < ids.length; start += PAPER_LOOKUP_ID_BATCH_SIZE) {
+    const response = await invoke<PapersByIdsResult>('library_get_papers_by_ids', {
+      paperIds: ids.slice(start, start + PAPER_LOOKUP_ID_BATCH_SIZE),
+    });
+    for (const paper of response.papers) {
+      if (requested.has(paper.id)) papersById.set(paper.id, paper);
+    }
+  }
+  const papers = ids.flatMap((id) => {
+    const paper = papersById.get(id);
+    return paper ? [paper] : [];
+  });
+  return { papers, missingIds: ids.filter((id) => !papersById.has(id)) };
+}
+
 /** SQL 分页查询（P2-1）：筛选/排序/分页在 SQLite 完成，返回当前筛选的完整匹配数。 */
 export async function queryLibraryPapers(
   request: ListPapersRequest = {},
@@ -173,6 +204,34 @@ export async function countLibraryPapers(
   }
 }
 
+export interface LibraryMineruParseStatus {
+  paperId: string;
+  sourceVersion: string;
+  status: 'unknown' | 'available' | 'missing' | 'error';
+  checkedAt: number | null;
+  updatedAt: number;
+}
+
+export async function getLibraryMineruParseStatuses(
+  paperIds: string[],
+): Promise<LibraryMineruParseStatus[]> {
+  try {
+    return await invoke<LibraryMineruParseStatus[]>('library_get_mineru_parse_statuses', { paperIds });
+  } catch (error) {
+    throw new Error(toErrorMessage(error, '读取解析成果状态失败'));
+  }
+}
+
+export async function saveLibraryMineruParseStatuses(
+  entries: Array<Pick<LibraryMineruParseStatus, 'paperId' | 'sourceVersion' | 'status' | 'checkedAt'>>,
+): Promise<{ accepted: number; stale: number }> {
+  try {
+    return await invoke('library_save_mineru_parse_statuses', { entries });
+  } catch (error) {
+    throw new Error(toErrorMessage(error, '保存解析成果状态失败'));
+  }
+}
+
 /** 与 queryLibraryPapers 同筛选同排序，分批枚举文献 id（供全选目标展开，P2-2）。 */
 export async function listLibraryPaperIds(
   request: ListPapersRequest = {},
@@ -184,27 +243,14 @@ export async function listLibraryPaperIds(
   }
 }
 
-const PAPER_ID_PAGE_SIZE = 5000;
-
-/** 按当前筛选枚举全部文献 id。只取 id，不水合详情；单页上限与 SQL 查询上限一致。 */
+/** 按同一后端调用内的筛选快照枚举文献 ID，避免多次 IPC 分页之间被写入推移 offset。 */
 export async function listAllLibraryPaperIds(
   request: ListPapersRequest = {},
 ): Promise<string[]> {
-  const ids: string[] = [];
-  let offset = 0;
-
-  for (;;) {
-    const page = await listLibraryPaperIds({
-      ...request,
-      offset,
-      limit: PAPER_ID_PAGE_SIZE,
-    });
-    ids.push(...page);
-    if (page.length < PAPER_ID_PAGE_SIZE) {
-      return ids;
-    }
-
-    offset += page.length;
+  try {
+    return await invoke<string[]>('library_list_all_paper_ids', { request });
+  } catch (error) {
+    throw new Error(toErrorMessage(error, '枚举文献失败'));
   }
 }
 

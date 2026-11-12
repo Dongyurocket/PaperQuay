@@ -266,6 +266,71 @@ test('RAG store fuses escaped FTS matches with vector candidates and syncs text 
   }
 });
 
+test('document similarities compare only vectors from the same embedding model identity', () => {
+  const { dataDir, store } = createStore();
+  try {
+    const index = (documentKey: string, sourceType: string, embeddingModelKey: string) => store.indexDocument({
+      documentKey,
+      title: documentKey,
+      sourceType,
+      sourceSignature: `${documentKey}-${sourceType}`,
+      embeddingModelKey,
+      totalChunkCount: 1,
+      chunks: [{
+        chunkId: `${documentKey}-${sourceType}`,
+        chunkIndex: 0,
+        pageIndex: 0,
+        text: `engineering content for ${documentKey}`,
+        embedding: [1, 0, 0, 0],
+      }],
+    });
+
+    index('model-a-1', 'pdf-text', 'model-a');
+    index('model-b', 'pdf-text', 'model-b');
+    index('model-a-2', 'pdf-text', 'model-a');
+    index('mixed-model-document', 'pdf-text', 'model-a');
+    index('mixed-model-document', 'mineru-markdown', 'model-b');
+
+    const similarities = store.listDocumentSimilarities({ minSimilarity: 0.99, limit: 20 });
+    assert.deepEqual(similarities.map((edge: { sourceDocumentKey: string; targetDocumentKey: string }) => [
+      edge.sourceDocumentKey,
+      edge.targetDocumentKey,
+    ]), [['model-a-1', 'model-a-2']]);
+  } finally {
+    store.close();
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('document similarities keep source representations in separate vector spaces', () => {
+  const { dataDir, store } = createStore();
+  try {
+    const index = (documentKey: string, sourceType: string) => store.indexDocument({
+      documentKey,
+      title: documentKey,
+      sourceType,
+      sourceSignature: `${documentKey}-${sourceType}`,
+      embeddingModelKey: 'same-model',
+      totalChunkCount: 1,
+      chunks: [{
+        chunkId: `${documentKey}-${sourceType}`,
+        chunkIndex: 0,
+        pageIndex: 0,
+        text: `engineering content for ${documentKey}`,
+        embedding: [1, 0, 0, 0],
+      }],
+    });
+
+    index('pdf-document', 'pdf-text');
+    index('markdown-document', 'mineru-markdown');
+
+    assert.deepEqual(store.listDocumentSimilarities({ minSimilarity: 0.99 }), []);
+  } finally {
+    store.close();
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
 test('RAG store falls back to vector-only retrieval when FTS is unavailable', () => {
   const { dataDir, store } = createStore({ disableFts: true });
 

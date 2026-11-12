@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -8,6 +8,10 @@ import {
   createKnowledgeGraphSnapshot,
   shouldFallbackToChatCompletions,
 } from '../electron/backend/knowledgeGraphCommands.cjs';
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url);
+const { createKnowledgeStore } = require('../electron/backend/knowledgeStore.cjs');
+const { DatabaseSync } = require('../electron/backend/nodeSqlite.cjs');
 
 function createContext(overrides = {}) {
   return {
@@ -220,6 +224,96 @@ test('knowledge graph includes persisted custom and AI-approved relations', asyn
   }
 });
 
+test('knowledge store migrates legacy relations once and snapshots durable writes', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'paperquay-knowledge-store-'));
+  const appPaths = { dataDir: dir, knowledgeDatabasePath: path.join(dir, 'paperquay-knowledge.sqlite') };
+  let store;
+  try {
+    const legacyPath = path.join(dir, 'paperquay-knowledge-graph-relations.json');
+    await writeFile(legacyPath, JSON.stringify({ version: 1, relations: [{
+      id: 'legacy-1', source: 'paper:a', target: 'note:b', type: 'ai_suggested', label: 'supports',
+      confidence: 0.81, createdAt: 12, updatedAt: 13,
+    }] }), 'utf8');
+    store = createKnowledgeStore(appPaths);
+    assert.equal(store.listRelations().length, 1);
+    store.close(); store = null;
+
+    store = createKnowledgeStore(appPaths);
+    assert.equal(store.listRelations().length, 1, 'startup retry must not duplicate imported rows');
+    store.saveRelation({ id: 'new-1', source: 'paper:a', target: 'paper:c', type: 'custom_relation',
+      label: 'contrasts', description: '', createdAt: 20, updatedAt: 20 });
+    const snapshotPath = path.join(dir, 'snapshot.sqlite');
+    store.snapshotTo(snapshotPath);
+    store.close(); store = null;
+    assert.equal(JSON.parse(await readFile(legacyPath, 'utf8')).relations.length, 1);
+    const snapshot = new DatabaseSync(snapshotPath, { readOnly: true });
+    try {
+      assert.equal(snapshot.prepare('PRAGMA integrity_check').get().integrity_check, 'ok');
+      assert.equal(snapshot.prepare('SELECT COUNT(*) AS n FROM kg_custom_relations').get().n, 2);
+    } finally { snapshot.close(); }
+    store = createKnowledgeStore(appPaths);
+    assert.equal(store.deleteRelation('new-1'), true);
+    assert.equal(store.deleteRelation('new-1'), false);
+  } finally { store?.close(); await rm(dir, { recursive: true, force: true }); }
+});
+
+test('knowledge relation migration leaves malformed source unmarked for safe retry', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'paperquay-knowledge-migration-'));
+  const appPaths = { dataDir: dir, knowledgeDatabasePath: path.join(dir, 'paperquay-knowledge.sqlite') };
+  try {
+    await writeFile(path.join(dir, 'paperquay-knowledge-graph-relations.json'), '{broken', 'utf8');
+    assert.throws(() => createKnowledgeStore(appPaths));
+    const db = new DatabaseSync(appPaths.knowledgeDatabasePath, { readOnly: true });
+    try {
+      assert.equal(db.prepare("SELECT COUNT(*) AS n FROM knowledge_meta WHERE key='legacy_relations_json_v1'").get().n, 0);
+    } finally { db.close(); }
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test('document generations publish only complete page coverage and reject stale workers', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'paperquay-generation-store-'));
+  const appPaths = { dataDir: dir, knowledgeDatabasePath: path.join(dir, 'paperquay-knowledge.sqlite') };
+  const store = createKnowledgeStore(appPaths);
+  const partition = (index, startPage, endPage) => ({ index, startPage, endPage, inputHash: `hash-${index}` });
+  const registerArtifacts = (generationId) => store.setGenerationArtifacts(generationId, {
+    artifactPath: path.join(dir, generationId),
+    manifest: [{ path: 'full.md', size: 4, sha256: 'a'.repeat(64) }],
+  });
+  try {
+    const first = store.beginGeneration({ sourceId: 'document-1', sourceVersion: 'v1', partitions: [partition(0, 1, 2)] });
+    assert.equal(store.setPartitionStatus(first.generationId, 0, 'running'), true);
+    assert.equal(store.setPartitionStatus(first.generationId, 0, 'complete'), true);
+    assert.equal(store.publishGeneration(first.generationId, { sourceVersion: 'v1', expectedPageCount: 2 }), false,
+      'a generation without a persisted artifact manifest cannot become current');
+    assert.equal(registerArtifacts(first.generationId), true);
+    assert.equal(store.publishGeneration(first.generationId, { sourceVersion: 'v1', expectedPageCount: 3 }), false,
+      'page coverage mismatch must keep the first generation unpublished');
+    assert.equal(store.publishGeneration(first.generationId, { sourceVersion: 'v1', expectedPageCount: 2 }), true);
+
+    const stale = store.beginGeneration({ sourceId: 'document-1', sourceVersion: 'v1', partitions: [partition(0, 1, 2)] });
+    const current = store.beginGeneration({ sourceId: 'document-1', sourceVersion: 'v2', partitions: [partition(0, 1, 2)] });
+    assert.equal(store.setPartitionStatus(stale.generationId, 0, 'running'), false,
+      'a late task for the old source version cannot write partition state');
+    assert.equal(store.publishGeneration(stale.generationId, { sourceVersion: 'v1', expectedPageCount: 2 }), false);
+    store.failGeneration(current.generationId, 'cancelled');
+    assert.equal(store.listGenerations('document-1').find((item) => item.generationId === first.generationId).currentGeneration, first.generationId,
+      'a failed replacement keeps the prior published generation pointer');
+
+    const replacement = store.beginGeneration({ sourceId: 'document-1', sourceVersion: 'v2', partitions: [partition(0, 1, 1), partition(1, 2, 2)] });
+    for (const index of [0, 1]) {
+      store.setPartitionStatus(replacement.generationId, index, 'running');
+      store.setPartitionStatus(replacement.generationId, index, 'complete');
+    }
+    assert.equal(registerArtifacts(replacement.generationId), true);
+    assert.equal(store.publishGeneration(replacement.generationId, { sourceVersion: 'v2', expectedPageCount: 2 }), true);
+    const db = new DatabaseSync(appPaths.knowledgeDatabasePath, { readOnly: true });
+    try {
+      assert.deepEqual(db.prepare('SELECT physical_page FROM document_pages WHERE generation_id=? ORDER BY physical_page')
+        .all(replacement.generationId).map((row) => row.physical_page), [1, 2]);
+    } finally { db.close(); }
+  } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+});
+
 test('knowledge graph AI generation falls back when responses upstream fails', () => {
   assert.equal(
     shouldFallbackToChatCompletions(
@@ -242,4 +336,20 @@ test('knowledge graph local mode keeps only nodes within the requested depth', a
   assert.ok(nodeIds.has('tag:rag'));
   assert.ok(nodeIds.has('category:cat-1'));
   assert.equal(nodeIds.has('note:note-2'), false);
+});
+
+test('knowledge graph local scope fails closed for missing focus, unknown focus, and invalid depth', async () => {
+  const globalSnapshot = await createKnowledgeGraphSnapshot(createContext(), { localDepth: 0 });
+  assert.ok(globalSnapshot.nodes.length > 0);
+
+  for (const request of [
+    { localDepth: 2 },
+    { localNodeId: 'paper:missing', localDepth: 2 },
+    { localNodeId: 'paper:paper-1', localDepth: 'invalid' },
+    { localNodeId: 'paper:paper-1', localDepth: 5 },
+  ]) {
+    const result = await createKnowledgeGraphSnapshot(createContext(), request);
+    assert.deepEqual(result.nodes, [], JSON.stringify(request));
+    assert.deepEqual(result.edges, [], JSON.stringify(request));
+  }
 });

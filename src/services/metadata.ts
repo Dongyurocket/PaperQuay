@@ -2,6 +2,7 @@ import { invoke } from '../platform/electron/core';
 import type {
   MetadataLookupRequest,
   MetadataLookupResult,
+  MetadataCandidateSearchResult,
 } from '../types/metadata';
 
 function toErrorMessage(error: unknown, fallback: string): string {
@@ -23,6 +24,17 @@ export async function lookupLiteratureMetadata(
     return await invoke<MetadataLookupResult | null>('lookup_literature_metadata', { request });
   } catch (error) {
     throw new Error(toErrorMessage(error, '自动补全文献元数据失败'));
+  }
+}
+
+/** Read-only lookup that preserves each provider's candidates and independent status. */
+export async function lookupLiteratureMetadataCandidates(
+  request: MetadataLookupRequest,
+): Promise<MetadataCandidateSearchResult> {
+  try {
+    return await invoke<MetadataCandidateSearchResult>('lookup_literature_metadata_candidates', { request });
+  } catch (error) {
+    throw new Error(toErrorMessage(error, '检索元数据候选失败'));
   }
 }
 

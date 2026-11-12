@@ -353,6 +353,34 @@ select:focus-visible,
   background: var(--pq-hover);
 }
 
+.pq-icon-button.pq-icon-button--accent {
+  border: 1px solid var(--pq-accent-border);
+  border-radius: var(--pq-radius-sm);
+  background: var(--pq-accent-soft);
+  color: var(--pq-accent);
+  box-shadow: none;
+}
+
+.pq-icon-button.pq-icon-button--accent:hover {
+  border-color: var(--pq-accent-border-strong);
+  background: var(--pq-accent-bg-hover);
+  color: var(--pq-accent);
+  box-shadow: none;
+}
+
+.pq-icon-button.pq-icon-button--accent:active {
+  border-color: var(--pq-accent);
+  background: var(--pq-accent-soft);
+  color: var(--pq-accent);
+  box-shadow: inset 0 0 0 1px var(--pq-accent-border);
+}
+
+.dark .pq-icon-button.pq-icon-button--accent:hover {
+  border-color: var(--pq-accent-border-strong);
+  background: var(--pq-accent-bg-hover);
+  color: var(--pq-accent);
+}
+
 .pq-nav-item {
   display: inline-flex;
   align-items: center;

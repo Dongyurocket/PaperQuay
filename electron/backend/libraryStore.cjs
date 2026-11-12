@@ -9,6 +9,25 @@ const SYSTEM_CATEGORIES = [
   ['system-favorites', 'Favorites', 'favorites', 3],
 ];
 
+const METADATA_FIELD_APPLICABILITY = {
+  title: null, authors: null, year: null, abstractText: null, keywords: null, url: null,
+  doi: ['journalArticle', 'conferencePaper', 'preprint'],
+  publication: ['journalArticle', 'conferencePaper', 'bookSection', 'preprint'],
+  publisher: ['journalArticle', 'conferencePaper', 'book', 'bookSection', 'report'],
+  institution: ['thesis', 'report'], reportNumber: ['report'],
+  volume: ['journalArticle'], issue: ['journalArticle'], pages: ['journalArticle', 'conferencePaper', 'bookSection'],
+  isbn: ['book', 'bookSection', 'conferencePaper'], issn: ['journalArticle'],
+};
+
+function metadataFieldIsMissing(paper, field) {
+  const itemType = paper.itemType || 'journalArticle';
+  const applicableTypes = METADATA_FIELD_APPLICABILITY[field];
+  if (!(field in METADATA_FIELD_APPLICABILITY) || (applicableTypes && !applicableTypes.includes(itemType))) return false;
+  if (field === 'authors') return !paper.authors.some((author) => author.name.trim());
+  if (field === 'keywords') return !paper.keywords.some((keyword) => keyword.trim());
+  return typeof paper[field] !== 'string' || paper[field].trim() === '';
+}
+
 function createAppPaths(app) {
   const dataDir = path.join(app.getPath('userData'), 'PaperQuay');
 
@@ -20,6 +39,7 @@ function createAppPaths(app) {
     libraryPath: path.join(dataDir, 'paperquay-library.json'),
     libraryDatabasePath: path.join(dataDir, 'paperquay-library.sqlite'),
     notesDatabasePath: path.join(dataDir, 'paperquay-notes.sqlite'),
+    knowledgeDatabasePath: path.join(dataDir, 'paperquay-knowledge.sqlite'),
     ragDatabasePath: path.join(dataDir, 'paperquay-rag.sqlite'),
     agentMemoryDir: path.join(dataDir, 'agent-memory'),
     screenshotDir: path.join(dataDir, '.screenshots'),
@@ -189,6 +209,68 @@ function paperMatches(paper, request, library) {
 
   if (request?.ragEnabled === true && paper.ragEnabled === false) return false;
   if (request?.ragEnabled === false && paper.ragEnabled !== false) return false;
+  if (typeof request?.isFavorite === 'boolean' && Boolean(paper.isFavorite) !== request.isFavorite) return false;
+  if (typeof request?.isRead === 'boolean' && (paper.lastReadAt != null) !== request.isRead) return false;
+  const progressFrom = request?.progressFrom == null || request.progressFrom === '' ? null : Number(request.progressFrom);
+  const progressTo = request?.progressTo == null || request.progressTo === '' ? null : Number(request.progressTo);
+  if (progressFrom !== null && (!Number.isFinite(progressFrom) || progressFrom < 0 || progressFrom > 100)) throw new Error('Invalid progressFrom reading progress filter');
+  if (progressTo !== null && (!Number.isFinite(progressTo) || progressTo < 0 || progressTo > 100)) throw new Error('Invalid progressTo reading progress filter');
+  if (progressFrom !== null && progressTo !== null && progressFrom > progressTo) throw new Error('Invalid reading progress range: progressFrom exceeds progressTo');
+  if (progressFrom !== null && paper.readingProgress * 100 < progressFrom) return false;
+  if (progressTo !== null && paper.readingProgress * 100 > progressTo) return false;
+  for (const [prefix, value] of [['importedAt', paper.importedAt], ['lastReadAt', paper.lastReadAt]]) {
+    const fromRaw = request?.[`${prefix}From`];
+    const toRaw = request?.[`${prefix}To`];
+    const from = fromRaw == null || fromRaw === '' ? null : Number(fromRaw);
+    const to = toRaw == null || toRaw === '' ? null : Number(toRaw);
+    if (from !== null && (!Number.isSafeInteger(from) || from < 0)) throw new Error(`Invalid ${prefix}From timestamp filter`);
+    if (to !== null && (!Number.isSafeInteger(to) || to < 0)) throw new Error(`Invalid ${prefix}To timestamp filter`);
+    if (from !== null && to !== null && from > to) throw new Error(`Invalid ${prefix} range: from exceeds to`);
+    if (from !== null && (value == null || value < from)) return false;
+    if (to !== null && (value == null || value > to)) return false;
+  }
+  const attachmentRole = typeof request?.attachmentRole === 'string' ? request.attachmentRole.trim() : '';
+  const attachments = Array.isArray(paper.attachments) ? paper.attachments : [];
+  if (attachmentRole === 'original-pdf' && !attachments.some((item) => ['pdf', 'original-pdf'].includes(item.kind) && item.missing !== true)) return false;
+  if (attachmentRole === 'translated-pdf' && !attachments.some((item) => item.kind === 'translated-pdf' && item.missing !== true)) return false;
+  if (attachmentRole === 'missing' && !attachments.some((item) => item.missing === true)) return false;
+  if (attachmentRole === 'none' && attachments.length > 0) return false;
+  if (attachmentRole && !['any', 'original-pdf', 'translated-pdf', 'missing', 'none'].includes(attachmentRole)) {
+    throw new Error(`Unsupported attachmentRole filter: ${attachmentRole}`);
+  }
+  const missingMetadataFields = Array.isArray(request?.missingMetadataFields)
+    ? [...new Set(request.missingMetadataFields.map((field) => typeof field === 'string' ? field.trim() : '').filter(Boolean))]
+    : [];
+  for (const field of missingMetadataFields) {
+    if (!(field in METADATA_FIELD_APPLICABILITY)) throw new Error(`Unsupported missing metadata field: ${field}`);
+  }
+  if (missingMetadataFields.length && !missingMetadataFields.some((field) => metadataFieldIsMissing(paper, field))) return false;
+  const itemType = typeof request?.itemType === 'string' ? request.itemType.trim() : '';
+  if (itemType && (paper.itemType || 'journalArticle') !== itemType) return false;
+
+  const yearFrom = request?.yearFrom == null || request.yearFrom === '' ? null : Number(request.yearFrom);
+  const yearTo = request?.yearTo == null || request.yearTo === '' ? null : Number(request.yearTo);
+  if (yearFrom !== null && (!Number.isInteger(yearFrom) || yearFrom < 1 || yearFrom > 9999)) throw new Error('Invalid yearFrom year filter');
+  if (yearTo !== null && (!Number.isInteger(yearTo) || yearTo < 1 || yearTo > 9999)) throw new Error('Invalid yearTo year filter');
+  if (yearFrom !== null && yearTo !== null && yearFrom > yearTo) throw new Error('Invalid year range: yearFrom exceeds yearTo');
+  const parsedYear = /^(\d{4})/.exec(String(paper.year ?? ''))?.[1];
+  const unknownYear = !parsedYear;
+  if (request?.unknownYearOnly === true && !unknownYear) return false;
+  if (request?.unknownYearOnly !== true) {
+    if (yearFrom !== null && (!parsedYear || Number(parsedYear) < yearFrom)) return false;
+    if (yearTo !== null && (!parsedYear || Number(parsedYear) > yearTo)) return false;
+  }
+
+  const authorQuery = typeof request?.authorQuery === 'string' ? request.authorQuery.trim().toLowerCase() : '';
+  if (authorQuery && !paper.authors.some((author) => author.name.toLowerCase().includes(authorQuery))) return false;
+  const publicationQuery = typeof request?.publicationQuery === 'string' ? request.publicationQuery.trim().toLowerCase() : '';
+  if (publicationQuery && !(paper.publication ?? '').toLowerCase().includes(publicationQuery)) return false;
+  const keywordQuery = typeof request?.keywordQuery === 'string' ? request.keywordQuery.trim().toLowerCase() : '';
+  if (keywordQuery && !paper.keywords.some((keyword) => keyword.toLowerCase().includes(keywordQuery))) return false;
+  const tagNames = Array.isArray(request?.tagNames)
+    ? [...new Set(request.tagNames.map((name) => typeof name === 'string' ? name.trim().toLowerCase() : '').filter(Boolean))]
+    : [];
+  if (tagNames.length && !paper.tags.some((tag) => tagNames.includes(tag.name.trim().toLowerCase()))) return false;
 
   if (request?.tagId && !paper.tags.some((tag) => tag.id === request.tagId)) return false;
 

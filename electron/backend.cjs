@@ -6,6 +6,7 @@ const { createAppPaths, createLibraryStore } = require('./backend/libraryStore.c
 const { createFileCommands } = require('./backend/fileCommands.cjs');
 const { createIntegrationCommands } = require('./backend/integrationCommands.cjs');
 const { createKnowledgeGraphCommands } = require('./backend/knowledgeGraphCommands.cjs');
+const { createKnowledgeStore } = require('./backend/knowledgeStore.cjs');
 const { createLibraryCommands } = require('./backend/libraryCommands.cjs');
 const { createMcpClientConfigCommands } = require('./backend/mcpClientConfig.cjs');
 const { createMineruCacheCommands } = require('./backend/mineruCacheCommands.cjs');
@@ -103,6 +104,7 @@ function createBackend({ app }) {
   const store = createLibraryStore(appPaths);
   perfMeasure('backend:init library-store', 'backend:init-start');
   const noteStore = createNoteStore(appPaths);
+  const knowledgeStore = createKnowledgeStore(appPaths);
   perfMeasure('backend:init note-store', 'backend:init-start');
   const agentMemoryStore = createAgentMemoryStore(appPaths);
   perfMeasure('backend:init agent-memory-store', 'backend:init-start');
@@ -131,6 +133,7 @@ function createBackend({ app }) {
     appPaths,
     agentMemoryStore,
     noteStore,
+    knowledgeStore,
     approvedWritePaths: new Set(),
     ragStore,
     store,
@@ -180,6 +183,7 @@ function createBackend({ app }) {
     close() {
       context.noteIndexer.close();
       noteStore.close();
+      knowledgeStore.close();
       void Promise.resolve(ragStore.close()).catch((error) => {
         console.warn('[paperquay] RAG store close failed.', error);
       });

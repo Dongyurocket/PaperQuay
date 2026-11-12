@@ -1113,7 +1113,7 @@ export function ChatWorkspacePanel({
                 onClick={handleCreateSessionClick}
                 title={l('新建会话', 'New Chat')}
                 aria-label={l('新建会话', 'New Chat')}
-                className="pq-icon-button h-8 w-8 shrink-0 border border-[var(--pq-border)] bg-slate-950 text-white shadow-[0_8px_18px_rgba(15,23,42,0.14)] hover:bg-slate-800 dark:bg-white dark:text-slate-950"
+                className="pq-icon-button pq-icon-button--accent h-8 w-8 shrink-0"
               >
                 <Plus className="h-3.5 w-3.5" strokeWidth={1.9} />
               </button>

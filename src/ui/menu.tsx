@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { cn } from '../utils/cn';
 
@@ -35,6 +35,7 @@ interface MenuProps {
   entries: MenuEntry[];
   onClose: () => void;
   width?: number;
+  initialFocus?: boolean;
 }
 
 function isSeparator(entry: MenuEntry): entry is { type: 'separator'; id: string } {
@@ -63,12 +64,29 @@ export function Menu({
   entries,
   onClose,
   width = 224,
+  initialFocus = false,
 }: MenuProps) {
+  const menuRef = useRef<HTMLDivElement | null>(null);
   const position = clampPosition(x, y, width, estimateMenuHeight(entries, Boolean(title)));
+
+  useEffect(() => {
+    if (!initialFocus) return;
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    menuRef.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
+    return () => {
+      if (previousFocus?.isConnected) previousFocus.focus();
+    };
+  }, [initialFocus]);
 
   const menu = (
     <div
       className="fixed inset-0 z-[10000]"
+      onKeyDown={(event) => {
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          onClose();
+        }
+      }}
       onClick={onClose}
       onContextMenu={(event) => {
         event.preventDefault();
@@ -77,6 +95,7 @@ export function Menu({
     >
       <div
         className="pq-card fixed overflow-hidden p-1 shadow-[var(--pq-shadow-dialog)]"
+        ref={menuRef}
         style={{ left: position.left, top: position.top, width }}
         onClick={(event) => event.stopPropagation()}
       >

@@ -9,6 +9,7 @@ import {
   Columns2,
   FileJson,
   FileText,
+  FolderOpen,
   Languages,
   Maximize2,
   MoreHorizontal,
@@ -51,6 +52,7 @@ export interface ReaderWorkspaceHeaderProps {
   onTranslateDocument: () => void;
   onCancelTranslateDocument: () => void;
   onOpenPreferences: () => void;
+  onOpenFileLocations?: () => void;
   onEnterImmersive: () => void;
 }
 
@@ -221,6 +223,7 @@ function HeaderToolsMenu({
   onTranslateDocument,
   onCancelTranslateDocument,
   onOpenPreferences,
+  onOpenFileLocations,
 }: Pick<
   ReaderWorkspaceHeaderProps,
   | 'loading'
@@ -232,6 +235,7 @@ function HeaderToolsMenu({
   | 'onTranslateDocument'
   | 'onCancelTranslateDocument'
   | 'onOpenPreferences'
+  | 'onOpenFileLocations'
 >) {
   const l = useLocaleText();
   const [toolbarOpen, setToolbarOpen] = useState(false);
@@ -307,6 +311,13 @@ function HeaderToolsMenu({
       style={menuStyle}
     >
       {[
+        ...(onOpenFileLocations ? [{
+          label: l('打开所在位置', 'Open file location'),
+          icon: <FolderOpen className="h-4 w-4" strokeWidth={1.8} />,
+          onClick: onOpenFileLocations,
+          disabled: false,
+          tone: 'default',
+        }] : []),
         {
           label: l('打开 JSON', 'Open JSON'),
           icon: <FileJson className="h-4 w-4" strokeWidth={1.8} />,
@@ -414,6 +425,7 @@ export function ReaderWorkspaceHeader({
   onTranslateDocument,
   onCancelTranslateDocument,
   onOpenPreferences,
+  onOpenFileLocations,
   onEnterImmersive,
 }: ReaderWorkspaceHeaderProps) {
   const l = useLocaleText();
@@ -523,6 +535,7 @@ export function ReaderWorkspaceHeader({
             onTranslateDocument={onTranslateDocument}
             onCancelTranslateDocument={onCancelTranslateDocument}
             onOpenPreferences={onOpenPreferences}
+            onOpenFileLocations={onOpenFileLocations}
           />
         </div>
       </div>

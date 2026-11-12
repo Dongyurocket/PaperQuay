@@ -117,6 +117,7 @@ interface ReaderWorkspaceProps {
   onTranslateDocument: () => void;
   onCancelTranslateDocument: () => void;
   onOpenPreferences: () => void;
+  onOpenFileLocations?: () => void;
   notes: Note[];
   onAddSelectionToNote: () => void;
   onDistillSelectionToNote: () => void;
@@ -127,6 +128,7 @@ interface ReaderWorkspaceProps {
   selectedAnnotationId: string | null;
   onSelectAnnotation: (annotationId: string) => void;
   paperSummary: PaperSummary | null;
+  paperSummaryVersionUnverified: boolean;
   paperSummaryLoading: boolean;
   paperSummaryError: string;
   onGenerateSummary: () => void;
@@ -649,6 +651,7 @@ function ReaderWorkspace(props: ReaderWorkspaceProps) {
     onTranslateDocument,
     onCancelTranslateDocument,
     onOpenPreferences,
+    onOpenFileLocations,
     onCurrentPdfPathChange,
     assistantDetached,
     active,
@@ -744,6 +747,7 @@ function ReaderWorkspace(props: ReaderWorkspaceProps) {
           onTranslateDocument={onTranslateDocument}
           onCancelTranslateDocument={onCancelTranslateDocument}
           onOpenPreferences={onOpenPreferences}
+          onOpenFileLocations={onOpenFileLocations}
           onEnterImmersive={() => setImmersiveReading(true)}
         />
       ) : null}
@@ -767,6 +771,7 @@ function ReaderWorkspace(props: ReaderWorkspaceProps) {
           translationProgressCompleted={props.translationProgressCompleted}
           translationProgressTotal={props.translationProgressTotal}
           paperSummary={props.paperSummary}
+          paperSummaryVersionUnverified={props.paperSummaryVersionUnverified}
           paperSummaryLoading={props.paperSummaryLoading}
           paperSummaryError={props.paperSummaryError}
           onGenerateSummary={props.onGenerateSummary}

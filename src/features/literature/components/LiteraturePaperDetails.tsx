@@ -6,10 +6,12 @@ import {
   CheckCircle2,
   FilePlus2,
   FileText,
+  FolderOpen,
   Languages,
   Loader2,
   Pencil,
   Replace,
+  Search,
   Save,
   Sparkles,
   Star,
@@ -25,6 +27,8 @@ import type {
   UpdatePaperRequest,
 } from '../../../types/library';
 import type { PdfReadingHeatmap } from '../../../types/reader';
+import type { MetadataCandidate, MetadataCandidateSearchResult } from '../../../types/metadata';
+import { lookupLiteratureMetadataCandidates } from '../../../services/metadata';
 import {
   loadPaperHistory,
   PAPER_READING_HEATMAP_UPDATED_EVENT,
@@ -46,12 +50,18 @@ import LiteratureReadingTimeChart from './LiteratureReadingTimeChart';
 import LibraryConfirmDialog from './LibraryConfirmDialog';
 import type { LiteraturePaperRagStatus } from './LiteraturePaperList';
 
+type PaperSaveResult =
+  | 'saved'
+  | 'failed'
+  | { status: 'conflict'; latestPaper: LiteraturePaper; conflictFields: string[] };
+
 interface LiteraturePaperDetailsProps {
   selectedPaper: LiteraturePaper | null;
   titleDisplayMode: PaperTitleDisplayMode;
   saving: boolean;
   onOpenPaper: (paper: LiteraturePaper) => void;
-  onSavePaper: (request: UpdatePaperRequest) => void;
+  onShowFileLocations?: (paper: LiteraturePaper) => void;
+  onSavePaper: (request: UpdatePaperRequest) => Promise<PaperSaveResult>;
   actionState?: LiteraturePaperTaskState | null;
   onRunMineruParse?: (paper: LiteraturePaper) => void;
   onTranslatePaper?: (paper: LiteraturePaper) => void;
@@ -100,6 +110,8 @@ type OverviewSectionKey =
   | 'limitations'
   | 'takeaways'
   | 'keywords';
+
+type PaperDetailsTab = 'metadata' | 'processing' | 'overview' | 'reading';
 
 interface ParsedOverviewSection {
   key: OverviewSectionKey;
@@ -302,6 +314,74 @@ function draftFromPaper(paper: LiteraturePaper | null): PaperEditDraft {
     userNote: paper?.userNote ?? '',
     citation: paper?.citation ?? '',
   };
+}
+
+function metadataValuesFromDraft(draft: PaperEditDraft, fallbackTitle: string) {
+  return {
+    title: draft.title.trim() || fallbackTitle,
+    titleZh: inputValue(draft.titleZh),
+    itemType: draft.itemType || 'journalArticle',
+    publisher: inputValue(draft.publisher),
+    institution: inputValue(draft.institution),
+    reportNumber: inputValue(draft.reportNumber),
+    volume: inputValue(draft.volume),
+    issue: inputValue(draft.issue),
+    pages: inputValue(draft.pages),
+    isbn: inputValue(draft.isbn),
+    issn: inputValue(draft.issn),
+    authors: splitList(draft.authors),
+    year: inputValue(draft.year),
+    publication: inputValue(draft.publication),
+    doi: inputValue(draft.doi),
+    url: inputValue(draft.url),
+    abstractText: inputValue(draft.abstractText),
+    keywords: splitList(draft.keywords),
+    tags: splitList(draft.tags),
+    userNote: inputValue(draft.userNote),
+    citation: inputValue(draft.citation),
+  };
+}
+
+type CandidateDraftField = 'title' | 'itemType' | 'publisher' | 'volume' | 'issue' | 'pages' | 'issn' | 'authors' | 'year' | 'publication' | 'doi' | 'url' | 'abstractText' | 'keywords';
+type CandidateDraftValues = Partial<Pick<PaperEditDraft, CandidateDraftField>>;
+
+function candidateDraftValues(candidate: MetadataCandidate): CandidateDraftValues {
+  const metadata = candidate.metadata;
+  const values: CandidateDraftValues = {};
+  if (metadata.title) values.title = metadata.title;
+  if (metadata.itemType) values.itemType = metadata.itemType;
+  if (metadata.publisher) values.publisher = metadata.publisher;
+  if (metadata.volume) values.volume = metadata.volume;
+  if (metadata.issue) values.issue = metadata.issue;
+  if (metadata.pages) values.pages = metadata.pages;
+  if (metadata.issn) values.issn = metadata.issn;
+  if (metadata.authors.length) values.authors = metadata.authors.join(', ');
+  if (metadata.year) values.year = metadata.year;
+  if (metadata.publication) values.publication = metadata.publication;
+  if (metadata.doi) values.doi = metadata.doi;
+  if (metadata.url) values.url = metadata.url;
+  if (metadata.abstractText) values.abstractText = metadata.abstractText;
+  if (metadata.keywords?.length) values.keywords = metadata.keywords.join(', ');
+  return values;
+}
+
+const candidateFieldLabels: Record<CandidateDraftField, [string, string]> = {
+  title: ['标题', 'Title'], itemType: ['文献类型', 'Entry type'], publisher: ['出版社', 'Publisher'],
+  volume: ['卷号', 'Volume'], issue: ['期号', 'Issue'], pages: ['页码', 'Pages'], issn: ['ISSN', 'ISSN'],
+  authors: ['作者', 'Authors'], year: ['年份', 'Year'], publication: ['期刊/会议', 'Journal/venue'],
+  doi: ['DOI', 'DOI'], url: ['URL', 'URL'], abstractText: ['摘要', 'Abstract'], keywords: ['关键词', 'Keywords'],
+};
+
+function mergeDraftOntoLatest(
+  base: PaperEditDraft,
+  current: PaperEditDraft,
+  latest: PaperEditDraft,
+): PaperEditDraft {
+  const merged = { ...latest };
+  for (const key of Object.keys(base) as Array<keyof PaperEditDraft>) {
+    if (current[key] !== base[key]) merged[key] = current[key];
+  }
+  return merged;
 }
 
 function splitList(value: string): string[] {
@@ -522,6 +602,7 @@ export default function LiteraturePaperDetails({
   titleDisplayMode,
   saving,
   onOpenPaper,
+  onShowFileLocations,
   onSavePaper,
   actionState,
   onRunMineruParse,
@@ -540,7 +621,18 @@ export default function LiteraturePaperDetails({
   const rootRef = useRef<HTMLElement | null>(null);
   const handleWheelCapture = useWheelScrollDelegate({ rootRef });
   const [editing, setEditing] = useState(false);
+  const [activeDetailsTab, setActiveDetailsTab] = useState<PaperDetailsTab>('metadata');
   const [draft, setDraft] = useState<PaperEditDraft>(() => draftFromPaper(selectedPaper));
+  const [draftBaseline, setDraftBaseline] = useState<PaperEditDraft>(() => draftFromPaper(selectedPaper));
+  const [draftBaseUpdatedAt, setDraftBaseUpdatedAt] = useState(() => selectedPaper?.updatedAt ?? 0);
+  const [draftConflict, setDraftConflict] = useState<Extract<PaperSaveResult, { status: 'conflict' }> | null>(null);
+  const [candidateSearch, setCandidateSearch] = useState<MetadataCandidateSearchResult | null>(null);
+  const [candidateSearchBusy, setCandidateSearchBusy] = useState(false);
+  const [candidateSearchError, setCandidateSearchError] = useState('');
+  const [candidateUndo, setCandidateUndo] = useState<Partial<Record<CandidateDraftField, { before: string; after: string }>>>({});
+  const candidateRequestId = useRef(0);
+  const selectedPaperIdRef = useRef(selectedPaper?.id ?? null);
+  selectedPaperIdRef.current = selectedPaper?.id ?? null;
   const [titleTranslating, setTitleTranslating] = useState(false);
   const [activeOverviewKey, setActiveOverviewKey] = useState<OverviewSectionKey>('overview');
   const [readingHeatmap, setReadingHeatmap] = useState<PdfReadingHeatmap | null>(() =>
@@ -554,7 +646,16 @@ export default function LiteraturePaperDetails({
 
   useEffect(() => {
     setEditing(false);
+    setActiveDetailsTab('metadata');
     setDraft(draftFromPaper(selectedPaper));
+    setDraftBaseline(draftFromPaper(selectedPaper));
+    setDraftBaseUpdatedAt(selectedPaper?.updatedAt ?? 0);
+    setDraftConflict(null);
+    candidateRequestId.current += 1;
+    setCandidateSearch(null);
+    setCandidateSearchBusy(false);
+    setCandidateSearchError('');
+    setCandidateUndo({});
     setTitleTranslating(false);
     setReadingHeatmap(latestReadingHeatmapForPaper(selectedPaper?.id));
   }, [selectedPaper?.id]);
@@ -575,36 +676,51 @@ export default function LiteraturePaperDetails({
     setDraft((current) => ({ ...current, ...patch }));
   };
 
-  const handleSave = () => {
+  const handleCandidateSearch = async () => {
+    if (!selectedPaper) return;
+    const paperId = selectedPaper.id;
+    const requestId = ++candidateRequestId.current;
+    setCandidateSearchBusy(true);
+    setCandidateSearchError('');
+    setCandidateSearch(null);
+    try {
+      const result = await lookupLiteratureMetadataCandidates({
+        doi: draft.doi.trim() || null,
+        title: draft.title.trim() || null,
+      });
+      if (candidateRequestId.current !== requestId || selectedPaperIdRef.current !== paperId) return;
+      setCandidateSearch(result);
+    } catch (error) {
+      if (candidateRequestId.current !== requestId || selectedPaperIdRef.current !== paperId) return;
+      setCandidateSearchError(error instanceof Error ? error.message : l('候选检索失败', 'Candidate search failed'));
+    } finally {
+      if (candidateRequestId.current === requestId && selectedPaperIdRef.current === paperId) setCandidateSearchBusy(false);
+    }
+  };
+
+  const applyCandidateField = (field: CandidateDraftField, value: string) => {
+    const previous = draft[field];
+    setCandidateUndo((current) => ({ ...current, [field]: { before: previous, after: value } }));
+    patchDraft({ [field]: value });
+  };
+
+  const handleSave = async () => {
     if (!selectedPaper) {
       return;
     }
 
-    onSavePaper({
+    const result = await onSavePaper({
       paperId: selectedPaper.id,
-      title: draft.title.trim() || selectedPaper.title,
-      titleZh: inputValue(draft.titleZh),
-      itemType: draft.itemType || 'journalArticle',
-      publisher: inputValue(draft.publisher),
-      institution: inputValue(draft.institution),
-      reportNumber: inputValue(draft.reportNumber),
-      volume: inputValue(draft.volume),
-      issue: inputValue(draft.issue),
-      pages: inputValue(draft.pages),
-      isbn: inputValue(draft.isbn),
-      issn: inputValue(draft.issn),
-      authors: splitList(draft.authors),
-      year: inputValue(draft.year),
-      publication: inputValue(draft.publication),
-      doi: inputValue(draft.doi),
-      url: inputValue(draft.url),
-      abstractText: inputValue(draft.abstractText),
-      keywords: splitList(draft.keywords),
-      tags: splitList(draft.tags),
-      userNote: inputValue(draft.userNote),
-      citation: inputValue(draft.citation),
+      expectedUpdatedAt: draftBaseUpdatedAt,
+      ...metadataValuesFromDraft(draft, selectedPaper.title),
+      expectedValues: metadataValuesFromDraft(draftBaseline, selectedPaper.title),
     });
-    setEditing(false);
+    if (result === 'saved') {
+      setEditing(false);
+      setDraftConflict(null);
+    } else if (typeof result === 'object' && result.status === 'conflict') {
+      setDraftConflict(result);
+    }
   };
 
   const handleToggleFavorite = () => {
@@ -648,17 +764,12 @@ export default function LiteraturePaperDetails({
       onWheelCapture={handleWheelCapture}
       className="pq-library-pane relative flex h-full min-h-0 flex-col overflow-hidden border-l"
     >
-      <header className="pq-toolbar px-4 py-3">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#8a8f94] dark:text-[#a0a0a0]">
-              {l('文献详情', 'Paper Details')}
-            </div>
-            <div className="mt-0.5 text-base font-semibold">
-              {selectedPaper ? l('已选择文献', 'Selected Paper') : l('未选择', 'No Selection')}
-            </div>
-          </div>
-        </div>
+      <header className="pq-toolbar flex min-h-10 items-center justify-end px-4 py-1">
+          {selectedPaper && onShowFileLocations ? (
+            <button type="button" className="pq-icon-button" title={l('打开所在位置', 'Open file location')} aria-label={l('打开所在位置', 'Open file location')} onClick={() => onShowFileLocations(selectedPaper)}>
+              <FolderOpen className="h-4 w-4" />
+            </button>
+          ) : null}
       </header>
 
       <div
@@ -698,7 +809,17 @@ export default function LiteraturePaperDetails({
 
                 <button
                   type="button"
-                  onClick={() => setEditing((current) => !current)}
+                  onClick={() => {
+                    if (editing) {
+                      setEditing(false);
+                      return;
+                    }
+                    setActiveDetailsTab('metadata');
+                    setDraft(draftFromPaper(selectedPaper));
+                    setDraftBaseline(draftFromPaper(selectedPaper));
+                    setDraftBaseUpdatedAt(selectedPaper.updatedAt);
+                    setEditing(true);
+                  }}
                   disabled={saving}
                   className="pq-button px-3 py-2 text-xs"
                 >
@@ -712,7 +833,39 @@ export default function LiteraturePaperDetails({
               </div>
             </div>
 
-            <div className="space-y-3">
+            <div role="tablist" aria-label={l('文献详情页签', 'Paper details tabs')} className="grid grid-cols-4 gap-1 border-b border-[var(--pq-border)]">
+              {([
+                ['metadata', l('资料', 'Details')],
+                ['processing', l('处理与附件', 'Processing & Files')],
+                ['overview', l('AI 概览', 'AI Overview')],
+                ['reading', l('阅读记录', 'Reading')],
+              ] as const).map(([tab, label]) => {
+                const selected = activeDetailsTab === tab;
+                const taskRunning = tab === 'processing' && actionState?.status === 'running';
+                return (
+                  <button
+                    key={tab}
+                    type="button"
+                    role="tab"
+                    id={`paper-details-tab-${tab}`}
+                    aria-selected={selected}
+                    aria-controls={`paper-details-panel-${tab}`}
+                    onClick={() => setActiveDetailsTab(tab)}
+                    className={[
+                      'relative min-h-10 px-1 py-2 text-center text-[11px] font-semibold leading-4 transition sm:text-xs',
+                      selected
+                        ? 'border-b-2 border-[var(--pq-accent)] text-[var(--pq-accent)]'
+                        : 'text-[var(--pq-text-muted)] hover:text-[var(--pq-text)]',
+                    ].join(' ')}
+                  >
+                    {label}
+                    {taskRunning ? <span aria-label={l('任务运行中', 'Task running')} className="ml-1 inline-block h-1.5 w-1.5 rounded-full bg-[var(--pq-accent)] align-middle" /> : null}
+                  </button>
+                );
+              })}
+            </div>
+
+            {activeDetailsTab === 'processing' ? <div role="tabpanel" id="paper-details-panel-processing" aria-labelledby="paper-details-tab-processing" className="space-y-3">
               <ActionButton
                 primary
                 disabled={!hasPdf}
@@ -925,10 +1078,84 @@ export default function LiteraturePaperDetails({
                   </div>
                 ) : null}
               </section>
-            </div>
+            </div> : null}
 
-            {editing ? (
+            {activeDetailsTab === 'metadata' || activeDetailsTab === 'overview' ? <div role="tabpanel" id={`paper-details-panel-${activeDetailsTab}`} aria-labelledby={`paper-details-tab-${activeDetailsTab}`} className="space-y-4">
+            {editing && activeDetailsTab === 'metadata' ? (
               <div className="pq-card space-y-4 p-4">
+                <section className="rounded-xl border border-[var(--pq-border)] bg-[var(--pq-surface-2)] p-3" aria-label={l('元数据候选', 'Metadata candidates')}>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <div className="text-sm font-semibold text-[var(--pq-text)]">{l('检索并比较元数据候选', 'Search and compare metadata candidates')}</div>
+                      <p className="mt-1 text-xs text-[var(--pq-text-muted)]">{l('候选只会应用到当前草稿；确认后仍需点击“保存修改”。', 'Candidates only update this draft; click Save Changes to persist them.')}</p>
+                    </div>
+                    <button type="button" className="pq-button inline-flex items-center gap-2 px-3 py-2 text-sm" onClick={() => void handleCandidateSearch()} disabled={candidateSearchBusy || saving || (!draft.doi.trim() && !draft.title.trim())}>
+                      {candidateSearchBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                      {candidateSearchBusy ? l('检索中…', 'Searching…') : l('检索候选', 'Find candidates')}
+                    </button>
+                  </div>
+                  {candidateSearchError ? <p role="alert" className="mt-2 text-xs text-[var(--pq-danger)]">{candidateSearchError}</p> : null}
+                  {candidateSearch ? (
+                    <div className="mt-3 space-y-3">
+                      <p className="text-xs text-[var(--pq-text-muted)]">{Object.entries(candidateSearch.providers).map(([provider, status]) => `${provider}: ${status.status}`).join(' · ')}</p>
+                      {candidateSearch.candidates.length === 0 ? <p className="text-sm text-[var(--pq-text-muted)]">{l('没有找到候选记录。', 'No candidate records found.')}</p> : null}
+                      {candidateSearch.candidates.map((candidate) => {
+                        const values = candidateDraftValues(candidate);
+                        return (
+                          <article key={candidate.id} className="rounded-lg border border-[var(--pq-border)] bg-[var(--pq-surface)] p-3">
+                            <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-xs">
+                              <span className="font-semibold text-[var(--pq-text)]">{candidate.provider} · {candidate.query.kind}: {candidate.query.value}</span>
+                              <span className="text-[var(--pq-text-faint)]">{candidate.id}</span>
+                            </div>
+                            <div className="space-y-2">
+                              {(Object.entries(values) as Array<[CandidateDraftField, string]>).map(([field, value]) => {
+                                const currentValue = draft[field];
+                                const isUndoable = candidateUndo[field]?.after === currentValue;
+                                return (
+                                  <div key={field} className="grid gap-1 border-t border-[var(--pq-border)] pt-2 sm:grid-cols-[110px_minmax(0,1fr)_auto] sm:items-start">
+                                    <span className="text-xs font-medium text-[var(--pq-text-muted)]">{l(...candidateFieldLabels[field])}</span>
+                                    <div className="min-w-0">
+                                      <p className="break-words text-xs text-[var(--pq-text-faint)]">{l('当前：', 'Current: ')}{currentValue || l('（空）', '(empty)')}</p>
+                                      <p className="break-words text-sm text-[var(--pq-text)]">{l('候选：', 'Candidate: ')}{value}</p>
+                                      <p className="text-[10px] text-[var(--pq-text-faint)]">{l('来源：', 'Source: ')}{candidate.fieldSources[field] ?? candidate.provider}</p>
+                                    </div>
+                                    {isUndoable ? (
+                                      <button type="button" className="pq-button px-2 py-1 text-xs" onClick={() => { patchDraft({ [field]: candidateUndo[field]?.before ?? '' }); setCandidateUndo((current) => { const next = { ...current }; delete next[field]; return next; }); }}>{l('撤销', 'Undo')}</button>
+                                    ) : (
+                                      <button type="button" className="pq-button px-2 py-1 text-xs" disabled={currentValue === value} onClick={() => applyCandidateField(field, value)}>{l('应用到草稿', 'Apply to draft')}</button>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </article>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                </section>
+                {draftConflict ? (
+                  <div className="space-y-2 rounded-xl border border-[var(--pq-border-strong)] bg-[var(--pq-surface-2)] p-3 text-sm text-[var(--pq-text)]" role="alert">
+                    <p>
+                      {l('部分字段在其他位置更新。你的草稿仍保留。', 'Some fields changed elsewhere. Your draft is still preserved.')}
+                      {' '}{l('冲突字段：', 'Conflicting fields: ')}{draftConflict.conflictFields.join(', ')}
+                      {' '}{l('最新标题：', 'Latest title: ')}{draftConflict.latestPaper.title}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const latestDraft = draftFromPaper(draftConflict.latestPaper);
+                        setDraft(mergeDraftOntoLatest(draftBaseline, draft, latestDraft));
+                        setDraftBaseline(latestDraft);
+                        setDraftBaseUpdatedAt(draftConflict.latestPaper.updatedAt);
+                        setDraftConflict(null);
+                      }}
+                      className="pq-button px-3 py-1.5 text-xs"
+                    >
+                      {l('确认基于最新版本继续保存草稿', 'Keep my draft and retry on the latest version')}
+                    </button>
+                  </div>
+                ) : null}
                 <label>
                   <FieldLabel>{l('标题', 'Title')}</FieldLabel>
                   <TextInput
@@ -1179,6 +1406,8 @@ export default function LiteraturePaperDetails({
                     type="button"
                     onClick={() => {
                       setDraft(draftFromPaper(selectedPaper));
+                      setDraftBaseline(draftFromPaper(selectedPaper));
+                      setDraftBaseUpdatedAt(selectedPaper.updatedAt);
                       setEditing(false);
                     }}
                     disabled={saving}
@@ -1190,6 +1419,7 @@ export default function LiteraturePaperDetails({
               </div>
             ) : (
               <>
+                {activeDetailsTab === 'metadata' ? <>
                 <dl className="pq-card p-4 text-sm">
                   <div className="grid gap-3 sm:grid-cols-2">
                     <div>
@@ -1240,7 +1470,34 @@ export default function LiteraturePaperDetails({
                   ) : null}
                 </dl>
 
-                <LiteratureReadingTimeChart heatmap={readingHeatmap} />
+                {selectedPaper.doi || selectedPaper.url || selectedPaper.abstractText || selectedPaper.citation ? (
+                  <dl className="pq-card space-y-3 p-4 text-sm">
+                    {selectedPaper.doi ? (
+                      <div>
+                        <dt className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--pq-text-faint)]">DOI</dt>
+                        <dd className="mt-1 break-all text-[var(--pq-text-muted)]">{selectedPaper.doi}</dd>
+                      </div>
+                    ) : null}
+                    {selectedPaper.url ? (
+                      <div>
+                        <dt className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--pq-text-faint)]">URL</dt>
+                        <dd className="mt-1 break-all text-[var(--pq-text-muted)]">{selectedPaper.url}</dd>
+                      </div>
+                    ) : null}
+                    {selectedPaper.abstractText ? (
+                      <div>
+                        <dt className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--pq-text-faint)]">{l('摘要', 'Abstract')}</dt>
+                        <dd className="mt-1 whitespace-pre-wrap leading-6 text-[var(--pq-text-muted)]">{selectedPaper.abstractText}</dd>
+                      </div>
+                    ) : null}
+                    {selectedPaper.citation ? (
+                      <div>
+                        <dt className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--pq-text-faint)]">{l('引用信息', 'Citation')}</dt>
+                        <dd className="mt-1 whitespace-pre-wrap leading-6 text-[var(--pq-text-muted)]">{selectedPaper.citation}</dd>
+                      </div>
+                    ) : null}
+                  </dl>
+                ) : null}
 
                 {selectedPaper.keywords.length > 0 ? (
                   <div className="flex flex-wrap gap-2">
@@ -1273,7 +1530,19 @@ export default function LiteraturePaperDetails({
                   </div>
                 ) : null}
 
-                <section className="pq-card p-4">
+                {selectedPaper.userNote ? (
+                  <div>
+                    <div className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--pq-text-faint)] dark:text-[#8d8d8d]">
+                      {l('用户笔记', 'User Note')}
+                    </div>
+                    <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-[var(--pq-text-muted)] dark:text-[#a0a0a0]">
+                      {selectedPaper.userNote}
+                    </p>
+                  </div>
+                ) : null}
+                </> : null}
+
+                {activeDetailsTab === 'overview' ? <section className="pq-card p-4">
                   <div className="flex items-center justify-between gap-3">
                     <div className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--pq-text-faint)] dark:text-[#8d8d8d]">
                       {l('AI 概览', 'AI Overview')}
@@ -1343,24 +1612,35 @@ export default function LiteraturePaperDetails({
                       </div>
                     </div>
                   ) : (
-                    <div className="mt-3 rounded-xl border border-dashed border-[var(--pq-border)] bg-white/48 px-4 py-4 text-sm leading-6 text-[var(--pq-text-muted)]">
-                      {l('生成概览后，结果会显示在这里。', 'After generating an overview, the result will appear here.')}
+                    <div className="mt-3 rounded-xl border border-dashed border-[var(--pq-border)] bg-white/48 px-4 py-4">
+                      <p className="text-sm leading-6 text-[var(--pq-text-muted)]">
+                        {l('尚无已保存概览。', 'No saved overview yet.')}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => onGenerateSummary?.(selectedPaper)}
+                        disabled={isPaperPipelineActionDisabled({
+                          hasPdf,
+                          hasHandler: Boolean(onGenerateSummary),
+                          actionState,
+                        })}
+                        className="pq-button-primary mt-3 inline-flex items-center px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-55"
+                      >
+                        <Sparkles className="mr-2 h-3.5 w-3.5" />
+                        {l('生成概览', 'Generate overview')}
+                      </button>
                     </div>
                   )}
-                </section>
-
-                {selectedPaper.userNote ? (
-                  <div>
-                    <div className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--pq-text-faint)] dark:text-[#8d8d8d]">
-                      {l('用户笔记', 'User Note')}
-                    </div>
-                    <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-[var(--pq-text-muted)] dark:text-[#a0a0a0]">
-                      {selectedPaper.userNote}
-                    </p>
-                  </div>
-                ) : null}
+                </section> : null}
               </>
             )}
+            </div> : null}
+            {activeDetailsTab === 'reading' ? (
+              <section role="tabpanel" id="paper-details-panel-reading" aria-labelledby="paper-details-tab-reading" className="space-y-3">
+                <div className="text-xs text-[var(--pq-text-muted)]">{l('显示最近更新的一份有效阅读热图。', 'Showing the most recently updated valid reading heatmap.')}</div>
+                <LiteratureReadingTimeChart heatmap={readingHeatmap} />
+              </section>
+            ) : null}
           </div>
         ) : (
           <div className="pq-card border-dashed p-8 text-center text-sm text-[var(--pq-text-muted)]">

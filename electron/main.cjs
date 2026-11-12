@@ -11,6 +11,13 @@ const {
 } = require('./localPdfProtocol.cjs');
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
+// Opt-in isolated profile for source-level desktop acceptance; never used by packaged builds.
+if (isDev && process.env.PAPERQUAY_DEV_DATA_DIR) {
+  app.setName('PaperQuay Dev');
+  const devDataDir = path.resolve(process.env.PAPERQUAY_DEV_DATA_DIR);
+  fs.mkdirSync(devDataDir, { recursive: true });
+  app.setPath('userData', devDataDir);
+}
 const RESTORE_RESUME_ARGUMENT = '--paperquay-restore-resume';
 const isRestoreResume = process.argv.includes(RESTORE_RESUME_ARGUMENT);
 let backend = null;

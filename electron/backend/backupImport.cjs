@@ -73,6 +73,7 @@ function rootPaths(appPaths) {
     configPath: appPaths.configPath || path.join(dataDir, '.settings', 'paperquay.config.json'),
     libraryDatabasePath: appPaths.libraryDatabasePath || path.join(dataDir, 'paperquay-library.sqlite'),
     notesDatabasePath: appPaths.notesDatabasePath || path.join(dataDir, 'paperquay-notes.sqlite'),
+    knowledgeDatabasePath: appPaths.knowledgeDatabasePath || path.join(dataDir, 'paperquay-knowledge.sqlite'),
     ragDatabasePath: appPaths.ragDatabasePath || path.join(dataDir, 'paperquay-rag.sqlite'),
     mineruCacheDir: appPaths.mineruCacheDir || path.join(dataDir, '.mineru-cache'),
     remotePdfDownloadDir: appPaths.remotePdfDownloadDir || path.join(dataDir, '.downloads', 'pdfs'),
@@ -103,7 +104,7 @@ function validPending(pending) {
 
 function writeJsonAtomicSync(filePath, value) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  const temporaryPath = `${filePath}.tmp`;
+  const temporaryPath = `${filePath}.tmp-${process.pid}-${crypto.randomBytes(6).toString('hex')}`;
   const descriptor = fs.openSync(temporaryPath, 'w', 0o600);
   try {
     fs.writeFileSync(descriptor, `${JSON.stringify(value, null, 2)}\n`);
@@ -123,7 +124,7 @@ async function syncHandle(handle) {
 
 async function writeJsonAtomic(filePath, value) {
   await fsp.mkdir(path.dirname(filePath), { recursive: true });
-  const temporaryPath = `${filePath}.tmp`;
+  const temporaryPath = `${filePath}.tmp-${process.pid}-${crypto.randomBytes(6).toString('hex')}`;
   const handle = await fsp.open(temporaryPath, 'w', 0o600);
   try {
     await handle.writeFile(`${JSON.stringify(value, null, 2)}\n`);
@@ -131,7 +132,22 @@ async function writeJsonAtomic(filePath, value) {
   } finally {
     await handle.close();
   }
-  await fsp.rename(temporaryPath, filePath);
+  try {
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        await fsp.rename(temporaryPath, filePath);
+        break;
+      } catch (error) {
+        const transientWindowsLock = process.platform === 'win32' &&
+          ['EPERM', 'EACCES', 'EBUSY'].includes(error?.code);
+        if (!transientWindowsLock || attempt >= 5) throw error;
+        await new Promise((resolve) => setTimeout(resolve, 20 * (attempt + 1)));
+      }
+    }
+  } catch (error) {
+    await fsp.rm(temporaryPath, { force: true }).catch(() => undefined);
+    throw error;
+  }
   const directory = await fsp.open(path.dirname(filePath), 'r').catch(() => null);
   if (directory) {
     try { await syncHandle(directory); } finally { await directory.close(); }
@@ -284,6 +300,48 @@ function pathsFromRoots(sourceRoots, resolvedRoots, sourceName, relativePath) {
     .filter((root, index, roots) => root && roots.indexOf(root) === index)
     .map((root) => sourcePathFromRoot(root, relativePath))
     .filter(Boolean);
+}
+
+function rebindKnowledgeArtifactPaths(databasePath, sourceRoots, resolvedRoots, targetMineruRoot) {
+  const sourceCandidates = [sourceRootValue(sourceRoots, 'mineruCacheDir'), sourceRootValue(resolvedRoots, 'mineruCacheDir')]
+    .filter((value, index, values) => value && values.indexOf(value) === index);
+  if (!sourceCandidates.length || !targetMineruRoot) return 0;
+  const rebind = (storedPath) => {
+    if (typeof storedPath !== 'string' || !storedPath.trim()) return null;
+    for (const sourceRoot of sourceCandidates) {
+      const windows = isWindowsAbsolutePath(sourceRoot);
+      const pathApi = windows ? path.win32 : path.posix;
+      const normalizedRoot = pathApi.resolve(sourceRoot);
+      const normalizedTarget = pathApi.resolve(storedPath);
+      const relative = pathApi.relative(normalizedRoot, normalizedTarget);
+      if (relative === '..' || relative.startsWith(`..${windows ? '\\' : '/'}`) || pathApi.isAbsolute(relative)) continue;
+      const segments = relative.split(/[\\/]+/).filter(Boolean);
+      return path.join(targetMineruRoot, ...segments);
+    }
+    return null;
+  };
+  const db = openDatabase(databasePath);
+  try {
+    const tables = new Set(db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((row) => row.name));
+    if (!tables.has('document_generations') || !tables.has('parse_partitions')) return 0;
+    let updated = 0;
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      for (const row of db.prepare('SELECT generation_id AS id,artifact_path AS artifactPath FROM document_generations WHERE artifact_path IS NOT NULL').all()) {
+        const nextPath = rebind(row.artifactPath);
+        if (nextPath && nextPath !== row.artifactPath) updated += db.prepare('UPDATE document_generations SET artifact_path=? WHERE generation_id=?').run(nextPath, row.id).changes;
+      }
+      for (const row of db.prepare('SELECT partition_id AS id,staged_path AS stagedPath FROM parse_partitions WHERE staged_path IS NOT NULL').all()) {
+        const nextPath = rebind(row.stagedPath);
+        if (nextPath && nextPath !== row.stagedPath) updated += db.prepare('UPDATE parse_partitions SET staged_path=? WHERE partition_id=?').run(nextPath, row.id).changes;
+      }
+      db.exec('COMMIT');
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
+    return updated;
+  } finally { db.close(); }
 }
 
 function makeRootMap(manifest, targets) {
@@ -535,14 +593,15 @@ function validateDatabases(manifest, roots, { deepRag = false } = {}) {
     }
   }
   if (databaseKinds.filter((kind) => kind === 'rag').length > 1) throw codedError('INVALID_PACKAGE', 'Backup contains duplicate RAG databases');
+  if (databaseKinds.filter((kind) => kind === 'knowledge').length > 1) throw codedError('INVALID_PACKAGE', 'Backup contains duplicate knowledge databases');
   for (const entry of databaseEntries) {
     const kind = entry.databaseKind;
-    if (!['library', 'notes', 'rag'].includes(kind)) throw codedError('INVALID_PACKAGE', 'Database entry has an unknown databaseKind');
+    if (!['library', 'notes', 'rag', 'knowledge'].includes(kind)) throw codedError('INVALID_PACKAGE', 'Database entry has an unknown databaseKind');
     const databasePath = path.join(roots.stagingDataDir, ...String(entry.packagePath).replace(/^data\//, '').split('/'));
     if (!fs.existsSync(databasePath)) throw codedError('DB_INTEGRITY_FAILED', `Missing ${kind} database`);
     const db = checkIntegrity(databasePath, { rag: kind === 'rag', deep: kind !== 'rag' || deepRag });
     try {
-      const databaseCounts = countDatabase(db, kind);
+    const databaseCounts = ['library', 'notes', 'rag'].includes(kind) ? countDatabase(db, kind) : {};
       compareCounts(databaseCounts, manifest.counts);
       Object.assign(counts, databaseCounts);
     } finally {
@@ -794,6 +853,10 @@ async function stageBackupImport(context, input, dependencies) {
       signal,
     });
     validateDatabases(manifest, { stagingDataDir }, { deepRag: dependencies?.deepRag });
+    const knowledgeDatabasePath = path.join(stagingDataDir, 'paperquay-knowledge.sqlite');
+    if (manifest.entries.some((entry) => entry.kind === 'database' && entry.databaseKind === 'knowledge') && await exists(knowledgeDatabasePath)) {
+      rebindKnowledgeArtifactPaths(knowledgeDatabasePath, roots.sourceRoots, roots.resolvedRoots, targets.mineruCacheDir);
+    }
     const packageRendererPath = path.join(stagingDataDir, '.settings', 'renderer-local-storage.json');
     const packageState = readJsonSync(packageRendererPath, {});
     const settingsPath = path.join(stagingDataDir, '.settings', 'paperquay.config.json');

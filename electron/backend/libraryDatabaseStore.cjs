@@ -1,6 +1,7 @@
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const { DatabaseSync, sqlStringLiteral, withTransaction } = require('./nodeSqlite.cjs');
 const { cleanString, readJson, writeJsonSync } = require('./utils.cjs');
 const {
@@ -12,6 +13,8 @@ const {
 function openDatabase(databasePath) {
   fs.mkdirSync(path.dirname(databasePath), { recursive: true });
   const db = new DatabaseSync(databasePath, { timeout: 5000 });
+  db.function('pq_casefold', (value) => (typeof value === 'string' ? value.toLowerCase() : ''));
+  db.function('pq_trim', (value) => (typeof value === 'string' ? value.trim() : ''));
   db.exec('PRAGMA journal_mode = WAL;');
   db.exec('PRAGMA foreign_keys = ON;');
   createSchema(db);
@@ -122,6 +125,48 @@ function createSchema(db) {
       missing INTEGER NOT NULL,
       FOREIGN KEY (paper_id) REFERENCES papers(id) ON DELETE CASCADE
     );
+
+    CREATE TABLE IF NOT EXISTS paper_processing_status (
+      paper_id TEXT PRIMARY KEY,
+      mineru_status TEXT NOT NULL DEFAULT 'unknown'
+        CHECK (mineru_status IN ('unknown', 'available', 'missing', 'error')),
+      mineru_source_version TEXT NOT NULL DEFAULT '',
+      mineru_checked_at INTEGER,
+      updated_at INTEGER NOT NULL DEFAULT 0,
+      FOREIGN KEY (paper_id) REFERENCES papers(id) ON DELETE CASCADE
+    );
+
+    CREATE TRIGGER IF NOT EXISTS invalidate_mineru_status_after_attachment_insert
+    AFTER INSERT ON attachments BEGIN
+      INSERT INTO paper_processing_status (paper_id, mineru_status, mineru_source_version, updated_at)
+      VALUES (NEW.paper_id, 'unknown', '', CAST(strftime('%s','now') AS INTEGER) * 1000)
+      ON CONFLICT(paper_id) DO UPDATE SET mineru_status='unknown', mineru_source_version='',
+        mineru_checked_at=NULL, updated_at=excluded.updated_at;
+    END;
+    CREATE TRIGGER IF NOT EXISTS invalidate_mineru_status_after_attachment_update
+    AFTER UPDATE OF kind, stored_path, relative_path, content_hash, missing ON attachments BEGIN
+      INSERT INTO paper_processing_status (paper_id, mineru_status, mineru_source_version, updated_at)
+      VALUES (NEW.paper_id, 'unknown', '', CAST(strftime('%s','now') AS INTEGER) * 1000)
+      ON CONFLICT(paper_id) DO UPDATE SET mineru_status='unknown', mineru_source_version='',
+        mineru_checked_at=NULL, updated_at=excluded.updated_at;
+    END;
+    -- Replace the early P4 trigger definition on existing databases too. That version
+    -- INSERTed during ON DELETE CASCADE and could violate the paper foreign key.
+    DROP TRIGGER IF EXISTS invalidate_mineru_status_after_attachment_delete;
+    CREATE TRIGGER invalidate_mineru_status_after_attachment_delete
+    AFTER DELETE ON attachments BEGIN
+      UPDATE paper_processing_status
+      SET mineru_status='unknown', mineru_source_version='', mineru_checked_at=NULL,
+        updated_at=CAST(strftime('%s','now') AS INTEGER) * 1000
+      WHERE paper_id=OLD.paper_id;
+    END;
+    CREATE TRIGGER IF NOT EXISTS invalidate_mineru_status_after_paper_title_update
+    AFTER UPDATE OF title ON papers WHEN OLD.title IS NOT NEW.title BEGIN
+      INSERT INTO paper_processing_status (paper_id, mineru_status, mineru_source_version, updated_at)
+      VALUES (NEW.id, 'unknown', '', CAST(strftime('%s','now') AS INTEGER) * 1000)
+      ON CONFLICT(paper_id) DO UPDATE SET mineru_status='unknown', mineru_source_version='',
+        mineru_checked_at=NULL, updated_at=excluded.updated_at;
+    END;
 
     CREATE TABLE IF NOT EXISTS paper_references (
       id TEXT PRIMARY KEY,
@@ -1015,6 +1060,128 @@ function deletePaperFromDb(db, paperId) {
   });
 }
 
+function mineruSourceVersion(db, paperId) {
+  const paper = db.prepare('SELECT id, title FROM papers WHERE id = ?').get(paperId);
+  if (!paper) return null;
+  const attachments = db.prepare(`
+    SELECT id, kind, stored_path AS storedPath, relative_path AS relativePath,
+      content_hash AS contentHash, missing
+    FROM attachments WHERE paper_id = ? ORDER BY id
+  `).all(paperId).map((item) => ({
+    ...item,
+    missing: Boolean(item.missing),
+  }));
+  return crypto.createHash('sha256')
+    .update(JSON.stringify({ paperId: paper.id, title: paper.title, attachments }))
+    .digest('hex');
+}
+
+function getMineruParseStatuses(db, paperIds) {
+  if (!Array.isArray(paperIds) || paperIds.length > 10000) {
+    throw new Error('paperIds must be an array with at most 10000 entries');
+  }
+  const result = [];
+  const select = db.prepare(`
+    SELECT mineru_status AS status, mineru_source_version AS sourceVersion,
+      mineru_checked_at AS checkedAt, updated_at AS updatedAt
+    FROM paper_processing_status WHERE paper_id = ?
+  `);
+  for (const paperId of [...new Set(paperIds.map(cleanString).filter(Boolean))]) {
+    const sourceVersion = mineruSourceVersion(db, paperId);
+    if (!sourceVersion) continue;
+    const stored = select.get(paperId);
+    const isFresh = Number.isSafeInteger(stored?.checkedAt)
+      && stored.checkedAt >= Date.now() - 24 * 60 * 60 * 1000;
+    const isCurrent = stored?.sourceVersion === sourceVersion;
+    result.push({
+      paperId,
+      sourceVersion,
+      status: isCurrent && (stored.status === 'error' || isFresh) ? stored.status : 'unknown',
+      checkedAt: isCurrent ? stored.checkedAt : null,
+      updatedAt: isCurrent ? stored.updatedAt : 0,
+    });
+  }
+  return result;
+}
+
+function saveMineruParseStatuses(db, entries) {
+  if (!Array.isArray(entries) || entries.length > 1000) {
+    throw new Error('entries must be an array with at most 1000 items');
+  }
+  const allowed = new Set(['available', 'missing', 'error']);
+  const upsert = db.prepare(`
+    INSERT INTO paper_processing_status (
+      paper_id, mineru_status, mineru_source_version, mineru_checked_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(paper_id) DO UPDATE SET
+      mineru_status=excluded.mineru_status,
+      mineru_source_version=excluded.mineru_source_version,
+      mineru_checked_at=excluded.mineru_checked_at,
+      updated_at=excluded.updated_at
+  `);
+  let accepted = 0;
+  let stale = 0;
+  withTransaction(db, () => {
+    for (const entry of entries) {
+      const paperId = cleanString(entry?.paperId);
+      const sourceVersion = cleanString(entry?.sourceVersion);
+      const status = cleanString(entry?.status);
+      if (!paperId || !sourceVersion || !allowed.has(status)) {
+        throw new Error('Invalid MinerU parse status entry');
+      }
+      if (mineruSourceVersion(db, paperId) !== sourceVersion) {
+        stale += 1;
+        continue;
+      }
+      const checkedAt = Number.isSafeInteger(entry.checkedAt) && entry.checkedAt >= 0
+        ? entry.checkedAt : Date.now();
+      upsert.run(paperId, status, sourceVersion, checkedAt, checkedAt);
+      accepted += 1;
+    }
+  });
+  return { accepted, stale };
+}
+
+/**
+ * Rebuild the persisted status projection against the current paper and attachment identities.
+ * Missing and stale rows become explicitly unverified; valid checks are preserved.
+ */
+function reconcileMineruStatusProjection(db) {
+  const papers = db.prepare('SELECT id FROM papers ORDER BY id').all();
+  const select = db.prepare(`
+    SELECT mineru_status AS status, mineru_source_version AS sourceVersion
+    FROM paper_processing_status WHERE paper_id = ?
+  `);
+  const insertUnknown = db.prepare(`
+    INSERT INTO paper_processing_status (
+      paper_id, mineru_status, mineru_source_version, mineru_checked_at, updated_at
+    ) VALUES (?, 'unknown', ?, NULL, ?)
+  `);
+  const resetUnknown = db.prepare(`
+    UPDATE paper_processing_status
+    SET mineru_status='unknown', mineru_source_version=?, mineru_checked_at=NULL, updated_at=?
+    WHERE paper_id=?
+  `);
+  let inserted = 0;
+  let invalidated = 0;
+  withTransaction(db, () => {
+    const now = Date.now();
+    for (const { id } of papers) {
+      const sourceVersion = mineruSourceVersion(db, id);
+      if (!sourceVersion) continue;
+      const stored = select.get(id);
+      if (!stored) {
+        insertUnknown.run(id, sourceVersion, now);
+        inserted += 1;
+      } else if (stored.sourceVersion !== sourceVersion) {
+        resetUnknown.run(sourceVersion, now, id);
+        invalidated += 1;
+      }
+    }
+  });
+  return { papers: papers.length, inserted, invalidated };
+}
+
 function saveLibraryToDb(db, appPaths, normalizeLibrary, library) {
   const normalized = normalizeLibrary(library, appPaths);
 
@@ -1093,6 +1260,9 @@ function createLibraryDatabaseStore(appPaths, helpers) {
     }
   }
 
+  // Reconcile on every open so interrupted or older writes converge before status filters run.
+  reconcileMineruStatusProjection(db);
+
   return {
     close() {
       if (db.isOpen) db.close();
@@ -1120,6 +1290,18 @@ function createLibraryDatabaseStore(appPaths, helpers) {
 
     countPapers(request) {
       return countPapersFromDb(db, request);
+    },
+
+    getMineruParseStatuses(paperIds) {
+      return getMineruParseStatuses(db, paperIds);
+    },
+
+    saveMineruParseStatuses(entries) {
+      return saveMineruParseStatuses(db, entries);
+    },
+
+    reconcileMineruStatusProjection() {
+      return reconcileMineruStatusProjection(db);
     },
 
     listCategoriesWithCounts() {
