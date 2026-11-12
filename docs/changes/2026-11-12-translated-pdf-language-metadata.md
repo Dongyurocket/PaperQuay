@@ -17,4 +17,4 @@
 - 最终修正后 `npx tsc --noEmit`、译版专项 5 项测试和前端生产构建通过。
 - 本地 Windows x64 安装包：122,241,558 字节；SHA-256 `2E67DF52060260FDEC8A2A37D34928CBEABEC3B5B99316FE2BE3494BE93064BD`，SHA-512 `0B0D9D158B52A670241CB704813F09418258F78296530D7D66A91CB9EA57C24C1939CAFB4C70AE94AD5B4D99E322358B92DEBFC95408D844A15F28AE99CF3004`。
 - 已发布 GitHub Release：[PaperQuay v0.4.25](https://github.com/Dongyurocket/PaperQuay/releases/tag/app-v0.4.25)；CI 安装包大小 122,241,301 字节，SHA-256 `8c6be947e6d036bcb991137a6197d2b5ca818b3a9c10293db4a49e0afc13fbc7`，并已上传 `.blockmap` 与 `stable.yml`。
-- Windows 安装版实机交互验收待安装本次 Release 后完成；不会使用或修改用户真实文库进行验收。
+- Windows 安装版已完成实机交互验收，用户反馈测试无问题；不会使用或修改用户真实文库进行验收。

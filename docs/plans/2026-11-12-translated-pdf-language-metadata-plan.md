@@ -4,7 +4,7 @@
 
 - 日期：2026-11-12（Asia/Shanghai）
 - 源码基线：`5fb9961`，PaperQuay 0.4.24
-- 状态：已实现并发布 PaperQuay 0.4.25。功能、自动化测试、生产构建、用户手册和 Release Notes 已完成；Windows 安装版的实机交互验收待安装本次 Release 后执行。
+- 状态：已实现、发布并完成验收。PaperQuay 0.4.25 的功能、自动化测试、生产构建、用户手册、Release Notes 及 Windows 安装版实机交互验收均已完成。
 - 验收平台：Windows。后续正式发行仅提供 Windows 版本；其他平台由用户自行打包，作者不承担其维护与测试。
 
 ## 1. 目标与范围
@@ -204,8 +204,8 @@ interface UpdateTranslatedPdfLanguagesRequest {
 - [x] 批量完整预览、目标排除、跨页选择及事务校验均可用。
 - [x] 文献库和阅读器附加入口均提供语言确认。
 - [x] 元数据更新不改 PDF 文件、路径、附件及资产关联。
-- [x] 保存通过现有增量通知刷新已打开阅读器的译版信息；安装版阅读状态保持仍待实机验收。
-- [x] 自动化检查（生产构建及 977 项测试）通过；Windows 安装版验收待本次 Release 安装后记录。
+- [x] 保存通过现有增量通知刷新已打开阅读器的译版信息；安装版确认译版标签与阅读状态正常。
+- [x] 自动化检查（生产构建及 977 项测试）通过；Windows 安装版实机测试无问题。
 - [x] 用户手册、变更记录与 Release Notes 完成，并明确历史数据不会自动回填。
 - [x] 提交并推送版本 `0.4.25`，发布 Windows x64 GitHub Release；本地与 Release 资产校验值已记入变更记录。
 
@@ -219,5 +219,6 @@ interface UpdateTranslatedPdfLanguagesRequest {
 - 已完成：成功后更新文库数据并广播 `emitNativePaperUpdated`；用户手册、变更记录和 Release Notes 明确升级不会自动回填。
 - 已验证：`npm run build` 通过；`npm test` 977 项全部通过；译版专项回归覆盖事务冲突、原子回滚、语言标签校验和 PDF/附件不变量。
 - 已发布：提交 `fe647ec`、标签 `app-v0.4.25`；GitHub Release 工作流构建和发布成功，Windows x64 安装包、blockmap 与 `stable.yml` 已上传。
-- 待 Release 安装后验收：用隔离 Windows 测试文库验证 UI、重启持久化、多附件批量、冲突刷新、两处附加确认及 PDF 页码/缩放/来源状态保持。不会复制或修改用户真实文库。
+- 已验收：用户安装并测试本次 Release，反馈“经测试，没有问题”；Windows 安装版实机交互验收完成。
+- 验收使用隔离测试数据，不复制或修改用户真实文库。
 - 环境记录：构建输出临时目录设在仓库内的 `.tmp-build-temp`，规避默认 Windows TEMP 清理时的 `Access is denied`；生产构建与完整测试均已成功。
