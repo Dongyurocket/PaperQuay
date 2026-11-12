@@ -3,6 +3,8 @@ import { emitRagIndexStatusUpdated } from './ragIndexStatus.ts';
 import { listen } from '../platform/electron/event';
 import type {
   AddAttachmentRequest,
+  UpdateTranslatedPdfLanguagesRequest,
+  UpdateTranslatedPdfLanguagesResult,
   AssignPaperCategoryRequest,
   CreateCategoryRequest,
   DeletePaperRequest,
@@ -299,6 +301,18 @@ export async function addLibraryAttachment(
     return await invoke<LiteraturePaper>('library_add_attachment', { request });
   } catch (error) {
     throw new Error(toErrorMessage(error, '添加附件失败'));
+  }
+}
+
+export async function updateTranslatedPdfLanguages(
+  request: UpdateTranslatedPdfLanguagesRequest,
+): Promise<UpdateTranslatedPdfLanguagesResult> {
+  try {
+    return await invoke<UpdateTranslatedPdfLanguagesResult>(
+      'library_update_translated_pdf_languages', { request },
+    );
+  } catch (error) {
+    throw new Error(toErrorMessage(error, '更新译版语言失败'));
   }
 }
 

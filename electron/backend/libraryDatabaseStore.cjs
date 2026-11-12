@@ -1146,6 +1146,44 @@ function createLibraryDatabaseStore(appPaths, helpers) {
       return savePaperToDb(db, paper);
     },
 
+    updateTranslatedPdfLanguages(changes) {
+      return withTransaction(db, () => {
+        const selectAttachment = db.prepare(`
+          SELECT paper_id AS paperId, kind, language
+          FROM attachments WHERE id = ?
+        `);
+        const updateAttachment = db.prepare(`
+          UPDATE attachments SET language = ? WHERE id = ? AND paper_id = ?
+        `);
+        const updateBinding = db.prepare(`
+          UPDATE pdf_attachment_bindings SET language = ? WHERE attachment_id = ?
+        `);
+        const updatePaper = db.prepare('UPDATE papers SET updated_at = ? WHERE id = ?');
+        const changedPaperIds = new Set();
+        const now = Date.now();
+
+        for (const change of changes) {
+          const attachment = selectAttachment.get(change.attachmentId);
+          if (!attachment || attachment.paperId !== change.paperId || attachment.kind !== 'translated-pdf') {
+            throw new Error(`译版附件已移除或归属已变化，请刷新预览后重试：${change.attachmentId}`);
+          }
+          if (attachment.language !== change.expectedLanguage) {
+            throw new Error(`译版语言已变化，请刷新预览后重试：${change.attachmentId}`);
+          }
+          if (attachment.language === change.language) continue;
+          updateAttachment.run(change.language, change.attachmentId, change.paperId);
+          updateBinding.run(change.language, change.attachmentId);
+          changedPaperIds.add(change.paperId);
+        }
+
+        for (const paperId of changedPaperIds) updatePaper.run(now, paperId);
+        return {
+          changedCount: changes.filter((change) => change.expectedLanguage !== change.language).length,
+          papers: [...changedPaperIds].map((paperId) => getPaperFromDb(db, paperId)),
+        };
+      });
+    },
+
     setPapersRagEnabled(paperIds, enabled) {
       return setPapersRagEnabled(db, paperIds, enabled);
     },

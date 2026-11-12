@@ -38,6 +38,7 @@ import {
   selectLibraryPdfFiles,
   setLibraryRagMembership,
   updateLibraryPaper,
+  updateTranslatedPdfLanguages,
   updateLibraryCategory,
   updateLibrarySettings,
 } from '../../services/library';
@@ -75,6 +76,8 @@ import {
 import type { ImportDraftItem } from './importTypes';
 import LiteratureCategorySidebar from './components/LiteratureCategorySidebar';
 import LiteraturePaperDetails from './components/LiteraturePaperDetails';
+import TranslatedPdfLanguageBatchDialog, { type TranslatedPdfLanguageBatchEntry } from './components/TranslatedPdfLanguageBatchDialog';
+import TranslatedPdfLanguageConfirmDialog from './components/TranslatedPdfLanguageConfirmDialog';
 import LiteraturePaperList, {
   type LiteraturePaperListStatus,
   type LiteraturePaperRagStatus,
@@ -417,6 +420,8 @@ export default function LiteratureLibraryView({
     useState<PaperContextMenuState | null>(null);
   const [metadataDialog, setMetadataDialog] = useState<MetadataDialogState | null>(null);
   const [metadataDialogBusy, setMetadataDialogBusy] = useState(false);
+  const [translatedPdfLanguageBatch, setTranslatedPdfLanguageBatch] = useState<{ entries: TranslatedPdfLanguageBatchEntry[]; skippedCount: number } | null>(null);
+  const [translatedPdfAttachDraft, setTranslatedPdfAttachDraft] = useState<{ paper: LiteraturePaper; sourcePath: string } | null>(null);
   const [paperDragOverCategoryId, setPaperDragOverCategoryId] = useState<string | null>(null);
   const [tagDialogPaper, setTagDialogPaper] = useState<LiteraturePaper | null>(null);
   const [paperSort, setPaperSort] = useState(loadPaperSortState);
@@ -2208,39 +2213,7 @@ export default function LiteratureLibraryView({
       if (!sourcePath) {
         return;
       }
-
-      setPaperSaving(true);
-
-      // retainpdf 翻译版应与原版页码一一对应；页数不一致时给出警告但允许继续
-      const originalPath = paperPdfPath(paper, libraryStorageDir);
-      const [originalPages, translatedPages] = await Promise.all([
-        originalPath ? readPdfPageCount(originalPath) : Promise.resolve(null),
-        readPdfPageCount(sourcePath),
-      ]);
-
-      if (originalPages && translatedPages && originalPages !== translatedPages) {
-        const proceed = await confirmAction({
-          title: l('翻译版 PDF 页数与原文不一致', 'Translated PDF page count differs'),
-          description: l(
-          `翻译版 PDF 页数（${translatedPages} 页）与原版（${originalPages} 页）不一致，对照阅读时页码可能错位。仍要附加吗？`,
-          `The translated PDF has ${translatedPages} pages, but the original has ${originalPages}. Page alignment in compare mode may be off. Attach anyway?`,
-          ),
-        });
-
-        if (!proceed) {
-          setStatusMessage(l('已取消附加翻译版 PDF', 'Translated PDF attachment cancelled'));
-          return;
-        }
-      }
-
-      const updatedPaper = await addLibraryAttachment({
-        paperId: paper.id,
-        sourcePath,
-        kind: ATTACHMENT_KIND_TRANSLATED_PDF,
-      });
-      await reloadAfterPaperUpdate(updatedPaper);
-      emitNativePaperUpdated(updatedPaper);
-      setStatusMessage(l('已附加翻译版 PDF', 'Translated PDF attached'));
+      setTranslatedPdfAttachDraft({ paper, sourcePath });
     } catch (nextError) {
       const message = nextError instanceof Error
         ? nextError.message
@@ -2250,6 +2223,41 @@ export default function LiteratureLibraryView({
     } finally {
       setPaperSaving(false);
     }
+  };
+
+  const handleConfirmTranslatedPdfAttach = async (language: string | null) => {
+    if (!translatedPdfAttachDraft) return;
+    const { paper, sourcePath } = translatedPdfAttachDraft;
+    setPaperSaving(true);
+    try {
+      const originalPath = paperPdfPath(paper, libraryStorageDir);
+      const [originalPages, translatedPages] = await Promise.all([
+        originalPath ? readPdfPageCount(originalPath) : Promise.resolve(null),
+        readPdfPageCount(sourcePath),
+      ]);
+      if (originalPages && translatedPages && originalPages !== translatedPages) {
+        const proceed = await confirmAction({
+          title: l('翻译版 PDF 页数与原文不一致', 'Translated PDF page count differs'),
+          description: l(
+            `翻译版 PDF 页数（${translatedPages} 页）与原版（${originalPages} 页）不一致，对照阅读时页码可能错位。仍要附加吗？`,
+            `The translated PDF has ${translatedPages} pages, but the original has ${originalPages}. Page alignment in compare mode may be off. Attach anyway?`,
+          ),
+        });
+        if (!proceed) { setStatusMessage(l('已取消附加翻译版 PDF', 'Translated PDF attachment cancelled')); setTranslatedPdfAttachDraft(null); return; }
+      }
+      const existingTranslatedIds = new Set(paper.attachments.filter((item) => item.kind === ATTACHMENT_KIND_TRANSLATED_PDF).map((item) => item.id));
+      const updatedPaper = await addLibraryAttachment({ paperId: paper.id, sourcePath, kind: ATTACHMENT_KIND_TRANSLATED_PDF, language });
+      if (updatedPaper.attachments.some((attachment) => attachment.kind === ATTACHMENT_KIND_TRANSLATED_PDF && existingTranslatedIds.has(attachment.id))) {
+        setStatusMessage(l('该译版已存在，可通过设置语言修改', 'This translated PDF already exists. Use Set language to update its metadata.'));
+      } else {
+        setStatusMessage(l('已附加翻译版 PDF', 'Translated PDF attached'));
+      }
+      await reloadAfterPaperUpdate(updatedPaper);
+      emitNativePaperUpdated(updatedPaper);
+      setTranslatedPdfAttachDraft(null);
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : l('附加翻译版 PDF 失败', 'Failed to attach the translated PDF'));
+    } finally { setPaperSaving(false); }
   };
 
   const handleRemoveTranslatedPdf = (paper: LiteraturePaper) => {
@@ -2270,6 +2278,62 @@ export default function LiteratureLibraryView({
       attachmentId: attachment.id,
       fileName: attachment.fileName,
     });
+  };
+
+  const handleUpdateTranslatedPdfLanguage = async (
+    paper: LiteraturePaper,
+    attachmentId: string,
+    language: string | null,
+  ) => {
+    if (demoMode) { showDemoLockedMessage(); throw new Error(l('演示模式不可修改', 'Changes are disabled in demo mode')); }
+    const attachment = paper.attachments.find((item) => item.id === attachmentId && item.kind === ATTACHMENT_KIND_TRANSLATED_PDF);
+    if (!attachment) throw new Error(l('译版附件已不存在，请刷新后重试', 'Translated attachment no longer exists; refresh and retry'));
+    setPaperSaving(true);
+    try {
+      const result = await updateTranslatedPdfLanguages({ changes: [{
+        paperId: paper.id,
+        attachmentId,
+        expectedLanguage: attachment.language ?? null,
+        language,
+      }] });
+      for (const updatedPaper of result.papers) {
+        await reloadAfterPaperUpdate(updatedPaper);
+        emitNativePaperUpdated(updatedPaper);
+      }
+      setStatusMessage(l('译版语言已更新', 'Translated PDF language updated'));
+    } finally { setPaperSaving(false); }
+  };
+
+  const handleBeginBatchTranslatedPdfLanguage = async () => {
+    if (demoMode) { showDemoLockedMessage(); return; }
+    setBatchWorking(true);
+    try {
+      const selectedPapers = await resolveSelectedPapers(paperSelectionRef.current.ids);
+      const entries = selectedPapers.flatMap((paper) => paper.attachments
+        .filter((attachment) => attachment.kind === ATTACHMENT_KIND_TRANSLATED_PDF)
+        .map((attachment) => ({ paper, attachmentId: attachment.id, fileName: attachment.fileName, language: attachment.language ?? null })));
+      setTranslatedPdfLanguageBatch({
+        entries,
+        skippedCount: selectedPapers.filter((paper) => !paper.attachments.some((attachment) => attachment.kind === ATTACHMENT_KIND_TRANSLATED_PDF)).length,
+      });
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : l('读取选中文献失败', 'Failed to load selected papers'));
+    } finally { setBatchWorking(false); }
+  };
+
+  const handleSaveBatchTranslatedPdfLanguage = async (changes: import('../../types/library').TranslatedPdfLanguageChange[]) => {
+    setBatchWorking(true);
+    try {
+      const result = await updateTranslatedPdfLanguages({ changes });
+      for (const paper of result.papers) {
+        await reloadAfterPaperUpdate(paper);
+        emitNativePaperUpdated(paper);
+      }
+      setTranslatedPdfLanguageBatch(null);
+      setStatusMessage(l(`已更新 ${result.changedCount} 个译版语言`, `Updated ${result.changedCount} translated PDF languages`));
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : l('批量更新失败，请刷新预览后重试', 'Batch update failed; refresh the preview and retry'));
+    } finally { setBatchWorking(false); }
   };
 
   const removeTranslatedPdfAfterConfirm = async (attachmentId: string) => {
@@ -3041,6 +3105,7 @@ export default function LiteratureLibraryView({
               {l(`已选 ${selectedCount} 篇`, `${selectedCount} selected`)}
             </span>
             <div className="mx-1 h-4 w-px bg-[var(--pq-border)]" />
+            <button type="button" disabled={batchWorking || demoMode} onClick={() => void handleBeginBatchTranslatedPdfLanguage()} className="pq-button px-2.5 py-1 text-xs disabled:opacity-50">{l('设置译版语言', 'Set translated PDF language')}</button>
             {onBatchTranslatePaperTitles ? (
               <button
                 type="button"
@@ -3293,6 +3358,7 @@ export default function LiteratureLibraryView({
             onTranslatePaperTitle={onTranslatePaperTitle}
             onAttachTranslatedPdf={(paper) => void handleAttachTranslatedPdf(paper)}
             onRemoveTranslatedPdf={handleRemoveTranslatedPdf}
+            onUpdateTranslatedPdfLanguage={handleUpdateTranslatedPdfLanguage}
             onGenerateSummary={onGenerateSummary}
             ragStatus={
               selectedPaper?.ragEnabled === false
@@ -3467,6 +3533,22 @@ export default function LiteratureLibraryView({
         onClose={handleCloseImportDialog}
         onConfirm={() => void handleConfirmImportDrafts()}
       />
+
+      {translatedPdfAttachDraft ? <TranslatedPdfLanguageConfirmDialog
+        paperTitle={translatedPdfAttachDraft.paper.title}
+        fileName={getFileNameFromPath(translatedPdfAttachDraft.sourcePath)}
+        busy={paperSaving}
+        onClose={() => setTranslatedPdfAttachDraft(null)}
+        onConfirm={handleConfirmTranslatedPdfAttach}
+      /> : null}
+
+      {translatedPdfLanguageBatch ? <TranslatedPdfLanguageBatchDialog
+        entries={translatedPdfLanguageBatch.entries}
+        skippedCount={translatedPdfLanguageBatch.skippedCount}
+        saving={batchWorking}
+        onClose={() => setTranslatedPdfLanguageBatch(null)}
+        onSave={handleSaveBatchTranslatedPdfLanguage}
+      /> : null}
 
       <Dialog
         open={pdfAssetAuditOpen}

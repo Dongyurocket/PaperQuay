@@ -132,7 +132,14 @@ async function addTranslatedPdfAttachment({
 
   const cleanSource = cleanString(sourcePath);
   const attachmentKind = cleanString(kind) || 'translated-pdf';
-  const attachmentLanguage = cleanString(language) || 'und';
+  let attachmentLanguage = language === undefined ? 'und' : null;
+  if (language !== undefined && language !== null && cleanString(language)) {
+    try {
+      [attachmentLanguage] = Intl.getCanonicalLocales(cleanString(language));
+    } catch {
+      throw new Error(`Invalid BCP 47 language tag: ${language}`);
+    }
+  }
   if (!cleanSource) throw new Error('Missing source path');
   if (attachmentKind !== 'translated-pdf') throw new Error('Only translated-pdf attachments are supported');
   if (!isPdf(cleanSource)) throw new Error('Only PDF files can be attached');

@@ -949,6 +949,39 @@ function createLibraryCommands(context) {
       return paper;
     },
 
+    async library_update_translated_pdf_languages({ request }) {
+      const changes = request?.changes;
+      if (!Array.isArray(changes) || changes.length === 0) {
+        throw new Error('至少需要一个译版语言变更');
+      }
+      const seen = new Set();
+      const normalized = changes.map((change) => {
+        const paperId = cleanString(change?.paperId);
+        const attachmentId = cleanString(change?.attachmentId);
+        if (!paperId || !attachmentId) throw new Error('文献和附件 ID 不能为空');
+        if (seen.has(attachmentId)) throw new Error(`重复的译版附件：${attachmentId}`);
+        seen.add(attachmentId);
+        if (!Object.prototype.hasOwnProperty.call(change, 'expectedLanguage')
+          || !(change.expectedLanguage === null || typeof change.expectedLanguage === 'string')) {
+          throw new Error('预览语言值无效，请刷新后重试');
+        }
+        if (!Object.prototype.hasOwnProperty.call(change, 'language')) {
+          throw new Error('缺少目标语言；清除语言请明确传入 null');
+        }
+        let language = change.language;
+        if (language !== null) {
+          if (typeof language !== 'string' || !language.trim()) throw new Error('语言标签不能为空；清除语言请使用专用操作');
+          try {
+            [language] = Intl.getCanonicalLocales(language.trim());
+          } catch {
+            throw new Error(`无效的 BCP 47 语言标签：${language}`);
+          }
+        }
+        return { paperId, attachmentId, expectedLanguage: change.expectedLanguage, language };
+      });
+      return store.updateTranslatedPdfLanguages(normalized);
+    },
+
     async library_remove_attachment({ request }) {
       const settings = store.loadSettings();
       const paperId = store.getPaperIdByAttachment(request.attachmentId);

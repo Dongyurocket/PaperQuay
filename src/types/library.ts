@@ -282,6 +282,24 @@ export interface AddAttachmentRequest {
   language?: string | null;
 }
 
+export interface TranslatedPdfLanguageChange {
+  paperId: string;
+  attachmentId: string;
+  /** Exact raw value observed in the preview; null and '' remain distinct. */
+  expectedLanguage: string | null;
+  /** null explicitly clears the language. */
+  language: string | null;
+}
+
+export interface UpdateTranslatedPdfLanguagesRequest {
+  changes: TranslatedPdfLanguageChange[];
+}
+
+export interface UpdateTranslatedPdfLanguagesResult {
+  changedCount: number;
+  papers: LiteraturePaper[];
+}
+
 export interface RemoveAttachmentRequest {
   attachmentId: string;
   deleteFile?: boolean;

@@ -164,6 +164,64 @@ test('translated PDF attachments can be added, replaced, and removed', async () 
   }
 });
 
+test('translated PDF language updates are atomic and preserve attachment data', async () => {
+  const appPaths = createAppPaths();
+  const store = createLibraryStore(appPaths);
+  try {
+    const filePath = path.join(appPaths.dataDir, 'translation.pdf');
+    writeFileSync(filePath, '%PDF-1.7\nkeep-bytes\n');
+    const library = store.load();
+    library.papers.push({
+      id: 'language-paper', title: 'Language test', year: null, publication: null, doi: null,
+      url: null, abstractText: null, keywords: [], importedAt: 11, updatedAt: 12,
+      lastReadAt: null, readingProgress: 0, isFavorite: false, userNote: null,
+      aiSummary: null, citation: null, source: 'local', sortOrder: 0, authors: [], tags: [],
+      categoryIds: [], attachments: [{
+        id: 'language-attachment', paperId: 'language-paper', kind: 'translated-pdf',
+        originalPath: filePath, storedPath: filePath, relativePath: 'translation.pdf',
+        language: null, fileName: 'translation.pdf', mimeType: 'application/pdf', fileSize: 22,
+        contentHash: 'stable-hash', createdAt: 10, missing: true,
+      }],
+    } as never);
+    await store.save(library);
+    const commands = createLibraryCommands({ appPaths, store });
+
+    const updated = await commands.library_update_translated_pdf_languages({ request: { changes: [{
+      paperId: 'language-paper', attachmentId: 'language-attachment', expectedLanguage: null, language: 'zh-cn',
+    }] } });
+    assert.equal(updated.changedCount, 1);
+    assert.equal(updated.papers[0].attachments[0].language, 'zh-CN');
+    assert.equal(updated.papers[0].updatedAt > 12, true);
+    assert.equal(updated.papers[0].attachments[0].storedPath, filePath);
+    assert.equal(updated.papers[0].attachments[0].contentHash, 'stable-hash');
+    assert.equal(updated.papers[0].attachments[0].missing, true);
+    assert.equal(readFileSync(filePath, 'utf8'), '%PDF-1.7\nkeep-bytes\n');
+
+    await assert.rejects(commands.library_update_translated_pdf_languages({ request: { changes: [
+      { paperId: 'language-paper', attachmentId: 'language-attachment', expectedLanguage: 'zh-CN', language: 'ja' },
+      { paperId: 'language-paper', attachmentId: 'missing-attachment', expectedLanguage: null, language: 'ja' },
+    ] } }));
+    assert.equal(store.getPaper('language-paper').attachments[0].language, 'zh-CN');
+    await assert.rejects(commands.library_update_translated_pdf_languages({ request: { changes: [{
+      paperId: 'language-paper', attachmentId: 'language-attachment', expectedLanguage: null, language: 'ja',
+    }] } }), /语言已变化/);
+    assert.equal(store.getPaper('language-paper').attachments[0].language, 'zh-CN');
+    await assert.rejects(commands.library_update_translated_pdf_languages({ request: { changes: [{
+      paperId: 'language-paper', attachmentId: 'language-attachment', expectedLanguage: 'zh-CN', language: 'not a tag',
+    }] } }), /无效的 BCP 47/);
+    assert.equal(store.getPaper('language-paper').attachments[0].language, 'zh-CN');
+    const cleared = await commands.library_update_translated_pdf_languages({ request: { changes: [{
+      paperId: 'language-paper', attachmentId: 'language-attachment', expectedLanguage: 'zh-CN', language: null,
+    }] } });
+    assert.equal(cleared.changedCount, 1);
+    assert.equal(cleared.papers[0].attachments[0].language, null);
+    assert.equal(readFileSync(filePath, 'utf8'), '%PDF-1.7\nkeep-bytes\n');
+  } finally {
+    store.close();
+    rmSync(appPaths.dataDir, { recursive: true, force: true });
+  }
+});
+
 test('translated PDF replacement preserves the previous attachment when persistence fails', async () => {
   const appPaths = createAppPaths();
   let store: ReturnType<typeof createLibraryStore> | null = null;

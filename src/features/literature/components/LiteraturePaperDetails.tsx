@@ -58,6 +58,7 @@ interface LiteraturePaperDetailsProps {
   onTranslatePaperTitle?: (paper: LiteraturePaper) => Promise<string | null>;
   onAttachTranslatedPdf?: (paper: LiteraturePaper) => void;
   onRemoveTranslatedPdf?: (paper: LiteraturePaper) => void;
+  onUpdateTranslatedPdfLanguage?: (paper: LiteraturePaper, attachmentId: string, language: string | null) => Promise<void>;
   onGenerateSummary?: (paper: LiteraturePaper) => void;
   ragStatus?: LiteraturePaperRagStatus;
   ragMembershipBusy?: boolean;
@@ -528,6 +529,7 @@ export default function LiteraturePaperDetails({
   onTranslatePaperTitle,
   onAttachTranslatedPdf,
   onRemoveTranslatedPdf,
+  onUpdateTranslatedPdfLanguage,
   onGenerateSummary,
   ragStatus = 'none',
   ragMembershipBusy = false,
@@ -545,6 +547,10 @@ export default function LiteraturePaperDetails({
     latestReadingHeatmapForPaper(selectedPaper?.id),
   );
   const [ragExcludeConfirmOpen, setRagExcludeConfirmOpen] = useState(false);
+  const [languageDialogOpen, setLanguageDialogOpen] = useState(false);
+  const [languageDraft, setLanguageDraft] = useState('');
+  const [languageSaving, setLanguageSaving] = useState(false);
+  const [languageError, setLanguageError] = useState('');
 
   useEffect(() => {
     setEditing(false);
@@ -815,7 +821,7 @@ export default function LiteraturePaperDetails({
                         <FileText className="h-4 w-4 shrink-0 text-[var(--pq-success)] " strokeWidth={1.9} />
                         <div className="min-w-0">
                           <div className="text-xs font-semibold text-[var(--pq-success)] ">
-                            {l('翻译版 PDF 已附加', 'Translated PDF attached')}
+                            {translatedPdf.attachment.language || l('语言待确认', 'Language unconfirmed')}
                           </div>
                           <div
                             className="truncate text-[11px] text-[var(--pq-success)] "
@@ -826,6 +832,16 @@ export default function LiteraturePaperDetails({
                         </div>
                       </div>
                       <div className="flex shrink-0 items-center gap-1">
+                        <button
+                          type="button"
+                          disabled={saving || !onUpdateTranslatedPdfLanguage}
+                          onClick={() => {
+                            setLanguageDraft(translatedPdf.attachment.language ?? '');
+                            setLanguageError('');
+                            setLanguageDialogOpen(true);
+                          }}
+                          className="rounded-lg px-2 py-1 text-[11px] text-[var(--pq-success)] hover:bg-[var(--pq-success-bg)] disabled:opacity-50"
+                        >{l('设置语言', 'Set language')}</button>
                         <button
                           type="button"
                           disabled={saving || !onAttachTranslatedPdf}
@@ -864,6 +880,44 @@ export default function LiteraturePaperDetails({
                     />
                   )}
                 </div>
+
+                {languageDialogOpen && translatedPdf ? (
+                  <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/40 p-4" role="presentation">
+                    <div role="dialog" aria-modal="true" aria-labelledby="translated-language-title" className="w-full max-w-md rounded-2xl border border-[var(--pq-border)] bg-[var(--pq-panel)] p-5 shadow-2xl">
+                      <h2 id="translated-language-title" className="text-base font-semibold">{l('设置译版语言', 'Set translated PDF language')}</h2>
+                      <p className="mt-2 break-words text-xs text-[var(--pq-muted)]">{selectedPaper.title} · {translatedPdf.attachment.fileName}</p>
+                      <label className="mt-4 block text-xs font-medium">{l('BCP 47 语言标签', 'BCP 47 language tag')}</label>
+                      <select value={['zh-CN', 'zh-TW', 'en', 'ja', 'de', 'fr', 'es', 'ko'].includes(languageDraft) ? languageDraft : ''} onChange={(event) => setLanguageDraft(event.target.value)} className="pq-input mt-1 w-full">
+                        <option value="">{l('自定义 / 暂不设置', 'Custom / leave unset')}</option>
+                        <option value="zh-CN">简体中文 (zh-CN)</option><option value="zh-TW">繁体中文 (zh-TW)</option><option value="en">English (en)</option><option value="ja">日本語 (ja)</option><option value="de">Deutsch (de)</option><option value="fr">Français (fr)</option><option value="es">Español (es)</option><option value="ko">한국어 (ko)</option>
+                      </select>
+                      <input value={languageDraft} onChange={(event) => setLanguageDraft(event.target.value)} placeholder="zh-CN, en, ja-JP…" className="pq-input mt-2 w-full" />
+                      {languageError ? <p role="alert" className="mt-2 text-xs text-[var(--pq-danger)]">{languageError}</p> : null}
+                      <div className="mt-5 flex flex-wrap justify-between gap-2">
+                        <button type="button" disabled={languageSaving || !translatedPdf.attachment.language} onClick={async () => {
+                          if (!selectedPaper || !onUpdateTranslatedPdfLanguage) return;
+                          setLanguageSaving(true); setLanguageError('');
+                          try { await onUpdateTranslatedPdfLanguage(selectedPaper, translatedPdf.attachment.id, null); setLanguageDialogOpen(false); }
+                          catch (error) { setLanguageError(error instanceof Error ? error.message : l('更新失败', 'Update failed')); }
+                          finally { setLanguageSaving(false); }
+                        }} className="pq-button px-3 py-1.5 text-xs">{l('清除语言', 'Clear language')}</button>
+                        <div className="ml-auto flex gap-2">
+                          <button type="button" disabled={languageSaving} onClick={() => setLanguageDialogOpen(false)} className="pq-button px-3 py-1.5 text-xs">{l('取消', 'Cancel')}</button>
+                          <button type="button" disabled={languageSaving || !languageDraft.trim()} onClick={async () => {
+                            if (!selectedPaper || !onUpdateTranslatedPdfLanguage) return;
+                            let language: string;
+                            try { [language] = Intl.getCanonicalLocales(languageDraft.trim()); }
+                            catch { setLanguageError(l('请输入有效的 BCP 47 语言标签', 'Enter a valid BCP 47 language tag')); return; }
+                            setLanguageSaving(true); setLanguageError('');
+                            try { await onUpdateTranslatedPdfLanguage(selectedPaper, translatedPdf.attachment.id, language); setLanguageDialogOpen(false); }
+                            catch (error) { setLanguageError(error instanceof Error ? error.message : l('更新失败', 'Update failed')); }
+                            finally { setLanguageSaving(false); }
+                          }} className="pq-button-primary px-3 py-1.5 text-xs disabled:opacity-50">{languageSaving ? l('保存中…', 'Saving…') : l('保存', 'Save')}</button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
 
                 {actionState ? (
                   <div className="mt-3">

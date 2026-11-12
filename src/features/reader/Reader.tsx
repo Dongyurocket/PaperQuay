@@ -44,6 +44,7 @@ import { chooseMountedReaderTabIds } from './readerResourceBudget';
 import { AssistantSidebar } from './AssistantSidebar';
 import { usePointerDragResize } from './usePointerDragResize';
 import LiteratureLibraryView from '../literature/LiteratureLibraryView';
+import TranslatedPdfLanguageConfirmDialog from '../literature/components/TranslatedPdfLanguageConfirmDialog';
 import {
   emitLibraryMetadataEnrichRequest,
   emitNativePaperUpdated,
@@ -168,6 +169,7 @@ function Reader({ workspaceActive = true }: ReaderProps) {
 
   const [standaloneItems, setStandaloneItems] = useState<WorkspaceItem[]>([]);
   const [nativeLibraryItems, setNativeLibraryItems] = useState<WorkspaceItem[]>([]);
+  const [translatedPdfAttachDraft, setTranslatedPdfAttachDraft] = useState<{ item: WorkspaceItem; sourcePath: string } | null>(null);
   const [selectedLibraryItemId, setSelectedLibraryItemId] = useState<string | null>(null);
   const [libraryLoading, setLibraryLoading] = useState(false);
   const [readerBridges, setReaderBridges] = useState<Record<string, ReaderTabBridgeState>>({});
@@ -843,43 +845,7 @@ function Reader({ workspaceActive = true }: ReaderProps) {
         if (!sourcePath) {
           return false;
         }
-
-        // retainpdf 翻译版应与原版页码一一对应；页数不一致时给出警告但允许继续
-        const [originalPages, translatedPages] = await Promise.all([
-          item.localPdfPath ? readPdfPageCount(item.localPdfPath) : Promise.resolve(null),
-          readPdfPageCount(sourcePath),
-        ]);
-
-        if (originalPages && translatedPages && originalPages !== translatedPages) {
-          const proceed = await confirmAction({
-          title: l('翻译版 PDF 页数与原文不一致', 'Translated PDF page count differs'),
-          description: l(
-            `翻译版 PDF 页数（${translatedPages} 页）与原版（${originalPages} 页）不一致，对照阅读时页码可能错位。仍要附加吗？`,
-            `The translated PDF has ${translatedPages} pages, but the original has ${originalPages}. Page alignment in compare mode may be off. Attach anyway?`,
-          ),
-        });
-
-          if (!proceed) {
-            return false;
-          }
-        }
-
-        const updatedPaper = await addLibraryAttachment({
-          paperId: item.itemKey,
-          sourcePath,
-          kind: ATTACHMENT_KIND_TRANSLATED_PDF,
-          language: settings.translationTargetLanguage,
-        });
-
-        const refreshedItem = createNativeLibraryWorkspaceItem(updatedPaper, librarySettings?.storageDir);
-
-        if (refreshedItem) {
-          handleWorkspaceItemResolved(refreshedItem);
-        }
-
-        emitNativePaperUpdated(updatedPaper);
-        setError('');
-        setStatusMessage(l('已附加翻译版 PDF，可在阅读视图中启用 PDF 对照', 'Translated PDF attached. Enable PDF Compare in the reading view.'));
+        setTranslatedPdfAttachDraft({ item, sourcePath });
         return true;
       } catch (nextError) {
         const message = nextError instanceof Error
@@ -892,13 +858,47 @@ function Reader({ workspaceActive = true }: ReaderProps) {
     },
     [
       l,
-      settings.translationTargetLanguage,
-      librarySettings?.storageDir,
-      handleWorkspaceItemResolved,
       setError,
       setStatusMessage,
     ],
   );
+
+  const handleConfirmReaderTranslatedPdfLanguage = useCallback(async (language: string | null) => {
+    if (!translatedPdfAttachDraft) return;
+    const { item, sourcePath } = translatedPdfAttachDraft;
+    try {
+      const [originalPages, translatedPages] = await Promise.all([
+        item.localPdfPath ? readPdfPageCount(item.localPdfPath) : Promise.resolve(null),
+        readPdfPageCount(sourcePath),
+      ]);
+      if (originalPages && translatedPages && originalPages !== translatedPages) {
+        const proceed = await confirmAction({
+          title: l('翻译版 PDF 页数与原文不一致', 'Translated PDF page count differs'),
+          description: l(
+            `翻译版 PDF 页数（${translatedPages} 页）与原版（${originalPages} 页）不一致，对照阅读时页码可能错位。仍要附加吗？`,
+            `The translated PDF has ${translatedPages} pages, but the original has ${originalPages}. Page alignment in compare mode may be off. Attach anyway?`,
+          ),
+        });
+        if (!proceed) { setTranslatedPdfAttachDraft(null); return; }
+      }
+      const existingIds = new Set((allLibraryPapers.find((paper) => paper.id === item.itemKey)?.attachments ?? [])
+        .filter((attachment) => attachment.kind === ATTACHMENT_KIND_TRANSLATED_PDF).map((attachment) => attachment.id));
+      const updatedPaper = await addLibraryAttachment({ paperId: item.itemKey, sourcePath, kind: ATTACHMENT_KIND_TRANSLATED_PDF, language });
+      const refreshedItem = createNativeLibraryWorkspaceItem(updatedPaper, librarySettings?.storageDir);
+      if (refreshedItem) handleWorkspaceItemResolved(refreshedItem);
+      emitNativePaperUpdated(updatedPaper);
+      const duplicate = updatedPaper.attachments.some((attachment) => attachment.kind === ATTACHMENT_KIND_TRANSLATED_PDF && existingIds.has(attachment.id));
+      setStatusMessage(duplicate
+        ? l('该译版已存在，可通过文献库中的“设置语言”修改', 'This translated PDF already exists. Use Set language in the library to update it.')
+        : l('已附加翻译版 PDF，可在阅读视图中启用 PDF 对照', 'Translated PDF attached. Enable PDF Compare in the reading view.'));
+      setTranslatedPdfAttachDraft(null);
+      setError('');
+    } catch (nextError) {
+      const message = nextError instanceof Error ? nextError.message : l('附加翻译版 PDF 失败', 'Failed to attach the translated PDF');
+      setError(message);
+      setStatusMessage(message);
+    }
+  }, [translatedPdfAttachDraft, allLibraryPapers, l, librarySettings?.storageDir, handleWorkspaceItemResolved, setError, setStatusMessage]);
 
   // 文献库视图中附加/移除翻译版 PDF 后，同步更新已打开的阅读标签页文档
   useEffect(() => {
@@ -1167,6 +1167,13 @@ function Reader({ workspaceActive = true }: ReaderProps) {
           onToggleRagIndexPause={handleToggleRagIndexPause}
           onCancelRagIndex={handleCancelRagIndex}
         />
+        {translatedPdfAttachDraft ? <TranslatedPdfLanguageConfirmDialog
+          paperTitle={translatedPdfAttachDraft.item.title}
+          fileName={translatedPdfAttachDraft.sourcePath.split(/[\\/]/).pop() ?? translatedPdfAttachDraft.sourcePath}
+          defaultLanguage={settings.translationTargetLanguage}
+          onClose={() => setTranslatedPdfAttachDraft(null)}
+          onConfirm={handleConfirmReaderTranslatedPdfLanguage}
+        /> : null}
       </div>
     </AppLocaleProvider>
   );

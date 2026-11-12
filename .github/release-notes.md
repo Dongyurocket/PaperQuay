@@ -1,9 +1,16 @@
 # PaperQuay v{{VERSION}}
 
-## Reader fixes
+## Translated PDF language metadata
 
-- Recalculate fit presets when a PDF pane or window changes size, including when a hidden reader becomes active again. Manual numeric zoom is preserved without restarting the PDF load.
-- Wait for PDF.js page initialization before applying the initial comparison page signal, so initialization cannot overwrite a completed synchronization jump.
+- Set, change, and clear the language on an existing translated PDF attachment.
+- Select papers across the full current selection, review every translated attachment and its old/new value, then save changes atomically. Known languages are unchecked by default.
+- Confirm a language when attaching a translated PDF from either the library or reader. The translation target is only a suggested default; duplicate attachments keep their existing metadata.
+- Language edits update attachment metadata and an existing asset binding only. They do not rewrite or move PDF files, and upgrades never infer languages for existing attachments.
+
+## Verification
+
+- `npm run build` passed; `npm test` passed all 977 tests.
+- Windows x64 installer is built by the Release workflow. Installed-app acceptance for these new dialogs and reader-state preservation remains pending installation of this release.
 
 ## Windows release scope
 
@@ -11,29 +18,22 @@ From 0.4.24, only Windows x64 installers are published, maintained, and tested. 
 
 Download the Windows x64 `.exe` installer from Assets. `stable.yml` and `.blockmap` support in-app updates.
 
-## Verification
-
-- `npm run check`: typecheck, frontend build, and all 976 tests passed.
-- The installed 0.4.23 Windows app rendered distinct original English and translated Chinese PDFs directly from the translated entry, with 47 pages on each side. Source labels, full-name tooltips, bidirectional scrolling, and tab restoration were checked.
-- That desktop run exposed pane-fit and initial-page synchronization issues. New regression tests failed before the fixes and pass afterward. Desktop verification of these fixes in the installed 0.4.24 release remains pending the user's update.
-- The existing library has no translated attachment with known language metadata, so the known-language desktop branch remains unverified; logic coverage is retained.
-
 ---
 
-## 阅读器修复
+## 译版 PDF 语言元数据
 
-- PDF 分栏、窗口尺寸变化或隐藏页签重新激活时，重新计算适配比例；保留用户手动设置的数字缩放，不重启 PDF 加载。
-- 初始对照同步等待 PDF.js 页面初始化完成，避免同步跳页被初始化位置恢复覆盖。
+- 可为已有译版附件设置、修改或清除语言。
+- 多选文献（含跨页全选）后，可查看所有译版附件及修改前后的值，再原子保存；已有语言默认不勾选。
+- 从文献库或阅读器附加译版时都需确认语言。翻译目标语言仅作为候选默认值；重复附件保留原语言元数据。
+- 语言编辑只更新附件元数据及已有资产绑定，不重写或移动 PDF。升级不会推断或回填已有译版语言。
 
-## Windows 发布与维护范围
+## 验证
+
+- `npm run build` 通过；`npm test` 全部 977 项通过。
+- Windows x64 安装包由 Release 工作流构建。新弹窗与阅读器状态保持的安装版验收，待安装此版本后完成。
+
+## Windows 发布范围
 
 自 0.4.24 起，仅发布、维护和测试 Windows x64 安装包。作者精力有限，macOS、Linux 等其他平台请用户自行打包，作者不承担维护和测试。历史发布资产及源码构建配置保留，应用内自动安装更新仅用于 Windows。
 
 请从 Assets 下载 Windows x64 `.exe` 安装包。`stable.yml` 和 `.blockmap` 用于应用内更新。
-
-## 验证
-
-- `npm run check` 类型检查、前端构建及全部 976 项测试通过。
-- 已安装的 Windows 0.4.23 从译版直接进入对照后，原版英文与译版中文均可读，两侧各 47 页；已检查来源短标签、完整名提示、双向滚动和页签恢复。
-- 本次桌面测试发现分栏适配与初始页同步问题；新增回归先复现失败，修复后通过。安装版 0.4.24 的这两项桌面复验，待用户更新后继续。
-- 现有文库的译版均未设置已知语言元数据，因此已知语言标签的桌面分支仍未验证，逻辑回归保留。
