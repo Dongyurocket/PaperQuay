@@ -59,31 +59,32 @@ function paper(attachments: LiteratureAttachment[]): LiteraturePaper {
 
 const pdf = attachment({ id: 'a-pdf', kind: 'pdf', storedPath: 'D:\\lib\\papers\\paper.pdf' });
 
-test('builds targets for PDF, MinerU folder and markdown with all three cache naming candidates', () => {
+test('builds targets for PDF and MinerU output with all three cache naming candidates', () => {
   const targets = buildPaperFileLocationTargets(paper([pdf]), {
     mineruCacheDir: 'D:\\cache',
     autoLoadSiblingJson: false,
   });
 
-  assert.deepEqual(targets.map((target) => target.kind), ['pdf', 'mineru-dir', 'markdown']);
+  assert.deepEqual(targets.map((target) => target.kind), ['pdf', 'mineru-output']);
   assert.deepEqual(targets[0].candidates, ['D:\\lib\\papers\\paper.pdf']);
 
-  const mineruDir = targets[1].candidates;
-  assert.equal(mineruDir.length, 3);
-  assert.ok(mineruDir.every((candidate) => candidate.startsWith('D:\\cache\\')));
-  assert.ok(mineruDir[0].includes('document-'));
-
-  const markdown = targets[2].candidates;
-  assert.equal(markdown.length, 3);
-  assert.ok(markdown.every((candidate) => candidate.endsWith('\\full.md')));
+  const output = targets[1].candidates;
+  assert.equal(output.length, 12);
+  assert.ok(output.every((candidate) => candidate.startsWith('D:\\cache\\')));
+  assert.ok(output[0].includes('document-'));
+  assert.ok(output.slice(0, 3).every((candidate) => candidate.endsWith('\\full.md')));
+  assert.ok(output.slice(3).every((candidate) => candidate.endsWith('.json')));
 });
 
 test('adds sibling full.md next to the PDF only when autoLoadSiblingJson is on', () => {
   const withSibling = buildPaperFileLocationTargets(paper([pdf]), { mineruCacheDir: '', autoLoadSiblingJson: true });
-  assert.deepEqual(withSibling.find((target) => target.kind === 'markdown')?.candidates, ['D:\\lib\\papers\\full.md']);
+  assert.deepEqual(withSibling.find((target) => target.kind === 'mineru-output')?.candidates, [
+    'D:\\lib\\papers\\full.md', 'D:\\lib\\papers\\content_list_v2.json',
+    'D:\\lib\\papers\\content_list.json', 'D:\\lib\\papers\\middle.json',
+  ]);
 
   const withoutSibling = buildPaperFileLocationTargets(paper([pdf]), { mineruCacheDir: '', autoLoadSiblingJson: false });
-  assert.deepEqual(withoutSibling.find((target) => target.kind === 'markdown')?.candidates, []);
+  assert.deepEqual(withoutSibling.find((target) => target.kind === 'mineru-output')?.candidates, []);
 });
 
 test('lists non-missing translated PDFs newest first, capped, with language', () => {
@@ -112,14 +113,33 @@ test('resolves relative attachment paths against the storage directory', () => {
 test('picks the first existing candidate per target and null when none exist', () => {
   const targets = buildPaperFileLocationTargets(paper([pdf]), { mineruCacheDir: 'D:\\cache', autoLoadSiblingJson: false });
   const candidates = flattenPaperFileLocationCandidates(targets);
-  const mineruDirs = targets[1].candidates;
-  // PDF 存在；MinerU 只有第二种（标题）命名存在；Markdown 都不存在。
-  const flags = candidates.map((candidate) => candidate === pdf.storedPath || candidate === mineruDirs[1]);
+  const output = targets[1].candidates;
+  const flags = candidates.map((candidate) => candidate === pdf.storedPath || candidate === output[1]);
   const resolved = resolvePaperFileLocations(targets, flags);
 
   assert.equal(resolved[0].path, pdf.storedPath);
-  assert.equal(resolved[1].path, mineruDirs[1]);
-  assert.equal(resolved[2].path, null);
+  assert.equal(resolved[1].path, output[1]);
+});
+
+test('finds sibling content_list.json and prefers markdown over JSON', async () => {
+  const options = { mineruCacheDir: 'D:\\cache', autoLoadSiblingJson: true };
+  const json = 'D:\\lib\\papers\\content_list.json';
+  const markdown = 'D:\\lib\\papers\\full.md';
+  const lookup = async (existing: string[]) => resolvePaperFileLocationsOnDisk(
+    paper([pdf]), options, async (paths) => paths.map((path) => existing.includes(path)),
+  );
+  assert.equal((await lookup([json])).find((item) => item.kind === 'mineru-output')?.path, json);
+  assert.equal((await lookup([json, markdown])).find((item) => item.kind === 'mineru-output')?.path, markdown);
+});
+
+test('does not locate sibling JSON or markdown when sibling loading is disabled', async () => {
+  const checked: string[] = [];
+  const resolved = await resolvePaperFileLocationsOnDisk(
+    paper([pdf]), { mineruCacheDir: 'D:\\cache', autoLoadSiblingJson: false },
+    async (paths) => { checked.push(...paths); return paths.map((path) => path.includes('lib\\papers\\content_list')); },
+  );
+  assert.equal(resolved.find((item) => item.kind === 'mineru-output')?.path, null);
+  assert.ok(!checked.some((path) => path.startsWith('D:\\lib\\papers\\') && path !== pdf.storedPath));
 });
 
 test('paper without any PDF yields empty candidates and no disk call', async () => {

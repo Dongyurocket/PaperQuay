@@ -1,7 +1,7 @@
 # 文库与阅读器界面精简优化计划
 
 - 日期：2026-11-16
-- 状态：**方案已确认（2026-11-16）**；决策见第 6 节。P0 + P1 已在分支 `ui/p0-p1-overview-cache-reveal` 实现，桌面实机验证待做（记录见 `docs/changes/2026-11-16-ui-p0-p1-overview-cache-and-reveal.md`）；P2 起未开始
+- 状态：**方案已确认（2026-11-16）**；决策见第 6 节。P0 + P1 已在分支 `ui/p0-p1-overview-cache-reveal` 实现，桌面实机验证待做（记录见 `docs/changes/2026-11-16-ui-p0-p1-overview-cache-and-reveal.md`）；P2 已在 `ui/p2-library-toolbar-filters` 实现，并修正 0.4.26 的 MinerU 结果定位（记录见 `docs/changes/2026-11-16-ui-p2-library-toolbar-filters.md`，桌面完整流程待验）；P3 起未开始
 - 基线：`main` @ `fe647ec`（package.json 0.4.25），工作区干净
 - 范围：文库顶部工具栏与筛选、右侧文献详情面板（含元数据编辑）、文献右键「打开所在位置」、阅读器助手栏黑色「+」按钮、论文概览页（含「每次都要点生成概览」缺陷）、阅读模式顶部栏与工具栏
 - 依据：`docs/ui-design-system.md`（令牌、圆角、按钮变体、Menu 唯一实现）；`AGENTS.md` 红线（不改 RAG schema、不写真实文库、不擅自提交/发版）

@@ -854,7 +854,17 @@ const PAPER_TABLE_COLUMNS = [
 ];
 
 const PAPER_UPSERT_ASSIGNMENTS = PAPER_TABLE_COLUMNS.filter((column) => column !== 'id')
-  .map((column) => `${column} = excluded.${column}`)
+  .map((column) => {
+    if (column === 'last_read_at') {
+      return `last_read_at = CASE WHEN papers.last_read_at IS NULL THEN excluded.last_read_at
+        WHEN excluded.last_read_at IS NULL THEN papers.last_read_at
+        ELSE MAX(papers.last_read_at, excluded.last_read_at) END`;
+    }
+    if (column === 'reading_progress') {
+      return 'reading_progress = MAX(COALESCE(papers.reading_progress, 0), COALESCE(excluded.reading_progress, 0))';
+    }
+    return `${column} = excluded.${column}`;
+  })
   .join(', ');
 
 function paperRowValues(paper) {
@@ -1021,6 +1031,9 @@ function saveLibraryToDb(db, appPaths, normalizeLibrary, library) {
   withTransaction(db, () => {
     const referenceCache = loadReferenceRows(db);
     const ragEnabledCache = loadRagEnabledCache(db);
+    const readingCache = new Map(db.prepare(
+      'SELECT id, last_read_at AS lastReadAt, reading_progress AS readingProgress FROM papers',
+    ).all().map((row) => [row.id, row]));
     clearData(db);
     saveKeyValueTable(db, 'library_settings', normalized.settings);
     db.prepare(`
@@ -1058,7 +1071,14 @@ function saveLibraryToDb(db, appPaths, normalizeLibrary, library) {
     }
 
     for (const paper of normalized.papers) {
-      writers.insertRow(paper);
+      const previous = readingCache.get(paper.id);
+      const lastReadAt = previous?.lastReadAt == null ? paper.lastReadAt
+        : paper.lastReadAt == null ? previous.lastReadAt : Math.max(previous.lastReadAt, paper.lastReadAt);
+      writers.insertRow({
+        ...paper,
+        lastReadAt,
+        readingProgress: Math.max(Number(previous?.readingProgress) || 0, Number(paper.readingProgress) || 0),
+      });
       writers.insertRelations(paper);
     }
 
@@ -1126,6 +1146,13 @@ function createLibraryDatabaseStore(appPaths, helpers) {
       return listCategoriesWithCountsFromDb(db);
     },
 
+    listTags() {
+      return db.prepare(`
+        SELECT id, MIN(name) AS name, MIN(color) AS color, COUNT(DISTINCT paper_id) AS count
+        FROM tags GROUP BY id ORDER BY lower(name), id
+      `).all();
+    },
+
     getPaper(paperId) {
       return getPaperFromDb(db, paperId);
     },
@@ -1144,6 +1171,16 @@ function createLibraryDatabaseStore(appPaths, helpers) {
 
     savePaper(paper) {
       return savePaperToDb(db, paper);
+    },
+
+    recordPaperReading(paperId, lastReadAt, readingProgress) {
+      const result = db.prepare(`
+        UPDATE papers
+        SET last_read_at = MAX(COALESCE(last_read_at, 0), ?),
+            reading_progress = MAX(COALESCE(reading_progress, 0), ?)
+        WHERE id = ?
+      `).run(lastReadAt, readingProgress, paperId);
+      return result.changes > 0;
     },
 
     updateTranslatedPdfLanguages(changes) {

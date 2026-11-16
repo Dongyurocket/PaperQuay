@@ -162,6 +162,14 @@ export async function queryLibraryPapers(
   }
 }
 
+export async function listLibraryTags(): Promise<import('../types/library').LibraryTagCount[]> {
+  try {
+    return await invoke<import('../types/library').LibraryTagCount[]>('library_list_tags');
+  } catch (error) {
+    throw new Error(toErrorMessage(error, '读取标签失败'));
+  }
+}
+
 /** 当前筛选的完整匹配计数（供全选三态与批量目标管理，P2-2）。 */
 export async function countLibraryPapers(
   request: ListPapersRequest = {},

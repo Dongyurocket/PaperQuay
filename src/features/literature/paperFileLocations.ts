@@ -1,5 +1,5 @@
 /**
- * 文献在磁盘上的各类数据位置（原始 PDF、译版 PDF、MinerU 结果目录、Markdown）。
+ * 文献在磁盘上的各类数据位置（原始 PDF、译版 PDF、MinerU 结果）。
  *
  * 每类位置给出按优先级排列的候选路径，配合一次 `paths_exist` 批量检查取第一个存在者；
  * MinerU 目录存在三种历史命名，必须以存在性为准，不能直接取第一个候选。
@@ -12,11 +12,13 @@ import {
 } from '../../utils/libraryPaper.ts';
 import {
   buildMineruCachePathCandidates,
+  getMineruJsonPathCandidates,
+  guessSiblingJsonPaths,
   guessSiblingMarkdownPath,
 } from '../../utils/mineruCache.ts';
 import { createNativeWorkspaceItemForPaper } from './literatureLibraryUtils.ts';
 
-export type PaperFileLocationKind = 'pdf' | 'translated-pdf' | 'mineru-dir' | 'markdown';
+export type PaperFileLocationKind = 'pdf' | 'translated-pdf' | 'mineru-output';
 
 export interface PaperFileLocationTarget {
   id: string;
@@ -92,18 +94,14 @@ export function buildPaperFileLocationTargets(
     : null;
 
   targets.push({
-    id: 'mineru-dir',
-    kind: 'mineru-dir',
-    language: null,
-    candidates: uniqueNonEmpty(cacheCandidates.map((cachePaths) => cachePaths.directory)),
-  });
-  targets.push({
-    id: 'markdown',
-    kind: 'markdown',
+    id: 'mineru-output',
+    kind: 'mineru-output',
     language: null,
     candidates: uniqueNonEmpty([
       ...cacheCandidates.map((cachePaths) => cachePaths.markdownPath),
       siblingMarkdown,
+      ...cacheCandidates.flatMap(getMineruJsonPathCandidates),
+      ...(pdfPath && options.autoLoadSiblingJson ? guessSiblingJsonPaths(pdfPath) : []),
     ]),
   });
 

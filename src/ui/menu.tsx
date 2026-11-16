@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useEffect, useRef, type KeyboardEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { cn } from '../utils/cn';
 
@@ -14,7 +14,7 @@ import { cn } from '../utils/cn';
  *   - 点击遮罩、或在遮罩上再次右键，关闭菜单；
  *   - `tone="danger"` 用错误色，`tone="accent"` 用强调色，默认项为弱化文字；
  *   - 超出窗口右下边缘时，按宽度与估算高度钳制回窗口内并留 8px 安全边距；
- *   - 当前实现不含键盘导航与快捷键提示（合并前也没有），如需新增应单独立项。
+ *   - 默认保留原有右键菜单行为；传入 keyboardAnchor 时启用工具栏菜单的键盘导航。
  */
 
 export interface MenuItem {
@@ -22,6 +22,7 @@ export interface MenuItem {
   label: string;
   icon?: ReactNode;
   disabled?: boolean;
+  checked?: boolean;
   tone?: 'default' | 'accent' | 'danger';
   onSelect: () => void | Promise<void>;
 }
@@ -35,6 +36,7 @@ interface MenuProps {
   entries: MenuEntry[];
   onClose: () => void;
   width?: number;
+  keyboardAnchor?: HTMLButtonElement;
 }
 
 function isSeparator(entry: MenuEntry): entry is { type: 'separator'; id: string } {
@@ -63,7 +65,40 @@ export function Menu({
   entries,
   onClose,
   width = 224,
+  keyboardAnchor,
 }: MenuProps) {
+  const menuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!keyboardAnchor) return;
+    const first = menuRef.current?.querySelector<HTMLButtonElement>('button:not(:disabled)');
+    (first ?? menuRef.current)?.focus();
+  }, [keyboardAnchor]);
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (!keyboardAnchor) return;
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      onClose();
+      keyboardAnchor.focus();
+      return;
+    }
+    if (event.key === 'Tab') {
+      onClose();
+      keyboardAnchor.focus();
+      return;
+    }
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+    const items = Array.from(menuRef.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? []);
+    if (!items.length) return;
+    event.preventDefault();
+    const index = items.indexOf(document.activeElement as HTMLButtonElement);
+    const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1
+      : event.key === 'ArrowDown' ? (index + 1) % items.length
+        : (index <= 0 ? items.length - 1 : index - 1);
+    items[next].focus();
+  };
+
   const position = clampPosition(x, y, width, estimateMenuHeight(entries, Boolean(title)));
 
   const menu = (
@@ -76,8 +111,13 @@ export function Menu({
       }}
     >
       <div
-        className="pq-card fixed overflow-hidden p-1 shadow-[var(--pq-shadow-dialog)]"
-        style={{ left: position.left, top: position.top, width }}
+        ref={menuRef}
+        role={keyboardAnchor ? "menu" : undefined}
+        aria-label={keyboardAnchor?.getAttribute("aria-label") ?? keyboardAnchor?.title}
+        tabIndex={keyboardAnchor ? -1 : undefined}
+        onKeyDown={handleKeyDown}
+        className={cn("pq-card fixed overflow-hidden p-1 shadow-[var(--pq-shadow-dialog)]", keyboardAnchor && "!rounded-[var(--pq-radius-sm)]")}
+        style={{ left: position.left, top: position.top, width, boxShadow: keyboardAnchor ? "var(--pq-shadow-dialog)" : undefined }}
         onClick={(event) => event.stopPropagation()}
       >
         {title ? (
@@ -97,13 +137,18 @@ export function Menu({
                 key={entry.id}
                 type="button"
                 disabled={entry.disabled}
+                role={keyboardAnchor ? (entry.checked === undefined ? "menuitem" : "menuitemcheckbox") : undefined}
+                aria-checked={keyboardAnchor && entry.checked !== undefined ? entry.checked : undefined}
+                tabIndex={keyboardAnchor ? -1 : undefined}
                 onClick={() => {
                   if (entry.disabled) return;
                   onClose();
+                  keyboardAnchor?.focus();
                   void entry.onSelect();
                 }}
                 className={cn(
                   'flex h-8 w-full items-center gap-2 rounded-[var(--pq-radius-sm)] px-2.5 text-left text-xs font-medium transition disabled:opacity-45',
+                  keyboardAnchor && '!rounded-[var(--pq-radius-sm)]',
                   entry.tone === 'danger'
                     ? 'text-[var(--pq-error)] hover:bg-[var(--pq-error-bg)]'
                     : entry.tone === 'accent'

@@ -81,8 +81,8 @@ import TranslatedPdfLanguageConfirmDialog from './components/TranslatedPdfLangua
 import LiteraturePaperList, {
   type LiteraturePaperListStatus,
   type LiteraturePaperRagStatus,
-  type LiteratureRagMembershipFilter,
 } from './components/LiteraturePaperList';
+import { buildPaperQuery, DEFAULT_LIBRARY_FILTERS, matchesDemoLibraryFilters } from './libraryFilters';
 import { flattenCategories, paperPdfPath, paperTranslatedPdfAttachment } from './literatureUi';
 import {
   capturePaperSelection,
@@ -140,6 +140,9 @@ import {
   type LiteratureLibraryDemoState,
 } from './literatureLibraryUtils';
 import { confirmAction } from '../../ui/confirmHost';
+import { useLibraryFilters } from './useLibraryFilters';
+import { useLibraryQueryRefresh } from './useLibraryQueryRefresh';
+import { useSelectionFilterGuard } from './useSelectionFilterGuard';
 import { Dialog } from '../../ui/dialog';
 import { Menu, type MenuEntry } from '../../ui/menu';
 import { toast } from '../../ui/toast';
@@ -295,8 +298,7 @@ async function fetchAllLibraryPapers(): Promise<LiteraturePaper[]> {
 
   for (;;) {
     const result = await queryLibraryPapers({
-      sortBy: 'manual',
-      sortDirection: 'asc',
+      ...buildPaperQuery(DEFAULT_LIBRARY_FILTERS, { sortBy: 'manual', sortDirection: 'asc' }, null, ''),
       limit: 1000,
       offset,
     });
@@ -381,11 +383,7 @@ export default function LiteratureLibraryView({
   const [selectedPaperId, setSelectedPaperId] = useState<string | null>(null);
   const [paperSelection, setPaperSelection] = useState<PaperSelection>(EMPTY_PAPER_SELECTION);
   const paperSelectionRef = useRef(paperSelection);
-  const selectionFilterRef = useRef<{
-    categoryId: string | null;
-    search: string;
-    ragMembershipFilter: LiteratureRagMembershipFilter;
-  } | null>(null);
+  const selectionFilterRef = useRef<string | null>(null);
   const [selectionAnchorId, setSelectionAnchorId] = useState<string | null>(null);
   const [batchWorking, setBatchWorking] = useState(false);
   const [bibExportMenuOpen, setBibExportMenuOpen] = useState(false);
@@ -395,7 +393,12 @@ export default function LiteratureLibraryView({
   const [pdfAssetInventory, setPdfAssetInventory] = useState<PdfAssetInventoryReport | null>(null);
   const [pdfAssetNamePlan, setPdfAssetNamePlan] = useState<PdfAssetNamePlan | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [ragMembershipFilter, setRagMembershipFilter] = useState<LiteratureRagMembershipFilter>('all');
+  const { filters, setFilters, libraryTags, mineruIdKey, mineruPaperIds } = useLibraryFilters({
+    demoPapers: demoLibrary?.papers, categories, paperStatuses,
+  });
+  const selectionQueryGuard = useSelectionFilterGuard({
+    categoryId: selectedCategoryId, search: searchQuery, filters, mineruIdKey,
+  });
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState(false);
   const [metadataWorking, setMetadataWorking] = useState(false);
@@ -478,16 +481,12 @@ export default function LiteratureLibraryView({
   );
 
   useEffect(() => {
-    const nextFilter = { categoryId: selectedCategoryId, search: searchQuery, ragMembershipFilter };
+    const nextFilter = JSON.stringify({ categoryId: selectedCategoryId, search: searchQuery, filters, mineruIdKey });
     const previousFilter = selectionFilterRef.current;
     selectionFilterRef.current = nextFilter;
     if (
       !previousFilter
-      || (
-        previousFilter.categoryId === nextFilter.categoryId
-        && previousFilter.search === nextFilter.search
-        && previousFilter.ragMembershipFilter === nextFilter.ragMembershipFilter
-      )
+      || previousFilter === nextFilter
       || paperSelectionRef.current.ids.length === 0
     ) {
       return;
@@ -497,7 +496,7 @@ export default function LiteratureLibraryView({
     setStatusMessage(
       l('筛选条件已变化，选择已清空。', 'The filter changed, so the selection was cleared.'),
     );
-  }, [l, ragMembershipFilter, searchQuery, selectedCategoryId]);
+  }, [filters, l, mineruIdKey, searchQuery, selectedCategoryId]);
 
   const clearMultiSelection = useCallback(() => {
     setPaperSelection(EMPTY_PAPER_SELECTION);
@@ -558,15 +557,7 @@ export default function LiteratureLibraryView({
 
       while (found.size < wanted.size) {
         const result = await queryLibraryPapers({
-          categoryId: selectedCategoryId,
-          search: searchQuery,
-          sortBy: paperSort.sortBy,
-          sortDirection: paperSort.sortDirection,
-          ragEnabled: ragMembershipFilter === 'included'
-            ? true
-            : ragMembershipFilter === 'excluded'
-              ? false
-              : null,
+          ...buildPaperQuery(filters, paperSort, selectedCategoryId, searchQuery, mineruPaperIds),
           limit: pageSize,
           offset,
         });
@@ -588,7 +579,7 @@ export default function LiteratureLibraryView({
       const paper = found.get(id);
       return paper ? [paper] : [];
     });
-  }, [demoLibrary, paperSort.sortBy, paperSort.sortDirection, ragMembershipFilter, searchQuery, selectedCategoryId]);
+  }, [demoLibrary, paperSort.sortBy, paperSort.sortDirection, filters, mineruPaperIds, searchQuery, selectedCategoryId]);
 
   const resolveDemoPapers = useCallback(
     (nextCategoryId = selectedCategoryId) => {
@@ -596,13 +587,10 @@ export default function LiteratureLibraryView({
         return [];
       }
 
-      return filterDemoPapers(demoLibrary, nextCategoryId, searchQuery).filter((paper) => {
-        if (ragMembershipFilter === 'included') return paper.ragEnabled !== false;
-        if (ragMembershipFilter === 'excluded') return paper.ragEnabled === false;
-        return true;
-      });
+      return filterDemoPapers(demoLibrary, nextCategoryId, searchQuery)
+        .filter((paper) => matchesDemoLibraryFilters(paper, filters, mineruPaperIds));
     },
-    [demoLibrary, ragMembershipFilter, searchQuery, selectedCategoryId],
+    [demoLibrary, filters, mineruPaperIds, searchQuery, selectedCategoryId],
   );
 
   const handleToggleSelectAll = useCallback(async () => {
@@ -611,6 +599,7 @@ export default function LiteratureLibraryView({
       return;
     }
 
+    const selectionRequest = selectionQueryGuard.capture();
     setBatchWorking(true);
     setError('');
 
@@ -618,15 +607,10 @@ export default function LiteratureLibraryView({
       const ids = demoLibrary
         ? resolveDemoPapers().map((paper) => paper.id)
         : await listAllLibraryPaperIds({
-          categoryId: selectedCategoryId,
-          search: searchQuery,
-          ragEnabled: ragMembershipFilter === 'included'
-            ? true
-            : ragMembershipFilter === 'excluded'
-              ? false
-              : null,
+          ...buildPaperQuery(filters, paperSort, selectedCategoryId, searchQuery, mineruPaperIds),
         });
 
+      if (!selectionQueryGuard.isCurrent(selectionRequest)) return;
       setPaperSelection(capturePaperSelection(ids));
       setStatusMessage(
         ids.length === 0
@@ -637,15 +621,16 @@ export default function LiteratureLibraryView({
           ),
       );
     } catch (nextError) {
+      if (!selectionQueryGuard.isCurrent(selectionRequest)) return;
       const message = nextError instanceof Error
         ? nextError.message
         : l('全选当前筛选失败', 'Failed to select the current filter');
       setError(message);
       setStatusMessage(message);
     } finally {
-      setBatchWorking(false);
+      if (selectionQueryGuard.isLatest(selectionRequest)) setBatchWorking(false);
     }
-  }, [demoLibrary, l, papersTotal, ragMembershipFilter, resolveDemoPapers, searchQuery, selectedCategoryId]);
+  }, [demoLibrary, l, papersTotal, filters, mineruPaperIds, paperSort, resolveDemoPapers, searchQuery, selectedCategoryId, selectionQueryGuard]);
 
   const showDemoLockedMessage = useCallback(() => {
     setStatusMessage(
@@ -815,15 +800,7 @@ export default function LiteratureLibraryView({
       const generation = papersQueryGenerationRef.current + 1;
       papersQueryGenerationRef.current = generation;
       const result = await queryLibraryPapers({
-        categoryId: nextCategoryId,
-        search: searchQuery,
-        sortBy: paperSort.sortBy,
-        sortDirection: paperSort.sortDirection,
-        ragEnabled: ragMembershipFilter === 'included'
-          ? true
-          : ragMembershipFilter === 'excluded'
-            ? false
-            : null,
+        ...buildPaperQuery(filters, paperSort, nextCategoryId, searchQuery, mineruPaperIds),
         limit: PAPER_PAGE_SIZE,
         offset: 0,
       });
@@ -837,8 +814,16 @@ export default function LiteratureLibraryView({
       setSelectedPaperId((current) => resolveSelectedPaperId(current, nextPapers));
       return nextPapers;
     },
-    [demoLibrary, paperSort.sortBy, paperSort.sortDirection, ragMembershipFilter, resolveDemoPapers, searchQuery, selectedCategoryId],
+    [demoLibrary, paperSort.sortBy, paperSort.sortDirection, filters, mineruPaperIds, resolveDemoPapers, searchQuery, selectedCategoryId],
   );
+
+  useLibraryQueryRefresh({
+    enabled: !demoMode,
+    ready: !loading,
+    refreshPapers,
+    listCategories: listLibraryCategories,
+    setCategories,
+  });
 
   // 滚动接近底部时按当前筛选追加下一页；按 id 去重防止翻页期间并发写入造成重复行。
   const loadMorePapers = useCallback(async () => {
@@ -849,15 +834,7 @@ export default function LiteratureLibraryView({
     try {
       const snapshot = papersRef.current;
       const result = await queryLibraryPapers({
-        categoryId: selectedCategoryId,
-        search: searchQuery,
-        sortBy: paperSort.sortBy,
-        sortDirection: paperSort.sortDirection,
-        ragEnabled: ragMembershipFilter === 'included'
-          ? true
-          : ragMembershipFilter === 'excluded'
-            ? false
-            : null,
+        ...buildPaperQuery(filters, paperSort, selectedCategoryId, searchQuery, mineruPaperIds),
         limit: PAPER_PAGE_SIZE,
         offset: snapshot.length,
       });
@@ -883,7 +860,7 @@ export default function LiteratureLibraryView({
     paperSort.sortBy,
     paperSort.sortDirection,
     papersLoadingMore,
-    ragMembershipFilter,
+    filters, mineruPaperIds,
     searchQuery,
     selectedCategoryId,
   ]);
@@ -1245,7 +1222,7 @@ export default function LiteratureLibraryView({
     if (demoLibrary) {
       setPaperStatuses(
         demoLibrary.paperStatuses ??
-          buildInitialPaperStatuses(papers),
+          buildInitialPaperStatuses(demoLibrary.papers),
       );
       return undefined;
     }
@@ -1458,6 +1435,7 @@ export default function LiteratureLibraryView({
           paths: importableItems.map((item) => item.localPdfPath as string),
           targetCategoryId: categoryId,
           importMode: 'copy',
+          source: 'zotero',
           metadata,
         });
 
@@ -1495,6 +1473,7 @@ export default function LiteratureLibraryView({
             paths: importableItems.map((item) => item.localPdfPath as string),
             targetCategoryId: unfiledCategoryId,
             importMode: 'copy',
+            source: 'zotero',
             metadata,
           });
 
@@ -2134,15 +2113,7 @@ export default function LiteratureLibraryView({
     const [nextCategories, queryResult] = await Promise.all([
       listLibraryCategories(),
       queryLibraryPapers({
-        categoryId: selectedCategoryId,
-        search: searchQuery,
-        sortBy: paperSort.sortBy,
-        sortDirection: paperSort.sortDirection,
-        ragEnabled: ragMembershipFilter === 'included'
-          ? true
-          : ragMembershipFilter === 'excluded'
-            ? false
-            : null,
+        ...buildPaperQuery(filters, paperSort, selectedCategoryId, searchQuery, mineruPaperIds),
         limit: PAPER_PAGE_SIZE,
         offset: 0,
       }),
@@ -2924,15 +2895,7 @@ export default function LiteratureLibraryView({
       const [nextCategories, queryResult] = await Promise.all([
         listLibraryCategories(),
         queryLibraryPapers({
-          categoryId: selectedCategoryId,
-          search: searchQuery,
-          sortBy: paperSort.sortBy,
-          sortDirection: paperSort.sortDirection,
-          ragEnabled: ragMembershipFilter === 'included'
-            ? true
-            : ragMembershipFilter === 'excluded'
-              ? false
-              : null,
+          ...buildPaperQuery(filters, paperSort, selectedCategoryId, searchQuery, mineruPaperIds),
           limit: PAPER_PAGE_SIZE,
           offset: 0,
         }),
@@ -3269,6 +3232,10 @@ export default function LiteratureLibraryView({
             selectAllState={selectAllState}
             onToggleSelectAll={() => void handleToggleSelectAll()}
             searchQuery={searchQuery}
+            filters={filters}
+            onFiltersChange={setFilters}
+            tags={libraryTags}
+            libraryTotal={categories.find((category) => category.id === selectedCategoryId)?.paperCount ?? categories.find((category) => category.systemKey === 'all')?.paperCount ?? papersTotal}
             sortBy={paperSort.sortBy}
             sortDirection={paperSort.sortDirection}
             titleDisplayMode={titleDisplayMode}
@@ -3294,8 +3261,6 @@ export default function LiteratureLibraryView({
           ragBadgeByDocumentKey={ragBadgeByDocumentKey}
           ragIndexingDocumentKey={ragIndexingDocumentKey}
           ragIndexAvailable={ragIndexAvailable}
-          ragMembershipFilter={ragMembershipFilter}
-          onRagMembershipFilterChange={setRagMembershipFilter}
         />
         </div>
       </div>

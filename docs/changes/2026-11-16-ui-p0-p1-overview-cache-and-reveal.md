@@ -17,7 +17,7 @@
 ## 新功能：右键「打开所在位置」
 
 - 后端 `reveal_path`（`electron/backend/fileCommands.cjs`）：文件用 `shell.showItemInFolder` 定位，目录用 `shell.openPath` 打开，不存在返回 `{ ok:false, reason:'missing' }`。只接受这些目录内的路径：应用数据目录、文库存储目录、译版目录、MinerU 缓存（默认与设置值）、远程下载目录、已批准写入路径，以及各附件原始/存储路径所在目录。非目录一律只做定位，不执行。
-- 前端纯函数 `src/features/literature/paperFileLocations.ts`：为原始 PDF、译版 PDF（最新 3 份，带语言）、MinerU 结果文件夹（三种历史命名）、Markdown（缓存内 `full.md`，开启同目录加载时含 PDF 旁的 `full.md`）生成候选路径，一次 `paths_exist` 取第一个存在者。
+- 前端纯函数 `src/features/literature/paperFileLocations.ts`：为原始 PDF、译版 PDF（最新 3 份，带语言）和 MinerU 结果生成候选路径（0.4.26 的文件夹与 Markdown 两项已合并，详见 P2 变更记录），一次 `paths_exist` 取第一个存在者。
 - `usePaperFileLocationMenu.tsx` 把这些位置接入文献右键菜单，放在「删除文献记录」之前，另加「复制 PDF 路径」。检查期间显示「检查中…」，找不到的项置灰并标「未找到」。菜单宽度从 224 调为 264。
 
 ## 样式
@@ -41,7 +41,7 @@
 **桌面实机验证尚未进行**，需用 `--user-data-dir=<空目录>` 或拷贝出的一次性库逐项确认：
 
 1. 关闭「自动生成概览」、清空 API Key，打开已有缓存概览的论文 → 概览页直接显示；返回文库，详情面板概览仍在。
-2. 右键文献，PDF / 译版 / MinerU 文件夹 / Markdown 四项均能在资源管理器中定位，缺失项置灰。
+2. 右键文献，PDF / 译版 / MinerU 结果均能在资源管理器中定位，缺失项置灰。
 3. 「+」、发送、推理强度按钮在日间与夜间主题下的观感。
 
 ## 已知遗留

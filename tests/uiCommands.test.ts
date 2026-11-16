@@ -58,3 +58,24 @@ test('registerCommands adds commands and returns an idempotent unregister', asyn
 test('runCommand on unknown id resolves without throwing', async () => {
   await assert.doesNotReject(() => runCommand('test.does-not-exist'));
 });
+
+test('hidden workspace commands become available when the workspace is shown', async () => {
+  let visible = false;
+  let calls = 0;
+  const unregister = registerCommands([{
+    id: 'test.visible-search', title: 'Search', shortcut: 'mod+f',
+    isAvailable: () => visible,
+    run: () => { calls += 1; },
+  }]);
+  try {
+    assert.equal(listCommands().some((item) => item.id === 'test.visible-search'), false);
+    await runCommand('test.visible-search');
+    assert.equal(calls, 0);
+    visible = true;
+    assert.equal(listCommands().some((item) => item.id === 'test.visible-search'), true);
+    await runCommand('test.visible-search');
+    assert.equal(calls, 1);
+  } finally {
+    unregister();
+  }
+});

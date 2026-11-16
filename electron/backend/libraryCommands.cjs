@@ -1,5 +1,6 @@
 const fsp = require('node:fs/promises');
 const path = require('node:path');
+const { resolveAttachmentFilters } = require('./libraryAttachmentAvailability.cjs');
 const {
   attachCategoryCounts,
   normalizeAuthor,
@@ -530,6 +531,13 @@ async function fetchCrossrefReferences(doi, paperId = '') {
 function createLibraryCommands(context) {
   const { appPaths, store } = context;
 
+  const resolvePaperRequest = async (request, library) => {
+    if (!['hasPdf', 'hasTranslatedPdf', 'missingFile'].some((key) => typeof request[key] === 'boolean')) {
+      return { request, applyToPapers: (papers) => papers };
+    }
+    return resolveAttachmentFilters(request, library ?? store.load());
+  };
+
   const commands = {
     async library_init() {
       // 只读取并规范化内存视图；不再每次启动全库 DELETE+重插
@@ -582,6 +590,10 @@ function createLibraryCommands(context) {
 
     async library_list_categories() {
       return store.listCategoriesWithCounts();
+    },
+
+    async library_list_tags() {
+      return store.listTags();
     },
 
     async library_create_category({ request }) {
@@ -658,8 +670,9 @@ function createLibraryCommands(context) {
 
     async library_list_papers({ request = {} }) {
       const library = store.load();
-      const limit = Math.max(1, Math.min(1000, request.limit ?? 300));
-      return sortPapers(library.papers.filter((paper) => paperMatches(paper, request, library)), request).slice(0, limit);
+      const resolved = await resolvePaperRequest(request, library);
+      const limit = Math.max(1, Math.min(1000, resolved.request.limit ?? 300));
+      return resolved.applyToPapers(sortPapers(library.papers.filter((paper) => paperMatches(paper, resolved.request, library)), resolved.request).slice(0, limit));
     },
 
     /**
@@ -667,17 +680,19 @@ function createLibraryCommands(context) {
      * { papers, total, offset, limit }；total 为当前筛选的完整匹配数，不受分页限制。
      */
     async library_query_papers({ request = {} }) {
-      return store.queryPapers(request);
+      const resolved = await resolvePaperRequest(request);
+      const result = store.queryPapers(resolved.request);
+      return { ...result, papers: resolved.applyToPapers(result.papers) };
     },
 
     /** 与 library_query_papers 同筛选同排序，仅分批枚举 id（供全选/批量目标管理，P2-2）。 */
     async library_list_paper_ids({ request = {} }) {
-      return store.listPaperIds(request);
+      return store.listPaperIds((await resolvePaperRequest(request)).request);
     },
 
     /** 当前筛选的完整匹配计数（供全选三态与批量目标校验，P2-2）。 */
     async library_count_papers({ request = {} }) {
-      return store.countPapers(request);
+      return store.countPapers((await resolvePaperRequest(request)).request);
     },
 
     async library_inspect_pdf_assets() {
@@ -706,6 +721,9 @@ function createLibraryCommands(context) {
     },
 
     async library_import_pdfs({ request }) {
+      if (request.source != null && request.source !== 'local' && request.source !== 'zotero') {
+        throw new Error('Invalid import source');
+      }
       const library = store.load();
       const results = [];
       const moveSourcesAfterCommit = [];
@@ -786,7 +804,7 @@ function createLibraryCommands(context) {
             userNote: null,
             aiSummary: null,
             citation: null,
-            source: 'local',
+            source: request.source === 'zotero' ? 'zotero' : 'local',
             sortOrder: Math.min(0, ...library.papers.map((item) => item.sortOrder ?? 0)) - 1,
             authors: (metadata.authors ?? []).map(normalizeAuthor),
             tags: [],
@@ -846,6 +864,19 @@ function createLibraryCommands(context) {
       paper.updatedAt = now();
       store.savePaper(paper);
       return paper;
+    },
+
+    async library_record_reading({ request }) {
+      const paperId = cleanString(request?.paperId);
+      const timestamp = request?.lastReadAt;
+      const progress = request?.readingProgress;
+      if (!paperId || !Number.isSafeInteger(timestamp) || timestamp <= 0 || timestamp > now() + 60_000) {
+        throw new Error('Invalid reading timestamp or paper ID');
+      }
+      if (progress != null && (typeof progress !== 'number' || !Number.isFinite(progress) || progress < 0 || progress > 1)) {
+        throw new Error('Invalid reading progress');
+      }
+      return store.recordPaperReading(paperId, timestamp, progress ?? 0);
     },
 
     async library_update_paper({ request }) {

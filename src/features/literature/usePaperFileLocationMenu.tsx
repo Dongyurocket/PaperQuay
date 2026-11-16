@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Copy, FileText, FolderOpen, Languages, FileType } from 'lucide-react';
+import { Copy, FileText, Languages, FileType } from 'lucide-react';
 import type { LiteraturePaper } from '../../types/library';
 import { localPathsExist, revealLocalPath } from '../../services/desktop';
 import { copyTextToClipboard } from '../../utils/clipboard';
@@ -146,15 +146,9 @@ export function usePaperFileLocationMenu({
 
     entries.push(
       revealItem(
-        'open-mineru-dir',
-        find('mineru-dir'),
-        l('打开 MinerU 结果文件夹', 'Open MinerU Output Folder'),
-        <FolderOpen className={ICON_CLASS} strokeWidth={1.9} />,
-      ),
-      revealItem(
-        'reveal-markdown',
-        find('markdown'),
-        l('在文件夹中显示 Markdown', 'Show Markdown in Folder'),
+        'reveal-mineru-output',
+        find('mineru-output'),
+        l('在文件夹中显示 MinerU 结果', 'Show MinerU Output in Folder'),
         <FileType className={ICON_CLASS} strokeWidth={1.9} />,
       ),
       {

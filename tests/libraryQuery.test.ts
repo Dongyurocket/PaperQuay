@@ -40,6 +40,7 @@ function makePaper(index: number, overrides: Record<string, unknown> = {}) {
     doi: null,
     url: null,
     abstractText: null,
+    itemType: 'journalArticle',
     keywords: [] as string[],
     importedAt: 1_000_000 + index,
     updatedAt: 2_000_000 + index,
@@ -127,6 +128,20 @@ function buildLibrary(appPaths: ReturnType<typeof createAppPaths>) {
     tags: [{ id: 'tag-ml', name: 'machine-learning', color: null }],
   });
   papers[6] = makePaper(7, { categoryIds: ['cat-parent'] });
+  papers[7] = makePaper(8, {
+    itemType: 'journalArticle', lastReadAt: 100, readingProgress: 0.5, source: 'zotero', aiSummary: 'overview',
+    tags: [{ id: 'tag-ml', name: 'machine-learning', color: null }, { id: 'tag-other', name: 'other', color: null }],
+    attachments: [{ id: 'att8', paperId: 'p08', kind: 'pdf', storedPath: 'a.pdf', fileName: 'a.pdf', mimeType: 'application/pdf', fileSize: 1, createdAt: 1, missing: false }],
+  });
+  papers[8] = makePaper(9, {
+    itemType: 'thesis', lastReadAt: 200, readingProgress: 1,
+    attachments: [{ id: 'att9', paperId: 'p09', kind: 'translated-pdf', storedPath: 'b.pdf', fileName: 'b.pdf', mimeType: 'application/pdf', fileSize: 1, createdAt: 1, missing: true }],
+  });
+  papers[9] = makePaper(10, {
+    attachments: [{ id: 'att10', paperId: 'p10', kind: 'translated-pdf', storedPath: 'c.pdf', fileName: 'c.pdf', mimeType: 'application/pdf', fileSize: 1, createdAt: 1, missing: false }],
+  });
+  papers[10] = makePaper(11, { aiSummary: '\u3000\u00a0\ufeff' });
+  papers[11] = makePaper(12, { aiSummary: '\u3000Overview\u00a0' });
   papers.push(makePaper(33, { title: '100% yield study' }));
   papers.push(makePaper(34, { title: 'code a_b sample' }));
 
@@ -167,6 +182,15 @@ test('SQL query matches JS filter sets and keeps a stable page order', () => {
       { categoryId: 'cat-child' },
       { categoryId: 'missing-category' },
       { tagId: 'tag-ml' },
+      { favorite: true }, { favorite: false },
+      { tagIds: ['tag-ml', 'tag-other'] }, { tagIds: ['unknown'] },
+      { yearFrom: 2008 }, { yearTo: 2009 }, { yearFrom: 2008, yearTo: 2009 },
+      { itemTypes: ['journalArticle', 'thesis'] },
+      { readStatus: 'unread' }, { readStatus: 'reading' }, { readStatus: 'finished' }, { readAfter: 150 },
+      { hasPdf: true }, { hasPdf: false }, { hasTranslatedPdf: true }, { hasTranslatedPdf: false },
+      { missingFile: true }, { missingFile: false }, { hasSummary: true }, { hasSummary: false },
+      { source: 'zotero' }, { paperIds: ['p08', 'p09'] }, { paperIds: [] },
+      { categoryId: 'all', tagIds: ['tag-ml'], yearFrom: 2007, hasPdf: true },
       { search: 'quantum' },
       { search: 'alice' },
       { search: 'graphene' },
@@ -174,6 +198,10 @@ test('SQL query matches JS filter sets and keeps a stable page order', () => {
       { search: '100%' },
       { search: '_' },
     ];
+
+    assert.deepEqual(store.listTags().map((tag: { id: string; count: number }) => [tag.id, tag.count]), [
+      ['tag-ml', 2], ['tag-other', 1],
+    ]);
 
     for (const request of requests) {
       const expected = oracleIds(library, request).sort();

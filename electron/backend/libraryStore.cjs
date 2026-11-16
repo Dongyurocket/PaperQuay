@@ -192,6 +192,30 @@ function paperMatches(paper, request, library) {
 
   if (request?.tagId && !paper.tags.some((tag) => tag.id === request.tagId)) return false;
 
+  if (typeof request?.favorite === 'boolean' && Boolean(paper.isFavorite) !== request.favorite) return false;
+  if (Array.isArray(request?.tagIds) && request.tagIds.length && !paper.tags.some((tag) => request.tagIds.includes(tag.id))) return false;
+  if (Array.isArray(request?.itemTypes) && request.itemTypes.length && !request.itemTypes.includes(paper.itemType)) return false;
+  if (Array.isArray(request?.paperIds) && !request.paperIds.includes(paper.id)) return false;
+  if (Number.isInteger(request?.yearFrom) || Number.isInteger(request?.yearTo)) {
+    if (!/^\d{4}$/.test(paper.year || '')) return false;
+    const year = Number(paper.year);
+    if (Number.isInteger(request.yearFrom) && year < request.yearFrom) return false;
+    if (Number.isInteger(request.yearTo) && year > request.yearTo) return false;
+  }
+  const progress = Number(paper.readingProgress) || 0;
+  const status = progress >= 1 ? 'finished' : (paper.lastReadAt != null || progress > 0) ? 'reading' : 'unread';
+  if (['unread', 'reading', 'finished'].includes(request?.readStatus) && request.readStatus !== status) return false;
+  if (Number.isFinite(request?.readAfter) && (paper.lastReadAt == null || paper.lastReadAt < request.readAfter)) return false;
+  for (const [field, predicate] of [
+    ['hasPdf', (a) => a.kind === 'pdf' && !a.missing],
+    ['hasTranslatedPdf', (a) => a.kind === 'translated-pdf' && !a.missing],
+    ['missingFile', (a) => Boolean(a.missing)],
+  ]) {
+    if (typeof request?.[field] === 'boolean' && (paper.attachments || []).some(predicate) !== request[field]) return false;
+  }
+  if (typeof request?.hasSummary === 'boolean' && Boolean(paper.aiSummary?.trim()) !== request.hasSummary) return false;
+  if (typeof request?.source === 'string' && request.source.trim() && paper.source !== request.source.trim()) return false;
+
   const search = typeof request?.search === 'string' ? request.search.trim().toLowerCase() : '';
   if (!search) return true;
 

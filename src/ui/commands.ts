@@ -24,6 +24,8 @@ export interface AppCommand {
   keywords?: string[];
   /** 例如 "mod+k"、"mod+w"；mod 在 Windows/Linux 为 Ctrl，macOS 为 Meta。 */
   shortcut?: string;
+  /** Hidden workspaces can leave commands registered without taking shortcuts. */
+  isAvailable?: () => boolean;
   run: () => void | Promise<void>;
 }
 
@@ -50,7 +52,7 @@ export function registerCommands(next: AppCommand[]): () => void {
 }
 
 export function listCommands(): AppCommand[] {
-  return Array.from(commands.values());
+  return Array.from(commands.values()).filter((command) => command.isAvailable?.() !== false);
 }
 
 export function subscribeCommands(listener: () => void): () => void {
@@ -64,7 +66,7 @@ export function subscribeCommands(listener: () => void): () => void {
 export function runCommand(id: string) {
   const command = commands.get(id);
 
-  if (!command) return Promise.resolve();
+  if (!command || command.isAvailable?.() === false) return Promise.resolve();
 
   return Promise.resolve(command.run());
 }
@@ -148,9 +150,15 @@ export function useGlobalShortcuts({ onCommandPalette }: GlobalShortcutOptions) 
 
       const key = event.key.toLowerCase();
 
+      if (key === 'f') {
+        const command = listCommands().find((item) => item.shortcut && parseShortcut(item.shortcut).key === 'f' && parseShortcut(item.shortcut).mod);
+        if (command) { event.preventDefault(); void command.run(); }
+        return;
+      }
+
       // Cmd/Ctrl+W 关闭当前标签：无输入焦点时也要生效；输入框内不拦截，交给浏览器行为。
       if (key === 'w' && !isEditableTarget(event.target)) {
-        const command = Array.from(commands.values()).find((item) => item.shortcut && parseShortcut(item.shortcut).key === 'w' && parseShortcut(item.shortcut).mod);
+        const command = listCommands().find((item) => item.shortcut && parseShortcut(item.shortcut).key === 'w' && parseShortcut(item.shortcut).mod);
 
         if (command) {
           event.preventDefault();
@@ -161,7 +169,7 @@ export function useGlobalShortcuts({ onCommandPalette }: GlobalShortcutOptions) 
       }
 
       if (key === ',' && !isEditableTarget(event.target)) {
-        const command = Array.from(commands.values()).find((item) => item.shortcut && parseShortcut(item.shortcut).key === ',');
+        const command = listCommands().find((item) => item.shortcut && parseShortcut(item.shortcut).key === ',');
 
         if (command) {
           event.preventDefault();

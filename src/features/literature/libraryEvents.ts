@@ -4,6 +4,7 @@ export const LIBRARY_SETTINGS_UPDATED_EVENT = 'paperquay:library-settings-update
 export const ZOTERO_IMPORT_REQUEST_EVENT = 'paperquay:zotero-import-request';
 export const LIBRARY_METADATA_ENRICH_REQUEST_EVENT = 'paperquay:library-metadata-enrich-request';
 export const NATIVE_PAPER_UPDATED_EVENT = 'paperquay:native-paper-updated';
+export const LIBRARY_READING_UPDATED_EVENT = 'paperquay:library-reading-updated';
 
 export interface LibrarySettingsUpdatedEventDetail {
   settings: LibrarySettings;

@@ -206,6 +206,27 @@ export interface ListPapersRequest {
   offset?: number;
   /** true 只看已加入，false 只看已排除，null/缺省为全部。 */
   ragEnabled?: boolean | null;
+  favorite?: boolean | null;
+  tagIds?: string[];
+  yearFrom?: number | null;
+  yearTo?: number | null;
+  itemTypes?: string[];
+  readStatus?: 'unread' | 'reading' | 'finished' | null;
+  readAfter?: number;
+  hasPdf?: boolean | null;
+  hasTranslatedPdf?: boolean | null;
+  missingFile?: boolean | null;
+  hasSummary?: boolean | null;
+  source?: string | null;
+  /** 空数组表示不匹配任何文献；缺省表示不限制。 */
+  paperIds?: string[];
+}
+
+export interface LibraryTagCount {
+  id: string;
+  name: string;
+  color: string | null;
+  count: number;
 }
 
 /** SQL 分页查询结果（P2-1）：total 为当前筛选的完整匹配数，不受 offset/limit 限制。 */
@@ -258,6 +279,7 @@ export interface ImportPdfRequest {
   paths: string[];
   targetCategoryId?: string | null;
   importMode?: LibraryImportMode | null;
+  source?: 'local' | 'zotero';
   metadata?: Record<string, ImportPdfMetadata> | null;
 }
 

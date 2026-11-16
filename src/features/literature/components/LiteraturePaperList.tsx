@@ -13,12 +13,7 @@ import {
 import {
   BookOpenText,
   Check,
-  Minus,
-  FilePlus2,
   GripVertical,
-  HardDrive,
-  RefreshCw,
-  Search,
   Star,
 } from 'lucide-react';
 import { useAppLocale, useLocaleText } from '../../../i18n/uiLanguage';
@@ -35,12 +30,14 @@ import {
   paperPdfPath,
 } from '../literatureUi';
 import {
-  persistPaperTitleDisplayMode,
   resolvePaperTitleDisplay,
   type PaperTitleDisplayMode,
 } from '../titleDisplay';
 import LiteratureReadingHeatmapPreview from './LiteratureReadingHeatmapPreview';
 import type { SelectionCheckState } from '../paperSelection';
+import type { LibraryFilterState } from '../libraryFilters';
+import type { LibraryTagCount } from '../../../types/library';
+import LiteratureToolbar from './LiteratureToolbar';
 
 export interface LiteraturePaperListStatus {
   mineruParsed: boolean;
@@ -73,6 +70,10 @@ interface LiteraturePaperListProps {
   selectAllState?: SelectionCheckState;
   onToggleSelectAll?: () => void;
   searchQuery: string;
+  filters: LibraryFilterState;
+  onFiltersChange: (filters: LibraryFilterState) => void;
+  tags: LibraryTagCount[];
+  libraryTotal: number;
   sortBy: LiteraturePaperListSortBy;
   sortDirection: LiteraturePaperListSortDirection;
   titleDisplayMode: PaperTitleDisplayMode;
@@ -107,8 +108,6 @@ interface LiteraturePaperListProps {
   ragIndexingDocumentKey?: string;
   /** 本地 RAG 可用（启用且 embedding 配置完整）时才展示角标。 */
   ragIndexAvailable?: boolean;
-  ragMembershipFilter?: LiteratureRagMembershipFilter;
-  onRagMembershipFilterChange?: (value: LiteratureRagMembershipFilter) => void;
 }
 
 export default function LiteraturePaperList({
@@ -119,13 +118,17 @@ export default function LiteraturePaperList({
   loadingMore = false,
   onLoadMore,
   paperStatuses,
-  showReadingHeatmap = true,
+  showReadingHeatmap: initialShowReadingHeatmap = true,
   storageDir = '',
   selectedPaper,
   multiSelectedPaperIds = [],
   selectAllState = 'none',
   onToggleSelectAll,
   searchQuery,
+  filters,
+  onFiltersChange,
+  tags,
+  libraryTotal,
   sortBy,
   sortDirection,
   titleDisplayMode,
@@ -147,8 +150,6 @@ export default function LiteraturePaperList({
   ragBadgeByDocumentKey,
   ragIndexingDocumentKey = '',
   ragIndexAvailable = false,
-  ragMembershipFilter = 'all',
-  onRagMembershipFilterChange,
 }: LiteraturePaperListProps) {
   const l = useLocaleText();
   const locale = useAppLocale();
@@ -176,8 +177,10 @@ export default function LiteraturePaperList({
   const [categoryDraggingPaperId, setCategoryDraggingPaperId] = useState<string | null>(null);
   const [suppressClickPaperId, setSuppressClickPaperId] = useState<string | null>(null);
   const [heatmapRevision, setHeatmapRevision] = useState(0);
+  const [showReadingHeatmap, setShowReadingHeatmap] = useState(initialShowReadingHeatmap);
+  const [compact, setCompact] = useState(false);
+  useEffect(() => setShowReadingHeatmap(initialShowReadingHeatmap), [initialShowReadingHeatmap]);
   const manualSortingEnabled = sortBy === 'manual';
-  const sortValue = `${sortBy}:${sortDirection}`;
   const multiSelectedSet = useMemo(() => new Set(multiSelectedPaperIds), [multiSelectedPaperIds]);
   const multiSelectActive = multiSelectedPaperIds.length > 0;
   const resolvedTotal = typeof papersTotal === 'number' ? Math.max(papersTotal, papers.length) : papers.length;
@@ -486,136 +489,18 @@ export default function LiteraturePaperList({
       onWheelCapture={handleWheelCapture}
       className="pq-library-pane flex h-full min-h-0 flex-col overflow-hidden border-r"
     >
-      <header className="pq-toolbar px-4 py-3">
-        <div className="flex flex-wrap items-center gap-2.5">
-          <button
-            type="button"
-            role="checkbox"
-            aria-checked={selectAllState === 'all' ? true : selectAllState === 'partial' ? 'mixed' : false}
-            disabled={working || resolvedTotal === 0 || !onToggleSelectAll}
-            onClick={onToggleSelectAll}
-            title={l(
-              `全选当前筛选结果（${resolvedTotal} 篇）`,
-              `Select all papers in the current filter (${resolvedTotal})`,
-            )}
-            className="pq-button inline-flex h-9 items-center gap-2 px-2.5 text-sm disabled:opacity-50"
-          >
-            <span
-              className={clsx(
-                'flex h-4 w-4 items-center justify-center rounded border',
-                selectAllState === 'none'
-                  ? 'border-[var(--pq-border)] bg-white/70 text-transparent'
-                  : 'border-[var(--pq-accent-border-strong)] bg-[var(--pq-accent)] text-white',
-              )}
-            >
-              {selectAllState === 'partial'
-                ? <Minus className="h-3 w-3" strokeWidth={2.6} />
-                : <Check className="h-3 w-3" strokeWidth={2.6} />}
-            </span>
-            {l(`全选（${resolvedTotal}）`, `All (${resolvedTotal})`)}
-          </button>
-          <div className="relative min-w-[260px] flex-1">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--pq-text-faint)]" strokeWidth={1.8} />
-            <input
-              value={searchQuery}
-              onChange={(event) => onSearchQueryChange(event.target.value)}
-              placeholder={l('搜索标题、作者、摘要、DOI...', 'Search title, author, abstract, DOI...')}
-              className="pq-input h-9 w-full pl-9 pr-3 text-sm placeholder:text-[var(--pq-text-faint)]"
-            />
-          </div>
-
-          <select
-            value={sortValue}
-            onChange={(event) => {
-              const [nextSortBy, nextDirection] = event.target.value.split(':') as [
-                LiteraturePaperListSortBy,
-                LiteraturePaperListSortDirection,
-              ];
-
-              onSortChange(nextSortBy, nextDirection);
-            }}
-            className="pq-input h-9 w-[168px] px-3 text-sm"
-            title={l('排序', 'Sort')}
-          >
-            <option value="manual:asc">{l('手动排序', 'Manual Order')}</option>
-            <option value="title:asc">{l('名称 A-Z', 'Name A-Z')}</option>
-            <option value="title:desc">{l('名称 Z-A', 'Name Z-A')}</option>
-            <option value="importedAt:desc">{l('添加时间 新-旧', 'Added New-Old')}</option>
-            <option value="importedAt:asc">{l('添加时间 旧-新', 'Added Old-New')}</option>
-            <option value="year:desc">{l('出版时间 新-旧', 'Year New-Old')}</option>
-            <option value="year:asc">{l('出版时间 旧-新', 'Year Old-New')}</option>
-            <option value="updatedAt:desc">{l('更新时间 新-旧', 'Updated New-Old')}</option>
-            <option value="author:asc">{l('作者 A-Z', 'Author A-Z')}</option>
-          </select>
-
-          <select
-            value={ragMembershipFilter}
-            onChange={(event) => {
-              onRagMembershipFilterChange?.(event.target.value as LiteratureRagMembershipFilter);
-            }}
-            className="pq-input h-9 w-[132px] px-3 text-sm"
-            title={l('本地知识库', 'Local knowledge base')}
-          >
-            <option value="all">{l('知识库：全部', 'Library: All')}</option>
-            <option value="included">{l('知识库：已加入', 'Library: Included')}</option>
-            <option value="excluded">{l('知识库：已排除', 'Library: Excluded')}</option>
-          </select>
-
-          <select
-            value={titleDisplayMode}
-            onChange={(event) => {
-              const nextMode = event.target.value as PaperTitleDisplayMode;
-              onTitleDisplayModeChange(nextMode);
-              persistPaperTitleDisplayMode(nextMode);
-            }}
-            className="pq-input h-9 w-[132px] px-3 text-sm"
-            title={l('标题语言显示', 'Title language display')}
-          >
-            <option value="both">{l('中英标题', 'Bilingual Titles')}</option>
-            <option value="zh">{l('中文标题', 'Chinese Titles')}</option>
-            <option value="original">{l('原文标题', 'Original Titles')}</option>
-          </select>
-
-          <button
-            type="button"
-            onClick={onImportPdfs}
-            disabled={working}
-            className="pq-button-primary h-9 px-3 text-sm"
-          >
-            <FilePlus2 className="mr-2 h-4 w-4" strokeWidth={1.9} />
-            {l('导入 PDF', 'Import PDF')}
-          </button>
-
-          <button
-            type="button"
-            onClick={onInspectPdfAssets}
-            disabled={working}
-            className="pq-button inline-flex h-9 items-center gap-2 px-3 text-sm disabled:opacity-50"
-            title={l('检查已登记的 PDF 附件与命名预览', 'Inspect registered PDF assets and naming preview')}
-          >
-            <HardDrive className="h-4 w-4" strokeWidth={1.9} />
-            {l('存储体检', 'Storage audit')}
-          </button>
-
-          <button
-            type="button"
-            onClick={onRefresh}
-            disabled={working}
-            className="pq-button h-9 px-3 text-sm"
-          >
-            <RefreshCw className="mr-2 h-4 w-4" strokeWidth={1.9} />
-            {l('刷新', 'Refresh')}
-          </button>
-        </div>
-
-        <div className="mt-2 text-xs text-[var(--pq-text-muted)]">
-          {error ||
-            statusMessage ||
-            (manualSortingEnabled
-              ? l('拖动把手可调整排序；拖动条目到分类可归类。', 'Drag the handle to reorder papers; drag the row onto a category to classify it.')
-              : l('当前使用自动排序；拖动条目到分类仍可归类。', 'Automatic sorting is active. Dragging a row onto a category still classifies it.'))}
-        </div>
-      </header>
+      <LiteratureToolbar
+        working={working} total={resolvedTotal} libraryTotal={libraryTotal}
+        selectAllState={selectAllState} onToggleSelectAll={onToggleSelectAll}
+        search={searchQuery} onSearch={onSearchQueryChange}
+        filters={filters} onFilters={onFiltersChange} tags={tags}
+        sortBy={sortBy} sortDirection={sortDirection} onSort={onSortChange}
+        titleMode={titleDisplayMode} onTitleMode={onTitleDisplayModeChange}
+        showHeatmap={showReadingHeatmap} onHeatmap={setShowReadingHeatmap}
+        compact={compact} onCompact={setCompact}
+        onImport={onImportPdfs} onAudit={onInspectPdfAssets} onRefresh={onRefresh}
+        statusMessage={statusMessage} error={error}
+      />
 
       <div
         data-wheel-scroll-target
@@ -703,6 +588,7 @@ export default function LiteraturePaperList({
                     onKeyDown={(event) => handleRowKeyDown(event, paper)}
                     className={clsx(
                       'pq-card pq-paper-row-card grid w-full gap-3 px-3 py-3 text-left transition',
+                      compact && '!py-1.5',
                       showReadingHeatmap && 'pq-paper-row-card--heatmap',
                       manualSortingEnabled ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer',
                       active

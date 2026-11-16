@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import ReaderWorkspace from './ReaderWorkspace';
+import { useLibraryReadingTracking } from './useLibraryReadingTracking';
 import { getDocumentParseTask, subscribeDocumentParseTasks } from '../../services/documentParseTasks';
 import { shouldShowParseTask, toPaperParseTaskState } from './documentParseTaskState';
 import {
@@ -628,6 +629,14 @@ function DocumentReaderTab({
   const pdfScrollPosition = pdfScrollSourceKey
     ? pdfScrollPositionsRef.current[pdfScrollSourceKey] ?? null
     : null;
+  const recordLibraryReadingPosition = useLibraryReadingTracking({
+    document: currentDocument,
+    expectedWorkspaceId: document.workspaceId,
+    active: isActive && Boolean(pdfSource),
+    sourceKey: pdfScrollSourceKey,
+    pageCount: pdfPageCount,
+    position: pdfScrollPosition,
+  });
   const pdfReadingHeatmap = pdfScrollSourceKey
     ? pdfReadingHeatmapsRef.current[pdfScrollSourceKey] ?? null
     : null;
@@ -697,6 +706,7 @@ function DocumentReaderTab({
     );
   };
   const handlePdfScrollPositionChange = useCallback((position: PdfScrollPosition) => {
+    recordLibraryReadingPosition(position);
     const next = upsertRecentPdfScrollPosition(pdfScrollPositionsRef.current, position);
 
     if (!next) {
@@ -705,7 +715,7 @@ function DocumentReaderTab({
 
     pdfScrollPositionsRef.current = next;
     saveCurrentPaperHistory(next, pdfReadingHeatmapsRef.current);
-  }, [saveCurrentPaperHistory]);
+  }, [recordLibraryReadingPosition, saveCurrentPaperHistory]);
   const handlePdfReadingHeatmapChange = useCallback((heatmap: PdfReadingHeatmap) => {
     const next = upsertRecentPdfReadingHeatmap(pdfReadingHeatmapsRef.current, heatmap);
 

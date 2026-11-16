@@ -87,6 +87,52 @@ function buildLibraryFilter(db, request = {}) {
     params.push(tagId);
   }
 
+  if (typeof request.favorite === 'boolean') {
+    where.push('p.is_favorite = ?');
+    params.push(request.favorite ? 1 : 0);
+  }
+  for (const [field, column] of [['tagIds', 't.id'], ['itemTypes', 'p.item_type']]) {
+    if (!Array.isArray(request[field]) || request[field].length === 0) continue;
+    const expression = `${column} IN (SELECT value FROM json_each(?))`;
+    where.push(field === 'tagIds'
+      ? `EXISTS (SELECT 1 FROM tags t WHERE t.paper_id = p.id AND ${expression})`
+      : expression);
+    params.push(JSON.stringify(request[field]));
+  }
+  if (Array.isArray(request.paperIds)) {
+    where.push('p.id IN (SELECT value FROM json_each(?))');
+    params.push(JSON.stringify(request.paperIds));
+  }
+  if (Number.isInteger(request.yearFrom) || Number.isInteger(request.yearTo)) {
+    where.push("p.year GLOB '[0-9][0-9][0-9][0-9]'");
+    if (Number.isInteger(request.yearFrom)) { where.push('CAST(p.year AS INTEGER) >= ?'); params.push(request.yearFrom); }
+    if (Number.isInteger(request.yearTo)) { where.push('CAST(p.year AS INTEGER) <= ?'); params.push(request.yearTo); }
+  }
+  if (request.readStatus === 'finished') {
+    where.push('COALESCE(p.reading_progress, 0) >= 1');
+  } else if (request.readStatus === 'reading') {
+    where.push('(p.last_read_at IS NOT NULL OR COALESCE(p.reading_progress, 0) > 0) AND COALESCE(p.reading_progress, 0) < 1');
+  } else if (request.readStatus === 'unread') {
+    where.push('p.last_read_at IS NULL AND COALESCE(p.reading_progress, 0) <= 0');
+  }
+  if (Number.isFinite(request.readAfter)) { where.push('p.last_read_at >= ?'); params.push(request.readAfter); }
+  for (const [field, predicate] of [
+    ['hasPdf', "a.kind = 'pdf' AND a.missing = 0"],
+    ['hasTranslatedPdf', "a.kind = 'translated-pdf' AND a.missing = 0"],
+    ['missingFile', 'a.missing != 0'],
+  ]) {
+    if (typeof request[field] === 'boolean') {
+      where.push(`${request[field] ? '' : 'NOT '}EXISTS (SELECT 1 FROM attachments a WHERE a.paper_id = p.id AND ${predicate})`);
+    }
+  }
+  if (typeof request.hasSummary === 'boolean') {
+    // SQLite trim 默认只处理空格；列出 ECMAScript String.trim 的所有空白字符。
+    where.push(`${request.hasSummary ? '' : 'NOT '}(length(trim(COALESCE(p.ai_summary, ''), ?)) > 0)`);
+    params.push('\u0009\u000a\u000b\u000c\u000d\u0020\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff');
+  }
+  const source = cleanString(request.source);
+  if (source) { where.push('p.source = ?'); params.push(source); }
+
   const search = cleanString(request.search).toLowerCase();
   if (search) {
     const like = `%${escapeLike(search)}%`;
