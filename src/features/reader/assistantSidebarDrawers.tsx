@@ -1,4 +1,4 @@
-﻿import { useState } from 'react';
+import { useState } from 'react';
 import { BookOpenText, FileJson, FileText, Info, PanelRightClose } from 'lucide-react';
 import { useLocaleText } from '../../i18n/uiLanguage';
 import type { SelectedExcerpt, ZoteroRelatedNote } from '../../types/reader';
@@ -326,7 +326,7 @@ function NotesDrawerContent({
               <div className="h-24 animate-pulse rounded-[22px] bg-[var(--pq-surface-2)]" />
             </div>
           ) : zoteroRelatedNotesError ? (
-            <div className="rounded-2xl border border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-danger-bg)] px-4 py-3 text-sm text-[var(--pq-danger)]">
+            <div className="rounded-2xl border border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-error-bg)] px-4 py-3 text-sm text-[var(--pq-danger)]">
               {zoteroRelatedNotesError}
             </div>
           ) : zoteroRelatedNotes.length > 0 ? (

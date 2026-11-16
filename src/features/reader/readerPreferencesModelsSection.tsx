@@ -402,7 +402,7 @@ export function ReaderPreferencesModelsSection({
                     type="button"
                     onClick={() => onQaModelPresetRemove(preset.id)}
                     disabled={qaModelPresets.length <= 1}
-                    className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-[var(--pq-border)] bg-white px-3 text-xs font-medium text-[var(--pq-text-muted)] transition hover:border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] hover:bg-[var(--pq-danger-bg)] hover:text-[var(--pq-danger)] disabled:cursor-not-allowed disabled:hover:border-[var(--pq-border)] disabled:hover:bg-white disabled:hover:text-[var(--pq-text-muted)] disabled:opacity-50"
+                    className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-[var(--pq-border)] bg-white px-3 text-xs font-medium text-[var(--pq-text-muted)] transition hover:border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] hover:bg-[var(--pq-error-bg)] hover:text-[var(--pq-danger)] disabled:cursor-not-allowed disabled:hover:border-[var(--pq-border)] disabled:hover:bg-white disabled:hover:text-[var(--pq-text-muted)] disabled:opacity-50"
                     title={l('删除模型预设', 'Delete model preset')}
                   >
                     <Trash2 className="h-3.5 w-3.5" strokeWidth={1.9} />
@@ -572,7 +572,7 @@ export function ReaderPreferencesModelsSection({
               ) : null}
 
               {modelListError ? (
-                <div className="mt-3 rounded-xl border border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-danger-bg)] px-3 py-2 text-xs leading-5 text-[var(--pq-danger)]">
+                <div className="mt-3 rounded-xl border border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-error-bg)] px-3 py-2 text-xs leading-5 text-[var(--pq-danger)]">
                   {modelListError}
                 </div>
               ) : null}
@@ -583,7 +583,7 @@ export function ReaderPreferencesModelsSection({
                     'mt-3 rounded-xl border px-3 py-2 text-xs leading-5',
                     presetTestResultMap[preset.id]?.ok
                       ? 'border-[color-mix(in_srgb,var(--pq-success)_28%,transparent)] bg-[var(--pq-success-bg)] text-[var(--pq-success)]'
-                      : 'border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-danger-bg)] text-[var(--pq-danger)]',
+                      : 'border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-error-bg)] text-[var(--pq-danger)]',
                   )}
                 >
                   <div className="font-medium">

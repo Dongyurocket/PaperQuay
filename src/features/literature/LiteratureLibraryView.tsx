@@ -36,6 +36,7 @@ import {
   removeLibraryAttachment,
   reorderLibraryPapers,
   selectLibraryPdfFiles,
+  setLibraryPaperCategories,
   setLibraryRagMembership,
   updateLibraryPaper,
   updateTranslatedPdfLanguages,
@@ -412,6 +413,7 @@ export default function LiteratureLibraryView({
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [dropActive, setDropActive] = useState(false);
   const [paperSaving, setPaperSaving] = useState(false);
+  const paperSaveInFlightRef = useRef(false);
   const [dialogBusy, setDialogBusy] = useState(false);
   const [metadataAttemptedPaths, setMetadataAttemptedPaths] = useState<Set<string>>(
     () => new Set(),
@@ -2134,25 +2136,51 @@ export default function LiteratureLibraryView({
     );
   };
 
-  const handleSavePaper = async (request: UpdatePaperRequest) => {
+  const handleSavePaper = async (request: UpdatePaperRequest, categoryIds?: string[]) => {
     if (demoMode) {
       showDemoLockedMessage();
-      return;
+      throw new Error(l('演示模式不可修改文献。', 'Paper changes are disabled in demo mode.'));
     }
 
+    if (paperSaveInFlightRef.current) {
+      throw new Error(l('文献信息正在保存。', 'Paper metadata is already being saved.'));
+    }
+    paperSaveInFlightRef.current = true;
     setPaperSaving(true);
     setError('');
 
     try {
-      const updatedPaper = await updateLibraryPaper(request);
+      let updatedPaper = await updateLibraryPaper(request);
+      if (categoryIds) {
+        const currentCategoryIds = [...updatedPaper.categoryIds].sort();
+        const nextCategoryIds = [...new Set(categoryIds)].sort();
+        if (JSON.stringify(currentCategoryIds) !== JSON.stringify(nextCategoryIds)) {
+          updatedPaper = await setLibraryPaperCategories({
+            paperId: updatedPaper.id,
+            categoryIds: nextCategoryIds,
+          });
+        }
+      }
+
+      const currentSnapshot = allPapersSnapshotRef.current;
+      const hasPaper = currentSnapshot.some((paper) => paper.id === updatedPaper.id);
+      const nextSnapshot = hasPaper
+        ? currentSnapshot.map((paper) => paper.id === updatedPaper.id ? updatedPaper : paper)
+        : [...currentSnapshot, updatedPaper];
+      allPapersSnapshotRef.current = nextSnapshot;
+      onAllPapersChange?.(nextSnapshot);
+
       await reloadAfterPaperUpdate(updatedPaper);
       setStatusMessage(l('文献信息已保存', 'Paper metadata saved'));
+      return updatedPaper;
     } catch (nextError) {
       const message =
         nextError instanceof Error ? nextError.message : l('保存文献信息失败', 'Failed to save paper metadata');
       setError(message);
       setStatusMessage(message);
+      throw nextError;
     } finally {
+      paperSaveInFlightRef.current = false;
       setPaperSaving(false);
     }
   };
@@ -3326,8 +3354,16 @@ export default function LiteratureLibraryView({
             selectedPaper={selectedPaper}
             titleDisplayMode={titleDisplayMode}
             saving={paperSaving}
+            categories={categories}
+            libraryTags={libraryTags}
+            allPapers={demoLibrary?.papers ?? allPapersSnapshotRef.current}
+            paperStatus={selectedPaper ? paperStatuses[selectedPaper.id] : undefined}
+            storageDir={libraryStorageDir}
+            mineruCacheDir={mineruCacheDir}
+            autoLoadSiblingJson={autoLoadSiblingJson}
             onOpenPaper={onOpenPaper}
-            onSavePaper={(request) => void handleSavePaper(request)}
+            onSavePaper={handleSavePaper}
+            onRestorePaperSelection={setSelectedPaperId}
             actionState={selectedPaper ? paperActionStates[selectedPaper.id] ?? null : null}
             onRunMineruParse={onRunMineruParse}
             onTranslatePaper={onTranslatePaper}
@@ -3347,6 +3383,8 @@ export default function LiteratureLibraryView({
             onSetRagMembership={(paper, enabled) => {
               void applyRagMembership([paper.id], enabled);
             }}
+            onIndexPaperRag={onIndexPaperRag ? (paper) => onIndexPaperRag(paper.id) : undefined}
+            onDeletePaper={handleDeletePaper}
           />
         )}
       </div>
@@ -3556,7 +3594,7 @@ export default function LiteratureLibraryView({
           {pdfAssetAuditLoading ? (
             <div className="py-10 text-center text-sm text-[var(--pq-text-muted)]">{l('正在核验已登记的 PDF…', 'Verifying registered PDFs…')}</div>
           ) : pdfAssetAuditError ? (
-            <div role="alert" className="rounded border border-[var(--pq-danger)]/30 bg-[var(--pq-danger-bg)] p-3 text-sm text-[var(--pq-danger)]">{pdfAssetAuditError}</div>
+            <div role="alert" className="rounded border border-[var(--pq-danger)]/30 bg-[var(--pq-error-bg)] p-3 text-sm text-[var(--pq-danger)]">{pdfAssetAuditError}</div>
           ) : pdfAssetInventory && pdfAssetNamePlan ? (
             <>
               <dl className="grid grid-cols-2 gap-x-5 gap-y-3 border-b border-[var(--pq-border)] pb-4 text-sm sm:grid-cols-4">

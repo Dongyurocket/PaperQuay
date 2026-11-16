@@ -1117,7 +1117,7 @@ select:focus-visible,
   border-radius: var(--pq-radius-md);
   border: 1px solid var(--pq-border);
   background: var(--pq-surface);
-  box-shadow: var(--pq-shadow-sm);
+  box-shadow: var(--pq-shadow-soft);
 }
 
 .pq-tiptap-editor .ProseMirror .tableWrapper {
@@ -1221,7 +1221,7 @@ select:focus-visible,
   border-radius: var(--pq-radius-sm);
   background: color-mix(in srgb, var(--pq-surface-1) 92%, transparent);
   color: var(--pq-text-faint);
-  box-shadow: var(--pq-shadow-sm);
+  box-shadow: var(--pq-shadow-soft);
   pointer-events: auto;
   user-select: none;
   transition: background-color var(--pq-motion-fast), border-color var(--pq-motion-fast), color var(--pq-motion-fast);
@@ -1262,7 +1262,7 @@ select:focus-visible,
   border: 1px solid var(--pq-border);
   border-radius: var(--pq-radius-md);
   background: var(--pq-surface);
-  box-shadow: var(--pq-shadow-sm);
+  box-shadow: var(--pq-shadow-soft);
 }
 
 .pq-note-component-block.is-selected {

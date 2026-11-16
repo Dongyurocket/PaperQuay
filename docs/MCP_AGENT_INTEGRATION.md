@@ -49,7 +49,7 @@ PaperQuay 提供了基于标准 **Model Context Protocol (MCP)** 的知识库服
 | `list_categories` | 读取分类树及各分类文献数（只读） | 无 | 分类列表（含系统分类、`parentId`、`sortOrder`、`paperCount` 含后代分类计数） |
 | `manage_category` | 分类全生命周期管理 | `action`（`create`/`rename`/`move`/`delete`）、`categoryId`、`name`、`parentId` | 操作后的分类对象；`delete` 级联删除全部子分类并把文献从其中解绑（不删除文献），返回 `deletedCategoryIds` |
 | `set_paper_categories` | 批量调整文献的分类归属 | `paperIds`（必填）、`add`/`remove`（可与 `remove` 组合）或 `replace`（互斥） | 每篇文献更新后的 `categoryIds`；任一文献或分类不存在则整体拒绝，不留部分写入 |
-| `update_paper` | 更新文献元数据（白名单字段） | `paperId`（必填）+ `title`/`titleZh`/`authors`/`keywords`/`tags`/`isFavorite` 等可更新字段 | 更新后的文献对象；未知字段显式报错 |
+| `update_paper` | 更新文献元数据（白名单字段） | `paperId`（必填）+ `title`/`titleZh`/`authors`/`authorDetails`/`year`/`doi`/`language`/`citationKey`/`keywords`/`tags`/`isFavorite` 等可更新字段 | 更新后的文献对象；未知字段显式报错 |
 | `delete_papers` | 批量删除文献 | `paperIds`（必填）、`deleteFiles`（默认 `false`，为 `true` 时同时删除已入库的 PDF 文件） | 删除报告（`deleted`、`deletedFileCount`、`fileErrors`）；数据库先提交再删文件 |
 | `attach_translated_pdf` | 把本地翻译版 PDF 附加到一篇文献 | `paperId`、`sourcePath`（必填） | 复制到统一的 `translated-pdfs` 目录并替换该文献已有翻译版；返回 `attachmentId`、`storedPath`、`relativePath`、`replaced`。页数与原版不一致时返回 `pageCountMismatch`，不拒绝附加 |
 | `remove_translated_pdf` | 移除一篇文献的翻译版 PDF | `paperId`（必填）、`deleteFile`（默认 `true`） | 先提交数据库再删除已入库副本。找不到翻译版附件时报错 |

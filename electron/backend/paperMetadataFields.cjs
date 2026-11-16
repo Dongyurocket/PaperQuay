@@ -1,0 +1,26 @@
+const UPDATABLE_PAPER_FIELDS = Object.freeze([
+  'title',
+  'titleZh',
+  'year',
+  'publication',
+  'doi',
+  'url',
+  'abstractText',
+  'itemType',
+  'publisher',
+  'institution',
+  'reportNumber',
+  'volume',
+  'issue',
+  'pages',
+  'isbn',
+  'issn',
+  'language',
+  'citationKey',
+  'authorDetails',
+  'userNote',
+  'aiSummary',
+  'citation',
+]);
+
+module.exports = { UPDATABLE_PAPER_FIELDS };

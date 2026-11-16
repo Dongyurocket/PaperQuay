@@ -342,6 +342,8 @@ function buildLocalLibraryItem(db, dataDir, baseAttachmentPath, row) {
   const publication = cleanString(localFieldValue(db, metadataItemId, 'publicationTitle'));
   const abstractNote = cleanString(localFieldValue(db, metadataItemId, 'abstractNote'));
   const url = cleanString(localFieldValue(db, metadataItemId, 'url'));
+  const language = cleanString(localFieldValue(db, metadataItemId, 'language'));
+  const extra = cleanString(localFieldValue(db, metadataItemId, 'extra'));
 
   return {
     itemKey: String(row.itemKey),
@@ -353,6 +355,8 @@ function buildLocalLibraryItem(db, dataDir, baseAttachmentPath, row) {
     publication: publication || undefined,
     abstractNote: abstractNote || undefined,
     url: url || undefined,
+    language: language || undefined,
+    extra: extra || undefined,
     itemType: cleanString(row.itemType) || 'attachment',
     attachmentKey,
     attachmentTitle: undefined,

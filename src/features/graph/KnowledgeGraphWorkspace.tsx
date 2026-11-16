@@ -1375,7 +1375,7 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
                 className={cn(
                   'h-8 rounded-[var(--pq-radius-sm)] text-xs font-medium transition',
                   layoutMode === mode
-                    ? 'bg-[var(--pq-surface)] text-[var(--pq-text)] shadow-[var(--pq-shadow-sm)]'
+                    ? 'bg-[var(--pq-surface)] text-[var(--pq-text)] shadow-[var(--pq-shadow-soft)]'
                     : 'text-[var(--pq-text-muted)] hover:text-[var(--pq-text)]',
                 )}
               >
@@ -1767,7 +1767,7 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
         </div>
 
         {quickRelationSourceNode ? (
-          <div className="absolute left-4 top-4 flex items-center gap-2 rounded-[var(--pq-radius-sm)] border border-[var(--pq-accent-border)] bg-[var(--pq-surface)] px-3 py-2 text-xs text-[var(--pq-text)] shadow-[var(--pq-shadow-md)]">
+          <div className="absolute left-4 top-4 flex items-center gap-2 rounded-[var(--pq-radius-sm)] border border-[var(--pq-accent-border)] bg-[var(--pq-surface)] px-3 py-2 text-xs text-[var(--pq-text)] shadow-[var(--pq-shadow-float)]">
             <Link2 className="h-4 w-4 text-[var(--pq-accent)]" strokeWidth={1.8} />
             <span className="max-w-[360px] truncate">
               {l(`已选择起点：${quickRelationSourceNode.label}。点击另一个节点添加连接。`, `Source: ${quickRelationSourceNode.label}. Click another node to add a relation.`)}
@@ -1784,7 +1784,7 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
 
         {contextMenu ? (
           <div
-            className="absolute z-20 w-44 overflow-hidden rounded-[var(--pq-radius-sm)] border border-[var(--pq-border)] bg-[var(--pq-surface)] py-1 text-xs shadow-[var(--pq-shadow-md)]"
+            className="absolute z-20 w-44 overflow-hidden rounded-[var(--pq-radius-sm)] border border-[var(--pq-border)] bg-[var(--pq-surface)] py-1 text-xs shadow-[var(--pq-shadow-float)]"
             style={{
               left: Math.min(contextMenu.x + 8, Math.max(8, (containerRef.current?.clientWidth ?? 220) - 188)),
               top: Math.min(contextMenu.y + 8, Math.max(8, (containerRef.current?.clientHeight ?? 220) - 180)),
@@ -1840,7 +1840,7 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
 
         {loading ? (
           <div className="absolute inset-0 flex items-center justify-center bg-[var(--pq-surface)]/70 backdrop-blur-sm">
-            <div className="flex items-center gap-2 rounded-[var(--pq-radius-sm)] border border-[var(--pq-border)] bg-[var(--pq-surface)] px-3 py-2 text-xs text-[var(--pq-text-muted)] shadow-[var(--pq-shadow-md)]">
+            <div className="flex items-center gap-2 rounded-[var(--pq-radius-sm)] border border-[var(--pq-border)] bg-[var(--pq-surface)] px-3 py-2 text-xs text-[var(--pq-text-muted)] shadow-[var(--pq-shadow-float)]">
               <Loader2 className="h-4 w-4 animate-spin" />
               {l('正在构建图谱...', 'Building graph...')}
             </div>
@@ -1848,7 +1848,7 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
         ) : null}
 
         {error ? (
-          <div className="absolute left-4 top-4 flex max-w-md items-start gap-2 rounded-[var(--pq-radius-sm)] border border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-danger-bg)] px-3 py-2 text-xs leading-5 text-[var(--pq-danger)] shadow-[var(--pq-shadow-md)]">
+          <div className="absolute left-4 top-4 flex max-w-md items-start gap-2 rounded-[var(--pq-radius-sm)] border border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-error-bg)] px-3 py-2 text-xs leading-5 text-[var(--pq-danger)] shadow-[var(--pq-shadow-float)]">
             <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" />
             <span>{error}</span>
           </div>
@@ -1863,7 +1863,7 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
         ) : null}
 
         {selectedNode ? (
-          <div className="absolute bottom-4 right-4 w-[320px] rounded-[var(--pq-radius-sm)] border border-[var(--pq-border)] bg-[var(--pq-surface)] p-3 shadow-[var(--pq-shadow-md)]">
+          <div className="absolute bottom-4 right-4 w-[320px] rounded-[var(--pq-radius-sm)] border border-[var(--pq-border)] bg-[var(--pq-surface)] p-3 shadow-[var(--pq-shadow-float)]">
             <div className="flex items-center gap-2">
               <span className="rounded-md bg-[var(--pq-accent-bg)] px-1.5 py-0.5 text-[11px] font-semibold text-[var(--pq-accent)]">
                 {selectedNode.type}
@@ -1954,7 +1954,7 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
         ) : null}
 
         {selectedEdge ? (
-          <div className="absolute bottom-4 right-4 w-[320px] rounded-[var(--pq-radius-sm)] border border-[var(--pq-border)] bg-[var(--pq-surface)] p-3 shadow-[var(--pq-shadow-md)]">
+          <div className="absolute bottom-4 right-4 w-[320px] rounded-[var(--pq-radius-sm)] border border-[var(--pq-border)] bg-[var(--pq-surface)] p-3 shadow-[var(--pq-shadow-float)]">
             <div className="flex items-center gap-2">
               <span
                 className="h-2 w-7 shrink-0 rounded-full"

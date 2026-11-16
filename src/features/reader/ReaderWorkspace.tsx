@@ -749,7 +749,7 @@ function ReaderWorkspace(props: ReaderWorkspaceProps) {
       ) : null}
 
       {error ? (
-        <div className="border-b border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-danger-bg)] px-6 py-3 text-sm text-[var(--pq-danger)] ">
+        <div className="border-b border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-error-bg)] px-6 py-3 text-sm text-[var(--pq-danger)] ">
           {error}
         </div>
       ) : null}

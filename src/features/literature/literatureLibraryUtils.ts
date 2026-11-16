@@ -3,6 +3,7 @@ import type {
   LibrarySettings,
   LiteratureCategory,
   LiteratureItemType,
+  LiteratureAuthorInput,
   LiteraturePaper,
   LiteraturePaperTaskState,
   UpdatePaperRequest,
@@ -19,6 +20,7 @@ import { paperPdfPath, resolvePaperPdfAttachment } from '../../utils/libraryPape
 import { canAutoReplaceTitle, titleFromPdfPath } from './importMetadata.ts';
 import type { ImportDraftItem } from './importTypes';
 import type { LiteraturePaperListStatus } from './components/LiteraturePaperList';
+import { canonicalizeBcp47Language, isValidCitationKey, normalizeOrcid } from './metadataValidation.ts';
 
 export interface LiteratureLibraryDemoState {
   settings: LibrarySettings;
@@ -166,9 +168,21 @@ export function metadataFromDraft(draft: ImportDraftItem): ImportPdfMetadata {
 
 export function metadataFromZoteroItem(item: ZoteroLibraryItem): ImportPdfMetadata {
   const year = item.year.trim();
+  const detailedAuthors: LiteratureAuthorInput[] = (item.authors ?? [])
+    .map((author) => ({
+      name: author.name.trim(),
+      givenName: author.givenName?.trim() || null,
+      familyName: author.familyName?.trim() || null,
+      affiliation: author.affiliation?.trim() || null,
+      orcid: normalizeOrcid(author.orcid) ?? null,
+    }))
+    .filter((author) => author.name);
+  const authors = detailedAuthors.length > 0
+    ? detailedAuthors.map((author) => author.name)
+    : splitAuthors(item.creators).filter((author) => author !== 'Unknown Authors');
   const metadata: ImportPdfMetadata = {
     title: item.title.trim() || item.attachmentFilename || item.itemKey,
-    authors: splitAuthors(item.creators).filter((author) => author !== 'Unknown Authors'),
+    authors,
     year: year && year !== '未知年份' && year !== 'Unknown Year' ? year : null,
     publication: null,
     doi: null,
@@ -177,6 +191,17 @@ export function metadataFromZoteroItem(item: ZoteroLibraryItem): ImportPdfMetada
   if (item.itemType && item.itemType !== 'journalArticle') {
     metadata.itemType = normalizeItemType(item.itemType);
   }
+
+  if (detailedAuthors.length > 0) metadata.authorDetails = detailedAuthors;
+
+  const language = canonicalizeBcp47Language(item.language);
+  if (language) metadata.language = language;
+
+  const citationLine = item.extra
+    ?.split(/\r?\n/)
+    .find((line) => /^citation\s+key\s*:/i.test(line));
+  const citationKey = citationLine?.replace(/^citation\s+key\s*:/i, '').trim() || '';
+  if (citationKey && isValidCitationKey(citationKey)) metadata.citationKey = citationKey;
 
   return metadata;
 }
@@ -407,7 +432,60 @@ export function metadataUpdateForPaper(
   assignString('pages', paper.pages ?? null, metadata.pages);
   assignString('issn', paper.issn ?? null, metadata.issn);
 
-  if (metadata.authors.length > 0) {
+  if (!paper.language?.trim()) {
+    const language = canonicalizeBcp47Language(metadata.language);
+    if (language) {
+      request.language = language;
+      changed = true;
+    }
+  }
+
+  if (metadata.authorDetails?.length) {
+    const currentAuthors = paper.authors;
+    const nextAuthors = currentAuthors.length === 0
+      ? metadata.authorDetails.map((author) => ({
+        name: author.name.trim(),
+        givenName: author.givenName?.trim() || null,
+        familyName: author.familyName?.trim() || null,
+        affiliation: author.affiliation?.trim() || null,
+        orcid: normalizeOrcid(author.orcid) ?? null,
+      }))
+      : currentAuthors.map((currentAuthor, index) => {
+        const candidate = metadata.authorDetails?.find(
+          (author) => author.name.trim().toLocaleLowerCase() === currentAuthor.name.trim().toLocaleLowerCase(),
+        ) ?? metadata.authorDetails?.[index];
+        if (!candidate) return {
+          id: currentAuthor.id,
+          name: currentAuthor.name,
+          givenName: currentAuthor.givenName,
+          familyName: currentAuthor.familyName,
+          affiliation: currentAuthor.affiliation ?? null,
+          orcid: currentAuthor.orcid ?? null,
+        };
+
+        return {
+          id: currentAuthor.id,
+          name: currentAuthor.name,
+          givenName: currentAuthor.givenName || candidate.givenName?.trim() || null,
+          familyName: currentAuthor.familyName || candidate.familyName?.trim() || null,
+          affiliation: currentAuthor.affiliation || candidate.affiliation?.trim() || null,
+          orcid: currentAuthor.orcid || normalizeOrcid(candidate.orcid) || null,
+        };
+      });
+    const hasNewAuthorValues = nextAuthors.some((author, index) => {
+      const current = currentAuthors[index];
+      return !current ||
+        current.name !== author.name ||
+        (current.givenName ?? null) !== (author.givenName ?? null) ||
+        (current.familyName ?? null) !== (author.familyName ?? null) ||
+        (current.affiliation ?? null) !== (author.affiliation ?? null) ||
+        (current.orcid ?? null) !== (author.orcid ?? null);
+    });
+    if (hasNewAuthorValues) {
+      request.authorDetails = nextAuthors;
+      changed = true;
+    }
+  } else if (metadata.authors.length > 0) {
     const currentAuthors = paper.authors.map((author) => author.name.trim()).filter(Boolean);
     const nextAuthors = metadata.authors.map((author) => author.trim()).filter(Boolean);
 

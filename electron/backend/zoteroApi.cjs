@@ -27,6 +27,23 @@ function creatorSummary(creators) {
   return `${names[0]} et al.`;
 }
 
+function creatorDetails(creators) {
+  return (creators ?? [])
+    .map((creator) => {
+      const givenName = cleanString(creator?.firstName);
+      const familyName = cleanString(creator?.lastName);
+      const name = cleanString(creator?.name) || [givenName, familyName].filter(Boolean).join(' ');
+      return {
+        name,
+        givenName: givenName || undefined,
+        familyName: familyName || undefined,
+        affiliation: cleanString(creator?.affiliation) || undefined,
+        orcid: cleanString(creator?.ORCID || creator?.orcid) || undefined,
+      };
+    })
+    .filter((creator) => creator.name);
+}
+
 function yearFromDate(date) {
   return cleanString(date).match(/\d{4}/)?.[0] ?? '';
 }
@@ -87,8 +104,11 @@ async function listZoteroLibraryItems(options) {
       itemKey: item.key,
       title: cleanString(item?.data?.title) || 'Untitled',
       creators: creatorSummary(item?.data?.creators),
+      authors: creatorDetails(item?.data?.creators),
       year: yearFromDate(item?.data?.date),
       itemType,
+      language: cleanString(item?.data?.language) || undefined,
+      extra: cleanString(item?.data?.extra) || undefined,
       attachmentKey: attachment?.key,
       attachmentTitle: attachment?.data?.title,
       attachmentFilename: attachment?.data?.filename,

@@ -59,6 +59,8 @@ function createSchema(db) {
       pages TEXT,
       isbn TEXT,
       issn TEXT,
+      language TEXT,
+      citation_key TEXT,
       imported_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL,
       last_read_at INTEGER,
@@ -85,6 +87,8 @@ function createSchema(db) {
       name TEXT NOT NULL,
       given_name TEXT,
       family_name TEXT,
+      affiliation TEXT,
+      orcid TEXT,
       sort_order INTEGER NOT NULL,
       FOREIGN KEY (paper_id) REFERENCES papers(id) ON DELETE CASCADE
     );
@@ -220,10 +224,12 @@ function createSchema(db) {
       name TEXT NOT NULL,
       given_name TEXT,
       family_name TEXT,
+      affiliation TEXT,
+      orcid TEXT,
       sort_order INTEGER NOT NULL,
       FOREIGN KEY (paper_id) REFERENCES papers(id) ON DELETE CASCADE
     )
-  `, 'id, paper_id, name, given_name, family_name, sort_order');
+  `, 'id, paper_id, name, given_name, family_name, affiliation, orcid, sort_order');
 
   migrateRepeatedIdListTable(db, 'tags', `
     CREATE TABLE tags (
@@ -253,6 +259,10 @@ function createSchema(db) {
   ensureColumn(db, 'papers', 'pages', 'TEXT');
   ensureColumn(db, 'papers', 'isbn', 'TEXT');
   ensureColumn(db, 'papers', 'issn', 'TEXT');
+  ensureColumn(db, 'papers', 'language', 'TEXT');
+  ensureColumn(db, 'papers', 'citation_key', 'TEXT');
+  ensureColumn(db, 'authors', 'affiliation', 'TEXT');
+  ensureColumn(db, 'authors', 'orcid', 'TEXT');
   ensureColumn(db, 'papers', 'rag_enabled', 'INTEGER NOT NULL DEFAULT 1');
   ensureColumn(db, 'attachments', 'language', 'TEXT');
 
@@ -284,9 +294,14 @@ function migrateRepeatedIdListTable(db, tableName, createSql, columns) {
     withTransaction(db, () => {
       db.exec(`ALTER TABLE ${tableName} RENAME TO ${tempTableName}`);
       db.exec(createSql);
+      const targetColumns = columns.split(',').map((column) => column.trim()).filter(Boolean);
+      const sourceColumns = new Set(
+        db.prepare(`PRAGMA table_info(${tempTableName})`).all().map((column) => column.name),
+      );
+      const sourceExpressions = targetColumns.map((column) => sourceColumns.has(column) ? column : 'NULL');
       db.exec(`
-        INSERT INTO ${tableName} (${columns})
-        SELECT ${columns}
+        INSERT INTO ${tableName} (${targetColumns.join(', ')})
+        SELECT ${sourceExpressions.join(', ')}
         FROM ${tempTableName}
       `);
       db.exec(`DROP TABLE ${tempTableName}`);
@@ -355,6 +370,8 @@ const PAPER_SELECT_COLUMNS = `
   pages,
   isbn,
   issn,
+  language,
+  citation_key AS citationKey,
   imported_at AS importedAt,
   updated_at AS updatedAt,
   last_read_at AS lastReadAt,
@@ -407,6 +424,8 @@ function hydratePaperRows(db, paperRows) {
       name,
       given_name AS givenName,
       family_name AS familyName,
+      affiliation,
+      orcid,
       sort_order AS sortOrder
     FROM authors
     WHERE paper_id IN (${placeholders})
@@ -584,6 +603,8 @@ function loadLibraryFromDb(db, appPaths, normalizeLibrary) {
       name,
       given_name AS givenName,
       family_name AS familyName,
+      affiliation,
+      orcid,
       sort_order AS sortOrder
     FROM authors
     ORDER BY paper_id, sort_order
@@ -841,6 +862,8 @@ const PAPER_TABLE_COLUMNS = [
   'pages',
   'isbn',
   'issn',
+  'language',
+  'citation_key',
   'imported_at',
   'updated_at',
   'last_read_at',
@@ -886,6 +909,8 @@ function paperRowValues(paper) {
     paper.pages ?? null,
     paper.isbn ?? null,
     paper.issn ?? null,
+    paper.language ?? null,
+    paper.citationKey ?? null,
     Number(paper.importedAt) || 0,
     Number(paper.updatedAt) || 0,
     paper.lastReadAt ?? null,
@@ -921,8 +946,8 @@ function createPaperWriters(db) {
     VALUES (?, ?, ?)
   `);
   const insertAuthor = db.prepare(`
-    INSERT INTO authors (id, paper_id, name, given_name, family_name, sort_order)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO authors (id, paper_id, name, given_name, family_name, affiliation, orcid, sort_order)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const insertTag = db.prepare(`
     INSERT INTO tags (id, paper_id, name, color, sort_order)
@@ -969,6 +994,8 @@ function createPaperWriters(db) {
           author.name,
           author.givenName ?? null,
           author.familyName ?? null,
+          author.affiliation ?? null,
+          author.orcid ?? null,
           Number(author.sortOrder ?? index) || 0,
         );
       });

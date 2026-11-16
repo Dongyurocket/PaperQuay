@@ -1,57 +1,50 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
-  AlertCircle,
-  BookOpenText,
-  ChevronRight,
-  CheckCircle2,
-  FilePlus2,
-  FileText,
-  Languages,
-  Loader2,
-  Pencil,
-  Replace,
-  Save,
-  Sparkles,
-  Star,
-  Trash2,
-  X,
+  BookOpenText, Check, ChevronDown, Copy, ExternalLink, FileText, Languages,
+  MoreHorizontal, Pencil, Save, Star, Trash2, X,
 } from 'lucide-react';
 import { useAppLocale, useLocaleText } from '../../../i18n/uiLanguage';
 import { useWheelScrollDelegate } from '../../../hooks/useWheelScrollDelegate';
 import type {
-  LiteraturePaper,
-  LiteraturePaperTaskKind,
-  LiteraturePaperTaskState,
+  LibraryTagCount, LiteratureCategory, LiteraturePaper, LiteraturePaperTaskState,
   UpdatePaperRequest,
 } from '../../../types/library';
 import type { PdfReadingHeatmap } from '../../../types/reader';
-import {
-  loadPaperHistory,
-  PAPER_READING_HEATMAP_UPDATED_EVENT,
-} from '../../../utils/paperHistory';
-import {
-  isPaperPipelineActionDisabled,
-  isPaperPipelineBusy,
-} from '../../reader/paperTaskState';
-import {
-  paperAuthors,
-  paperPdfPath,
-  paperTranslatedPdfAttachment,
-} from '../literatureUi';
-import {
-  resolvePaperTitleDisplay,
-  type PaperTitleDisplayMode,
-} from '../titleDisplay';
+import { loadPaperHistory, PAPER_READING_HEATMAP_UPDATED_EVENT } from '../../../utils/paperHistory';
+import { copyTextToClipboard } from '../../../utils/clipboard';
+import { paperToBibtexEntry } from '../../../utils/bibtex';
+import { formatBibliographyEntry } from '../../notes/bibliography';
+import { normalizeOrcid } from '../metadataValidation';
+import { paperPdfPath, paperTranslatedPdfAttachment } from '../literatureUi';
+import { resolvePaperTitleDisplay, type PaperTitleDisplayMode } from '../titleDisplay';
+import type { LiteraturePaperListStatus, LiteraturePaperRagStatus } from './LiteraturePaperList';
+import { getPaperTaskProgress } from '../paperTaskProgress';
+import { loadPaperDetailsSections, persistPaperDetailsSections, type PaperDetailsSectionKey, type PaperDetailsSectionState } from '../details/paperDetailsSections';
+import { buildPaperDraftUpdateRequest, createPaperDetailsDraft, hasDuplicateCitationKey, paperDraftChanged, validatePaperDraft, normalizeDoi, type PaperDetailsDraft, type PaperDraftErrors } from '../details/paperDetailsDraft';
+import PaperEditForm from '../details/PaperEditForm';
+import PaperDetailsStatusBar from '../details/PaperDetailsStatusBar';
+import MetadataRecognitionDialog from '../details/MetadataRecognitionDialog';
+import { usePaperFileLocationMenu } from '../usePaperFileLocationMenu';
 import LiteratureReadingTimeChart from './LiteratureReadingTimeChart';
-import LibraryConfirmDialog from './LibraryConfirmDialog';
-import type { LiteraturePaperRagStatus } from './LiteraturePaperList';
+import TranslatedPdfLanguageDialog from './TranslatedPdfLanguageDialog';
+import { ConfirmDialog, Dialog } from '../../../ui/dialog';
+import { Menu, type MenuEntry } from '../../../ui/menu';
+import { toast } from '../../../ui/toast';
 
 interface LiteraturePaperDetailsProps {
   selectedPaper: LiteraturePaper | null;
   titleDisplayMode: PaperTitleDisplayMode;
   saving: boolean;
+  categories: LiteratureCategory[];
+  libraryTags: LibraryTagCount[];
+  allPapers: LiteraturePaper[];
+  paperStatus?: LiteraturePaperListStatus;
+  storageDir?: string | null;
+  mineruCacheDir?: string;
+  autoLoadSiblingJson?: boolean;
   onOpenPaper: (paper: LiteraturePaper) => void;
-  onSavePaper: (request: UpdatePaperRequest) => void;
+  onSavePaper: (request: UpdatePaperRequest, categoryIds?: string[]) => Promise<LiteraturePaper | void>;
+  onRestorePaperSelection: (paperId: string | null) => void;
   actionState?: LiteraturePaperTaskState | null;
   onRunMineruParse?: (paper: LiteraturePaper) => void;
   onTranslatePaper?: (paper: LiteraturePaper) => void;
@@ -63,457 +56,87 @@ interface LiteraturePaperDetailsProps {
   ragStatus?: LiteraturePaperRagStatus;
   ragMembershipBusy?: boolean;
   onSetRagMembership?: (paper: LiteraturePaper, enabled: boolean) => void;
+  onIndexPaperRag?: (paper: LiteraturePaper) => void;
+  onDeletePaper?: (paper: LiteraturePaper) => void;
 }
 
-interface PaperEditDraft {
-  title: string;
-  titleZh: string;
-  itemType: string;
-  publisher: string;
-  institution: string;
-  reportNumber: string;
-  volume: string;
-  issue: string;
-  pages: string;
-  isbn: string;
-  issn: string;
-  authors: string;
-  year: string;
-  publication: string;
-  doi: string;
-  url: string;
-  abstractText: string;
-  keywords: string;
-  tags: string;
-  userNote: string;
-  citation: string;
-}
+type InlineFieldKey = 'title' | 'year' | 'doi';
+interface MenuPosition { x: number; y: number; anchor: HTMLButtonElement; entries: MenuEntry[] }
 
-type OverviewSectionKey =
-  | 'overview'
-  | 'background'
-  | 'problem'
-  | 'approach'
-  | 'experiment'
-  | 'findings'
-  | 'conclusion'
-  | 'limitations'
-  | 'takeaways'
-  | 'keywords';
-
-interface ParsedOverviewSection {
-  key: OverviewSectionKey;
-  title: string;
-  content: string;
-}
-
-function resolveOverviewSectionKey(title: string): OverviewSectionKey {
-  const normalized = title
-    .trim()
-    .toLocaleLowerCase()
-    .replace(/[：:]/g, '');
-
-  if (/keyword|keywords/.test(normalized)) {
-    return 'keywords';
-  }
-
-  if (/finding|result/.test(normalized)) {
-    return 'findings';
-  }
-
-  if (/takeaway|insight|contribution/.test(normalized)) {
-    return 'takeaways';
-  }
-
-  if (/limitation|weakness|constraint/.test(normalized)) {
-    return 'limitations';
-  }
-
-  if (/conclusion|summary/.test(normalized)) {
-    return 'conclusion';
-  }
-
-  if (/experiment|validation|evaluation|setup/.test(normalized)) {
-    return 'experiment';
-  }
-
-  if (/approach|method|model|framework/.test(normalized)) {
-    return 'approach';
-  }
-
-  if (/problem|question/.test(normalized)) {
-    return 'problem';
-  }
-
-  if (/background|motivation/.test(normalized)) {
-    return 'background';
-  }
-
-  return 'overview';
-}
-
-function parseOverviewSections(value: string): ParsedOverviewSection[] {
-  const normalized = value.replace(/\r\n?/g, '\n').trim();
-
-  if (!normalized) {
-    return [];
-  }
-
-  const sections: ParsedOverviewSection[] = [];
-  let currentTitle = 'Overview';
-  let currentKey: OverviewSectionKey = 'overview';
-  let currentLines: string[] = [];
-
-  const flush = () => {
-    const content = currentLines.join('\n').trim();
-
-    if (!content) {
-      currentLines = [];
-      return;
-    }
-
-    const existingSection = sections.find((section) => section.key === currentKey);
-
-    if (existingSection) {
-      existingSection.content = `${existingSection.content}\n${content}`.trim();
-    } else {
-      sections.push({
-        key: currentKey,
-        title: currentTitle,
-        content,
-      });
-    }
-
-    currentLines = [];
-  };
-
-  for (const line of normalized.split('\n')) {
-    const heading = line.match(/^#{1,4}\s+(.+?)\s*$/);
-
-    if (heading) {
-      flush();
-      currentTitle = heading[1].trim();
-      currentKey = resolveOverviewSectionKey(currentTitle);
-      continue;
-    }
-
-    currentLines.push(line);
-  }
-
-  flush();
-
-  return sections.length > 0
-    ? sections
-    : [
-        {
-          key: 'overview',
-          title: 'Overview',
-          content: normalized,
-        },
-      ];
-}
-
-function overviewSectionLabel(
-  key: OverviewSectionKey,
-  fallbackTitle: string,
-  l: <T>(zh: T, en: T) => T,
-): string {
-  const labels: Record<OverviewSectionKey, string> = {
-    overview: l('概览', 'Overview'),
-    background: l('背景', 'Background'),
-    problem: l('问题', 'Problem'),
-    approach: l('方法', 'Approach'),
-    experiment: l('实验', 'Experiments'),
-    findings: l('发现', 'Findings'),
-    conclusion: l('结论', 'Conclusion'),
-    limitations: l('局限', 'Limitations'),
-    takeaways: l('要点', 'Takeaways'),
-    keywords: l('关键词', 'Keywords'),
-  };
-
-  return labels[key] || fallbackTitle;
-}
-
-function splitOverviewListItems(content: string, key: OverviewSectionKey): string[] {
-  const normalized = content.replace(/\r\n?/g, '\n').trim();
-
-  if (!normalized) {
-    return [];
-  }
-
-  if (key === 'keywords') {
-    return normalized
-      .split(/[,;\n]/)
-      .map((item) => item.replace(/^[-*\s]*/, '').trim())
-      .filter(Boolean);
-  }
-
-  return normalized
-    .split(/\n+/)
-    .map((item) => item.replace(/^(\d+[.)]\s*|[-*\s]*)/, '').trim())
-    .filter(Boolean);
-}
-
-function itemTypeLabel(type: string | null | undefined, l: (zh: string, en: string) => string): string {
-  const t = (type ?? 'journalArticle').toLowerCase();
-  if (t === 'book') return l('书籍', 'Book');
-  if (t === 'booksection' || t === 'chapter') return l('书籍章节', 'Book Section');
-  if (t === 'thesis' || t === 'dissertation') return l('学位论文', 'Thesis');
-  if (t === 'report' || t === 'techreport') return l('报告', 'Report');
-  if (t === 'conferencepaper' || t === 'conference') return l('会议论文', 'Conference Paper');
-  if (t === 'preprint') return l('预印本', 'Preprint');
-  if (t === 'misc') return l('其他文献', 'Misc');
-  return l('期刊论文', 'Journal Article');
-}
-
-function latestReadingHeatmapForPaper(paperId: string | null | undefined): PdfReadingHeatmap | null {
-  if (!paperId) {
-    return null;
-  }
-
+function getLatestHeatmap(paperId: string): PdfReadingHeatmap | null {
   const history = loadPaperHistory(`native-library:${paperId}`);
-
   return Object.values(history?.pdfReadingHeatmaps ?? {})
     .filter((heatmap) => heatmap.totalMs > 0)
     .sort((left, right) => right.updatedAt - left.updatedAt)[0] ?? null;
 }
 
-function draftFromPaper(paper: LiteraturePaper | null): PaperEditDraft {
-  return {
-    title: paper?.title ?? '',
-    titleZh: paper?.titleZh ?? '',
-    itemType: paper?.itemType ?? 'journalArticle',
-    publisher: paper?.publisher ?? '',
-    institution: paper?.institution ?? '',
-    reportNumber: paper?.reportNumber ?? '',
-    volume: paper?.volume ?? '',
-    issue: paper?.issue ?? '',
-    pages: paper?.pages ?? '',
-    isbn: paper?.isbn ?? '',
-    issn: paper?.issn ?? '',
-    authors: paper?.authors.map((author) => author.name).join(', ') ?? '',
-    year: paper?.year ?? '',
-    publication: paper?.publication ?? '',
-    doi: paper?.doi ?? '',
-    url: paper?.url ?? '',
-    abstractText: paper?.abstractText ?? '',
-    keywords: paper?.keywords.join(', ') ?? '',
-    tags: paper?.tags.map((tag) => tag.name).join(', ') ?? '',
-    userNote: paper?.userNote ?? '',
-    citation: paper?.citation ?? '',
+function parseOverview(value: string, fallbackTitle: string): Array<{ title: string; content: string }> {
+  const normalized = value.replace(/\r\n?/g, '\n').trim();
+  if (!normalized) return [];
+  const sections: Array<{ title: string; content: string }> = [];
+  let title = fallbackTitle;
+  let lines: string[] = [];
+  const flush = () => {
+    const content = lines.join('\n').trim();
+    if (content) sections.push({ title, content });
+    lines = [];
   };
+  for (const line of normalized.split('\n')) {
+    const heading = line.match(/^#{1,4}\s+(.+?)\s*$/);
+    if (heading) { flush(); title = heading[1].trim(); } else lines.push(line);
+  }
+  flush();
+  return sections.length ? sections : [{ title: fallbackTitle, content: normalized }];
 }
 
-function splitList(value: string): string[] {
-  return value
-    .split(/[;,，；]/)
-    .map((part) => part.trim())
-    .filter(Boolean);
-}
-
-function inputValue(value: string): string | null {
-  const trimmed = value.trim();
-  return trimmed ? trimmed : null;
-}
-
-function FieldLabel({ children }: { children: string }) {
+function DetailsSection({
+  title, collapsed, onToggle, children,
+}: { title: string; collapsed: boolean; onToggle: () => void; children: ReactNode }) {
+  const l = useLocaleText();
   return (
-    <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--pq-text-faint)] dark:text-[#8d8d8d]">
-      {children}
-    </div>
+    <section className="border-b border-[var(--pq-border-subtle)] py-2 last:border-b-0">
+      <button type="button" aria-expanded={!collapsed} onClick={onToggle} className="flex w-full items-center justify-between gap-3 py-1 text-left text-sm font-semibold text-[var(--pq-text)]">
+        <span>{title}</span>
+        <ChevronDown className={['h-4 w-4 shrink-0 text-[var(--pq-text-faint)] transition-transform', collapsed ? '-rotate-90' : ''].join(' ')} />
+        <span className="sr-only">{collapsed ? l('展开', 'Expand') : l('折叠', 'Collapse')}</span>
+      </button>
+      {!collapsed ? <div className="pb-2 pt-2">{children}</div> : null}
+    </section>
   );
 }
 
-function TextInput({
-  value,
-  placeholder,
-  onChange,
+function InlineEditor({
+  label, value, active, draftValue, error, onBegin, onChange, onCommit, onCancel,
 }: {
+  label: string;
   value: string;
-  placeholder?: string;
+  active: boolean;
+  draftValue: string;
+  error?: string;
+  onBegin: () => void;
   onChange: (value: string) => void;
+  onCommit: () => void;
+  onCancel: () => void;
 }) {
+  const l = useLocaleText();
+  if (active) {
+    return (
+      <label className="min-w-0">
+        <span className="sr-only">{label}</span>
+        <input autoFocus value={draftValue} aria-invalid={Boolean(error)} onChange={(event) => onChange(event.target.value)} onKeyDown={(event) => {
+          if (event.key === 'Enter') { event.preventDefault(); onCommit(); }
+          if (event.key === 'Escape') { event.preventDefault(); onCancel(); }
+        }} className="pq-input h-8 w-full px-2 text-sm" />
+        {error ? <span className="mt-1 block text-xs text-[var(--pq-danger)]">{error}</span> : null}
+        <span className="sr-only">{l('按 Enter 保存，按 Esc 取消', 'Press Enter to save or Esc to cancel')}</span>
+      </label>
+    );
+  }
   return (
-    <input
-      value={value}
-      onChange={(event) => onChange(event.target.value)}
-      placeholder={placeholder}
-      className="pq-input h-10 w-full px-3 text-sm placeholder:text-[var(--pq-text-faint)]"
-    />
-  );
-}
-
-function TextArea({
-  value,
-  rows = 4,
-  placeholder,
-  onChange,
-}: {
-  value: string;
-  rows?: number;
-  placeholder?: string;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <textarea
-      value={value}
-      rows={rows}
-      onChange={(event) => onChange(event.target.value)}
-      placeholder={placeholder}
-      className="pq-input w-full resize-none px-3 py-2 text-sm leading-6 placeholder:text-[var(--pq-text-faint)]"
-    />
-  );
-}
-
-function ActionButton({
-  children,
-  icon,
-  disabled,
-  primary = false,
-  onClick,
-}: {
-  children: ReactNode;
-  icon: ReactNode;
-  disabled?: boolean;
-  primary?: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      className={
-        primary
-          ? 'pq-button-primary w-full px-4 py-2.5 text-sm'
-          : 'pq-button px-3 py-2.5 text-sm'
-      }
-    >
-      <span className="mr-2">{icon}</span>
-      {children}
+    <button type="button" onClick={onBegin} title={l(`编辑${label}`, `Edit ${label}`)} className="group inline-flex max-w-full items-center gap-1 text-left hover:text-[var(--pq-accent)]">
+      <span className="truncate">{value || l('未设置', 'Not set')}</span>
+      <Pencil className="h-3 w-3 shrink-0 opacity-0 group-hover:opacity-70" />
     </button>
-  );
-}
-
-function ProcessingActionTile({
-  title,
-  description,
-  icon,
-  dataTour,
-  disabled,
-  active,
-  busy,
-  onClick,
-}: {
-  title: ReactNode;
-  description: ReactNode;
-  icon: ReactNode;
-  dataTour?: string;
-  disabled?: boolean;
-  active?: boolean;
-  busy?: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      data-tour={dataTour}
-      onClick={onClick}
-      disabled={disabled}
-      className={[
-        'group flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition hover:border-[var(--pq-accent-border)] hover:bg-white/88 disabled:cursor-not-allowed disabled:opacity-55',
-        active
-          ? 'border-[var(--pq-accent-border-strong)] bg-[var(--pq-accent-soft)] ring-1 ring-[var(--pq-accent-ring)]'
-          : 'border-[var(--pq-border)] bg-white/72 dark:bg-white/6',
-      ].join(' ')}
-    >
-      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-[var(--pq-accent-ring)] bg-[var(--pq-accent-soft)] text-[var(--pq-accent)] transition group-hover:bg-white/80">
-        {busy ? <Loader2 className="h-4 w-4 animate-spin" strokeWidth={2} /> : icon}
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="block text-sm font-semibold text-[var(--pq-text)] dark:text-[#e8e8e8]">
-          {title}
-        </span>
-        <span className="mt-0.5 block truncate text-[11px] leading-4 text-[var(--pq-text-muted)] dark:text-[#a0a0a0]">
-          {description}
-        </span>
-      </span>
-      <ChevronRight className="h-4 w-4 shrink-0 text-[var(--pq-text-faint)] transition group-hover:translate-x-0.5 group-hover:text-[var(--pq-accent)]" strokeWidth={2} />
-    </button>
-  );
-}
-
-function TaskStatusPanel({
-  state,
-}: {
-  state: LiteraturePaperTaskState;
-}) {
-  const total = typeof state.total === 'number' ? state.total : 0;
-  const completed = typeof state.completed === 'number' ? state.completed : 0;
-  const hasProgress = total > 0;
-  const ratio = hasProgress ? Math.min(100, Math.max(0, (completed / total) * 100)) : 45;
-  const tone =
-    state.status === 'error'
-      ? 'rose'
-      : state.status === 'success'
-        ? 'emerald'
-        : 'teal';
-  const StatusIcon =
-    state.status === 'error'
-      ? AlertCircle
-      : state.status === 'success'
-        ? CheckCircle2
-        : Loader2;
-
-  return (
-    <div
-      className={[
-        'rounded-lg border px-3.5 py-3',
-        tone === 'rose'
-          ? 'border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-danger-bg)] text-[var(--pq-danger)] '
-          : '',
-        tone === 'emerald'
-          ? 'border-[color-mix(in_srgb,var(--pq-success)_28%,transparent)] bg-[var(--pq-success-bg)] text-[var(--pq-success)] '
-          : '',
-        tone === 'teal'
-          ? 'border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-[var(--pq-accent-bg)] text-[var(--pq-accent)] '
-          : '',
-      ].join(' ')}
-    >
-      <div className="flex items-start gap-3">
-        <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/80 dark:bg-white/10">
-          <StatusIcon
-            className={['h-4 w-4', state.status === 'running' ? 'animate-spin' : ''].join(' ')}
-            strokeWidth={2}
-          />
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center justify-between gap-3">
-            <div className="truncate text-sm font-semibold">{state.label}</div>
-            {hasProgress ? (
-              <div className="shrink-0 text-xs font-semibold">
-                {completed}/{total}
-              </div>
-            ) : null}
-          </div>
-          <div className="mt-1 line-clamp-2 text-xs leading-5 opacity-80">
-            {state.message}
-          </div>
-          <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-black/[0.08] dark:bg-white/10">
-            <div
-              className={[
-                'h-full rounded-full transition-all duration-300',
-                state.status === 'running' && !hasProgress ? 'animate-pulse' : '',
-                tone === 'rose' ? 'bg-[var(--pq-danger)]' : '',
-                tone === 'emerald' ? 'bg-[var(--pq-success)]' : '',
-                tone === 'teal' ? 'bg-[var(--pq-accent)]' : '',
-              ].join(' ')}
-              style={{ width: state.status === 'error' ? '100%' : `${ratio}%` }}
-            />
-          </div>
-        </div>
-      </div>
-    </div>
   );
 }
 
@@ -521,9 +144,17 @@ export default function LiteraturePaperDetails({
   selectedPaper,
   titleDisplayMode,
   saving,
+  categories,
+  libraryTags,
+  allPapers,
+  paperStatus,
+  storageDir,
+  mineruCacheDir = '',
+  autoLoadSiblingJson = true,
   onOpenPaper,
   onSavePaper,
-  actionState,
+  onRestorePaperSelection,
+  actionState = null,
   onRunMineruParse,
   onTranslatePaper,
   onTranslatePaperTitle,
@@ -534,861 +165,378 @@ export default function LiteraturePaperDetails({
   ragStatus = 'none',
   ragMembershipBusy = false,
   onSetRagMembership,
+  onIndexPaperRag,
+  onDeletePaper,
 }: LiteraturePaperDetailsProps) {
   const l = useLocaleText();
   const locale = useAppLocale();
   const rootRef = useRef<HTMLElement | null>(null);
   const handleWheelCapture = useWheelScrollDelegate({ rootRef });
+  const [paper, setPaper] = useState(selectedPaper);
+  const [draft, setDraft] = useState<PaperDetailsDraft | null>(() => selectedPaper ? createPaperDetailsDraft(selectedPaper) : null);
+  const [draftErrors, setDraftErrors] = useState<PaperDraftErrors>({});
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState<PaperEditDraft>(() => draftFromPaper(selectedPaper));
-  const [titleTranslating, setTitleTranslating] = useState(false);
-  const [activeOverviewKey, setActiveOverviewKey] = useState<OverviewSectionKey>('overview');
-  const [readingHeatmap, setReadingHeatmap] = useState<PdfReadingHeatmap | null>(() =>
-    latestReadingHeatmapForPaper(selectedPaper?.id),
-  );
-  const [ragExcludeConfirmOpen, setRagExcludeConfirmOpen] = useState(false);
+  const [pendingPaper, setPendingPaper] = useState<LiteraturePaper | null>(null);
+  const [switchDialogOpen, setSwitchDialogOpen] = useState(false);
+  const [recognitionOpen, setRecognitionOpen] = useState(false);
   const [languageDialogOpen, setLanguageDialogOpen] = useState(false);
-  const [languageDraft, setLanguageDraft] = useState('');
-  const [languageSaving, setLanguageSaving] = useState(false);
-  const [languageError, setLanguageError] = useState('');
+  const [excludeConfirmOpen, setExcludeConfirmOpen] = useState(false);
+  const [openMenu, setOpenMenu] = useState<MenuPosition | null>(null);
+  const [inlineField, setInlineField] = useState<InlineFieldKey | null>(null);
+  const [inlineValue, setInlineValue] = useState('');
+  const [inlineError, setInlineError] = useState('');
+  const [sections, setSections] = useState<PaperDetailsSectionState>(loadPaperDetailsSections);
+  const [readingHeatmap, setReadingHeatmap] = useState<PdfReadingHeatmap | null>(() => selectedPaper ? getLatestHeatmap(selectedPaper.id) : null);
+  const paperRef = useRef(paper);
+  const draftRef = useRef(draft);
+  const editingRef = useRef(editing);
+  paperRef.current = paper;
+  draftRef.current = draft;
+  editingRef.current = editing;
 
+  useEffect(() => persistPaperDetailsSections(sections), [sections]);
   useEffect(() => {
+    const currentPaper = paperRef.current;
+    const currentDraft = draftRef.current;
+
+    if (selectedPaper?.id === currentPaper?.id) {
+      if (selectedPaper && currentPaper !== selectedPaper) {
+        setPaper(selectedPaper);
+        if (!currentPaper || !currentDraft || !paperDraftChanged(currentPaper, currentDraft)) {
+          setDraft(createPaperDetailsDraft(selectedPaper));
+          setDraftErrors({});
+        }
+      }
+      return;
+    }
+
+    if (currentPaper && currentDraft && editingRef.current && paperDraftChanged(currentPaper, currentDraft)) {
+      setPendingPaper(selectedPaper);
+      setSwitchDialogOpen(true);
+      return;
+    }
+    setPaper(selectedPaper);
+    setDraft(selectedPaper ? createPaperDetailsDraft(selectedPaper) : null);
+    setDraftErrors({});
     setEditing(false);
-    setDraft(draftFromPaper(selectedPaper));
-    setTitleTranslating(false);
-    setReadingHeatmap(latestReadingHeatmapForPaper(selectedPaper?.id));
-  }, [selectedPaper?.id]);
+    setPendingPaper(null);
+    setInlineField(null);
+    setReadingHeatmap(selectedPaper ? getLatestHeatmap(selectedPaper.id) : null);
+  }, [selectedPaper]);
 
   useEffect(() => {
-    const handleHeatmapUpdated = () => {
-      setReadingHeatmap(latestReadingHeatmapForPaper(selectedPaper?.id));
-    };
+    const handleHeatmap = () => { if (paper) setReadingHeatmap(getLatestHeatmap(paper.id)); };
+    window.addEventListener(PAPER_READING_HEATMAP_UPDATED_EVENT, handleHeatmap);
+    return () => window.removeEventListener(PAPER_READING_HEATMAP_UPDATED_EVENT, handleHeatmap);
+  }, [paper?.id]);
 
-    window.addEventListener(PAPER_READING_HEATMAP_UPDATED_EVENT, handleHeatmapUpdated);
+  const toggleSection = (key: PaperDetailsSectionKey) => setSections((current) => ({ ...current, [key]: !current[key] }));
+  const translatedPdf = paper ? paperTranslatedPdfAttachment(paper, storageDir) : null;
+  const fileLocationEntries = usePaperFileLocationMenu({ paper, storageDir, mineruCacheDir, autoLoadSiblingJson, l });
+  const overviewSections = useMemo(() => paper ? parseOverview(paper.aiSummary ?? '', l('概览', 'Overview')) : [], [l, paper?.aiSummary]);
+  const titleDisplay = paper ? resolvePaperTitleDisplay(paper, titleDisplayMode) : null;
 
-    return () => {
-      window.removeEventListener(PAPER_READING_HEATMAP_UPDATED_EVENT, handleHeatmapUpdated);
-    };
-  }, [selectedPaper?.id]);
-
-  const patchDraft = (patch: Partial<PaperEditDraft>) => {
-    setDraft((current) => ({ ...current, ...patch }));
-  };
-
-  const handleSave = () => {
-    if (!selectedPaper) {
-      return;
-    }
-
-    onSavePaper({
-      paperId: selectedPaper.id,
-      title: draft.title.trim() || selectedPaper.title,
-      titleZh: inputValue(draft.titleZh),
-      itemType: draft.itemType || 'journalArticle',
-      publisher: inputValue(draft.publisher),
-      institution: inputValue(draft.institution),
-      reportNumber: inputValue(draft.reportNumber),
-      volume: inputValue(draft.volume),
-      issue: inputValue(draft.issue),
-      pages: inputValue(draft.pages),
-      isbn: inputValue(draft.isbn),
-      issn: inputValue(draft.issn),
-      authors: splitList(draft.authors),
-      year: inputValue(draft.year),
-      publication: inputValue(draft.publication),
-      doi: inputValue(draft.doi),
-      url: inputValue(draft.url),
-      abstractText: inputValue(draft.abstractText),
-      keywords: splitList(draft.keywords),
-      tags: splitList(draft.tags),
-      userNote: inputValue(draft.userNote),
-      citation: inputValue(draft.citation),
-    });
+  const closeEdit = () => {
+    if (paper) setDraft(createPaperDetailsDraft(paper));
     setEditing(false);
+    setInlineField(null);
+    setInlineError('');
+    setDraftErrors({});
   };
 
-  const handleToggleFavorite = () => {
-    if (!selectedPaper) {
+  const saveRequest = async (request: UpdatePaperRequest, categoryIds?: string[]) => {
+    if (!paper) throw new Error(l('没有选中的文献。', 'No paper is selected.'));
+    const saved = await onSavePaper(request, categoryIds);
+    if (saved) {
+      setPaper(saved);
+      setDraft(createPaperDetailsDraft(saved));
+    }
+    setDraftErrors({});
+    setEditing(false);
+    setInlineField(null);
+    toast({ tone: 'success', message: l('文献信息已保存', 'Paper metadata saved') });
+    return saved;
+  };
+
+  const switchToPending = () => {
+    const target = pendingPaper;
+    setPaper(target);
+    setDraft(target ? createPaperDetailsDraft(target) : null);
+    setDraftErrors({});
+    setEditing(false);
+    setPendingPaper(null);
+    setSwitchDialogOpen(false);
+    setInlineField(null);
+    setReadingHeatmap(target ? getLatestHeatmap(target.id) : null);
+    onRestorePaperSelection(target?.id ?? null);
+  };
+
+  const cancelPendingSwitch = () => {
+    setSwitchDialogOpen(false);
+    setPendingPaper(null);
+    onRestorePaperSelection(paper?.id ?? null);
+  };
+
+  const saveThenSwitch = async () => {
+    if (saving || !paper || !draft) return;
+    const errors = validatePaperDraft(draft);
+    if (Object.keys(errors).length) {
+      setDraftErrors(errors);
+      setSwitchDialogOpen(false);
+      setPendingPaper(null);
+      setEditing(true);
+      onRestorePaperSelection(paper.id);
       return;
     }
-
-    onSavePaper({
-      paperId: selectedPaper.id,
-      isFavorite: !selectedPaper.isFavorite,
-    });
+    try {
+      await saveRequest(buildPaperDraftUpdateRequest(paper, draft), draft.categories);
+      switchToPending();
+    } catch {
+      setSwitchDialogOpen(false);
+      setPendingPaper(null);
+      setEditing(true);
+      onRestorePaperSelection(paper.id);
+    }
   };
 
-  const hasPdf = selectedPaper ? Boolean(paperPdfPath(selectedPaper)) : false;
-  const translatedPdf = selectedPaper ? paperTranslatedPdfAttachment(selectedPaper) : null;
-  const titleDisplay = selectedPaper
-    ? resolvePaperTitleDisplay(selectedPaper, titleDisplayMode)
-    : null;
-  const activeTaskKind: LiteraturePaperTaskKind | null =
-    actionState?.status === 'running' ? actionState.kind : null;
-  const pipelineBusy = isPaperPipelineBusy(actionState);
-  const aiSummary = selectedPaper?.aiSummary?.trim() ?? '';
-  const overviewSections = useMemo(() => parseOverviewSections(aiSummary), [aiSummary]);
-  const activeOverviewSection =
-    overviewSections.find((section) => section.key === activeOverviewKey) ?? overviewSections[0];
+  const startInlineEdit = (key: InlineFieldKey, value: string) => {
+    setInlineField(key);
+    setInlineValue(value);
+    setInlineError('');
+  };
+
+  const commitInlineEdit = async () => {
+    if (saving || !paper || !draft || !inlineField) return;
+    const next = { ...draft, [inlineField]: inlineValue };
+    const errors = validatePaperDraft(next);
+    const error = errors[inlineField];
+    if (error) {
+      setInlineError(error);
+      return;
+    }
+    const value = inlineField === 'doi' ? (inlineValue.trim() ? normalizeDoi(inlineValue) : null) : inlineField === 'year' ? (inlineValue.trim() || null) : inlineValue.trim() || paper.title;
+    try {
+      await saveRequest({ paperId: paper.id, [inlineField]: value }, paper.categoryIds);
+      setInlineField(null);
+    } catch {
+      // Parent reports the failure in its shared error channel.
+    }
+  };
 
   useEffect(() => {
-    if (overviewSections.length === 0) {
-      setActiveOverviewKey('overview');
-      return;
-    }
+    if (!editing || !paper || !draft) return undefined;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+        event.preventDefault();
+        if (!saving && !recognitionOpen && !languageDialogOpen && !switchDialogOpen) {
+          const errors = validatePaperDraft(draft);
+          setDraftErrors(errors);
+          if (Object.keys(errors).length === 0) {
+            void saveRequest(buildPaperDraftUpdateRequest(paper, draft), draft.categories).catch(() => {});
+          }
+        }
+      } else if (event.key === 'Escape' && !recognitionOpen && !languageDialogOpen && !switchDialogOpen) {
+        event.preventDefault();
+        closeEdit();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [draft, editing, languageDialogOpen, paper, recognitionOpen, saving, switchDialogOpen]);
 
-    if (!overviewSections.some((section) => section.key === activeOverviewKey)) {
-      setActiveOverviewKey(overviewSections[0].key);
+  const toggleFavorite = async () => {
+    if (!paper || saving) return;
+    try {
+      const updated = await onSavePaper({ paperId: paper.id, isFavorite: !paper.isFavorite }, paper.categoryIds);
+      if (!updated) return;
+      setPaper(updated);
+      toast({
+        tone: 'success',
+        message: updated.isFavorite
+          ? l('已加入收藏', 'Added to favorites')
+          : l('已取消收藏', 'Removed from favorites'),
+      });
+    } catch {
+      // Parent reports the failure in its shared error channel.
     }
-  }, [activeOverviewKey, overviewSections]);
+  };
+
+  const showMoreMenu = (anchor: HTMLButtonElement) => {
+    if (!paper) return;
+    const rect = anchor.getBoundingClientRect();
+    const copy = async (text: string, label: string) => {
+      const ok = await copyTextToClipboard(text);
+      toast(ok ? { tone: 'success', message: l(`已复制${label}`, `${label} copied`) } : { tone: 'error', message: l('复制失败', 'Copy failed') });
+    };
+    const entries: MenuEntry[] = [
+      { id: 'copy-doi', label: l('复制 DOI', 'Copy DOI'), icon: <Copy className="h-4 w-4" />, disabled: !paper.doi, onSelect: () => paper.doi ? copy(paper.doi, 'DOI') : undefined },
+      { id: 'copy-gbt', label: l('复制引用（GB/T 7714）', 'Copy Citation (GB/T 7714)'), icon: <Copy className="h-4 w-4" />, onSelect: () => copy(formatBibliographyEntry(paper, paper.title, 'gbt7714'), l('引用', 'Citation')) },
+      { id: 'copy-apa', label: l('复制引用（APA）', 'Copy Citation (APA)'), icon: <Copy className="h-4 w-4" />, onSelect: () => copy(formatBibliographyEntry(paper, paper.title, 'apa7'), l('引用', 'Citation')) },
+      { id: 'copy-bibtex', label: l('复制 BibTeX', 'Copy BibTeX'), icon: <Copy className="h-4 w-4" />, onSelect: () => copy(paperToBibtexEntry(paper), 'BibTeX') },
+      { id: 'reidentify', label: l('按 DOI 重新识别…', 'Re-identify by DOI…'), icon: <Languages className="h-4 w-4" />, disabled: saving || editing || inlineField !== null, onSelect: () => setRecognitionOpen(true) },
+      { type: 'separator', id: 'paper-menu-rag-separator' },
+      { id: 'toggle-rag', label: paper.ragEnabled === false ? l('加入本地知识库', 'Include in Local Knowledge Base') : l('移出本地知识库', 'Exclude from Local Knowledge Base'), disabled: !onSetRagMembership || ragMembershipBusy, icon: <FileText className="h-4 w-4" />, onSelect: () => {
+        if (paper.ragEnabled === false) onSetRagMembership?.(paper, true);
+        else setExcludeConfirmOpen(true);
+      } },
+      ...fileLocationEntries,
+      { type: 'separator', id: 'paper-menu-delete-separator' },
+      { id: 'delete-paper', label: l('删除文献…', 'Delete Paper…'), tone: 'danger', icon: <Trash2 className="h-4 w-4" />, disabled: !onDeletePaper, onSelect: () => onDeletePaper?.(paper) },
+    ];
+    setOpenMenu({ x: rect.left, y: rect.bottom + 4, anchor, entries });
+  };
+
+  if (!paper || !draft) {
+    return (
+      <aside ref={rootRef} onWheelCapture={handleWheelCapture} className="pq-library-pane flex h-full min-h-0 flex-col overflow-hidden border-l">
+        <div className="m-4 rounded-[var(--pq-radius-sm)] border border-dashed border-[var(--pq-border)] p-6 text-center text-sm text-[var(--pq-text-muted)]">{l('选择一篇文献查看详情。', 'Select a paper to view its details.')}</div>
+      </aside>
+    );
+  }
+
+  const authors = paper.authors.length ? paper.authors : [];
+  const duplicateCitationKey = hasDuplicateCitationKey(draft.citationKey, allPapers, paper.id);
 
   return (
-    <aside
-      ref={rootRef}
-      onWheelCapture={handleWheelCapture}
-      className="pq-library-pane relative flex h-full min-h-0 flex-col overflow-hidden border-l"
-    >
-      <header className="pq-toolbar px-4 py-3">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#8a8f94] dark:text-[#a0a0a0]">
-              {l('文献详情', 'Paper Details')}
+    <aside ref={rootRef} onWheelCapture={handleWheelCapture} className="pq-library-pane relative flex h-full min-h-0 flex-col overflow-hidden border-l">
+      <div data-wheel-scroll-target className="h-0 min-h-0 flex-1 overflow-y-auto overscroll-y-contain p-3">
+        <div className="space-y-3">
+          <div className="flex items-start gap-2">
+            <div className="min-w-0 flex-1">
+              <div className="text-base font-semibold leading-6 text-[var(--pq-text)]">
+                <InlineEditor label={l('标题', 'Title')} value={titleDisplay?.primary ?? paper.title} active={inlineField === 'title'} draftValue={inlineValue} error={inlineError} onBegin={() => startInlineEdit('title', paper.title)} onChange={setInlineValue} onCommit={() => void commitInlineEdit()} onCancel={() => { setInlineField(null); setInlineError(''); }} />
+              </div>
+              {titleDisplay?.secondary ? <div className="mt-0.5 text-sm leading-5 text-[var(--pq-text-muted)]">{titleDisplay.secondary}</div> : null}
+              <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-[var(--pq-text-muted)]">
+                <div className="flex flex-wrap items-center gap-x-1.5">
+                  {authors.length ? authors.map((author, index) => {
+                    const orcid = normalizeOrcid(author.orcid);
+                    return <span key={author.id} className="inline-flex items-center gap-1" title={author.affiliation ?? undefined}>
+                      {index > 0 ? <span>,</span> : null}{author.name}
+                      {orcid ? <a href={`https://orcid.org/${orcid}`} target="_blank" rel="noreferrer" title={author.affiliation || l('打开 ORCID', 'Open ORCID')} aria-label={l(`${author.name} 的 ORCID`, `${author.name}'s ORCID`)} className="text-[var(--pq-accent)]"><ExternalLink className="h-3 w-3" /></a> : null}
+                    </span>;
+                  }) : <span>{l('未知作者', 'Unknown Authors')}</span>}
+                </div>
+                <span aria-hidden="true">·</span>
+                <span><InlineEditor label={l('年份', 'Year')} value={paper.year ?? ''} active={inlineField === 'year'} draftValue={inlineValue} error={inlineError} onBegin={() => startInlineEdit('year', paper.year ?? '')} onChange={setInlineValue} onCommit={() => void commitInlineEdit()} onCancel={() => { setInlineField(null); setInlineError(''); }} /></span>
+                {paper.publication ? <><span aria-hidden="true">·</span><span className="max-w-48 truncate">{paper.publication}</span></> : null}
+                {paper.doi ? <><span aria-hidden="true">·</span><span><InlineEditor label="DOI" value={paper.doi} active={inlineField === 'doi'} draftValue={inlineValue} error={inlineError} onBegin={() => startInlineEdit('doi', paper.doi ?? '')} onChange={setInlineValue} onCommit={() => void commitInlineEdit()} onCancel={() => { setInlineField(null); setInlineError(''); }} /></span></> : <button type="button" className="text-[var(--pq-accent)] hover:underline" onClick={() => startInlineEdit('doi', '')}>{l('添加 DOI', 'Add DOI')}</button>}
+              </div>
             </div>
-            <div className="mt-0.5 text-base font-semibold">
-              {selectedPaper ? l('已选择文献', 'Selected Paper') : l('未选择', 'No Selection')}
+            <button type="button" disabled={saving} onClick={toggleFavorite} aria-label={paper.isFavorite ? l('取消收藏', 'Remove from favorites') : l('加入收藏', 'Add to favorites')} title={paper.isFavorite ? l('取消收藏', 'Remove from favorites') : l('加入收藏', 'Add to favorites')} className={paper.isFavorite ? 'pq-icon-button h-8 w-8 shrink-0 !text-[var(--pq-warning)]' : 'pq-icon-button h-8 w-8 shrink-0'}>
+              <Star className="h-4 w-4" fill={paper.isFavorite ? 'currentColor' : 'none'} />
+            </button>
+            <button type="button" disabled={saving} onClick={(event) => showMoreMenu(event.currentTarget)} aria-label={l('更多文献操作', 'More paper actions')} title={l('更多', 'More')} className="pq-icon-button h-8 w-8 shrink-0"><MoreHorizontal className="h-4 w-4" /></button>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <button type="button" disabled={!paperPdfPath(paper, storageDir)} onClick={() => onOpenPaper(paper)} className="pq-button-primary px-3 py-1.5 text-xs"><BookOpenText className="mr-1.5 inline h-3.5 w-3.5" />{l('打开阅读', 'Open Reader')}</button>
+            <button type="button" disabled={saving} onClick={() => { setDraft(createPaperDetailsDraft(paper)); setEditing(true); }} className="pq-button px-3 py-1.5 text-xs"><Pencil className="mr-1.5 inline h-3.5 w-3.5" />{l('编辑', 'Edit')}</button>
+          </div>
+
+          <PaperDetailsStatusBar
+            paper={paper}
+            actionState={actionState}
+            paperStatus={paperStatus}
+            ragStatus={ragStatus}
+            storageDir={storageDir}
+            onOpenPaper={onOpenPaper}
+            onRunMineruParse={onRunMineruParse}
+            onTranslatePaper={onTranslatePaper}
+            onGenerateSummary={onGenerateSummary}
+            onSetRagMembership={onSetRagMembership}
+            onIndexPaperRag={onIndexPaperRag}
+            onAttachTranslatedPdf={onAttachTranslatedPdf}
+            onRemoveTranslatedPdf={onRemoveTranslatedPdf}
+            onSetTranslatedPdfLanguage={() => setLanguageDialogOpen(true)}
+          />
+
+          {editing ? (
+            <PaperEditForm
+              paper={paper}
+              draft={draft}
+              categories={categories}
+              libraryTags={libraryTags}
+              saving={saving}
+              duplicateCitationKey={duplicateCitationKey}
+              errors={draftErrors}
+              onValidationErrors={setDraftErrors}
+              onDraftChange={(nextDraft) => { setDraft(nextDraft); setDraftErrors(validatePaperDraft(nextDraft)); }}
+              onSave={saveRequest}
+              onCancel={closeEdit}
+              onTranslateTitle={onTranslatePaperTitle}
+            />
+          ) : (
+            <div className="rounded-[var(--pq-radius-sm)] border border-[var(--pq-border)] bg-[var(--pq-surface-1)] px-3">
+              <DetailsSection title={l('信息', 'Information')} collapsed={sections.information} onToggle={() => toggleSection('information')}>
+                <dl className="grid gap-x-4 gap-y-2 text-xs sm:grid-cols-2">
+                  <div><dt className="text-[var(--pq-text-faint)]">{l('类型', 'Type')}</dt><dd className="mt-0.5 text-[var(--pq-text)]">{paper.itemType || l('期刊论文', 'Journal Article')}</dd></div>
+                  <div><dt className="text-[var(--pq-text-faint)]">{l('出版物 / 机构', 'Publication / Institution')}</dt><dd className="mt-0.5 text-[var(--pq-text)]">{paper.institution || paper.publisher || paper.publication || l('未设置', 'Not set')}</dd></div>
+                  {paper.volume || paper.issue || paper.pages ? <div className="sm:col-span-2"><dt className="text-[var(--pq-text-faint)]">{l('卷期页', 'Volume, Issue, Pages')}</dt><dd className="mt-0.5 text-[var(--pq-text)]">{[paper.volume && `${l('卷', 'Vol.')} ${paper.volume}`, paper.issue && `${l('期', 'Issue')} ${paper.issue}`, paper.pages && `${l('页', 'pp.')} ${paper.pages}`].filter(Boolean).join(' · ')}</dd></div> : null}
+                  {paper.issn || paper.isbn ? <div className="sm:col-span-2 text-[var(--pq-text-muted)]">{paper.issn ? `ISSN ${paper.issn}` : ''}{paper.issn && paper.isbn ? ' · ' : ''}{paper.isbn ? `ISBN ${paper.isbn}` : ''}</div> : null}
+                  {paper.language ? <div><dt className="text-[var(--pq-text-faint)]">{l('论文语言', 'Paper Language')}</dt><dd className="mt-0.5 text-[var(--pq-text)]">{paper.language}</dd></div> : null}
+                  {paper.citationKey ? <div><dt className="text-[var(--pq-text-faint)]">{l('引用键', 'Citation Key')}</dt><dd className="mt-0.5 font-mono text-[var(--pq-text)]">{paper.citationKey}</dd></div> : null}
+                  {paper.doi ? <div className="sm:col-span-2"><dt className="text-[var(--pq-text-faint)]">DOI</dt><dd className="mt-0.5 break-all"><a href={`https://doi.org/${normalizeDoi(paper.doi) ?? paper.doi}`} target="_blank" rel="noreferrer" className="text-[var(--pq-accent)] hover:underline">{paper.doi}</a></dd></div> : null}
+                  {paper.url ? <div className="sm:col-span-2"><dt className="text-[var(--pq-text-faint)]">URL</dt><dd className="mt-0.5 break-all"><a href={paper.url} target="_blank" rel="noreferrer" className="text-[var(--pq-accent)] hover:underline">{paper.url}</a></dd></div> : null}
+                </dl>
+              </DetailsSection>
+
+              {paper.abstractText ? <DetailsSection title={l('摘要', 'Abstract')} collapsed={sections.abstract} onToggle={() => toggleSection('abstract')}><p className="line-clamp-3 whitespace-pre-wrap text-xs leading-5 text-[var(--pq-text-muted)]">{paper.abstractText}</p></DetailsSection> : null}
+
+              <DetailsSection title={l('AI 概览', 'AI Overview')} collapsed={sections.overview} onToggle={() => toggleSection('overview')}>
+                {overviewSections.length ? <div className="space-y-3">{overviewSections.map((section) => <div key={section.title}><h4 className="text-xs font-semibold text-[var(--pq-text)]">{section.title}</h4><p className="mt-1 whitespace-pre-wrap text-xs leading-5 text-[var(--pq-text-muted)]">{section.content}</p></div>)}</div> : <p className="text-xs text-[var(--pq-text-faint)]">{l('生成概览后，结果会显示在这里。', 'The generated overview will appear here.')}</p>}
+              </DetailsSection>
+
+              {paper.keywords.length || paper.tags.length ? <DetailsSection title={l('关键词与标签', 'Keywords & Tags')} collapsed={sections.keywords} onToggle={() => toggleSection('keywords')}>
+                <div className="flex flex-wrap gap-1.5">{paper.keywords.map((keyword) => <span key={keyword} className="pq-chip px-2 py-1 text-xs">{keyword}</span>)}{paper.tags.map((tag) => <span key={tag.id} className="rounded-[var(--pq-radius-sm)] border border-[var(--pq-accent-border)] bg-[var(--pq-accent-soft)] px-2 py-1 text-xs text-[var(--pq-accent)]">{tag.name}</span>)}</div>
+              </DetailsSection> : null}
+
+              {paper.userNote || paper.citation ? <DetailsSection title={l('笔记与引用', 'Notes & Citation')} collapsed={sections.notes} onToggle={() => toggleSection('notes')}>
+                {paper.userNote ? <p className="whitespace-pre-wrap text-xs leading-5 text-[var(--pq-text-muted)]">{paper.userNote}</p> : null}
+                {paper.citation ? <p className="mt-2 whitespace-pre-wrap text-xs leading-5 text-[var(--pq-text-muted)]">{paper.citation}</p> : null}
+              </DetailsSection> : null}
+
+              <DetailsSection title={l('阅读时间', 'Reading Time')} collapsed={sections.readingTime} onToggle={() => toggleSection('readingTime')}>
+                <LiteratureReadingTimeChart heatmap={readingHeatmap} />
+              </DetailsSection>
             </div>
+          )}
+        </div>
+      </div>
+
+      {openMenu ? <Menu x={openMenu.x} y={openMenu.y} entries={openMenu.entries} onClose={() => { setOpenMenu(null); openMenu.anchor.focus(); }} keyboardAnchor={openMenu.anchor} width={260} /> : null}
+      {recognitionOpen ? <MetadataRecognitionDialog open paper={paper} pdfPath={paperPdfPath(paper, storageDir)} onClose={() => setRecognitionOpen(false)} onApply={(request) => saveRequest(request, paper.categoryIds).then(() => {})} /> : null}
+      {languageDialogOpen && translatedPdf && onUpdateTranslatedPdfLanguage ? <TranslatedPdfLanguageDialog paperTitle={paper.title} fileName={translatedPdf.attachment.fileName} language={translatedPdf.attachment.language ?? null} saving={saving} onClose={() => setLanguageDialogOpen(false)} onSave={(language) => onUpdateTranslatedPdfLanguage(paper, translatedPdf.attachment.id, language).then(() => setLanguageDialogOpen(false))} onClear={() => onUpdateTranslatedPdfLanguage(paper, translatedPdf.attachment.id, null).then(() => setLanguageDialogOpen(false))} /> : null}
+      <ConfirmDialog open={excludeConfirmOpen} title={l('移出本地知识库', 'Exclude from Local Knowledge Base')} description={l('将删除该文献已建立的索引；PDF、解析结果和笔记保留。', 'This removes the paper index. The PDF, parsed content, and notes remain.')} confirmLabel={l('移出', 'Exclude')} cancelLabel={l('取消', 'Cancel')} busy={ragMembershipBusy} danger onClose={() => setExcludeConfirmOpen(false)} onConfirm={() => { setExcludeConfirmOpen(false); onSetRagMembership?.(paper, false); }} />
+      <Dialog
+        open={switchDialogOpen}
+        onClose={() => {
+          if (!saving) cancelPendingSwitch();
+        }}
+        dismissOnBackdrop={!saving}
+        labelledBy="paper-details-switch-title"
+        describedBy="paper-details-switch-description"
+      >
+        <div className="p-5">
+          <h2 id="paper-details-switch-title" className="text-base font-semibold text-[var(--pq-text)]">
+            {l('草稿尚未保存', 'Unsaved Changes')}
+          </h2>
+          <p id="paper-details-switch-description" className="mt-2 text-sm leading-6 text-[var(--pq-text-muted)]">
+            {l('切换文献前要如何处理当前草稿？', 'What should happen to this draft before switching papers?')}
+          </p>
+          <div className="mt-6 flex flex-wrap justify-end gap-2">
+            <button type="button" disabled={saving} onClick={cancelPendingSwitch} className="pq-button px-3 py-2 text-sm disabled:opacity-60">
+              {l('取消切换', 'Cancel Switch')}
+            </button>
+            <button type="button" disabled={saving} onClick={() => void saveThenSwitch()} className="pq-button-primary px-3 py-2 text-sm disabled:opacity-60">
+              {saving ? l('正在保存…', 'Saving…') : l('保存并切换', 'Save and Switch')}
+            </button>
+            <button type="button" disabled={saving} onClick={switchToPending} className="pq-button px-3 py-2 text-sm disabled:opacity-60">
+              {l('放弃并切换', 'Discard and Switch')}
+            </button>
           </div>
         </div>
-      </header>
-
-      <div
-        data-wheel-scroll-target
-        className="h-0 min-h-0 flex-1 overflow-y-auto overscroll-y-contain p-4"
-      >
-        {selectedPaper ? (
-          <div className="space-y-5">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <h2 className="text-lg font-semibold leading-7">{titleDisplay?.primary}</h2>
-                {titleDisplay?.secondary ? (
-                  <p className="mt-1 text-sm leading-6 text-[var(--pq-text-muted)] dark:text-[#c3c3c3]">
-                    {titleDisplay.secondary}
-                  </p>
-                ) : null}
-                <p className="mt-2 text-sm leading-6 text-[var(--pq-text-muted)] dark:text-[#a0a0a0]">
-                  {paperAuthors(selectedPaper, locale)}
-                </p>
-              </div>
-
-              <div className="flex shrink-0 items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleToggleFavorite}
-                  disabled={saving}
-                  className={
-                    selectedPaper.isFavorite
-                      ? 'pq-icon-button h-9 w-9 border border-[color-mix(in_srgb,var(--pq-warning)_40%,transparent)] bg-[var(--pq-warning-bg)] text-[var(--pq-warning)] disabled:opacity-60 '
-                      : 'pq-icon-button h-9 w-9 border border-[var(--pq-border)] bg-white/65 text-[var(--pq-text-faint)] disabled:opacity-60'
-                  }
-                  title={selectedPaper.isFavorite ? l('取消收藏', 'Remove from favorites') : l('加入收藏', 'Add to favorites')}
-                  aria-label={selectedPaper.isFavorite ? l('取消收藏', 'Remove from favorites') : l('加入收藏', 'Add to favorites')}
-                >
-                  <Star className="h-4 w-4" fill={selectedPaper.isFavorite ? 'currentColor' : 'none'} strokeWidth={1.9} />
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setEditing((current) => !current)}
-                  disabled={saving}
-                  className="pq-button px-3 py-2 text-xs"
-                >
-                  {editing ? (
-                    <X className="mr-1.5 h-3.5 w-3.5" strokeWidth={1.9} />
-                  ) : (
-                    <Pencil className="mr-1.5 h-3.5 w-3.5" strokeWidth={1.9} />
-                  )}
-                  {editing ? l('取消', 'Cancel') : l('编辑', 'Edit')}
-                </button>
-              </div>
-            </div>
-
-            <div className="space-y-3">
-              <ActionButton
-                primary
-                disabled={!hasPdf}
-                icon={<BookOpenText className="h-4 w-4" strokeWidth={1.9} />}
-                onClick={() => onOpenPaper(selectedPaper)}
-              >
-                {l('打开阅读', 'Open Reader')}
-              </ActionButton>
-
-              <section className="pq-card p-3">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="text-xs font-bold uppercase tracking-[0.16em] text-[var(--pq-text-faint)] dark:text-[#8d8d8d]">
-                      {l('本地知识库', 'Local Knowledge Base')}
-                    </div>
-                    <div className="mt-1 text-[11px] leading-5 text-[var(--pq-text-muted)] dark:text-[#a0a0a0]">
-                      {selectedPaper.ragEnabled === false
-                        ? l('已排除。重新加入后需要手动建立索引。', 'Excluded. Include it again, then build the index manually.')
-                        : ragStatus === 'ready'
-                          ? l('已加入，索引可用。', 'Included. The index is ready.')
-                          : ragStatus === 'failed'
-                            ? l('已加入，索引失败。', 'Included. Indexing failed.')
-                            : ragStatus === 'pending'
-                              ? l('已加入，索引尚未完成。', 'Included. Indexing is not finished.')
-                              : l('已加入，尚未建立索引。', 'Included. Not indexed yet.')}
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    disabled={!onSetRagMembership || saving || ragMembershipBusy}
-                    onClick={() => {
-                      if (selectedPaper.ragEnabled === false) {
-                        onSetRagMembership?.(selectedPaper, true);
-                        return;
-                      }
-                      setRagExcludeConfirmOpen(true);
-                    }}
-                    className="pq-button shrink-0 px-3 py-2 text-xs disabled:opacity-60"
-                  >
-                    {selectedPaper.ragEnabled === false
-                      ? l('加入', 'Include')
-                      : l('移出', 'Exclude')}
-                  </button>
-                </div>
-              </section>
-
-              <section className="pq-card p-3">
-                <div className="mb-2.5 flex items-center justify-between gap-3 px-1">
-                  <div>
-                    <div className="text-xs font-bold uppercase tracking-[0.16em] text-[var(--pq-text-faint)] dark:text-[#8d8d8d]">
-                      {l('文档处理', 'Document Pipeline')}
-                    </div>
-                    <div className="mt-0.5 text-[11px] text-[var(--pq-text-muted)] dark:text-[#a0a0a0]">
-                      {l('解析、翻译和生成概览', 'Parse, translate, and generate overview')}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <ProcessingActionTile
-                    dataTour="overview-mineru-parse"
-                    disabled={isPaperPipelineActionDisabled({
-                      hasPdf,
-                      hasHandler: Boolean(onRunMineruParse),
-                      actionState,
-                    })}
-                    active={activeTaskKind === 'mineru'}
-                    busy={pipelineBusy && activeTaskKind === 'mineru'}
-                    icon={<Sparkles className="h-4 w-4" strokeWidth={1.9} />}
-                    onClick={() => onRunMineruParse?.(selectedPaper)}
-                    title={l('MinerU 解析', 'MinerU Parse')}
-                    description={l('提取结构化文本和版面块', 'Extract structured text and layout blocks')}
-                  />
-                  <ProcessingActionTile
-                    dataTour="overview-translate-document"
-                    disabled={isPaperPipelineActionDisabled({
-                      hasPdf,
-                      hasHandler: Boolean(onTranslatePaper),
-                      actionState,
-                    })}
-                    active={activeTaskKind === 'translation'}
-                    busy={pipelineBusy && activeTaskKind === 'translation'}
-                    icon={<Languages className="h-4 w-4" strokeWidth={1.9} />}
-                    onClick={() => onTranslatePaper?.(selectedPaper)}
-                    title={l('全文翻译', 'Full Translation')}
-                    description={l('将结构化内容翻译为双语文本', 'Translate structured blocks into bilingual text')}
-                  />
-                  <ProcessingActionTile
-                    dataTour="generate-summary"
-                    disabled={isPaperPipelineActionDisabled({
-                      hasPdf,
-                      hasHandler: Boolean(onGenerateSummary),
-                      actionState,
-                    })}
-                    active={activeTaskKind === 'overview'}
-                    busy={pipelineBusy && activeTaskKind === 'overview'}
-                    icon={<FileText className="h-4 w-4" strokeWidth={1.9} />}
-                    onClick={() => onGenerateSummary?.(selectedPaper)}
-                    title={l('概览生成', 'Generate Overview')}
-                    description={l('生成研究问题、方法和结论概览', 'Generate questions, methods, and findings')}
-                  />
-
-                  {translatedPdf ? (
-                    <div className="flex items-center justify-between gap-2 rounded-xl border border-[color-mix(in_srgb,var(--pq-success)_28%,transparent)] bg-[var(--pq-success-bg)] px-3 py-2.5 ">
-                      <div className="flex min-w-0 items-center gap-2.5">
-                        <FileText className="h-4 w-4 shrink-0 text-[var(--pq-success)] " strokeWidth={1.9} />
-                        <div className="min-w-0">
-                          <div className="text-xs font-semibold text-[var(--pq-success)] ">
-                            {translatedPdf.attachment.language || l('语言待确认', 'Language unconfirmed')}
-                          </div>
-                          <div
-                            className="truncate text-[11px] text-[var(--pq-success)] "
-                            title={translatedPdf.path}
-                          >
-                            {translatedPdf.attachment.fileName}
-                          </div>
-                        </div>
-                      </div>
-                      <div className="flex shrink-0 items-center gap-1">
-                        <button
-                          type="button"
-                          disabled={saving || !onUpdateTranslatedPdfLanguage}
-                          onClick={() => {
-                            setLanguageDraft(translatedPdf.attachment.language ?? '');
-                            setLanguageError('');
-                            setLanguageDialogOpen(true);
-                          }}
-                          className="rounded-lg px-2 py-1 text-[11px] text-[var(--pq-success)] hover:bg-[var(--pq-success-bg)] disabled:opacity-50"
-                        >{l('设置语言', 'Set language')}</button>
-                        <button
-                          type="button"
-                          disabled={saving || !onAttachTranslatedPdf}
-                          onClick={() => onAttachTranslatedPdf?.(selectedPaper)}
-                          className="rounded-lg p-1.5 text-[var(--pq-success)] transition hover:bg-[var(--pq-success-bg)] disabled:cursor-not-allowed disabled:opacity-50 "
-                          title={l('替换翻译版 PDF', 'Replace translated PDF')}
-                          aria-label={l('替换翻译版 PDF', 'Replace translated PDF')}
-                        >
-                          <Replace className="h-3.5 w-3.5" strokeWidth={1.9} />
-                        </button>
-                        <button
-                          type="button"
-                          disabled={saving || !onRemoveTranslatedPdf}
-                          onClick={() => onRemoveTranslatedPdf?.(selectedPaper)}
-                          className="rounded-lg p-1.5 text-[var(--pq-danger)] transition hover:bg-[var(--pq-danger-bg)] disabled:cursor-not-allowed disabled:opacity-50 "
-                          title={l('移除翻译版 PDF', 'Remove translated PDF')}
-                          aria-label={l('移除翻译版 PDF', 'Remove translated PDF')}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" strokeWidth={1.9} />
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <ProcessingActionTile
-                      dataTour="attach-translated-pdf"
-                      disabled={!hasPdf || saving || !onAttachTranslatedPdf}
-                      active={false}
-                      busy={false}
-                      icon={<FilePlus2 className="h-4 w-4" strokeWidth={1.9} />}
-                      onClick={() => onAttachTranslatedPdf?.(selectedPaper)}
-                      title={l('附加翻译版 PDF', 'Attach Translated PDF')}
-                      description={l(
-                        '关联 retainpdf 翻译的 PDF，用于逐页对照阅读',
-                        'Link a retainpdf-translated PDF for page-aligned compare reading',
-                      )}
-                    />
-                  )}
-                </div>
-
-                {languageDialogOpen && translatedPdf ? (
-                  <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/40 p-4" role="presentation">
-                    <div role="dialog" aria-modal="true" aria-labelledby="translated-language-title" className="w-full max-w-md rounded-2xl border border-[var(--pq-border)] bg-[var(--pq-panel)] p-5 shadow-2xl">
-                      <h2 id="translated-language-title" className="text-base font-semibold">{l('设置译版语言', 'Set translated PDF language')}</h2>
-                      <p className="mt-2 break-words text-xs text-[var(--pq-muted)]">{selectedPaper.title} · {translatedPdf.attachment.fileName}</p>
-                      <label className="mt-4 block text-xs font-medium">{l('BCP 47 语言标签', 'BCP 47 language tag')}</label>
-                      <select value={['zh-CN', 'zh-TW', 'en', 'ja', 'de', 'fr', 'es', 'ko'].includes(languageDraft) ? languageDraft : ''} onChange={(event) => setLanguageDraft(event.target.value)} className="pq-input mt-1 w-full">
-                        <option value="">{l('自定义 / 暂不设置', 'Custom / leave unset')}</option>
-                        <option value="zh-CN">简体中文 (zh-CN)</option><option value="zh-TW">繁体中文 (zh-TW)</option><option value="en">English (en)</option><option value="ja">日本語 (ja)</option><option value="de">Deutsch (de)</option><option value="fr">Français (fr)</option><option value="es">Español (es)</option><option value="ko">한국어 (ko)</option>
-                      </select>
-                      <input value={languageDraft} onChange={(event) => setLanguageDraft(event.target.value)} placeholder="zh-CN, en, ja-JP…" className="pq-input mt-2 w-full" />
-                      {languageError ? <p role="alert" className="mt-2 text-xs text-[var(--pq-danger)]">{languageError}</p> : null}
-                      <div className="mt-5 flex flex-wrap justify-between gap-2">
-                        <button type="button" disabled={languageSaving || !translatedPdf.attachment.language} onClick={async () => {
-                          if (!selectedPaper || !onUpdateTranslatedPdfLanguage) return;
-                          setLanguageSaving(true); setLanguageError('');
-                          try { await onUpdateTranslatedPdfLanguage(selectedPaper, translatedPdf.attachment.id, null); setLanguageDialogOpen(false); }
-                          catch (error) { setLanguageError(error instanceof Error ? error.message : l('更新失败', 'Update failed')); }
-                          finally { setLanguageSaving(false); }
-                        }} className="pq-button px-3 py-1.5 text-xs">{l('清除语言', 'Clear language')}</button>
-                        <div className="ml-auto flex gap-2">
-                          <button type="button" disabled={languageSaving} onClick={() => setLanguageDialogOpen(false)} className="pq-button px-3 py-1.5 text-xs">{l('取消', 'Cancel')}</button>
-                          <button type="button" disabled={languageSaving || !languageDraft.trim()} onClick={async () => {
-                            if (!selectedPaper || !onUpdateTranslatedPdfLanguage) return;
-                            let language: string;
-                            try { [language] = Intl.getCanonicalLocales(languageDraft.trim()); }
-                            catch { setLanguageError(l('请输入有效的 BCP 47 语言标签', 'Enter a valid BCP 47 language tag')); return; }
-                            setLanguageSaving(true); setLanguageError('');
-                            try { await onUpdateTranslatedPdfLanguage(selectedPaper, translatedPdf.attachment.id, language); setLanguageDialogOpen(false); }
-                            catch (error) { setLanguageError(error instanceof Error ? error.message : l('更新失败', 'Update failed')); }
-                            finally { setLanguageSaving(false); }
-                          }} className="pq-button-primary px-3 py-1.5 text-xs disabled:opacity-50">{languageSaving ? l('保存中…', 'Saving…') : l('保存', 'Save')}</button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ) : null}
-
-                {actionState ? (
-                  <div className="mt-3">
-                    <TaskStatusPanel state={actionState} />
-                  </div>
-                ) : null}
-              </section>
-            </div>
-
-            {editing ? (
-              <div className="pq-card space-y-4 p-4">
-                <label>
-                  <FieldLabel>{l('标题', 'Title')}</FieldLabel>
-                  <TextInput
-                    value={draft.title}
-                    onChange={(value) => patchDraft({ title: value })}
-                  />
-                </label>
-
-                <div>
-                  <span className="flex items-center justify-between gap-2">
-                    <FieldLabel>{l('中文标题', 'Chinese Title')}</FieldLabel>
-                    {onTranslatePaperTitle ? (
-                      <button
-                        type="button"
-                        disabled={saving || titleTranslating || !draft.title.trim()}
-                        onClick={() => {
-                          if (!selectedPaper || !onTranslatePaperTitle) {
-                            return;
-                          }
-
-                          setTitleTranslating(true);
-                          void onTranslatePaperTitle(selectedPaper)
-                            .then((translated) => {
-                              if (translated) {
-                                patchDraft({ titleZh: translated });
-                              }
-                            })
-                            .finally(() => setTitleTranslating(false));
-                        }}
-                        className="mb-1 inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium text-[var(--pq-accent)] transition hover:bg-[var(--pq-accent-bg)] disabled:cursor-not-allowed disabled:opacity-50 "
-                        title={l('使用翻译模型生成中文标题', 'Generate Chinese title with the translation model')}
-                      >
-                        <Languages className="h-3 w-3" strokeWidth={1.9} />
-                        {titleTranslating ? l('翻译中…', 'Translating…') : l('AI 翻译标题', 'Translate Title')}
-                      </button>
-                    ) : null}
-                  </span>
-                  <TextInput
-                    value={draft.titleZh}
-                    placeholder={l('留空则仅显示原文标题', 'Leave empty to show the original title only')}
-                    onChange={(value) => patchDraft({ titleZh: value })}
-                  />
-                </div>
-
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <label>
-                    <FieldLabel>{l('文献类型', 'Entry Type')}</FieldLabel>
-                    <select
-                      value={draft.itemType}
-                      onChange={(event) => patchDraft({ itemType: event.target.value })}
-                      className="pq-input h-10 w-full px-3 text-sm"
-                    >
-                      <option value="journalArticle">{l('期刊论文 (Journal Article)', 'Journal Article')}</option>
-                      <option value="book">{l('书籍 (Book)', 'Book')}</option>
-                      <option value="bookSection">{l('书籍章节 (Book Section)', 'Book Section')}</option>
-                      <option value="conferencePaper">{l('会议论文 (Conference Paper)', 'Conference Paper')}</option>
-                      <option value="thesis">{l('学位论文 (Thesis / Dissertation)', 'Thesis / Dissertation')}</option>
-                      <option value="report">{l('研究/技术报告 (Report)', 'Report')}</option>
-                      <option value="preprint">{l('预印本 (Preprint / arXiv)', 'Preprint')}</option>
-                      <option value="misc">{l('其他文献 (Misc)', 'Misc')}</option>
-                    </select>
-                  </label>
-
-                  <label>
-                    <FieldLabel>
-                      {draft.itemType === 'book' || draft.itemType === 'bookSection'
-                        ? l('出版社', 'Publisher')
-                        : draft.itemType === 'thesis'
-                          ? l('授予单位 / 大学', 'University / School')
-                          : draft.itemType === 'report'
-                            ? l('发布机构 / 单位', 'Institution / Agency')
-                            : l('出版社 / 机构', 'Publisher / Institution')}
-                    </FieldLabel>
-                    <TextInput
-                      value={draft.publisher || draft.institution}
-                      placeholder={
-                        draft.itemType === 'thesis'
-                          ? l('例如：清华大学、MIT', 'e.g. Tsinghua University, MIT')
-                          : draft.itemType === 'report'
-                            ? l('例如：OpenAI、NASA', 'e.g. OpenAI, NASA')
-                            : l('例如：Springer、O\'Reilly', 'e.g. Springer, O\'Reilly')
-                      }
-                      onChange={(value) => {
-                        if (draft.itemType === 'thesis' || draft.itemType === 'report') {
-                          patchDraft({ institution: value, publisher: value });
-                        } else {
-                          patchDraft({ publisher: value });
-                        }
-                      }}
-                    />
-                  </label>
-                </div>
-
-                {draft.itemType === 'report' ? (
-                  <label>
-                    <FieldLabel>{l('报告编号', 'Report Number')}</FieldLabel>
-                    <TextInput
-                      value={draft.reportNumber}
-                      placeholder={l('例如：TR-2024-01、arXiv:2305.18290', 'e.g. TR-2024-01, arXiv:2305.18290')}
-                      onChange={(value) => patchDraft({ reportNumber: value })}
-                    />
-                  </label>
-                ) : null}
-
-                <div className="grid gap-3 sm:grid-cols-3">
-                  <label>
-                    <FieldLabel>{l('卷号', 'Volume')}</FieldLabel>
-                    <TextInput
-                      value={draft.volume}
-                      placeholder="12"
-                      onChange={(value) => patchDraft({ volume: value })}
-                    />
-                  </label>
-                  <label>
-                    <FieldLabel>{l('期号', 'Issue / No.')}</FieldLabel>
-                    <TextInput
-                      value={draft.issue}
-                      placeholder="3"
-                      onChange={(value) => patchDraft({ issue: value })}
-                    />
-                  </label>
-                  <label>
-                    <FieldLabel>{l('页码范围', 'Pages')}</FieldLabel>
-                    <TextInput
-                      value={draft.pages}
-                      placeholder="123-145"
-                      onChange={(value) => patchDraft({ pages: value })}
-                    />
-                  </label>
-                </div>
-
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <label>
-                    <FieldLabel>ISBN</FieldLabel>
-                    <TextInput
-                      value={draft.isbn}
-                      placeholder="978-3-16-148410-0"
-                      onChange={(value) => patchDraft({ isbn: value })}
-                    />
-                  </label>
-                  <label>
-                    <FieldLabel>ISSN</FieldLabel>
-                    <TextInput
-                      value={draft.issn}
-                      placeholder="1234-5678"
-                      onChange={(value) => patchDraft({ issn: value })}
-                    />
-                  </label>
-                </div>
-
-                <label>
-                  <FieldLabel>{l('作者', 'Authors')}</FieldLabel>
-                  <TextInput
-                    value={draft.authors}
-                    placeholder={l('多个作者用逗号分隔', 'Separate with commas')}
-                    onChange={(value) => patchDraft({ authors: value })}
-                  />
-                </label>
-
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <label>
-                    <FieldLabel>{l('年份', 'Year')}</FieldLabel>
-                    <TextInput
-                      value={draft.year}
-                      onChange={(value) => patchDraft({ year: value })}
-                    />
-                  </label>
-                  <label>
-                    <FieldLabel>DOI</FieldLabel>
-                    <TextInput
-                      value={draft.doi}
-                      onChange={(value) => patchDraft({ doi: value })}
-                    />
-                  </label>
-                </div>
-
-                <label>
-                  <FieldLabel>{l('期刊 / 会议', 'Journal / Conference')}</FieldLabel>
-                  <TextInput
-                    value={draft.publication}
-                    onChange={(value) => patchDraft({ publication: value })}
-                  />
-                </label>
-
-                <label>
-                  <FieldLabel>URL</FieldLabel>
-                  <TextInput
-                    value={draft.url}
-                    onChange={(value) => patchDraft({ url: value })}
-                  />
-                </label>
-
-                <label>
-                  <FieldLabel>{l('摘要', 'Abstract')}</FieldLabel>
-                  <TextArea
-                    value={draft.abstractText}
-                    onChange={(value) => patchDraft({ abstractText: value })}
-                  />
-                </label>
-
-                <label>
-                  <FieldLabel>{l('关键词', 'Keywords')}</FieldLabel>
-                  <TextInput
-                    value={draft.keywords}
-                    placeholder={l('多个关键词用逗号分隔', 'Separate with commas')}
-                    onChange={(value) => patchDraft({ keywords: value })}
-                  />
-                </label>
-
-                <label>
-                  <FieldLabel>{l('标签', 'Tags')}</FieldLabel>
-                  <TextInput
-                    value={draft.tags}
-                    placeholder={l('多个标签用逗号分隔，例如：Zotero, 综述, 待读', 'Separate with commas, e.g. Zotero, Review, To read')}
-                    onChange={(value) => patchDraft({ tags: value })}
-                  />
-                </label>
-
-                <label>
-                  <FieldLabel>{l('用户笔记', 'User Note')}</FieldLabel>
-                  <TextArea
-                    value={draft.userNote}
-                    rows={5}
-                    onChange={(value) => patchDraft({ userNote: value })}
-                  />
-                </label>
-
-                <label>
-                  <FieldLabel>{l('引用信息', 'Citation')}</FieldLabel>
-                  <TextArea
-                    value={draft.citation}
-                    rows={3}
-                    onChange={(value) => patchDraft({ citation: value })}
-                  />
-                </label>
-
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={handleSave}
-                    disabled={saving}
-                    className="pq-button-primary px-4 py-2.5 text-sm disabled:opacity-60"
-                  >
-                    <Save className="mr-2 h-4 w-4" strokeWidth={1.9} />
-                    {saving ? l('正在保存...', 'Saving...') : l('保存修改', 'Save Changes')}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setDraft(draftFromPaper(selectedPaper));
-                      setEditing(false);
-                    }}
-                    disabled={saving}
-                    className="pq-button px-4 py-2.5 text-sm disabled:opacity-60"
-                  >
-                    {l('放弃', 'Discard')}
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <>
-                <dl className="pq-card p-4 text-sm">
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <div>
-                      <dt className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--pq-text-faint)] dark:text-[#8d8d8d]">
-                        {l('文献类型', 'Entry Type')}
-                      </dt>
-                      <dd className="mt-1 font-medium text-[var(--pq-text-muted)] dark:text-[#e0e0e0]">
-                        {itemTypeLabel(selectedPaper.itemType, l)}
-                      </dd>
-                    </div>
-
-                    <div>
-                      <dt className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--pq-text-faint)] dark:text-[#8d8d8d]">
-                        {selectedPaper.itemType === 'thesis'
-                          ? l('学位授予机构', 'Institution / School')
-                          : selectedPaper.itemType === 'report'
-                            ? l('发布单位', 'Institution / Agency')
-                            : l('期刊 / 会议 / 出版社', 'Publication / Publisher')}
-                      </dt>
-                      <dd className="mt-1 text-[var(--pq-text-muted)] dark:text-[#e0e0e0]">
-                        {selectedPaper.institution || selectedPaper.publisher || selectedPaper.publication || l('未设置', 'Not set')}
-                      </dd>
-                    </div>
-                  </div>
-
-                  {selectedPaper.volume || selectedPaper.issue || selectedPaper.pages || selectedPaper.reportNumber ? (
-                    <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 border-t border-[var(--pq-border)] pt-2.5 text-xs text-[var(--pq-text-muted)] dark:text-[#c0c0c0]">
-                      {selectedPaper.reportNumber ? (
-                        <span><strong className="font-semibold">{l('报告号:', 'Report No:')}</strong> {selectedPaper.reportNumber}</span>
-                      ) : null}
-                      {selectedPaper.volume ? (
-                        <span><strong className="font-semibold">{l('卷:', 'Vol:')}</strong> {selectedPaper.volume}</span>
-                      ) : null}
-                      {selectedPaper.issue ? (
-                        <span><strong className="font-semibold">{l('期:', 'Issue:')}</strong> {selectedPaper.issue}</span>
-                      ) : null}
-                      {selectedPaper.pages ? (
-                        <span><strong className="font-semibold">{l('页码:', 'Pages:')}</strong> {selectedPaper.pages}</span>
-                      ) : null}
-                    </div>
-                  ) : null}
-
-                  {selectedPaper.isbn || selectedPaper.issn ? (
-                    <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-[var(--pq-text-muted)] dark:text-[#9c9c9c]">
-                      {selectedPaper.isbn ? <span>ISBN: {selectedPaper.isbn}</span> : null}
-                      {selectedPaper.issn ? <span>ISSN: {selectedPaper.issn}</span> : null}
-                    </div>
-                  ) : null}
-                </dl>
-
-                <LiteratureReadingTimeChart heatmap={readingHeatmap} />
-
-                {selectedPaper.keywords.length > 0 ? (
-                  <div className="flex flex-wrap gap-2">
-                    {selectedPaper.keywords.map((keyword) => (
-                      <span
-                        key={keyword}
-                        className="pq-chip px-3 py-1 text-xs font-medium"
-                      >
-                        {keyword}
-                      </span>
-                    ))}
-                  </div>
-                ) : null}
-
-                {selectedPaper.tags.length > 0 ? (
-                  <div>
-                    <div className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--pq-text-faint)] dark:text-[#8d8d8d]">
-                      {l('标签', 'Tags')}
-                    </div>
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      {selectedPaper.tags.map((tag) => (
-                        <span
-                          key={tag.id}
-                          className="rounded-full border border-[var(--pq-accent-ring)] bg-[var(--pq-accent-soft)] px-3 py-1 text-xs font-semibold text-[var(--pq-accent)]"
-                        >
-                          {tag.name}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
-
-                <section className="pq-card p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--pq-text-faint)] dark:text-[#8d8d8d]">
-                      {l('AI 概览', 'AI Overview')}
-                    </div>
-                    {overviewSections.length > 0 ? (
-                      <span className="rounded-full border border-[var(--pq-accent-ring)] bg-[var(--pq-accent-soft)] px-2.5 py-1 text-[11px] font-semibold text-[var(--pq-accent)]">
-                        {l(`${overviewSections.length} 个部分`, `${overviewSections.length} sections`)}
-                      </span>
-                    ) : null}
-                  </div>
-                  {activeOverviewSection ? (
-                    <div className="mt-3 space-y-3">
-                      <div className="flex flex-wrap gap-2">
-                        {overviewSections.map((section) => {
-                          const label = overviewSectionLabel(section.key, section.title, l);
-
-                          return (
-                            <button
-                              key={section.key}
-                              type="button"
-                              onClick={() => setActiveOverviewKey(section.key)}
-                              className={
-                                activeOverviewSection.key === section.key
-                                  ? 'rounded-full border border-[var(--pq-accent-border)] bg-[var(--pq-accent-soft)] px-3 py-1.5 text-xs font-semibold text-[var(--pq-accent)] transition'
-                                  : 'rounded-full border border-[var(--pq-border)] bg-white/58 px-3 py-1.5 text-xs font-semibold text-[var(--pq-text-muted)] transition hover:border-[var(--pq-border-strong)] hover:bg-white hover:text-[var(--pq-text)]'
-                              }
-                            >
-                              {label}
-                            </button>
-                          );
-                        })}
-                      </div>
-
-                      <div className="rounded-xl border border-[var(--pq-border)] bg-white/54 px-4 py-4 dark:bg-white/5">
-                        <div className="text-sm font-semibold text-[var(--pq-text)] dark:text-[#e0e0e0]">
-                          {overviewSectionLabel(
-                            activeOverviewSection.key,
-                            activeOverviewSection.title,
-                            l,
-                          )}
-                        </div>
-                        {[
-                          'findings',
-                          'takeaways',
-                          'keywords',
-                        ].includes(activeOverviewSection.key) ||
-                        splitOverviewListItems(
-                          activeOverviewSection.content,
-                          activeOverviewSection.key,
-                        ).length > 1 ? (
-                          <ul className="mt-3 space-y-2 text-sm leading-6 text-[var(--pq-text-muted)] dark:text-[#cfcfcf]">
-                            {splitOverviewListItems(
-                              activeOverviewSection.content,
-                              activeOverviewSection.key,
-                            ).map((item) => (
-                              <li key={item} className="flex gap-2">
-                                <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--pq-accent)]" />
-                                <span>{item}</span>
-                              </li>
-                            ))}
-                          </ul>
-                        ) : (
-                          <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-[var(--pq-text-muted)] dark:text-[#cfcfcf]">
-                            {activeOverviewSection.content}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="mt-3 rounded-xl border border-dashed border-[var(--pq-border)] bg-white/48 px-4 py-4 text-sm leading-6 text-[var(--pq-text-muted)]">
-                      {l('生成概览后，结果会显示在这里。', 'After generating an overview, the result will appear here.')}
-                    </div>
-                  )}
-                </section>
-
-                {selectedPaper.userNote ? (
-                  <div>
-                    <div className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--pq-text-faint)] dark:text-[#8d8d8d]">
-                      {l('用户笔记', 'User Note')}
-                    </div>
-                    <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-[var(--pq-text-muted)] dark:text-[#a0a0a0]">
-                      {selectedPaper.userNote}
-                    </p>
-                  </div>
-                ) : null}
-              </>
-            )}
-          </div>
-        ) : (
-          <div className="pq-card border-dashed p-8 text-center text-sm text-[var(--pq-text-muted)]">
-            {l('选择一篇文献查看详情。', 'Select a paper to view details.')}
-          </div>
-        )}
-      </div>
-      <LibraryConfirmDialog
-        open={ragExcludeConfirmOpen && Boolean(selectedPaper)}
-        title={l('移出本地知识库', 'Exclude from Local Knowledge Base')}
-        description={l(
-          '将删除该文献已建立的索引；PDF、解析结果和笔记保留；之后需要重新建立索引才能再被检索。',
-          'This deletes the paper’s existing index. The PDF, parsed content, and notes stay. It must be indexed again before it can be retrieved.',
-        )}
-        confirmLabel={l('移出', 'Exclude')}
-        cancelLabel={l('取消', 'Cancel')}
-        busy={ragMembershipBusy}
-        danger
-        onClose={() => {
-          if (!ragMembershipBusy) setRagExcludeConfirmOpen(false);
-        }}
-        onConfirm={() => {
-          if (!selectedPaper) return;
-          setRagExcludeConfirmOpen(false);
-          onSetRagMembership?.(selectedPaper, false);
-        }}
-      />
+      </Dialog>
     </aside>
   );
 }
-

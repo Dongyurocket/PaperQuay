@@ -26,6 +26,12 @@ const {
   resolveTranslatedPdfStorageDir,
 } = require('./translatedPdfAttachments.cjs');
 const {
+  canonicalizeBcp47Language,
+  normalizeCitationKey,
+  normalizeOrcid,
+} = require('./metadataValidation.cjs');
+const { UPDATABLE_PAPER_FIELDS } = require('./paperMetadataFields.cjs');
+const {
   inspectPdfAssets,
   planPdfAssetNames,
   isManagedPath,
@@ -307,9 +313,19 @@ function hasMetadataValue(metadata) {
       cleanString(metadata.publication) ||
       cleanString(metadata.url) ||
       cleanString(metadata.abstractText) ||
-      (Array.isArray(metadata.authors) && metadata.authors.length > 0)
+      cleanString(metadata.language) ||
+      (Array.isArray(metadata.authors) && metadata.authors.length > 0) ||
+      (Array.isArray(metadata.authorDetails) && metadata.authorDetails.length > 0)
     ),
   );
+}
+
+function safeNormalizeOrcid(value) {
+  try {
+    return normalizeOrcid(value);
+  } catch {
+    return null;
+  }
 }
 
 function abstractFromOpenAlexInvertedIndex(invertedIndex) {
@@ -369,9 +385,27 @@ function mapCrossrefWork(item) {
     doi: normalizeDoi(item.DOI) || null,
     title: firstString(item.title),
     authors: (item.author ?? [])
-      .map((author) => [author.given, author.family].filter(Boolean).join(' '))
+      .map((author) => [author.given, author.family].filter(Boolean).join(' ') || author.name)
       .map(cleanString)
       .filter(Boolean),
+    authorDetails: (item.author ?? [])
+      .map((author) => {
+        const givenName = cleanString(author.given) || null;
+        const familyName = cleanString(author.family) || null;
+        const name = cleanString([givenName, familyName].filter(Boolean).join(' ') || author.name);
+        const affiliation = Array.isArray(author.affiliation)
+          ? author.affiliation.map((item) => cleanString(item?.name)).filter(Boolean).join('; ')
+          : '';
+        return {
+          name,
+          givenName,
+          familyName,
+          affiliation: affiliation || null,
+          orcid: safeNormalizeOrcid(author.ORCID),
+        };
+      })
+      .filter((author) => author.name),
+    language: canonicalizeBcp47Language(item.language),
     year: normalizeYear(item.issued?.['date-parts']?.[0]?.[0] ?? item.published?.['date-parts']?.[0]?.[0]),
     publication: firstString(item['container-title']),
     url: firstString(item.URL, doiUrl(item.DOI)),
@@ -390,6 +424,8 @@ function mergeMetadataResults(...results) {
     doi: null,
     title: null,
     authors: [],
+    authorDetails: [],
+    language: null,
     year: null,
     publication: null,
     url: null,
@@ -403,11 +439,26 @@ function mergeMetadataResults(...results) {
     merged.publication ||= cleanString(result.publication) || null;
     merged.url ||= cleanString(result.url) || null;
     merged.abstractText ||= cleanString(result.abstractText) || null;
+    merged.language ||= canonicalizeBcp47Language(result.language) || null;
 
     if (merged.authors.length === 0 && Array.isArray(result.authors) && result.authors.length > 0) {
       merged.authors = result.authors.map(cleanString).filter(Boolean);
     }
+    if (merged.authorDetails.length === 0 && Array.isArray(result.authorDetails) && result.authorDetails.length > 0) {
+      merged.authorDetails = result.authorDetails
+        .map((author) => ({
+          name: cleanString(author?.name),
+          givenName: cleanString(author?.givenName) || null,
+          familyName: cleanString(author?.familyName) || null,
+          affiliation: cleanString(author?.affiliation) || null,
+          orcid: safeNormalizeOrcid(author?.orcid),
+        }))
+        .filter((author) => author.name);
+    }
   }
+
+  if (merged.authorDetails.length === 0) delete merged.authorDetails;
+  if (!merged.language) delete merged.language;
 
   return merged;
 }
@@ -795,6 +846,15 @@ function createLibraryCommands(context) {
             pages: metadata.pages ?? null,
             isbn: metadata.isbn ?? null,
             issn: metadata.issn ?? null,
+            language: (() => {
+              if (metadata.language === null || metadata.language === undefined || !cleanString(metadata.language)) {
+                return null;
+              }
+              const normalized = canonicalizeBcp47Language(metadata.language);
+              if (!normalized) throw new Error(`无效的 BCP 47 语言标签：${metadata.language}`);
+              return normalized;
+            })(),
+            citationKey: normalizeCitationKey(metadata.citationKey),
             keywords: Array.isArray(metadata.keywords) ? metadata.keywords : [],
             importedAt: now(),
             updatedAt: now(),
@@ -806,7 +866,9 @@ function createLibraryCommands(context) {
             citation: null,
             source: request.source === 'zotero' ? 'zotero' : 'local',
             sortOrder: Math.min(0, ...library.papers.map((item) => item.sortOrder ?? 0)) - 1,
-            authors: (metadata.authors ?? []).map(normalizeAuthor),
+            authors: (Array.isArray(metadata.authorDetails) ? metadata.authorDetails : (metadata.authors ?? []))
+              .map((author, index) => normalizeAuthor(author, index))
+              .filter((author) => author.name),
             tags: [],
             categoryIds: request.targetCategoryId ? [request.targetCategoryId] : [],
             attachments: [{
@@ -816,7 +878,7 @@ function createLibraryCommands(context) {
               originalPath: sourcePath,
               storedPath,
               relativePath,
-              language: metadata.language ?? null,
+              language: null,
               fileName,
               mimeType: 'application/pdf',
               fileSize: stat.size,
@@ -866,6 +928,28 @@ function createLibraryCommands(context) {
       return paper;
     },
 
+    async library_set_paper_categories({ request }) {
+      const paperId = cleanString(request?.paperId);
+      const categoryIds = request?.categoryIds;
+      if (!paperId) throw new Error('paperId is required');
+      if (!Array.isArray(categoryIds) || categoryIds.some((id) => typeof id !== 'string')) {
+        throw new Error('categoryIds must be an array of strings');
+      }
+      const paper = store.getPaper(paperId);
+      if (!paper) throw new Error('Paper does not exist');
+      const uniqueIds = [...new Set(categoryIds.map(cleanString).filter(Boolean))];
+      const library = store.load();
+      const categories = new Map(library.categories.map((category) => [category.id, category]));
+      for (const categoryId of uniqueIds) {
+        const category = categories.get(categoryId);
+        if (!category || category.isSystem) throw new Error(`Invalid user category: ${categoryId}`);
+      }
+      paper.categoryIds = uniqueIds;
+      paper.updatedAt = now();
+      store.savePaper(paper);
+      return paper;
+    },
+
     async library_record_reading({ request }) {
       const paperId = cleanString(request?.paperId);
       const timestamp = request?.lastReadAt;
@@ -883,32 +967,42 @@ function createLibraryCommands(context) {
       const paper = store.getPaper(request.paperId);
       if (!paper) throw new Error('Paper does not exist');
 
-      for (const key of [
-        'title',
-        'titleZh',
-        'year',
-        'publication',
-        'doi',
-        'url',
-        'abstractText',
-        'itemType',
-        'publisher',
-        'institution',
-        'reportNumber',
-        'volume',
-        'issue',
-        'pages',
-        'isbn',
-        'issn',
-        'userNote',
-        'aiSummary',
-        'citation',
-      ]) {
-        if (request[key] !== undefined) paper[key] = request[key];
+      for (const key of UPDATABLE_PAPER_FIELDS) {
+        // authorDetails is an update-only request field. Persist it via the
+        // normalized `authors` collection below, but never expose it on a paper.
+        if (request[key] === undefined || key === 'authorDetails') continue;
+        if (key === 'language') {
+          if (request.language === null) paper.language = null;
+          else {
+            const normalized = canonicalizeBcp47Language(request.language);
+            if (!normalized) throw new Error(`无效的 BCP 47 语言标签：${request.language}`);
+            paper.language = normalized;
+          }
+        } else if (key === 'citationKey') {
+          paper.citationKey = normalizeCitationKey(request.citationKey);
+        } else {
+          paper[key] = request[key];
+        }
       }
-      if (request.keywords) paper.keywords = request.keywords.map(cleanString).filter(Boolean);
-      if (request.authors) paper.authors = request.authors.map(cleanString).filter(Boolean).map(normalizeAuthor);
-      if (request.tags) paper.tags = request.tags.map(cleanString).filter(Boolean).map(normalizeTag);
+      if (request.keywords !== undefined) {
+        if (!Array.isArray(request.keywords)) throw new Error('keywords must be an array of strings');
+        paper.keywords = request.keywords.map(cleanString).filter(Boolean);
+      }
+      if (request.authorDetails !== undefined) {
+        if (!Array.isArray(request.authorDetails)) throw new Error('authorDetails must be an array of author objects');
+        paper.authors = request.authorDetails
+          .map((author, index) => normalizeAuthor(author, index))
+          .filter((author) => author.name);
+      } else if (request.authors !== undefined) {
+        if (!Array.isArray(request.authors)) throw new Error('authors must be an array of author names');
+        paper.authors = request.authors
+          .map((author, index) => normalizeAuthor(author, index))
+          .filter((author) => author.name);
+      }
+      if (request.tags !== undefined) {
+        if (!Array.isArray(request.tags)) throw new Error('tags must be an array of tag names');
+        paper.tags = request.tags.map(cleanString).filter(Boolean).map(normalizeTag);
+      }
       if (request.isFavorite != null) paper.isFavorite = Boolean(request.isFavorite);
       paper.updatedAt = now();
 

@@ -91,7 +91,7 @@ class WorkspaceErrorBoundary extends Component<WorkspaceErrorBoundaryProps, Work
     if (this.state.error) {
       return (
         <div className="flex h-full min-h-0 items-center justify-center rounded-[var(--pq-radius-md)] border border-[var(--pq-border)] bg-[var(--pq-surface-1)] p-6">
-          <div className="max-w-xl rounded-[var(--pq-radius-md)] border border-[var(--pq-border)] bg-[var(--pq-surface)] p-4 shadow-[var(--pq-shadow-sm)]">
+          <div className="max-w-xl rounded-[var(--pq-radius-md)] border border-[var(--pq-border)] bg-[var(--pq-surface)] p-4 shadow-[var(--pq-shadow-soft)]">
             <div className="text-sm font-semibold text-[var(--pq-text)]">
               {this.props.name} workspace failed to load
             </div>

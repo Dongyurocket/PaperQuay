@@ -48,6 +48,7 @@ import {
 } from './readerLibraryPreview';
 import { countTranslatedBlocks } from './readerTranslation';
 import { readTranslationCache } from './readerTranslationCache';
+import { buildCachedTranslationTask } from '../literature/paperTaskProgress';
 import type {
   LibraryPreviewSyncPayload,
   ReaderDocumentTranslationSnapshot,
@@ -432,10 +433,7 @@ export function useReaderLibraryPreview({
             continue;
           }
 
-          const message = l(
-            `已加载缓存全文翻译 ${entry.count} 条`,
-            `Loaded ${entry.count} cached full-document translations`,
-          );
+          const cachedTask = buildCachedTranslationTask({ count: entry.count, l });
 
           next[entry.item.workspaceId] = {
             ...previousState,
@@ -443,16 +441,16 @@ export function useReaderLibraryPreview({
             error: '',
             operation: createPaperTaskState(
               'translation',
-              'success',
-              message,
-              entry.count,
-              null,
+              cachedTask.status,
+              cachedTask.message,
+              cachedTask.completed,
+              cachedTask.total,
             ),
             currentPdfName:
               previousState.currentPdfName ||
               (entry.item.localPdfPath ? getFileNameFromPath(entry.item.localPdfPath) : noPdfLoadedText),
             currentJsonName: previousState.currentJsonName || notLoadedText,
-            statusMessage: previousState.statusMessage || message,
+            statusMessage: previousState.statusMessage || cachedTask.message,
           };
           changed = true;
         }

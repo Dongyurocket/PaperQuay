@@ -1074,7 +1074,7 @@ export function ReaderPreferencesContent({
                   <button
                     type="button"
                     onClick={onCancelBatchMineru}
-                    className="rounded-xl border border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-danger-bg)] px-4 py-2 text-sm text-[var(--pq-danger)] transition hover:bg-[var(--pq-danger-bg)]"
+                    className="rounded-xl border border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-error-bg)] px-4 py-2 text-sm text-[var(--pq-danger)] transition hover:bg-[var(--pq-error-bg)]"
                   >
                     {l('取消', 'Cancel')}
                   </button>
@@ -1266,7 +1266,7 @@ export function ReaderPreferencesContent({
                   embeddingTestState.status === 'ok'
                     ? 'border-[color-mix(in_srgb,var(--pq-success)_28%,transparent)] bg-[var(--pq-success-bg)] text-[var(--pq-success)]'
                     : embeddingTestState.status === 'fail'
-                      ? 'border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-danger-bg)] text-[var(--pq-danger)]'
+                      ? 'border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-error-bg)] text-[var(--pq-danger)]'
                       : 'border-[var(--pq-border)] bg-[var(--pq-surface-2)] text-[var(--pq-text-muted)]',
                 )}
               >
@@ -1715,7 +1715,7 @@ export function ReaderPreferencesContent({
                       <button
                         type="button"
                         onClick={onCancelRagIndex}
-                        className="rounded-xl border border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-danger-bg)] px-4 py-2 text-sm text-[var(--pq-danger)] transition hover:bg-[var(--pq-danger-bg)]"
+                        className="rounded-xl border border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-error-bg)] px-4 py-2 text-sm text-[var(--pq-danger)] transition hover:bg-[var(--pq-error-bg)]"
                       >
                         {l('取消', 'Cancel')}
                       </button>
@@ -1774,7 +1774,7 @@ export function ReaderPreferencesContent({
                   <button
                     type="button"
                     onClick={onCancelBatchSummary}
-                    className="rounded-xl border border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-danger-bg)] px-4 py-2 text-sm text-[var(--pq-danger)] transition hover:bg-[var(--pq-danger-bg)]"
+                    className="rounded-xl border border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-error-bg)] px-4 py-2 text-sm text-[var(--pq-danger)] transition hover:bg-[var(--pq-error-bg)]"
                   >
                     {l('取消', 'Cancel')}
                   </button>

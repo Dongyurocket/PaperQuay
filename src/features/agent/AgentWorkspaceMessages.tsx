@@ -390,7 +390,7 @@ function CapabilityProgress({
                   : stage.status === 'running'
                     ? 'bg-[var(--pq-info-bg)] text-[var(--pq-info)] '
                     : stage.status === 'error'
-                      ? 'bg-[var(--pq-danger-bg)] text-[var(--pq-danger)] '
+                      ? 'bg-[var(--pq-error-bg)] text-[var(--pq-danger)] '
                       : stage.status === 'warning'
                         ? 'bg-[var(--pq-warning-bg)] text-[var(--pq-warning)] '
                         : 'bg-[var(--pq-surface-2)] text-[var(--pq-text-muted)] dark:bg-white/10 dark:text-chrome-400',
@@ -423,7 +423,7 @@ function DeliveryQualitySummary({
     ? 'border-[color-mix(in_srgb,var(--pq-success)_28%,transparent)] bg-[var(--pq-success-bg)] text-[var(--pq-success)] '
     : quality.state === 'partial'
       ? 'border-[color-mix(in_srgb,var(--pq-warning)_28%,transparent)] bg-[var(--pq-warning-bg)] text-[var(--pq-warning)] '
-      : 'border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-danger-bg)] text-[var(--pq-danger)] ';
+      : 'border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-error-bg)] text-[var(--pq-danger)] ';
   const issueLabel = (item: DeliveryQualityIssue) => {
     const labels: Record<DeliveryQualityIssue['code'], [string, string]> = {
       'empty-answer': ['回答为空', 'Answer is empty'],

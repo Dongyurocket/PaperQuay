@@ -208,7 +208,7 @@ export function BackupPasswordDialog({
             ) : null}
 
             {error || localError ? (
-              <div role="alert" className="rounded-lg border border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-danger-bg)] px-3 py-2 text-xs leading-5 text-[var(--pq-danger)]">
+              <div role="alert" className="rounded-lg border border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-error-bg)] px-3 py-2 text-xs leading-5 text-[var(--pq-danger)]">
                 {error || localError}
               </div>
             ) : null}

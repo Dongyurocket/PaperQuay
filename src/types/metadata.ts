@@ -9,6 +9,14 @@ export interface MetadataLookupResult {
   doi: string | null;
   title: string | null;
   authors: string[];
+  authorDetails?: Array<{
+    name: string;
+    givenName?: string | null;
+    familyName?: string | null;
+    affiliation?: string | null;
+    orcid?: string | null;
+  }>;
+  language?: string | null;
   year: string | null;
   publication: string | null;
   url: string | null;

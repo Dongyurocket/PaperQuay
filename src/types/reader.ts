@@ -548,6 +548,15 @@ export interface ZoteroLibraryItem {
   creators: string;
   year: string;
   itemType: string;
+  language?: string;
+  extra?: string;
+  authors?: Array<{
+    name: string;
+    givenName?: string;
+    familyName?: string;
+    affiliation?: string;
+    orcid?: string;
+  }>;
   attachmentKey?: string;
   attachmentTitle?: string;
   attachmentFilename?: string;

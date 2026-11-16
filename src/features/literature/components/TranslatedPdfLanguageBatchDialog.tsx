@@ -50,14 +50,14 @@ export default function TranslatedPdfLanguageBatchDialog({ entries, skippedCount
       </div>
       {error ? <p role="alert" className="mt-2 text-sm text-[var(--pq-danger)]">{error}</p> : null}
       <div className="mt-4 max-h-[50vh] overflow-auto rounded-lg border border-[var(--pq-border)]">
-      <table className="w-full text-left text-xs"><thead className="sticky top-0 bg-[var(--pq-panel)]"><tr><th className="p-2">应用</th><th className="p-2">文献 / 附件</th><th className="p-2">原值</th><th className="p-2">保存后</th></tr></thead>
+      <table className="w-full text-left text-xs"><thead className="sticky top-0 bg-[var(--pq-surface-2)]"><tr><th className="p-2">应用</th><th className="p-2">文献 / 附件</th><th className="p-2">原值</th><th className="p-2">保存后</th></tr></thead>
         <tbody>{entries.map((entry) => <tr key={entry.attachmentId} className="border-t border-[var(--pq-border)]">
           <td className="p-2"><input type="checkbox" checked={selectedIds.has(entry.attachmentId)} disabled={saving} onChange={(event) => setSelectedIds((current) => { const next = new Set(current); event.target.checked ? next.add(entry.attachmentId) : next.delete(entry.attachmentId); return next; })} /></td>
-          <td className="max-w-[28rem] p-2"><div className="truncate" title={entry.paper.title}>{entry.paper.title}</div><div className="truncate text-[var(--pq-muted)]" title={entry.fileName}>{entry.fileName}</div></td>
+          <td className="max-w-[28rem] p-2"><div className="truncate" title={entry.paper.title}>{entry.paper.title}</div><div className="truncate text-[var(--pq-text-muted)]" title={entry.fileName}>{entry.fileName}</div></td>
           <td className="p-2">{isUnknown(entry.language) ? `语言待确认${entry.language ? `（原值 ${entry.language}）` : '（原值为空）'}` : entry.language}</td><td className="p-2">{clear ? '语言待确认' : normalizedLanguage || language}</td>
         </tr>)}</tbody>
       </table>
-      {entries.length === 0 ? <p className="p-4 text-sm text-[var(--pq-muted)]">所选文献没有已登记的译版附件。</p> : null}
+      {entries.length === 0 ? <p className="p-4 text-sm text-[var(--pq-text-muted)]">所选文献没有已登记的译版附件。</p> : null}
       </div>
       {skippedCount > 0 ? <p className="mt-2 text-xs text-[var(--pq-text-muted)]">{skippedCount} 篇文献没有译版附件，已跳过。</p> : null}
       <div className="mt-5 flex justify-end gap-2">

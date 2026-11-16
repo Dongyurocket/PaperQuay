@@ -26,7 +26,7 @@ function statusTone(status: AgentStepStatus): string {
     case 'warning':
       return 'border-[color-mix(in_srgb,var(--pq-warning)_28%,transparent)] bg-[var(--pq-warning-bg)] text-[var(--pq-warning)] ';
     case 'error':
-      return 'border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-danger-bg)] text-[var(--pq-danger)] ';
+      return 'border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-error-bg)] text-[var(--pq-danger)] ';
     case 'skipped':
       return 'border-[var(--pq-border)] bg-[var(--pq-surface-2)] text-[var(--pq-text-faint)] dark:border-white/10 dark:bg-chrome-900 dark:text-chrome-500';
     default:

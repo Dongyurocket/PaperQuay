@@ -155,7 +155,7 @@ export function ReaderWorkspaceOverview({
                   className={[
                     'inline-flex items-center rounded-2xl border px-4 py-2.5 text-sm font-medium transition-all duration-200 disabled:opacity-60',
                     translating
-                      ? 'border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-danger-bg)] text-[var(--pq-danger)] hover:bg-[var(--pq-danger-bg)]'
+                      ? 'border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-error-bg)] text-[var(--pq-danger)] hover:bg-[var(--pq-error-bg)]'
                       : 'border-[var(--pq-border)] bg-white text-[var(--pq-text-muted)] hover:border-[var(--pq-border-strong)] hover:bg-[var(--pq-surface-2)]',
                   ].join(' ')}
                 >

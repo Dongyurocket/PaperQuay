@@ -27,6 +27,7 @@ import type {
   RelocateAttachmentRequest,
   RemoveAttachmentRequest,
   ReorderPapersRequest,
+  SetPaperCategoriesRequest,
   UpdatePaperRequest,
   UpdateCategoryRequest,
 } from '../types/library';
@@ -243,6 +244,16 @@ export async function assignPaperToLibraryCategory(
     return await invoke<LiteraturePaper>('library_assign_paper_category', { request });
   } catch (error) {
     throw new Error(toErrorMessage(error, '移动文献到分类失败'));
+  }
+}
+
+export async function setLibraryPaperCategories(
+  request: SetPaperCategoriesRequest,
+): Promise<LiteraturePaper> {
+  try {
+    return await invoke<LiteraturePaper>('library_set_paper_categories', { request });
+  } catch (error) {
+    throw new Error(toErrorMessage(error, '保存文献分类失败'));
   }
 }
 

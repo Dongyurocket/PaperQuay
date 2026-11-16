@@ -1,5 +1,6 @@
 const path = require('node:path');
 const { createLibraryDatabaseStore } = require('./libraryDatabaseStore.cjs');
+const { normalizeOrcid } = require('./metadataValidation.cjs');
 const { hashBytes, now } = require('./utils.cjs');
 
 const SYSTEM_CATEGORIES = [
@@ -132,12 +133,19 @@ function attachCategoryCounts(library) {
     );
 }
 
-function normalizeAuthor(name, sortOrder) {
+function normalizeAuthor(input, sortOrder) {
+  const raw = typeof input === 'string' ? { name: input } : (input || {});
+  const name = typeof raw.name === 'string' ? raw.name.trim() : '';
+  const rawOrcid = typeof raw.orcid === 'string' ? raw.orcid.trim() : '';
   return {
-    id: `auth_${hashBytes(Buffer.from(name)).slice(0, 12)}`,
+    id: typeof raw.id === 'string' && raw.id.trim()
+      ? raw.id.trim()
+      : `auth_${hashBytes(Buffer.from(name)).slice(0, 12)}`,
     name,
-    givenName: null,
-    familyName: null,
+    givenName: typeof raw.givenName === 'string' && raw.givenName.trim() ? raw.givenName.trim() : null,
+    familyName: typeof raw.familyName === 'string' && raw.familyName.trim() ? raw.familyName.trim() : null,
+    affiliation: typeof raw.affiliation === 'string' && raw.affiliation.trim() ? raw.affiliation.trim() : null,
+    orcid: rawOrcid ? normalizeOrcid(rawOrcid) : null,
     sortOrder,
   };
 }

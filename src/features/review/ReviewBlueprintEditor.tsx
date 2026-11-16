@@ -181,7 +181,7 @@ function ReviewFigureThumbnail({
           </span>
         </span>
       )}
-      <span className="absolute bottom-1 left-1 rounded bg-[var(--pq-surface)]/90 px-1 py-0.5 text-[9px] font-semibold uppercase text-[var(--pq-text-muted)] shadow-[var(--pq-shadow-sm)]">
+      <span className="absolute bottom-1 left-1 rounded bg-[var(--pq-surface)]/90 px-1 py-0.5 text-[9px] font-semibold uppercase text-[var(--pq-text-muted)] shadow-[var(--pq-shadow-soft)]">
         {isTable ? l('表', 'Tab') : l('图', 'Img')}
       </span>
     </span>

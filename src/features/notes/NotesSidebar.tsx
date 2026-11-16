@@ -375,7 +375,7 @@ export function NotesSidebar({
                 className={cn(
                   'h-7 flex-1 rounded-md px-2 text-xs font-medium transition',
                   drawerTab === tab
-                    ? 'bg-[var(--pq-surface)] text-[var(--pq-text)] shadow-[var(--pq-shadow-sm)]'
+                    ? 'bg-[var(--pq-surface)] text-[var(--pq-text)] shadow-[var(--pq-shadow-soft)]'
                     : 'text-[var(--pq-text-muted)] hover:text-[var(--pq-text)]',
                 )}
               >
@@ -404,7 +404,7 @@ export function NotesSidebar({
                         key={anchor.id}
                         onContextMenu={(event) => openAnchorContextMenu(event, activeNote, anchor)}
                         className={cn(
-                          'group w-full rounded-[var(--pq-radius-sm)] border bg-[var(--pq-surface)] px-2.5 py-2.5 text-left shadow-[var(--pq-shadow-sm)] transition',
+                          'group w-full rounded-[var(--pq-radius-sm)] border bg-[var(--pq-surface)] px-2.5 py-2.5 text-left shadow-[var(--pq-shadow-soft)] transition',
                           hasLocation
                             ? 'border-[var(--pq-border-subtle)] hover:border-[var(--pq-border)]'
                             : 'border-transparent opacity-55',

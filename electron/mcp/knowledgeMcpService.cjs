@@ -15,6 +15,11 @@ const {
 } = require('../backend/zoteroLocal.cjs');
 const { execFileSync } = require('node:child_process');
 const { attachCategoryCounts, createLibraryStore, normalizeAuthor, normalizeTag } = require('../backend/libraryStore.cjs');
+const {
+  canonicalizeBcp47Language,
+  normalizeCitationKey,
+} = require('../backend/metadataValidation.cjs');
+const { UPDATABLE_PAPER_FIELDS } = require('../backend/paperMetadataFields.cjs');
 const { createNoteStore } = require('../backend/noteStore.cjs');
 const { parseMarkdownToTiptap } = require('../../src/shared/markdownToTiptap.cjs');
 const { desktopRunMarkerState } = require('../backend/desktopRunMarker.cjs');
@@ -26,6 +31,22 @@ const {
 
 function cleanString(value) {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function citationKeyFromZoteroExtra(extra) {
+  const line = cleanString(extra)
+    .split(/\r?\n/)
+    .find((item) => /^citation\s+key\s*:/i.test(item));
+  if (!line) return null;
+
+  const rawValue = cleanString(line.replace(/^citation\s+key\s*:/i, ''));
+  if (!rawValue) return null;
+
+  try {
+    return normalizeCitationKey(rawValue);
+  } catch {
+    return null;
+  }
 }
 
 // 笔记对外返回的精简形状：避免 contentJson 等大字段撑爆 MCP 响应。
@@ -53,14 +74,13 @@ function slimNote(note) {
 }
 
 function buildPaperAuthors(item) {
-  if (Array.isArray(item.authors) && item.authors.length > 0) {
-    return item.authors.map((author, index) => ({
-      id: id('auth'),
-      name: cleanString(author.name) || 'Unknown Author',
-      givenName: cleanString(author.givenName) || null,
-      familyName: cleanString(author.familyName) || null,
-      sortOrder: index,
-    }));
+  const detailedAuthors = Array.isArray(item.authorDetails)
+    ? item.authorDetails
+    : Array.isArray(item.authors) ? item.authors : [];
+  if (detailedAuthors.length > 0) {
+    return detailedAuthors
+      .map((author, index) => normalizeAuthor(author, index))
+      .filter((author) => author.name);
   }
   const creators = cleanString(item.creators);
   if (!creators) return [];
@@ -330,29 +350,6 @@ function detectDesktopAppRunning(deps = {}) {
   }
 }
 
-// 与 libraryCommands.cjs 的 library_update_paper 白名单保持一致。
-const UPDATABLE_PAPER_FIELDS = [
-  'title',
-  'titleZh',
-  'year',
-  'publication',
-  'doi',
-  'url',
-  'abstractText',
-  'itemType',
-  'publisher',
-  'institution',
-  'reportNumber',
-  'volume',
-  'issue',
-  'pages',
-  'isbn',
-  'issn',
-  'userNote',
-  'aiSummary',
-  'citation',
-];
-
 class PaperQuayKnowledgeService {
   constructor(options = {}) {
     this.appPaths = resolveAppPaths(options.dataDir);
@@ -474,6 +471,8 @@ class PaperQuayKnowledgeService {
           p.publication,
           p.doi,
           p.url,
+          ${paperCols.has('language') ? 'p.language AS language,' : 'NULL AS language,'}
+          ${paperCols.has('citation_key') ? 'p.citation_key AS citationKey,' : 'NULL AS citationKey,'}
           ${itemTypeSelect}
           ${ragEnabledSelect}
           p.is_favorite AS isFavorite,
@@ -519,6 +518,8 @@ class PaperQuayKnowledgeService {
         publication: row.publication || null,
         doi: row.doi || null,
         url: row.url || null,
+        language: row.language || null,
+        citationKey: row.citationKey || null,
         itemType: row.itemType || 'journalArticle',
         tags: tagsByPaper.get(row.id) || [],
         isFavorite: Boolean(row.isFavorite),
@@ -549,8 +550,12 @@ class PaperQuayKnowledgeService {
         return null;
       }
 
+      const authorCols = getTableColumns(db, 'authors');
+      const affiliationSelect = authorCols.has('affiliation') ? 'affiliation' : 'NULL AS affiliation';
+      const orcidSelect = authorCols.has('orcid') ? 'orcid' : 'NULL AS orcid';
       const authors = db.prepare(`
-        SELECT id, name, given_name AS givenName, family_name AS familyName, sort_order AS sortOrder
+        SELECT id, name, given_name AS givenName, family_name AS familyName,
+          ${affiliationSelect}, ${orcidSelect}, sort_order AS sortOrder
         FROM authors WHERE paper_id = ? ORDER BY sort_order
       `).all(id);
 
@@ -580,10 +585,13 @@ class PaperQuayKnowledgeService {
         title: paper.title,
         titleZh: paper.title_zh || null,
         authors: authors.map((a) => a.name),
+        authorDetails: authors,
         year: paper.year || null,
         publication: paper.publication || null,
         doi: paper.doi || null,
         url: paper.url || null,
+        language: paper.language || null,
+        citationKey: paper.citation_key || null,
         itemType: paper.item_type || 'journalArticle',
         publisher: paper.publisher || null,
         institution: paper.institution || null,
@@ -1233,6 +1241,9 @@ class PaperQuayKnowledgeService {
         publication: item.publication || null,
         abstractNote: item.abstractNote || null,
         itemType: item.itemType,
+        language: item.language || null,
+        citationKey: citationKeyFromZoteroExtra(item.extra),
+        extra: item.extra || null,
         hasLocalPdf: Boolean(item.localPdfPath && fs.existsSync(item.localPdfPath)),
         localPdfPath: item.localPdfPath || null,
         attachmentFilename: item.attachmentFilename || null,
@@ -1290,6 +1301,8 @@ class PaperQuayKnowledgeService {
           title: item.title,
           year: item.year,
           creators: item.creators,
+          language: item.language || null,
+          citationKey: citationKeyFromZoteroExtra(item.extra),
           reason: 'Zotero 中无本地 PDF 附件或文件已丢失',
         });
         continue;
@@ -1324,6 +1337,8 @@ class PaperQuayKnowledgeService {
           year: item.year,
           creators: item.creators,
           doi: item.doi || null,
+          language: item.language || null,
+          citationKey: citationKeyFromZoteroExtra(item.extra),
           reason: duplicateReason,
         });
       } else {
@@ -1334,6 +1349,8 @@ class PaperQuayKnowledgeService {
           creators: item.creators,
           doi: item.doi || null,
           publication: item.publication || null,
+          language: item.language || null,
+          citationKey: citationKeyFromZoteroExtra(item.extra),
           hasLocalPdf: true,
           localPdfPath: item.localPdfPath,
           attachmentFilename: item.attachmentFilename || null,
@@ -1500,6 +1517,8 @@ class PaperQuayKnowledgeService {
           pages: null,
           isbn: null,
           issn: null,
+          language: canonicalizeBcp47Language(item.language) || null,
+          citationKey: citationKeyFromZoteroExtra(item.extra),
           keywords: [],
           importedAt: now(),
           updatedAt: now(),
@@ -1937,12 +1956,19 @@ class PaperQuayKnowledgeService {
             relativePath = path.relative(storageDir, storedPath);
           }
           const stat = fs.statSync(storedPath);
-          const authors = Array.isArray(itemMeta.authors)
-            ? itemMeta.authors.map(cleanString).filter(Boolean).map(normalizeAuthor)
-            : [];
+          const rawAuthors = Array.isArray(itemMeta.authorDetails)
+            ? itemMeta.authorDetails
+            : Array.isArray(itemMeta.authors) ? itemMeta.authors : [];
+          const authors = rawAuthors.map((author, index) => normalizeAuthor(author, index)).filter((author) => author.name);
           const tags = Array.isArray(itemMeta.tags)
             ? itemMeta.tags.map(cleanString).filter(Boolean).map(normalizeTag)
             : [];
+          let language = null;
+          if (itemMeta.language !== undefined && itemMeta.language !== null && cleanString(itemMeta.language)) {
+            language = canonicalizeBcp47Language(itemMeta.language);
+            if (!language) throw new Error(`无效的 BCP 47 语言标签：${itemMeta.language}`);
+          }
+          const citationKey = normalizeCitationKey(itemMeta.citationKey);
 
           const paper = {
             id: paperId,
@@ -1962,6 +1988,8 @@ class PaperQuayKnowledgeService {
             pages: itemMeta.pages ?? null,
             isbn: itemMeta.isbn ?? null,
             issn: itemMeta.issn ?? null,
+            language,
+            citationKey,
             keywords: Array.isArray(itemMeta.keywords) ? itemMeta.keywords.map(cleanString).filter(Boolean) : [],
             importedAt: now(),
             updatedAt: now(),
@@ -2044,13 +2072,31 @@ class PaperQuayKnowledgeService {
       if (!paper) throw new Error(`Paper does not exist: ${targetId}`);
 
       for (const key of UPDATABLE_PAPER_FIELDS) {
-        if (patch[key] !== undefined) paper[key] = patch[key];
+        if (patch[key] === undefined || key === 'authorDetails') continue;
+        if (key === 'language') {
+          if (patch.language === null || patch.language === '') {
+            paper.language = null;
+          } else {
+            const normalized = canonicalizeBcp47Language(patch.language);
+            if (!normalized) throw new Error(`无效的 BCP 47 语言标签：${patch.language}`);
+            paper.language = normalized;
+          }
+        } else if (key === 'citationKey') {
+          paper.citationKey = normalizeCitationKey(patch.citationKey);
+        } else {
+          paper[key] = patch[key];
+        }
       }
       if (patch.keywords !== undefined) {
         if (!Array.isArray(patch.keywords)) throw new Error('keywords must be an array of strings');
         paper.keywords = patch.keywords.map(cleanString).filter(Boolean);
       }
-      if (patch.authors !== undefined) {
+      if (patch.authorDetails !== undefined) {
+        if (!Array.isArray(patch.authorDetails)) throw new Error('authorDetails must be an array of author objects');
+        paper.authors = patch.authorDetails
+          .map((author, index) => normalizeAuthor(author, index))
+          .filter((author) => author.name);
+      } else if (patch.authors !== undefined) {
         if (!Array.isArray(patch.authors)) throw new Error('authors must be an array of author names');
         paper.authors = patch.authors.map(cleanString).filter(Boolean).map(normalizeAuthor);
       }

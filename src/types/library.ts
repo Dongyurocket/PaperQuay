@@ -20,7 +20,18 @@ export interface LiteratureAuthor {
   name: string;
   givenName: string | null;
   familyName: string | null;
+  affiliation?: string | null;
+  orcid?: string | null;
   sortOrder: number;
+}
+
+export interface LiteratureAuthorInput {
+  id?: string | null;
+  name: string;
+  givenName?: string | null;
+  familyName?: string | null;
+  affiliation?: string | null;
+  orcid?: string | null;
 }
 
 export interface LiteratureTag {
@@ -86,6 +97,8 @@ export interface LiteraturePaper {
   pages?: string | null;
   isbn?: string | null;
   issn?: string | null;
+  language?: string | null;
+  citationKey?: string | null;
   keywords: string[];
   importedAt: number;
   updatedAt: number;
@@ -273,6 +286,9 @@ export interface ImportPdfMetadata {
   issn?: string | null;
   keywords?: string[] | null;
   authors?: string[] | null;
+  authorDetails?: LiteratureAuthorInput[] | null;
+  language?: string | null;
+  citationKey?: string | null;
 }
 
 export interface ImportPdfRequest {
@@ -332,6 +348,11 @@ export interface AssignPaperCategoryRequest {
   categoryId: string;
 }
 
+export interface SetPaperCategoriesRequest {
+  paperId: string;
+  categoryIds: string[];
+}
+
 export interface UpdatePaperRequest {
   paperId: string;
   title?: string | null;
@@ -353,6 +374,9 @@ export interface UpdatePaperRequest {
   keywords?: string[] | null;
   tags?: string[] | null;
   authors?: string[] | null;
+  authorDetails?: LiteratureAuthorInput[] | null;
+  language?: string | null;
+  citationKey?: string | null;
   userNote?: string | null;
   aiSummary?: string | null;
   citation?: string | null;

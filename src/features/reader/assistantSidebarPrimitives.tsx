@@ -321,7 +321,7 @@ function SummaryPanel({
       ) : null}
 
       {error ? (
-        <div className="rounded-2xl border border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-danger-bg)] px-4 py-3 text-sm text-[var(--pq-danger)]">
+        <div className="rounded-2xl border border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-error-bg)] px-4 py-3 text-sm text-[var(--pq-danger)]">
           {error}
         </div>
       ) : null}
@@ -453,7 +453,7 @@ function SelectionPanel({
           </div>
 
           {selectedExcerptError ? (
-            <div className="rounded-2xl border border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-danger-bg)] px-4 py-3 text-sm text-[var(--pq-danger)]">
+            <div className="rounded-2xl border border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-error-bg)] px-4 py-3 text-sm text-[var(--pq-danger)]">
               {selectedExcerptError}
             </div>
           ) : null}

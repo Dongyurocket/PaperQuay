@@ -447,7 +447,7 @@ export default function AgentWorkspaceView({
                               event.stopPropagation();
                               handleDeleteHistorySession(session.id);
                             }}
-                            className="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-[var(--pq-radius-sm)] text-[var(--pq-text-faint)] opacity-0 transition hover:bg-[var(--pq-danger-bg)] hover:text-[var(--pq-danger)] group-hover:opacity-100 focus:opacity-100 "
+                            className="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-[var(--pq-radius-sm)] text-[var(--pq-text-faint)] opacity-0 transition hover:bg-[var(--pq-error-bg)] hover:text-[var(--pq-danger)] group-hover:opacity-100 focus:opacity-100 "
                             aria-label={l('删除历史对话', 'Delete history item')}
                             title={l('删除历史对话', 'Delete history item')}
                           >
@@ -469,7 +469,7 @@ export default function AgentWorkspaceView({
                   <button
                     type="button"
                     onClick={handleClearAgentHistory}
-                    className="flex h-8 w-full items-center rounded-[var(--pq-radius-sm)] px-2.5 text-left text-xs font-medium text-[var(--pq-text-faint)] transition hover:bg-[var(--pq-danger-bg)] hover:text-[var(--pq-danger)] "
+                    className="flex h-8 w-full items-center rounded-[var(--pq-radius-sm)] px-2.5 text-left text-xs font-medium text-[var(--pq-text-faint)] transition hover:bg-[var(--pq-error-bg)] hover:text-[var(--pq-danger)] "
                   >
                     {l('清空历史记录', 'Clear history')}
                   </button>
@@ -570,7 +570,7 @@ export default function AgentWorkspaceView({
                 </div>
 
                 {error ? (
-                  <div className="mb-3 whitespace-pre-wrap rounded-lg border border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-danger-bg)] px-4 py-2.5 text-sm leading-6 text-[var(--pq-danger)] ">
+                  <div className="mb-3 whitespace-pre-wrap rounded-lg border border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-error-bg)] px-4 py-2.5 text-sm leading-6 text-[var(--pq-danger)] ">
                     {error}
                   </div>
                 ) : null}

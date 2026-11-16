@@ -153,7 +153,7 @@ function EquationContentComponent({
     const hasValidBBox = block && isValidBBox(block.bbox) && pdfSource;
 
     return (
-      <div className="my-1 overflow-x-auto rounded-xl border border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-danger-bg)] px-3.5 py-3 text-[var(--pq-danger)] ">
+      <div className="my-1 overflow-x-auto rounded-xl border border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-error-bg)] px-3.5 py-3 text-[var(--pq-danger)] ">
         <div className="mb-2 flex items-center justify-between">
           <span className="text-[11px] font-semibold uppercase tracking-[0.16em]">
             Formula parse failed
@@ -168,7 +168,7 @@ function EquationContentComponent({
                   setShowInlineCrop((prev) => !prev);
                 }
               }}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-rose-300/80 bg-white/90 px-2.5 py-1 text-xs font-semibold text-[var(--pq-danger)] shadow-xs transition-colors hover:bg-[var(--pq-danger-bg)] dark:border-rose-800 dark:bg-rose-900/60 dark:text-rose-100 dark:hover:bg-rose-900"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-rose-300/80 bg-white/90 px-2.5 py-1 text-xs font-semibold text-[var(--pq-danger)] shadow-xs transition-colors hover:bg-[var(--pq-error-bg)] dark:border-rose-800 dark:bg-rose-900/60 dark:text-rose-100 dark:hover:bg-rose-900"
               title={l('使用 PDF.js 裁剪并展示该区域的原版矢量图', 'Crop and display the original vector region using PDF.js')}
             >
               <Scan className="h-3.5 w-3.5" />
@@ -620,7 +620,7 @@ function BlockPdfCropViewer({
           </div>
         </div>
       ) : error || !dataUrl ? (
-        <div className="rounded-xl border border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-danger-bg)] px-3 py-2 text-xs text-[var(--pq-danger)] ">
+        <div className="rounded-xl border border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-error-bg)] px-3 py-2 text-xs text-[var(--pq-danger)] ">
           {error || l('未能截取切片图像', 'Failed to crop PDF region')}
         </div>
       ) : (

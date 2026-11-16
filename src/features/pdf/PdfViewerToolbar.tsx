@@ -295,7 +295,7 @@ export function PdfViewerToolbar({
             className={cn(
               'inline-flex items-center rounded-xl border px-3 py-2 text-sm font-medium transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-60',
               hasSelectedEditor && !loading && !saving
-                ? 'border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-danger-bg)] text-[var(--pq-danger)] hover:bg-[var(--pq-danger-bg)] '
+                ? 'border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-error-bg)] text-[var(--pq-danger)] hover:bg-[var(--pq-error-bg)] '
                 : 'border-[var(--pq-border)] bg-white text-[var(--pq-text-faint)] dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:text-[var(--pq-text-faint)]',
             )}
             title={l('删除当前选中的 PDF 批注', 'Delete the selected PDF annotation')}

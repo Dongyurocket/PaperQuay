@@ -161,7 +161,7 @@ export function BlockReparseModal({
           <summary className="cursor-pointer text-[var(--pq-text-muted)]">{l('参考 OCR 文本', 'Reference OCR text')} ({initialText.length})</summary>
           <pre className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap text-[11px] text-[var(--pq-text-muted)] dark:text-[var(--pq-text-muted)]">{initialText || l('无参考文字，将依据图片识别。', 'No reference text; recognition will use the image.')}</pre>
         </details>
-        {(error || storageError) && <div role="alert" className="flex gap-2 whitespace-pre-wrap rounded-xl border border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-danger-bg)] p-3 text-xs text-[var(--pq-danger)] "><AlertCircle className="h-4 w-4 shrink-0" /><span>{error || storageError}</span></div>}
+        {(error || storageError) && <div role="alert" className="flex gap-2 whitespace-pre-wrap rounded-xl border border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-error-bg)] p-3 text-xs text-[var(--pq-danger)] "><AlertCircle className="h-4 w-4 shrink-0" /><span>{error || storageError}</span></div>}
         {reparsedResult && <div className="space-y-2">
           <div className="flex items-center justify-between text-xs">
             <span className="font-semibold text-[var(--pq-success)]">{resultSource === 'image' ? l('图片重析结果', 'Image re-parse result') : l('文本修复结果', 'Text repair result')}</span>

@@ -191,7 +191,7 @@ export function paperToBibtexEntry(
 ): string {
   const dialect: BibDialect = options.dialect ?? 'bibtex';
   const entryType = inferBibtexEntryType(paper);
-  const citationKey = options.citationKey ?? buildCitationKey(paper, usedKeys);
+  const citationKey = options.citationKey ?? paper.citationKey ?? buildCitationKey(paper, usedKeys);
   const fields: Array<[string, string]> = [];
 
   fields.push(['title', escapeBibtexValue(paper.title.trim())]);
@@ -271,6 +271,11 @@ export function paperToBibtexEntry(
   const issn = paper.issn?.trim();
   if (issn) {
     fields.push(['issn', escapeBibtexValue(issn)]);
+  }
+
+  const language = paper.language?.trim();
+  if (language) {
+    fields.push(['language', escapeBibtexValue(language)]);
   }
 
   const doi = paper.doi?.trim();

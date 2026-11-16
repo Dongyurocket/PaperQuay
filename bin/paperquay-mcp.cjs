@@ -435,7 +435,7 @@ const TOOLS = [
         metadata: {
           type: 'object',
           description:
-            'Optional per-file metadata overrides, keyed by the exact source path. Supported keys: title, titleZh, authors (string[]), year, publication, doi, url, abstractText, itemType, publisher, institution, reportNumber, volume, issue, pages, isbn, issn, keywords (string[]), tags (string[]).',
+            'Optional per-file metadata overrides, keyed by the exact source path. Supported keys: title, titleZh, authors (string[]), authorDetails (object[]), year, publication, doi, url, abstractText, itemType, publisher, institution, reportNumber, volume, issue, pages, isbn, issn, language (BCP 47), citationKey, keywords (string[]), tags (string[]). authorDetails takes precedence over authors.',
           additionalProperties: { type: 'object' },
         },
         targetCategoryId: {
@@ -533,7 +533,7 @@ const TOOLS = [
   {
     name: 'update_paper',
     description:
-      'Update bibliographic metadata of an existing paper. Only whitelisted fields are accepted: title, titleZh, authors (string[]), year, publication, doi, url, abstractText, itemType, publisher, institution, reportNumber, volume, issue, pages, isbn, issn, keywords (string[]), tags (string[]), userNote, aiSummary, citation, isFavorite. Unknown fields are rejected. Refused while the desktop app is running unless allowWhileAppRunning is true.',
+      'Update bibliographic metadata of an existing paper. Only whitelisted fields are accepted: title, titleZh, authors (string[]), authorDetails (object[]), year, publication, doi, url, abstractText, itemType, publisher, institution, reportNumber, volume, issue, pages, isbn, issn, language (BCP 47), citationKey, keywords (string[]), tags (string[]), userNote, aiSummary, citation, isFavorite. authorDetails takes precedence over authors when both are provided. Unknown fields are rejected. Refused while the desktop app is running unless allowWhileAppRunning is true.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -541,6 +541,11 @@ const TOOLS = [
         title: { type: 'string' },
         titleZh: { type: 'string', description: 'Chinese title.' },
         authors: { type: 'array', items: { type: 'string' }, description: 'Full author list, replacing the existing one.' },
+        authorDetails: {
+          type: 'array',
+          description: 'Detailed authors, replacing the existing list; takes precedence over authors. Each item accepts name, givenName, familyName, affiliation, and ORCID.',
+          items: { type: 'object' },
+        },
         year: { description: 'Publication year.' },
         publication: { type: 'string' },
         doi: { type: 'string' },
@@ -555,6 +560,8 @@ const TOOLS = [
         pages: { type: 'string' },
         isbn: { type: 'string' },
         issn: { type: 'string' },
+        language: { type: 'string', description: 'Paper language as a BCP 47 tag, for example en or zh-Hans.' },
+        citationKey: { type: 'string', description: 'Optional citation key matching ^[A-Za-z0-9_:\\-.]+$. Empty clears it; duplicate keys are allowed.' },
         keywords: { type: 'array', items: { type: 'string' }, description: 'Full keyword list, replacing the existing one.' },
         tags: { type: 'array', items: { type: 'string' }, description: 'Full tag list, replacing the existing one.' },
         userNote: { type: 'string' },

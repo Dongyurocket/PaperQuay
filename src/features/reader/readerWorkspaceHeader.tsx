@@ -360,7 +360,7 @@ function HeaderToolsMenu({
           className={cn(
             'flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-50',
             action.tone === 'danger'
-              ? 'text-[var(--pq-danger)] hover:bg-[var(--pq-danger-bg)] '
+              ? 'text-[var(--pq-danger)] hover:bg-[var(--pq-error-bg)] '
               : 'text-[var(--pq-text-muted)] hover:bg-[var(--pq-surface-2)] dark:text-[var(--pq-text-muted)] dark:hover:bg-[var(--pq-surface-2)]',
           )}
         >

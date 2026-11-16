@@ -696,7 +696,7 @@ export default function LiteraturePaperList({
                                 : ragStatus === 'ready'
                                   ? 'border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-[var(--pq-accent-bg)] text-[var(--pq-accent)] '
                                   : ragStatus === 'failed'
-                                    ? 'border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-danger-bg)] text-[var(--pq-danger)] '
+                                    ? 'border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-error-bg)] text-[var(--pq-danger)] '
                                     : 'border-[var(--pq-border-strong)] bg-[var(--pq-surface-2)] text-[var(--pq-text-muted)] dark:border-white/10 dark:bg-white/[0.06] dark:text-[#a0a0a0]',
                             )}
                           >

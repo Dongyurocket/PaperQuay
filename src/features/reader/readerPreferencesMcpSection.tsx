@@ -72,7 +72,7 @@ export function ReaderPreferencesMcpSection({
       )}
     >
       {error ? (
-        <div className="rounded-xl border border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-danger-bg)] px-3 py-2 text-xs leading-5 text-[var(--pq-danger)]">
+        <div className="rounded-xl border border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-error-bg)] px-3 py-2 text-xs leading-5 text-[var(--pq-danger)]">
           {error}
         </div>
       ) : null}
