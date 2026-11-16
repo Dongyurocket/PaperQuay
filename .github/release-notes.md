@@ -1,26 +1,25 @@
 # PaperQuay v{{VERSION}}
 
-## Overview shows up without clicking Generate
+## Fix: show MinerU output in Explorer
 
-- Opening a paper now shows its existing overview straight from the local cache. This only reads files and never calls a model, so it works with "Auto Generate Overview" off and without an API key. While the paper content is still loading, the overview already shown in the library appears first.
-- Clicking Generate checks the cache before the model settings. A missing model setting now shows an error without clearing the overview on screen.
-- Opening the reader no longer wipes the cached overview in the library details panel.
-- Select-all batch actions now follow the current knowledge-base filter.
+- 0.4.26's "Open MinerU Output Folder" showed "not found" when the parse result sat next to the PDF. It is now merged with the Markdown item as "Show MinerU Output in Folder": it reveals `full.md`, or `content_list_v2.json` / `content_list.json` / `middle.json` when there is no Markdown, checking both the MinerU cache and the PDF's folder (the latter when "Auto-load sibling JSON" is on).
 
-## Show paper files in Explorer
+## New library toolbar and filters
 
-- Right-click a paper to show its original PDF, translated PDF or Markdown (`full.md`) in Explorer, open its MinerU output folder, or copy the PDF path. Items whose files are missing are greyed out.
-- The new backend command only accepts paths inside library-related folders and only reveals files; it never runs them.
+- One-row toolbar: select-all count, search with a clear button (`Ctrl+F` to focus), a Filter button with a count badge, sort (now with "Recently read"), a View menu (title language, reading heat column, comfortable/compact density), a single primary "Import PDF" button and a "⋯" menu (storage check, refresh). In a library pane narrower than 480px, View options move into "⋯".
+- Combine filters for favorites, read in the last 30 days, read status (unread / reading / finished), publication year range, item type, tags (any of several), has PDF, has translated PDF, missing file, has overview, parsed by MinerU and source. Active filters show as removable chips with "Clear all" and the match count, and are kept after restart.
+- Paging, totals and cross-page select-all follow the filters. Attachment filters check whether files really exist.
+- Status text such as "Library ready" now appears as a toast. Menus and the filter popover support keyboard navigation and visible focus.
 
-## Cleaner buttons
+## Other fixes
 
-- The assistant's "New chat +" button is no longer a solid black block; it matches the neighbouring buttons with an accent-coloured icon. The disabled send button and the reasoning-effort toggle use design tokens.
-- Ten other solid black buttons (export annotated PDF, start reading, add to Q&A, settings actions and more) now use the theme's primary button style.
+- Reading progress and last-read time are saved to the library, so read status and "Recently read" sorting work.
+- Papers imported from Zotero on the desktop keep Zotero as their source.
 
 ## Verification
 
-- `npm run build` passed; `npm test` passed all 997 tests, including 20 new tests for overview auto-loading, file-location resolution and `reveal_path` rejecting out-of-scope paths.
-- Installed-app acceptance is pending installation of this release: cached overview shown on open, right-click reveal of the four file types, and button appearance in light and dark themes.
+- `npm run build` passed; `npm test` passed all 1018 tests, including 21 new tests for filter state, SQL/JS filter parity, attachment checks, reading-progress write-back and MinerU output location.
+- Installed-app acceptance is pending installation of this release: revealing MinerU output, combined filters with cross-page select-all, filters kept after restart, read status and recent-read sorting, and toolbar/popover appearance in light and dark themes.
 
 ## Windows release scope
 
@@ -30,27 +29,26 @@ Download the Windows x64 `.exe` installer from Assets. `stable.yml` and `.blockm
 
 ---
 
-## 概览无需再点「生成」
+## 修复：在资源管理器中显示 MinerU 结果
 
-- 打开论文时，已有概览直接从本地缓存显示。这一步只读文件、不调用模型，关闭「自动生成概览」或未配置 API Key 时同样有效；正文尚未加载时，先显示文库里已有的概览。
-- 点击生成时先读缓存再检查模型配置；缺少配置只提示错误，不清空已显示的概览。
-- 打开阅读器不再清掉文库详情里已缓存的概览。
-- 全选后的批量操作按当前知识库筛选执行。
+- 0.4.26 的「打开 MinerU 结果文件夹」在解析结果位于 PDF 同目录时显示「未找到」。现与 Markdown 项合并为「在文件夹中显示 MinerU 结果」：优先定位 `full.md`，没有时定位 `content_list_v2.json`、`content_list.json` 或 `middle.json`；同时检查 MinerU 缓存目录和 PDF 同目录（后者需启用「自动加载同目录 JSON」）。
 
-## 在资源管理器中显示文献文件
+## 文库顶栏与筛选
 
-- 在文献上右键，可显示原始 PDF、译版 PDF、Markdown（`full.md`），打开 MinerU 结果文件夹，或复制 PDF 路径。文件不存在的项置灰。
-- 新增的后端命令只接受文库相关目录内的路径，只定位、不执行文件。
+- 顶栏改为单行：全选计数、带清除按钮的搜索（`Ctrl+F` 聚焦）、带数量角标的「筛选」、排序（新增「最近阅读」）、视图菜单（标题语言、阅读热力列、舒适／紧凑密度）、唯一主按钮「导入 PDF」和「⋯」（存储体检、刷新）。文库面板窄于 480px 时，视图选项并入「⋯」。
+- 可组合筛选：收藏、最近 30 天阅读、阅读状态（未读／在读／已读完）、出版年份范围、文献类型、标签（多选，任一匹配）、有 PDF、有译版 PDF、文件缺失、有概览、MinerU 已解析、来源。生效条件显示为可单独移除的标签，附「清除全部」和匹配数，重启后保留。
+- 分页、总数和跨页全选与筛选结果一致；附件相关筛选会检查文件是否真实存在。
+- 「文献库已就绪」等状态文字改为 toast；菜单和筛选弹层支持键盘操作并显示焦点。
 
-## 按钮样式统一
+## 其他修复
 
-- 助手栏「新建会话 +」不再是实心黑块，改为与相邻按钮一致、图标为主题色的透明按钮；发送按钮禁用态和推理强度按钮改用设计令牌。
-- 其余 10 处黑底按钮（导出批注 PDF、进入阅读、加入问答、设置页操作等）统一为主题主按钮样式。
+- 阅读进度和最近阅读时间写回文库，阅读状态筛选与「最近阅读」排序随之生效。
+- 桌面端从 Zotero 导入的文献保留来源为 Zotero。
 
 ## 验证
 
-- `npm run build` 通过；`npm test` 全部 997 项通过，含概览自动加载、文件位置解析和 `reveal_path` 越界拒绝等 20 项新测试。
-- 安装版验收待安装此版本后完成：打开即显示缓存概览、右键定位四类文件、日夜主题下的按钮观感。
+- `npm run build` 通过；`npm test` 全部 1018 项通过，含筛选状态、SQL／JS 筛选一致性、附件检查、阅读进度写回和 MinerU 结果定位等 21 项新测试。
+- 安装版验收待安装此版本后完成：定位 MinerU 结果、组合筛选与跨页全选、重启后筛选恢复、阅读状态与最近阅读排序、浅深主题下的顶栏和弹层。
 
 ## Windows 发布范围
 
