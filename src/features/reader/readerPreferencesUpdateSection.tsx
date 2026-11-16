@@ -261,10 +261,10 @@ export function ReaderPreferencesUpdateSection({
             type="button"
             onClick={handleCheck}
             disabled={checking || downloading || installing}
-            className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-60 dark:bg-[var(--pq-accent-button-bg)] dark:text-[var(--pq-accent-button-text)]"
+            className="pq-button-primary px-4 py-2 text-sm"
           >
             <RefreshCw
-              className={checking ? 'mr-2 inline h-4 w-4 animate-spin' : 'mr-2 inline h-4 w-4'}
+              className={checking ? 'h-4 w-4 animate-spin' : 'h-4 w-4'}
               strokeWidth={1.8}
             />
             {checking ? l('检查中...', 'Checking...') : l('检查更新', 'Check for Updates')}

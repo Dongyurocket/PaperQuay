@@ -114,6 +114,7 @@ import {
   type ZoteroImportRequestEventDetail,
 } from './libraryEvents';
 import { useDesktopPdfDrop } from './useDesktopPdfDrop';
+import { usePaperFileLocationMenu } from './usePaperFileLocationMenu';
 import {
   categorySignature,
   clampDetailsPanelWidth,
@@ -587,7 +588,7 @@ export default function LiteratureLibraryView({
       const paper = found.get(id);
       return paper ? [paper] : [];
     });
-  }, [demoLibrary, paperSort.sortBy, paperSort.sortDirection, searchQuery, selectedCategoryId]);
+  }, [demoLibrary, paperSort.sortBy, paperSort.sortDirection, ragMembershipFilter, searchQuery, selectedCategoryId]);
 
   const resolveDemoPapers = useCallback(
     (nextCategoryId = selectedCategoryId) => {
@@ -2989,6 +2990,14 @@ export default function LiteratureLibraryView({
     await assignPaperToCategory(paperId, category);
   };
 
+  const paperFileLocationEntries = usePaperFileLocationMenu({
+    paper: paperContextMenu?.paper ?? null,
+    storageDir: libraryStorageDir,
+    mineruCacheDir,
+    autoLoadSiblingJson,
+    l,
+  });
+
   const paperContextMenuEntries = (): MenuEntry[] => {
     if (!paperContextMenu) {
       return [];
@@ -3061,6 +3070,8 @@ export default function LiteratureLibraryView({
         onSelect: handleIndexPaperRagFromContextMenu,
       });
     }
+
+    entries.push(...paperFileLocationEntries);
 
     entries.push(
       { type: 'separator', id: 'delete-paper-separator' },
@@ -3421,6 +3432,7 @@ export default function LiteratureLibraryView({
           title={paperContextMenu.paper.title}
           entries={paperContextMenuEntries()}
           onClose={() => setPaperContextMenu(null)}
+          width={264}
         />
       ) : null}
 

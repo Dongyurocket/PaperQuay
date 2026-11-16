@@ -1103,7 +1103,7 @@ export function ChatWorkspacePanel({
                 aria-expanded={historyOpen}
                 className={cn(
                   'pq-icon-button h-8 w-8',
-                  historyOpen && 'bg-[var(--pq-accent-soft)] text-[var(--pq-accent)]',
+                  historyOpen && '!bg-[var(--pq-accent-soft)] !text-[var(--pq-accent)]',
                 )}
               >
                 <MessageSquareText className="h-3.5 w-3.5" strokeWidth={1.9} />
@@ -1113,7 +1113,7 @@ export function ChatWorkspacePanel({
                 onClick={handleCreateSessionClick}
                 title={l('新建会话', 'New Chat')}
                 aria-label={l('新建会话', 'New Chat')}
-                className="pq-icon-button h-8 w-8 shrink-0 border border-[var(--pq-border)] bg-slate-950 text-white shadow-[0_8px_18px_rgba(15,23,42,0.14)] hover:bg-slate-800 dark:bg-white dark:text-slate-950"
+                className="pq-icon-button h-8 w-8 shrink-0 !text-[var(--pq-accent)] hover:!bg-[var(--pq-accent-soft)] hover:!text-[var(--pq-accent-hover)]"
               >
                 <Plus className="h-3.5 w-3.5" strokeWidth={1.9} />
               </button>
@@ -1644,7 +1644,7 @@ export function ChatWorkspacePanel({
                                 'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm transition disabled:cursor-not-allowed disabled:opacity-50',
                                 active
                                   ? 'bg-[var(--pq-accent-soft)] text-[var(--pq-accent)]'
-                                  : 'text-[var(--pq-text-muted)] hover:bg-white/70 hover:text-[var(--pq-text)]',
+                                  : 'text-[var(--pq-text-muted)] hover:bg-[var(--pq-hover)] hover:text-[var(--pq-text)]',
                               )}
                             >
                               {'key' in action && action.key === 'screenshot' && screenshotLoading ? (
@@ -1700,7 +1700,7 @@ export function ChatWorkspacePanel({
                 title={selectedSessionRunning ? l('回复中', 'Replying') : l('发送', 'Send')}
                 aria-label={selectedSessionRunning ? l('回复中', 'Replying') : l('发送', 'Send')}
                 className={cn(
-                  'pq-button-primary shrink-0 text-sm disabled:cursor-not-allowed',
+                  'pq-button-primary shrink-0 text-sm disabled:cursor-not-allowed disabled:!bg-[var(--pq-surface-3)] disabled:!text-[var(--pq-text-faint)] disabled:!opacity-100',
                   compactComposer ? 'h-10 w-10 rounded-full px-0' : 'h-11 px-4',
                 )}
               >

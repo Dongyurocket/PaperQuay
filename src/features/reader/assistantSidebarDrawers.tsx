@@ -304,7 +304,7 @@ function NotesDrawerContent({
               type="button"
               onClick={onAppendSelectedExcerptToNote}
               disabled={!selectedExcerpt}
-              className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-60"
+              className="pq-button-primary px-4 py-2 text-sm"
             >
               {l('插入选中文本', 'Insert Selection')}
             </button>

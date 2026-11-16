@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -53,5 +53,110 @@ test('paths_exist rejects non-array payloads', async () => {
     await assert.rejects(() => commands.paths_exist({ paths: 'not-an-array' }));
   } finally {
     rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+function createRevealCommands(options: { papers?: unknown[] } = {}) {
+  const dataDir = mkdtempSync(path.join(tmpdir(), 'paperquay-reveal-test-'));
+  const calls: { showItemInFolder: string[]; openPath: string[] } = { showItemInFolder: [], openPath: [] };
+  const commands = createFileCommands({
+    appPaths: {
+      dataDir,
+      configPath: path.join(dataDir, '.settings', 'paperquay.config.json'),
+      mineruCacheDir: path.join(dataDir, '.mineru-cache'),
+      remotePdfDownloadDir: path.join(dataDir, '.downloads', 'pdfs'),
+    },
+    approvedWritePaths: new Set(),
+    store: { load: () => ({ settings: { storageDir: path.join(dataDir, 'paperquay-data') }, papers: options.papers ?? [] }) },
+    shell: {
+      showItemInFolder: (target: string) => { calls.showItemInFolder.push(target); },
+      openPath: async (target: string) => { calls.openPath.push(target); return ''; },
+    },
+  });
+
+  return { commands, dataDir, calls };
+}
+
+test('reveal_path shows files inside library roots in the file manager', async () => {
+  const { commands, dataDir, calls } = createRevealCommands();
+
+  try {
+    const storageDir = path.join(dataDir, 'paperquay-data');
+    mkdirSync(storageDir, { recursive: true });
+    const pdfPath = path.join(storageDir, 'paper.pdf');
+    writeFileSync(pdfPath, '%PDF');
+
+    assert.deepEqual(await commands.reveal_path({ path: pdfPath }), { ok: true, kind: 'file' });
+    assert.deepEqual(calls.showItemInFolder, [path.resolve(pdfPath)]);
+  } finally {
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('reveal_path opens directories such as the MinerU cache folder', async () => {
+  const { commands, dataDir, calls } = createRevealCommands();
+
+  try {
+    const mineruDir = path.join(dataDir, '.mineru-cache', 'document-abc');
+    mkdirSync(mineruDir, { recursive: true });
+
+    assert.deepEqual(await commands.reveal_path({ path: mineruDir }), { ok: true, kind: 'directory' });
+    assert.deepEqual(calls.openPath, [path.resolve(mineruDir)]);
+    assert.deepEqual(calls.showItemInFolder, []);
+  } finally {
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('reveal_path reports missing files without touching the shell', async () => {
+  const { commands, dataDir, calls } = createRevealCommands();
+
+  try {
+    const missing = path.join(dataDir, 'paperquay-data', 'missing.pdf');
+    assert.deepEqual(await commands.reveal_path({ path: missing }), { ok: false, reason: 'missing' });
+    assert.deepEqual(calls.showItemInFolder, []);
+  } finally {
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('reveal_path allows the folder of an attachment original path outside library roots', async () => {
+  const outsideDir = mkdtempSync(path.join(tmpdir(), 'paperquay-reveal-outside-'));
+  const originalPdf = path.join(outsideDir, 'original.pdf');
+  writeFileSync(originalPdf, '%PDF');
+  writeFileSync(path.join(outsideDir, 'full.md'), '# md');
+  const { commands, dataDir, calls } = createRevealCommands({
+    papers: [{ id: 'p1', attachments: [{ originalPath: originalPdf, storedPath: path.join(outsideDir, 'stored', 'x.pdf') }] }],
+  });
+
+  try {
+    assert.deepEqual(await commands.reveal_path({ path: originalPdf }), { ok: true, kind: 'file' });
+    // 与原始 PDF 同目录的 MinerU 输出（autoLoadSiblingJson 场景）也可定位。
+    assert.deepEqual(await commands.reveal_path({ path: path.join(outsideDir, 'full.md') }), { ok: true, kind: 'file' });
+    assert.equal(calls.showItemInFolder.length, 2);
+  } finally {
+    rmSync(dataDir, { recursive: true, force: true });
+    rmSync(outsideDir, { recursive: true, force: true });
+  }
+});
+
+test('reveal_path rejects paths outside allowed roots and empty input', async () => {
+  const outsideDir = mkdtempSync(path.join(tmpdir(), 'paperquay-reveal-denied-'));
+  const outsideFile = path.join(outsideDir, 'secret.txt');
+  writeFileSync(outsideFile, 'x');
+  const { commands, dataDir, calls } = createRevealCommands();
+
+  try {
+    await assert.rejects(() => commands.reveal_path({ path: outsideFile }), /not allowed/);
+    // 用 .. 绕出根目录同样被拒绝。
+    await assert.rejects(
+      () => commands.reveal_path({ path: path.join(dataDir, 'paperquay-data', '..', '..', path.basename(outsideDir), 'secret.txt') }),
+      /not allowed/,
+    );
+    await assert.rejects(() => commands.reveal_path({ path: '' }), /empty/);
+    assert.deepEqual(calls.showItemInFolder, []);
+  } finally {
+    rmSync(dataDir, { recursive: true, force: true });
+    rmSync(outsideDir, { recursive: true, force: true });
   }
 });

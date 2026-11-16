@@ -307,12 +307,12 @@ export function PdfViewerToolbar({
             type="button"
             onClick={() => void onSave()}
             disabled={saving || loading}
-            className="inline-flex items-center rounded-xl bg-slate-900 px-3 py-2 text-sm font-medium text-white transition-all duration-200 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-[var(--pq-accent-button-bg)] dark:text-[var(--pq-accent-button-text)] dark:hover:bg-[var(--pq-accent-button-bg-hover)]"
+            className="pq-button-primary px-3 py-2 text-sm disabled:cursor-not-allowed"
           >
             {saving ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" strokeWidth={1.8} />
+              <Loader2 className="h-4 w-4 animate-spin" strokeWidth={1.8} />
             ) : (
-              <Download className="mr-2 h-4 w-4" strokeWidth={1.8} />
+              <Download className="h-4 w-4" strokeWidth={1.8} />
             )}
             {saving ? l('正在导出...', 'Exporting...') : l('导出批注 PDF', 'Export Annotated PDF')}
           </button>

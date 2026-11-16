@@ -223,6 +223,12 @@ import {
   loadMineruMarkdownDocument,
   resolveMineruMarkdownCandidatePaths,
 } from './documentReaderSummarySource';
+import {
+  previewSummarySyncField,
+  resolveSummaryModelConfigIssue,
+  shouldAutoLoadCachedSummary,
+  shouldUsePreviewSummaryFallback,
+} from './paperSummaryAutoLoad';
 import { buildReaderAssistantSidebarProps } from './readerAssistantSidebarProps';
 import { RagChunkContextPreview } from './RagChunkContextPreview';
 import { formatReaderDocumentSource } from './readerWorkspaceShared';
@@ -272,6 +278,8 @@ interface DocumentReaderTabProps {
   notePaperCandidates?: LiteraturePaper[];
   pendingNoteAnchorJump?: JumpToNoteAnchorEventDetail | null;
   translationSnapshot?: ReaderDocumentTranslationSnapshot | null;
+  /** 文库侧已加载的同一文档概览；阅读器尚无概览时先行显示。 */
+  libraryPreviewSummary?: PaperSummary | null;
 }
 
 
@@ -287,6 +295,7 @@ function DocumentReaderTab({
   notePaperCandidates = [],
   pendingNoteAnchorJump = null,
   translationSnapshot = null,
+  libraryPreviewSummary = null,
 }: DocumentReaderTabProps) {
   const {
     embeddingApiKey,
@@ -371,6 +380,8 @@ function DocumentReaderTab({
   const selectedQaPresetIdRef = useRef(selectedQaPresetId);
   const autoTranslatedSelectionKeyRef = useRef('');
   const autoSummarySourceKeyRef = useRef('');
+  const cachedSummaryAttemptKeyRef = useRef('');
+  const cachedSummaryRequestIdRef = useRef(0);
   const pendingHistoryActiveBlockIdRef = useRef<string | null>(null);
   const pdfTextCacheRef = useRef<{
     key: string;
@@ -898,7 +909,8 @@ function DocumentReaderTab({
       currentJsonName,
       statusMessage,
       sourceKey: libraryPreviewSourceKey,
-      summary: paperSummary,
+      // 暂无概览时不带 summary 字段，避免用 null 覆盖文库侧已缓存的概览。
+      ...previewSummarySyncField(paperSummary),
     };
 
     if (libraryOperation) {
@@ -945,6 +957,8 @@ function DocumentReaderTab({
     setPaperSummarySourceKey('');
     setLibraryOperation(null);
     autoSummarySourceKeyRef.current = '';
+    cachedSummaryAttemptKeyRef.current = '';
+    cachedSummaryRequestIdRef.current += 1;
     setSelectedAnnotationId(null);
     setCapturingScreenshot(false);
     setSelectedExcerpt(null);
@@ -2178,7 +2192,6 @@ function DocumentReaderTab({
       }
 
       if (settings.summarySourceMode === 'mineru-markdown' && summaryBlockInputs.length === 0) {
-        setPaperSummary(null);
         const message = lRef.current(
           '请先加载 MinerU JSON，再基于 MinerU Markdown 生成概览。',
           'Load a MinerU JSON file before generating an overview from MinerU Markdown.',
@@ -2189,80 +2202,79 @@ function DocumentReaderTab({
         return;
       }
 
-      if (!summaryModelPreset || !summaryModelPreset.baseUrl.trim()) {
-        setPaperSummary(null);
-        const message = lRef.current(
-          '请先在设置中填写概览模型的 OpenAI 兼容 Base URL。',
-          'Configure the overview model OpenAI-compatible Base URL in Settings first.',
-        );
-        setPaperSummaryError(message);
-        setStatusMessage(lRef.current('缺少概览接口 Base URL', 'Missing overview Base URL'));
-        updateLibraryOperation('overview', 'error', message, 100, 100);
-
-        if (openPreferencesOnMissingKey) {
-          onOpenPreferences();
-        }
-
-        return;
-      }
-
-      if (!summaryModelPreset || !summaryModelPreset.apiKey.trim()) {
-        setStatusMessage(lRef.current('缺少概览接口 API Key', 'Missing overview API key'));
-        setPaperSummary(null);
-        const message = lRef.current(
-          '请先在设置中填写概览模型的 API Key。',
-          'Configure the overview model API key in Settings first.',
-        );
-        setPaperSummaryError(message);
-        updateLibraryOperation('overview', 'error', message, 100, 100);
-
-        if (openPreferencesOnMissingKey) {
-          onOpenPreferences();
-        }
-
-        return;
-      }
-
-      if (!summaryModelPreset || !summaryModelPreset.model.trim()) {
-        setPaperSummary(null);
-        const message = lRef.current(
-          '请先在设置中填写概览模型名称。',
-          'Configure the overview model name in Settings first.',
-        );
-        setPaperSummaryError(message);
-        setStatusMessage(lRef.current('缺少概览模型名称', 'Missing overview model name'));
-        updateLibraryOperation('overview', 'error', message, 100, 100);
-
-        if (openPreferencesOnMissingKey) {
-          onOpenPreferences();
-        }
-
-        return;
-      }
-
       const requestId = summaryRequestIdRef.current + 1;
       summaryRequestIdRef.current = requestId;
+      // 主动生成会接管被动读缓存，丢弃仍在途的被动结果。
+      cachedSummaryRequestIdRef.current += 1;
 
       setPaperSummaryLoading(true);
       setPaperSummaryError('');
-      const runningMessage = lRef.current('正在生成论文概览…', 'Generating the paper overview...');
-      setStatusMessage(runningMessage);
-      updateLibraryOperation('overview', 'running', runningMessage, 25, 100);
 
       try {
-        const summaryRequest = await resolveSummaryRequest();
-        const cachedSummary = await tryLoadSavedSummary(currentDocument, paperSummaryNextSourceKey);
+        // 先读本地缓存：命中时不需要模型配置，也不必抽取正文。
+        const cachedSummary = paperSummaryNextSourceKey.trim()
+          ? await tryLoadSavedSummary(currentDocument, paperSummaryNextSourceKey)
+          : null;
+
+        if (summaryRequestIdRef.current !== requestId) {
+          return;
+        }
 
         if (cachedSummary) {
-          if (summaryRequestIdRef.current !== requestId) {
-            return;
-          }
-
           setPaperSummary(cachedSummary);
           setPaperSummarySourceKey(paperSummaryNextSourceKey);
           const successMessage = lRef.current('已从本地缓存恢复论文概览', 'Restored the paper overview from the local cache');
           setStatusMessage(successMessage);
           updateLibraryOperation('overview', 'success', successMessage, 100, 100);
+          return;
+        }
+
+        const configIssue = resolveSummaryModelConfigIssue(summaryModelPreset);
+
+        if (configIssue || !summaryModelPreset) {
+          const configMessages = {
+            'base-url': {
+              message: lRef.current(
+                '请先在设置中填写概览模型的 OpenAI 兼容 Base URL。',
+                'Configure the overview model OpenAI-compatible Base URL in Settings first.',
+              ),
+              status: lRef.current('缺少概览接口 Base URL', 'Missing overview Base URL'),
+            },
+            'api-key': {
+              message: lRef.current(
+                '请先在设置中填写概览模型的 API Key。',
+                'Configure the overview model API key in Settings first.',
+              ),
+              status: lRef.current('缺少概览接口 API Key', 'Missing overview API key'),
+            },
+            model: {
+              message: lRef.current(
+                '请先在设置中填写概览模型名称。',
+                'Configure the overview model name in Settings first.',
+              ),
+              status: lRef.current('缺少概览模型名称', 'Missing overview model name'),
+            },
+          } as const;
+          const { message, status } = configMessages[configIssue ?? 'base-url'];
+          // 不清空已显示的概览：缺配置只说明无法重新生成。
+          setPaperSummaryError(message);
+          setStatusMessage(status);
+          updateLibraryOperation('overview', 'error', message, 100, 100);
+
+          if (openPreferencesOnMissingKey) {
+            onOpenPreferences();
+          }
+
+          return;
+        }
+
+        const runningMessage = lRef.current('正在生成论文概览…', 'Generating the paper overview...');
+        setStatusMessage(runningMessage);
+        updateLibraryOperation('overview', 'running', runningMessage, 25, 100);
+
+        const summaryRequest = await resolveSummaryRequest();
+
+        if (summaryRequestIdRef.current !== requestId) {
           return;
         }
 
@@ -4180,6 +4192,68 @@ function DocumentReaderTab({
     setQaRagEnabled(true);
     void openDocumentItem();
   }, [document.attachmentKey, document.workspaceId, openDocumentItem]);
+
+  // 文库侧已有概览时先显示，正文就绪后再由下方被动读缓存校正为精确匹配的结果。
+  useEffect(() => {
+    if (
+      !shouldUsePreviewSummaryFallback({
+        currentSummary: paperSummary,
+        previewSummary: libraryPreviewSummary,
+        loading: paperSummaryLoading,
+      }) ||
+      !libraryPreviewSummary
+    ) {
+      return;
+    }
+
+    setPaperSummary(libraryPreviewSummary);
+  }, [libraryPreviewSummary, paperSummary, paperSummaryLoading]);
+
+  // 打开论文即读取本地概览缓存：只读盘、不调用模型，与「自动生成概览」开关无关。
+  // 必须声明在自动生成 effect 之前，同一次提交里先启动被动读取，再由主动生成接管。
+  useEffect(() => {
+    if (
+      !currentDocument ||
+      !shouldAutoLoadCachedSummary({
+        sourceKey: paperSummaryNextSourceKey,
+        currentSourceKey: paperSummarySourceKey,
+        attemptedSourceKey: cachedSummaryAttemptKeyRef.current,
+        loading: paperSummaryLoading,
+        taskRunning: isPaperTaskRunning(libraryOperation, 'overview'),
+      })
+    ) {
+      return;
+    }
+
+    const sourceKey = paperSummaryNextSourceKey;
+    const generationAtStart = summaryRequestIdRef.current;
+    const requestId = cachedSummaryRequestIdRef.current + 1;
+    cachedSummaryRequestIdRef.current = requestId;
+    cachedSummaryAttemptKeyRef.current = sourceKey;
+
+    void tryLoadSavedSummary(currentDocument, sourceKey)
+      .then((cachedSummary) => {
+        if (
+          !cachedSummary ||
+          cachedSummaryRequestIdRef.current !== requestId ||
+          summaryRequestIdRef.current !== generationAtStart
+        ) {
+          return;
+        }
+
+        setPaperSummary(cachedSummary);
+        setPaperSummarySourceKey(sourceKey);
+        setPaperSummaryError('');
+      })
+      .catch(() => undefined);
+  }, [
+    currentDocument,
+    libraryOperation,
+    paperSummaryLoading,
+    paperSummaryNextSourceKey,
+    paperSummarySourceKey,
+    tryLoadSavedSummary,
+  ]);
 
   useEffect(() => {
     if (!currentDocument || !paperSummaryNextSourceKey) {

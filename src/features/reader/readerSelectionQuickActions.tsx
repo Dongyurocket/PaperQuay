@@ -410,7 +410,7 @@ export function SelectionQuickActions({
           <button
             type="button"
             onClick={onAppendSelectedExcerptToQa}
-            className="inline-flex items-center rounded-xl bg-slate-900 px-3 py-2 text-sm font-medium text-white transition-all duration-200 hover:bg-slate-800"
+            className="pq-button-primary px-3 py-2 text-sm"
           >
             {l('加入问答', 'Add to QA')}
           </button>

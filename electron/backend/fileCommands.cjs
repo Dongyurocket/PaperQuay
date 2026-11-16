@@ -110,8 +110,17 @@ async function hasLooseMineruOutputFiles(directory) {
   }
 }
 
+function isWithinRoot(absolutePath, root) {
+  const comparableAbsolute = comparablePath(absolutePath);
+  const comparableRoot = comparablePath(root);
+  const rootWithSep = comparableRoot.endsWith(path.sep) ? comparableRoot : `${comparableRoot}${path.sep}`;
+  return comparableAbsolute === comparableRoot || comparableAbsolute.startsWith(rootWithSep);
+}
+
 function createFileCommands(context) {
   const { appPaths, approvedWritePaths, store } = context;
+  // 测试可注入 shell；运行时使用 Electron 的 shell。
+  const shellApi = context.shell ?? shell;
   const configuredMineruCacheDir = cleanString(
     readJson(appPaths.configPath, null)?.settings?.mineruCacheDir,
   );
@@ -160,6 +169,40 @@ function createFileCommands(context) {
     }
 
     throw new Error(`Writing to this path is not allowed until approved: ${filePath}`);
+  }
+
+  /**
+   * 「在文件夹中显示」允许的范围：应用数据、文库存储、译版目录、MinerU 缓存、
+   * 远程下载目录、已批准的写入路径，以及文库附件（原始/存储路径）所在目录。
+   * 只做定位，不执行文件；范围外路径一律拒绝。
+   */
+  function isRevealAllowed(absolutePath) {
+    const library = typeof store?.load === 'function' ? store.load() ?? {} : {};
+    const settings = library.settings ?? {};
+    const configuredCacheDir = cleanString(readJson(appPaths.configPath, null)?.settings?.mineruCacheDir);
+    const roots = [
+      appPaths.dataDir,
+      settings.storageDir || (appPaths.dataDir ? path.join(appPaths.dataDir, 'paperquay-data') : ''),
+      settings.translatedPdfDir,
+      appPaths.mineruCacheDir,
+      configuredCacheDir,
+      appPaths.remotePdfDownloadDir,
+      ...approvedWritePaths,
+    ];
+
+    for (const paper of Array.isArray(library.papers) ? library.papers : []) {
+      for (const attachment of Array.isArray(paper?.attachments) ? paper.attachments : []) {
+        for (const attachmentPath of [attachment?.originalPath, attachment?.storedPath]) {
+          const cleaned = cleanString(attachmentPath);
+          if (cleaned) roots.push(path.dirname(path.resolve(cleaned)));
+        }
+      }
+    }
+
+    return roots
+      .map((root) => cleanString(root))
+      .filter(Boolean)
+      .some((root) => isWithinRoot(absolutePath, path.resolve(root)));
   }
 
   async function selectFiles(properties, filters, event) {
@@ -401,6 +444,37 @@ function createFileCommands(context) {
           .slice(0, 10000)
           .map((candidate) => (typeof candidate === 'string' && candidate ? pathExists(candidate) : false)),
       );
+    },
+
+    // 在系统文件管理器中定位文件或打开目录；只接受文库相关目录内的路径。
+    async reveal_path({ path: targetPath }) {
+      const trimmed = cleanString(targetPath);
+      if (!trimmed) throw new Error('Path cannot be empty');
+
+      const absolutePath = path.resolve(trimmed);
+      if (!isRevealAllowed(absolutePath)) {
+        throw new Error(`Revealing this path is not allowed: ${trimmed}`);
+      }
+
+      let stat;
+      try {
+        stat = await fsp.stat(absolutePath);
+      } catch (error) {
+        if (error?.code === 'ENOENT' || error?.code === 'ENOTDIR') {
+          return { ok: false, reason: 'missing' };
+        }
+        throw error;
+      }
+
+      if (stat.isDirectory()) {
+        const message = await shellApi.openPath(absolutePath);
+        return message
+          ? { ok: false, reason: 'error', message }
+          : { ok: true, kind: 'directory' };
+      }
+
+      shellApi.showItemInFolder(absolutePath);
+      return { ok: true, kind: 'file' };
     },
 
     async read_text_file({ path: filePath }) {

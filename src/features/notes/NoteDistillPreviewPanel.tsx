@@ -156,7 +156,7 @@ export function NoteDistillPreviewPanel({
                 <button type="button" onClick={onDirectSave} className="rounded-lg border border-[var(--pq-border-strong)] bg-white px-3 py-2 text-sm font-medium text-[var(--pq-text-muted)] hover:bg-[var(--pq-surface-2)]">
                   {l('直接保存', 'Save directly')}
                 </button>
-                <button type="button" onClick={onConfirm} disabled={!state.distilledText.trim()} className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50">
+                <button type="button" onClick={onConfirm} disabled={!state.distilledText.trim()} className="pq-button-primary px-3 py-2 text-sm">
                   <Check className="h-4 w-4" />
                   {l('确认并写入', 'Confirm and save')}
                 </button>

@@ -119,10 +119,10 @@ export function ReaderWorkspaceOverview({
                 <button
                   type="button"
                   onClick={onEnterReading}
-                  className="inline-flex items-center rounded-2xl bg-slate-900 px-4 py-2.5 text-sm font-medium text-white transition-all duration-200 hover:bg-slate-800"
+                  className="pq-button-primary px-4 py-2.5 text-sm"
                 >
                   {l('进入阅读', 'Start Reading')}
-                  <ArrowRight className="ml-2 h-4 w-4" strokeWidth={1.8} />
+                  <ArrowRight className="h-4 w-4" strokeWidth={1.8} />
                 </button>
                 <button
                   type="button"

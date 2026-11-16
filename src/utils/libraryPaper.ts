@@ -29,7 +29,7 @@ function joinStorageRelativePath(storageDir: string, relativePath: string): stri
     : normalizedRelativePath;
 }
 
-function resolveAttachmentPdfPath(
+export function resolveAttachmentPdfPath(
   attachment: LiteratureAttachment,
   options: ResolvePaperPdfAttachmentOptions = {},
 ): string {

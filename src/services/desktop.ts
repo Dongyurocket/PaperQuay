@@ -210,6 +210,19 @@ export async function approveWritePath(path: string): Promise<void> {
   }
 }
 
+export type RevealLocalPathResult =
+  | { ok: true; kind: 'file' | 'directory' }
+  | { ok: false; reason: 'missing' | 'error'; message?: string };
+
+/** 在系统文件管理器中定位文件（目录则直接打开）；仅限文库相关目录。 */
+export async function revealLocalPath(path: string): Promise<RevealLocalPathResult> {
+  try {
+    return await invoke<RevealLocalPathResult>('reveal_path', { path });
+  } catch (error) {
+    throw new Error(toErrorMessage(error, `Failed to reveal path: ${path}`));
+  }
+}
+
 export async function localPathExists(path: string): Promise<boolean> {
   try {
     return await invoke<boolean>('path_exists', { path });

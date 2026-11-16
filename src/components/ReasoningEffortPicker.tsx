@@ -232,11 +232,11 @@ export function ReasoningEffortPicker({
         aria-haspopup="menu"
         aria-expanded={open}
         className={cn(
-          'pq-icon-button border bg-white/60',
+          'pq-icon-button border',
           compact ? 'h-8 w-8' : 'h-10 w-10',
           value === 'auto'
-            ? 'border-[var(--pq-border)] text-[var(--pq-text-faint)] dark:bg-white/5 dark:text-[var(--pq-text-faint)]'
-            : 'border-[color-mix(in_srgb,var(--pq-success)_28%,transparent)] bg-[var(--pq-success-bg)] text-[var(--pq-success)] shadow-[0_0_0_3px_rgba(16,185,129,0.12)] ',
+            ? 'border-[var(--pq-border)] bg-[var(--pq-surface-1)] text-[var(--pq-text-faint)]'
+            : 'border-[var(--pq-accent-border)] !bg-[var(--pq-accent-soft)] !text-[var(--pq-accent)] shadow-[0_0_0_3px_var(--pq-accent-ring)]',
         )}
       >
         <Brain className="h-4 w-4" strokeWidth={1.8} />

@@ -632,7 +632,7 @@ export function ReaderPreferencesContent({
                   type="button"
                   onClick={onReloadLocalZotero}
                   disabled={libraryLoading}
-                  className="rounded-xl bg-slate-900 px-3 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-60"
+                  className="pq-button-primary px-3 py-2 text-sm"
                 >
                   {l('重新读取', 'Reload')}
                 </button>
@@ -1055,7 +1055,7 @@ export function ReaderPreferencesContent({
                   type="button"
                   onClick={onBatchMineruParse}
                   disabled={batchMineruRunning}
-                  className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-60"
+                  className="pq-button-primary px-4 py-2 text-sm"
                 >
                   {batchMineruRunning
                     ? l('处理中...', 'Processing...')
@@ -1381,7 +1381,7 @@ export function ReaderPreferencesContent({
                   'rounded-xl px-4 py-2 text-sm font-medium text-white transition disabled:opacity-60',
                   translating
                     ? 'bg-[var(--pq-danger-button-bg)] hover:bg-[var(--pq-danger-button-bg-hover)]'
-                    : 'bg-slate-900 hover:bg-slate-800',
+                    : 'bg-[var(--pq-accent-button-bg)] text-[var(--pq-accent-button-text)] hover:bg-[var(--pq-accent-button-bg-hover)]',
                 )}
               >
                 <Languages className="mr-2 inline h-4 w-4" strokeWidth={1.8} />

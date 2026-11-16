@@ -914,7 +914,7 @@ function BlockViewer({
                   className={cn(
                     'rounded-full px-3 py-1.5 font-medium transition-all duration-200',
                     selected
-                      ? 'bg-slate-900 text-white dark:bg-[var(--pq-accent-button-bg)] dark:text-[var(--pq-accent-button-text)]'
+                      ? 'bg-[var(--pq-accent-soft)] text-[var(--pq-accent)] shadow-[inset_0_0_0_1px_var(--pq-accent-border)]'
                       : 'text-[var(--pq-text-muted)] hover:bg-[var(--pq-surface-2)] dark:text-[var(--pq-text-muted)] dark:hover:bg-[var(--pq-surface-3)]',
                     option.disabled &&
                       'cursor-not-allowed opacity-45 hover:bg-transparent dark:hover:bg-transparent',

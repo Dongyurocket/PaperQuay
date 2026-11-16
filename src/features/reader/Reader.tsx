@@ -1060,6 +1060,7 @@ function Reader({ workspaceActive = true }: ReaderProps) {
                     }
                     translationTargetLanguageLabel={translationTargetLanguageLabel}
                     translationSnapshot={libraryTranslationSnapshots[item.workspaceId] ?? null}
+                    libraryPreviewSummary={libraryPreviewStates[item.workspaceId]?.summary ?? null}
                   />
                   ) : null}
                 </div>
