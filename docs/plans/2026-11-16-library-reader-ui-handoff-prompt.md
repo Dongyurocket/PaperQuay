@@ -22,7 +22,7 @@
 - 不写入真实文库。实机验证只用 `--user-data-dir=<空目录>` 或拷贝出的一次性库。
 - 不提交、不推送、不改版本号、不发版，除非用户明确要求。
 - 所有新文案用 `l('中文','English')`。
-- 保留 `data-tour` 引导锚点，元素迁移时一起迁移。
+- 不保留 `data-tour` 引导锚点；新手引导已经整体移除，旧笔记 `onboarding:` 目标只保留读取兼容。
 - 新逻辑尽量放进新文件或新 hook。`DocumentReaderTab.tsx`、`LiteratureLibraryView.tsx`、`PdfViewer.tsx`、`assistantSidebarChat.tsx` 这几个超大文件只做接线级改动。
 - 优先抽纯函数并写单测，再改布局。
 

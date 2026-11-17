@@ -25,6 +25,7 @@ interface TranslatedPdfPaneProps {
   active: boolean;
   smoothScroll: boolean;
   softPageShadow: boolean;
+  hideToolbar?: boolean;
 }
 
 const noop = () => {};
@@ -48,6 +49,7 @@ export default function TranslatedPdfPane({
   active,
   smoothScroll,
   softPageShadow,
+  hideToolbar = false,
 }: TranslatedPdfPaneProps) {
   const l = useLocaleText();
   const source = useMemo<PdfSource>(
@@ -69,7 +71,7 @@ export default function TranslatedPdfPane({
   if (!translatedPdfPath) {
     return (
       <div className="flex h-full min-h-0 flex-col items-center justify-center gap-4 p-8 text-center">
-        <BookCopy className="h-10 w-10 text-[var(--pq-text-faint)] dark:text-[#666]" strokeWidth={1.6} />
+        <BookCopy className="h-10 w-10 text-[var(--pq-text-faint)]" strokeWidth={1.6} />
         <div className="max-w-sm">
           <div className="text-sm font-semibold text-[var(--pq-text-muted)] dark:text-[var(--pq-text)]">
             {l('尚未附加翻译版 PDF', 'No translated PDF attached')}
@@ -100,7 +102,7 @@ export default function TranslatedPdfPane({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-slate-200/70 bg-white/60 px-3 py-1.5 dark:border-white/10 dark:bg-white/[0.04]">
+      {!hideToolbar ? <div className="pq-toolbar flex h-9 shrink-0 items-center justify-between gap-2 px-3">
         <div className="flex min-w-0 items-center gap-1.5">
           <BookCopy className="h-3.5 w-3.5 shrink-0 text-[var(--pq-success)] " strokeWidth={1.9} />
           <span className="shrink-0 text-[11px] font-semibold text-[var(--pq-text-muted)] dark:text-[var(--pq-text-muted)]">
@@ -126,7 +128,7 @@ export default function TranslatedPdfPane({
           className={
             syncEnabled
               ? 'inline-flex h-6 shrink-0 items-center gap-1 rounded-full border border-[color-mix(in_srgb,var(--pq-success)_40%,transparent)] bg-[var(--pq-success-bg)] px-2 text-[11px] font-medium text-[var(--pq-success)] transition '
-              : 'inline-flex h-6 shrink-0 items-center gap-1 rounded-full border border-slate-300/80 bg-[var(--pq-surface-2)] px-2 text-[11px] font-medium text-[var(--pq-text-muted)] transition dark:border-white/10 dark:bg-white/[0.06] dark:text-[var(--pq-text-faint)]'
+              : 'inline-flex h-6 shrink-0 items-center gap-1 rounded-full border border-[var(--pq-border)] bg-[var(--pq-surface-2)] px-2 text-[11px] font-medium text-[var(--pq-text-muted)] transition'
           }
           title={
             syncEnabled
@@ -141,7 +143,7 @@ export default function TranslatedPdfPane({
           )}
           {l('滚动同步', 'Sync scroll')}
         </button>
-      </div>
+      </div> : null}
 
       <div className="min-h-0 flex-1">
         <PdfViewer

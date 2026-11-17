@@ -1050,6 +1050,8 @@ export function chunkItems<T>(items: T[], size: number): T[][] {
 }
 
 export function formatPaperSummaryForLibrary(summary: PaperSummary): string {
+  // These fixed English Markdown headings are a stable stored format consumed by MCP,
+  // the knowledge base, and agents; localize them only in UI presentation code.
   const sections = [
     ['Overview', summary.overview || summary.abstract],
     ['Background', summary.background],

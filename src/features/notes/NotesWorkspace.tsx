@@ -31,6 +31,7 @@ import {
 import { listLibraryPapers } from '../../services/library';
 import { useLocaleText } from '../../i18n/uiLanguage';
 import { useNotesStore } from '../../stores/useNotesStore';
+import { normalizeNotePaperTarget } from './notePaperTarget';
 import { useTabsStore, type NoteTab } from '../../stores/useTabsStore';
 import type { LiteraturePaper } from '../../types/library';
 import type { Note, NoteAnchor, NoteFolder } from '../../types/notes';
@@ -577,21 +578,7 @@ function createNoteAnchorJumpRequestId() {
 }
 
 function resolveNoteAnchorTargetPaperId(note: Note, anchor: NoteAnchor) {
-  const rawTarget = (anchor.paperId || note.paperId || '').trim();
-
-  if (!rawTarget) {
-    return '';
-  }
-
-  if (
-    rawTarget.startsWith('native-library:') ||
-    rawTarget.startsWith('standalone:') ||
-    rawTarget.startsWith('onboarding:')
-  ) {
-    return rawTarget;
-  }
-
-  return `native-library:${rawTarget}`;
+  return normalizeNotePaperTarget(anchor.paperId || note.paperId || '');
 }
 
 function NotesRightPanel({

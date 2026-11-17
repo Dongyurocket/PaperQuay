@@ -10,10 +10,10 @@ import {
 } from 'react';
 import {
   FilePlus2,
+  Info,
   Languages,
   RefreshCw,
   Scan,
-  SearchCode,
   Sparkles,
   ZoomIn,
   ZoomOut,
@@ -63,6 +63,7 @@ interface BlockViewerProps {
   compactMode: boolean;
   showBlockMeta: boolean;
   hidePageDecorations?: boolean;
+  hideToolbar?: boolean;
   smoothScroll: boolean;
   active?: boolean;
   translationBusy?: boolean;
@@ -193,6 +194,7 @@ function BlockViewer({
   compactMode,
   showBlockMeta,
   hidePageDecorations = false,
+  hideToolbar = false,
   smoothScroll,
   active = true,
   translationBusy = false,
@@ -873,8 +875,8 @@ function BlockViewer({
   if (visibleBlocks.length === 0) {
     return (
       <EmptyState
-        title={l('Waiting for Structured Content', 'Waiting for Structured Content')}
-        description={l('After opening or loading a MinerU JSON file, this panel will show the paper block by block and stay geometrically linked to the PDF on the left.', 'After opening or loading a MinerU JSON file, this panel will show the paper block by block and stay geometrically linked to the PDF on the left.',
+        title={l('等待结构化内容', 'Waiting for structured content')}
+        description={l('打开或加载 MinerU JSON 文件后，这里会按块显示论文内容，并与左侧 PDF 保持几何联动。', 'After opening or loading a MinerU JSON file, this panel will show the paper block by block and stay geometrically linked to the PDF on the left.',
         )}
       />
     );
@@ -883,79 +885,71 @@ function BlockViewer({
   return (
     <div
       ref={containerRef}
-      className="flex h-full min-h-0 flex-col bg-[radial-gradient(circle_at_top,#ffffff,#f8fafc_34%,#f5f5f4_100%)] text-[var(--pq-text)] dark:bg-[var(--pq-bg-primary)] dark:text-[var(--pq-text)]"
+      className="flex h-full min-h-0 flex-col bg-[var(--pq-bg-primary)] text-[var(--pq-text)]"
       onMouseUp={active ? () => scheduleSelectionCommit() : undefined}
       onKeyUp={active ? () => scheduleSelectionCommit() : undefined}
     >
-      <div className="sticky top-0 z-40 px-4 pt-4">
-        <div className="mx-auto flex w-fit max-w-full flex-wrap items-center gap-2 rounded-2xl border border-white/80 bg-white/72 px-3 py-2 shadow-[0_10px_22px_rgba(15,23,42,0.05)] backdrop-blur-xl dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:shadow-none">
-          <div className="flex items-center gap-2 rounded-full bg-[var(--pq-surface-2)] px-2.5 py-1 text-sm text-[var(--pq-text-muted)] dark:bg-[var(--pq-surface-2)] dark:text-[var(--pq-text-muted)]">
-            <SearchCode className="h-4 w-4 text-[var(--pq-text-faint)] dark:text-[var(--pq-text-faint)]" strokeWidth={1.8} />
-            <span className="hidden sm:inline">{l('Structured Reading', 'Structured Reading')}</span>
-          </div>
-
-          <span className="pq-badge-neutral rounded-full border border-[var(--pq-border)] bg-[var(--pq-surface-1)] px-3 py-1 text-xs text-[var(--pq-text-muted)]">
-            {l(`${visibleBlocks.length} 个块`, `${visibleBlocks.length} blocks`)}
-          </span>
-          <span className="pq-badge-state rounded-full border border-[var(--pq-border)] bg-[var(--pq-surface-1)] px-3 py-1 text-xs text-[var(--pq-text-muted)]">
-            {l(`${translatedCount} 个译文块`, `${translatedCount} translated blocks`)}
-          </span>
-
-          <div className="flex items-center gap-1 rounded-full border border-[var(--pq-border)] bg-white p-1 text-xs text-[var(--pq-text-muted)] dark:border-white/10 dark:bg-[var(--pq-surface-2)] dark:text-[var(--pq-text-muted)]">
-            {displayModeOptions.map((option) => {
-              const selected = option.mode === activeDisplayMode;
-
-              return (
-                <button
-                  key={option.mode}
-                  type="button"
-                  disabled={option.disabled}
-                  onClick={() => onTranslationDisplayModeChange?.(option.mode)}
-                  className={cn(
-                    'rounded-full px-3 py-1.5 font-medium transition-all duration-200',
-                    selected
-                      ? 'bg-[var(--pq-accent-soft)] text-[var(--pq-accent)] shadow-[inset_0_0_0_1px_var(--pq-accent-border)]'
-                      : 'text-[var(--pq-text-muted)] hover:bg-[var(--pq-surface-2)] dark:text-[var(--pq-text-muted)] dark:hover:bg-[var(--pq-surface-3)]',
-                    option.disabled &&
-                      'cursor-not-allowed opacity-45 hover:bg-transparent dark:hover:bg-transparent',
-                  )}
-                >
-                  {option.label}
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="flex items-center gap-1 rounded-full border border-[var(--pq-border)] bg-white px-1.5 py-1 text-sm text-[var(--pq-text-muted)] dark:border-white/10 dark:bg-[var(--pq-surface-2)] dark:text-[var(--pq-text-muted)]">
+      {!hideToolbar ? (
+        <div className="sticky top-0 z-40 px-3 pt-1">
+          <div className="pq-toolbar mx-auto flex h-9 w-fit max-w-full items-center gap-2 rounded-[var(--pq-radius-sm)] border border-[var(--pq-border)] px-2">
             <button
               type="button"
-              onClick={() => updateContentScale(-CONTENT_SCALE_STEP)}
-              className="rounded-full p-1.5 transition-all duration-200 hover:bg-[var(--pq-surface-2)] dark:hover:bg-[var(--pq-surface-3)]"
-              aria-label={l('缩小正文', 'Zoom out content')}
+              className="pq-icon-button !h-8 !w-8 shrink-0"
+              title={l(
+                `${visibleBlocks.length} 个块，${translatedCount} 个译文块。点击块可反向定位到 PDF 几何区域。`,
+                `${visibleBlocks.length} blocks, ${translatedCount} translated blocks. Click a block to jump back to the PDF geometry region.`,
+              )}
+              aria-label={l('结构化阅读信息', 'Structured reading information')}
             >
-              <ZoomOut className="h-4 w-4" strokeWidth={1.9} />
+              <Info className="h-4 w-4" strokeWidth={1.8} />
             </button>
-            <span className="min-w-[54px] text-center text-sm font-medium text-[var(--pq-text-muted)] dark:text-[var(--pq-text)]">
-              {Math.round(contentScale * 100)}%
-            </span>
-            <button
-              type="button"
-              onClick={() => updateContentScale(CONTENT_SCALE_STEP)}
-              className="rounded-full p-1.5 transition-all duration-200 hover:bg-[var(--pq-surface-2)] dark:hover:bg-[var(--pq-surface-3)]"
-              aria-label={l('放大正文', 'Zoom in content')}
-            >
-              <ZoomIn className="h-4 w-4" strokeWidth={1.9} />
-            </button>
-          </div>
 
-          <span className="hidden rounded-full bg-[var(--pq-surface-2)] px-3 py-1 text-xs text-[var(--pq-text-faint)] lg:inline dark:bg-[var(--pq-surface-2)] dark:text-[var(--pq-text-faint)]">
-            {l(
-              '点击块可反向定位到 PDF 几何区域',
-              'Click a block to jump back to the PDF geometry region',
-            )}
-          </span>
+            <div className="flex min-w-0 items-center gap-1 rounded-[var(--pq-radius-sm)] border border-[var(--pq-border)] bg-[var(--pq-surface-1)] p-0.5 text-[11px] text-[var(--pq-text-muted)]">
+              {displayModeOptions.map((option) => {
+                const selected = option.mode === activeDisplayMode;
+
+                return (
+                  <button
+                    key={option.mode}
+                    type="button"
+                    disabled={option.disabled}
+                    onClick={() => onTranslationDisplayModeChange?.(option.mode)}
+                    className={cn(
+                      'pq-nav-item !h-7 px-2 text-[11px] font-medium',
+                      selected && 'active !text-[var(--pq-accent)]',
+                      option.disabled && 'cursor-not-allowed opacity-45',
+                    )}
+                  >
+                    {option.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="flex shrink-0 items-center gap-1 rounded-[var(--pq-radius-sm)] border border-[var(--pq-border)] bg-[var(--pq-surface-1)] px-1 text-[11px] text-[var(--pq-text-muted)]">
+              <button
+                type="button"
+                onClick={() => updateContentScale(-CONTENT_SCALE_STEP)}
+                className="pq-icon-button !h-7 !w-7"
+                aria-label={l('缩小正文', 'Zoom out content')}
+              >
+                <ZoomOut className="h-3.5 w-3.5" strokeWidth={1.9} />
+              </button>
+              <span className="min-w-10 text-center font-medium text-[var(--pq-text-muted)]">
+                {Math.round(contentScale * 100)}%
+              </span>
+              <button
+                type="button"
+                onClick={() => updateContentScale(CONTENT_SCALE_STEP)}
+                className="pq-icon-button !h-7 !w-7"
+                aria-label={l('放大正文', 'Zoom in content')}
+              >
+                <ZoomIn className="h-3.5 w-3.5" strokeWidth={1.9} />
+              </button>
+            </div>
+          </div>
         </div>
-      </div>
+      ) : null}
 
       <div
         ref={listRef}
@@ -997,7 +991,7 @@ function BlockViewer({
           </div>
 
           <div className="mt-8 flex justify-center">
-            <div className="inline-flex items-center gap-2 rounded-full border border-[var(--pq-border)] bg-white px-3 py-1.5 text-xs text-[var(--pq-text-faint)] shadow-sm dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:text-[var(--pq-text-faint)] dark:shadow-none">
+            <div className="inline-flex items-center gap-2 rounded-full border border-[var(--pq-border)] bg-[var(--pq-surface-1)] px-3 py-1.5 text-xs text-[var(--pq-text-faint)] shadow-[var(--pq-shadow-soft)]">
               <Sparkles className="h-3.5 w-3.5" strokeWidth={1.9} />
               {l(
                 '左侧 PDF 与右侧结构块保持几何联动',

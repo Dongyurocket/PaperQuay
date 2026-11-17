@@ -8,7 +8,11 @@ export type SummarySectionKey =
   | 'experiment'
   | 'findings'
   | 'conclusion'
-  | 'limitations';
+  | 'limitations'
+  | 'takeaways'
+  | 'keywords';
+
+export type SummarySectionLocalize = (zh: string, en: string) => string;
 
 export interface SummarySection {
   key: SummarySectionKey;
@@ -16,6 +20,19 @@ export interface SummarySection {
   /** Findings remain separate items so the panel can render a real list and count them. */
   items?: string[];
 }
+
+export const SUMMARY_SECTION_LABELS: Record<SummarySectionKey, readonly [string, string]> = {
+  overview: ['概览', 'Overview'],
+  background: ['背景', 'Background'],
+  problem: ['问题', 'Problem'],
+  approach: ['方法', 'Approach'],
+  experiment: ['实验', 'Experiments'],
+  findings: ['发现', 'Findings'],
+  conclusion: ['结论', 'Conclusion'],
+  limitations: ['局限性', 'Limitations'],
+  takeaways: ['要点', 'Takeaways'],
+  keywords: ['关键词', 'Keywords'],
+};
 
 const SECTION_ALIASES: Record<SummarySectionKey, readonly string[]> = {
   overview: ['overview', 'summary', 'abstract', 'paper overview', '概览', '论文概览', '摘要', '概要', '总览'],
@@ -26,6 +43,8 @@ const SECTION_ALIASES: Record<SummarySectionKey, readonly string[]> = {
   findings: ['findings', 'key findings', 'results', '主要发现', '关键发现', '发现', '实验结果', '研究结果'],
   conclusion: ['conclusion', 'conclusions', '结论', '研究结论'],
   limitations: ['limitation', 'limitations', 'limitations and future work', '局限', '局限性', '研究局限', '局限与展望'],
+  takeaways: ['takeaway', 'takeaways', 'key takeaways', '要点', '启示'],
+  keywords: ['keyword', 'keywords', '关键词'],
 };
 
 const SECTION_KEYS = Object.keys(SECTION_ALIASES) as SummarySectionKey[];
@@ -41,7 +60,7 @@ function cleanHeading(text: string): string {
     .toLowerCase();
 }
 
-function headingKey(text: string): SummarySectionKey | undefined {
+export function getSummarySectionKey(text: string): SummarySectionKey | undefined {
   const heading = cleanHeading(text);
   const exact = SECTION_KEYS.find((key) => SECTION_ALIASES[key].includes(heading));
   if (exact) return exact;
@@ -52,16 +71,21 @@ function headingKey(text: string): SummarySectionKey | undefined {
   return SECTION_KEYS.find((key) => parts.every((part) => SECTION_ALIASES[key].includes(part)));
 }
 
+export function getSummarySectionLabel(key: SummarySectionKey, localize: SummarySectionLocalize): string {
+  const [zh, en] = SUMMARY_SECTION_LABELS[key];
+  return localize(zh, en);
+}
+
 function readHeading(line: string): { key: SummarySectionKey; rest: string } | null {
   if (/^\s/.test(line)) return null;
   const text = line.replace(/^#{1,6}\s+/, '').replace(/\s+#+\s*$/, '').trim();
-  const key = headingKey(text);
+  const key = getSummarySectionKey(text);
   if (key) return { key, rest: '' };
 
   const colon = text.search(/[：:]/);
   if (colon < 0) return null;
   const label = text.slice(0, colon);
-  const inlineKey = headingKey(label);
+  const inlineKey = getSummarySectionKey(label);
   if (!inlineKey) return null;
   // A bold label can put its colon inside or outside the closing delimiter.
   const opening = label.match(/^(\*\*|__)/)?.[1];
@@ -193,6 +217,8 @@ export function parseSummarySections(summary: PaperSummary | string | null | und
       experiment: summary.experimentSetup,
       conclusion: summary.conclusions,
       limitations: summary.limitations,
+      takeaways: (summary.takeaways ?? []).filter((item) => item.trim()).join('\n'),
+      keywords: (summary.keywords ?? []).map((item) => item.trim()).filter(Boolean).join(', '),
     };
     for (const [key, text] of Object.entries(fields) as [SummarySectionKey, string][]) {
       if (!text?.trim()) continue;
@@ -213,8 +239,10 @@ export function parseSummarySections(summary: PaperSummary | string | null | und
   return SECTION_KEYS.flatMap<SummarySection>((key) => {
     const content = contents[key]?.trim();
     if (!content) return [];
-    if (key !== 'findings') return [{ key, content }];
-    const items = structuredFindings.length ? structuredFindings : findingItems(content);
+    if (key !== 'findings' && key !== 'takeaways') return [{ key, content }];
+    const items = key === 'findings' && structuredFindings.length
+      ? structuredFindings
+      : findingItems(content);
     return items.length ? [{ key, content: findingsMarkdown(items), items }] : [];
   });
 }

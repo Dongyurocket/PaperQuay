@@ -3086,7 +3086,7 @@ export default function LiteratureLibraryView({
         gridTemplateRows: 'minmax(0, 1fr)',
       }}
     >
-      <div data-tour="library-sidebar" className="h-full min-h-0 overflow-hidden">
+      <div className="h-full min-h-0 overflow-hidden">
         <LiteratureCategorySidebar
           categories={flatCategories}
           selectedCategoryId={selectedCategoryId}
@@ -3100,7 +3100,7 @@ export default function LiteratureLibraryView({
         />
       </div>
 
-      <div data-tour="paper-list" className="flex h-full min-h-0 flex-col overflow-hidden">
+      <div className="flex h-full min-h-0 flex-col overflow-hidden">
         {selectedCount > 0 ? (
           <div className="flex flex-wrap items-center gap-2 border-b border-[var(--pq-border)] bg-[var(--pq-accent-soft)] px-4 py-2">
             <span className="text-xs font-semibold text-[var(--pq-accent)]">
@@ -3319,7 +3319,7 @@ export default function LiteratureLibraryView({
         />
       </div>
 
-      <div data-tour="library-ai-summary" className="h-full min-h-0 overflow-hidden">
+      <div className="h-full min-h-0 overflow-hidden">
         {selectedCount >= 2 ? (
           <div className="flex h-full min-h-0 flex-col overflow-y-auto p-4">
             <div className="rounded-[22px] border border-[var(--pq-border)] bg-white/70 p-4 dark:bg-white/5">

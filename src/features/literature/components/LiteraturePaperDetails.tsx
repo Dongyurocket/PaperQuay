@@ -20,6 +20,7 @@ import { resolvePaperTitleDisplay, type PaperTitleDisplayMode } from '../titleDi
 import type { LiteraturePaperListStatus, LiteraturePaperRagStatus } from './LiteraturePaperList';
 import { getPaperTaskProgress } from '../paperTaskProgress';
 import { loadPaperDetailsSections, persistPaperDetailsSections, type PaperDetailsSectionKey, type PaperDetailsSectionState } from '../details/paperDetailsSections';
+import { parsePaperOverviewForDisplay } from '../details/paperOverviewPresentation';
 import { buildPaperDraftUpdateRequest, createPaperDetailsDraft, hasDuplicateCitationKey, paperDraftChanged, validatePaperDraft, normalizeDoi, type PaperDetailsDraft, type PaperDraftErrors } from '../details/paperDetailsDraft';
 import PaperEditForm from '../details/PaperEditForm';
 import PaperDetailsStatusBar from '../details/PaperDetailsStatusBar';
@@ -68,25 +69,6 @@ function getLatestHeatmap(paperId: string): PdfReadingHeatmap | null {
   return Object.values(history?.pdfReadingHeatmaps ?? {})
     .filter((heatmap) => heatmap.totalMs > 0)
     .sort((left, right) => right.updatedAt - left.updatedAt)[0] ?? null;
-}
-
-function parseOverview(value: string, fallbackTitle: string): Array<{ title: string; content: string }> {
-  const normalized = value.replace(/\r\n?/g, '\n').trim();
-  if (!normalized) return [];
-  const sections: Array<{ title: string; content: string }> = [];
-  let title = fallbackTitle;
-  let lines: string[] = [];
-  const flush = () => {
-    const content = lines.join('\n').trim();
-    if (content) sections.push({ title, content });
-    lines = [];
-  };
-  for (const line of normalized.split('\n')) {
-    const heading = line.match(/^#{1,4}\s+(.+?)\s*$/);
-    if (heading) { flush(); title = heading[1].trim(); } else lines.push(line);
-  }
-  flush();
-  return sections.length ? sections : [{ title: fallbackTitle, content: normalized }];
 }
 
 function DetailsSection({
@@ -233,7 +215,7 @@ export default function LiteraturePaperDetails({
   const toggleSection = (key: PaperDetailsSectionKey) => setSections((current) => ({ ...current, [key]: !current[key] }));
   const translatedPdf = paper ? paperTranslatedPdfAttachment(paper, storageDir) : null;
   const fileLocationEntries = usePaperFileLocationMenu({ paper, storageDir, mineruCacheDir, autoLoadSiblingJson, l });
-  const overviewSections = useMemo(() => paper ? parseOverview(paper.aiSummary ?? '', l('概览', 'Overview')) : [], [l, paper?.aiSummary]);
+  const overviewSections = useMemo(() => paper ? parsePaperOverviewForDisplay(paper.aiSummary ?? '', l, paper.keywords ?? []) : [], [l, paper?.aiSummary, paper?.keywords]);
   const titleDisplay = paper ? resolvePaperTitleDisplay(paper, titleDisplayMode) : null;
 
   const closeEdit = () => {
@@ -484,7 +466,7 @@ export default function LiteraturePaperDetails({
               {paper.abstractText ? <DetailsSection title={l('摘要', 'Abstract')} collapsed={sections.abstract} onToggle={() => toggleSection('abstract')}><p className="line-clamp-3 whitespace-pre-wrap text-xs leading-5 text-[var(--pq-text-muted)]">{paper.abstractText}</p></DetailsSection> : null}
 
               <DetailsSection title={l('AI 概览', 'AI Overview')} collapsed={sections.overview} onToggle={() => toggleSection('overview')}>
-                {overviewSections.length ? <div className="space-y-3">{overviewSections.map((section) => <div key={section.title}><h4 className="text-xs font-semibold text-[var(--pq-text)]">{section.title}</h4><p className="mt-1 whitespace-pre-wrap text-xs leading-5 text-[var(--pq-text-muted)]">{section.content}</p></div>)}</div> : <p className="text-xs text-[var(--pq-text-faint)]">{l('生成概览后，结果会显示在这里。', 'The generated overview will appear here.')}</p>}
+                {overviewSections.length ? <div className="space-y-3">{overviewSections.map((section, index) => <div key={`${index}:${section.key ?? section.title}`}><h4 className="text-xs font-semibold text-[var(--pq-text)]">{section.title}</h4><p className="mt-1 whitespace-pre-wrap text-xs leading-5 text-[var(--pq-text-muted)]">{section.content}</p></div>)}</div> : <p className="text-xs text-[var(--pq-text-faint)]">{l('生成概览后，结果会显示在这里。', 'The generated overview will appear here.')}</p>}
               </DetailsSection>
 
               {paper.keywords.length || paper.tags.length ? <DetailsSection title={l('关键词与标签', 'Keywords & Tags')} collapsed={sections.keywords} onToggle={() => toggleSection('keywords')}>

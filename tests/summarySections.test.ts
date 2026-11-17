@@ -4,9 +4,12 @@ import { build } from 'esbuild';
 import { createRequire } from 'node:module';
 import type { PaperSummary } from '../src/types/reader.ts';
 import {
+  getSummarySectionKey,
   parseSummarySections,
   resolveSummaryPanelState,
 } from '../src/features/reader/overview/summarySections.ts';
+import { parsePaperOverviewForDisplay } from '../src/features/literature/details/paperOverviewPresentation.ts';
+import { formatPaperSummaryForLibrary } from '../src/features/reader/readerShared.ts';
 
 function summary(overrides: Partial<PaperSummary> = {}): PaperSummary {
   return {
@@ -15,6 +18,73 @@ function summary(overrides: Partial<PaperSummary> = {}): PaperSummary {
     takeaways: [], keywords: [], ...overrides,
   };
 }
+
+const localize = (locale: 'zh-CN' | 'en-US') => (zh: string, en: string) => locale === 'en-US' ? en : zh;
+
+test('summary headings resolve across English, Chinese, bilingual, and unknown labels', () => {
+  assert.equal(getSummarySectionKey('Research Problem'), 'problem');
+  assert.equal(getSummarySectionKey('研究背景'), 'background');
+  assert.equal(getSummarySectionKey('研究背景 / Background'), 'background');
+  assert.equal(getSummarySectionKey('Takeaways'), 'takeaways');
+  assert.equal(getSummarySectionKey('关键词'), 'keywords');
+  assert.equal(getSummarySectionKey('Custom section'), undefined);
+});
+
+test('library overview display localizes known headings immediately and preserves unknown headings', () => {
+  const value = '## Overview\nScope\n## 研究背景 / Background\nContext\n## Takeaways\n- Key point\n' +
+    '## Keywords\nalpha, beta\n## Custom section\nCustom body';
+  for (const locale of ['zh-CN', 'en-US'] as const) {
+    const sections = parsePaperOverviewForDisplay(value, localize(locale), ['Alpha', 'beta']);
+    assert.deepEqual(sections.map(({ title, content }) => ({ title, content })), locale === 'zh-CN'
+      ? [
+        { title: '概览', content: 'Scope' },
+        { title: '背景', content: 'Context' },
+        { title: '要点', content: '- Key point' },
+        { title: 'Custom section', content: 'Custom body' },
+      ]
+      : [
+        { title: 'Overview', content: 'Scope' },
+        { title: 'Background', content: 'Context' },
+        { title: 'Takeaways', content: '- Key point' },
+        { title: 'Custom section', content: 'Custom body' },
+      ]);
+  }
+});
+
+test('library overview keeps the AI keywords section unless every keyword is already in paper metadata', () => {
+  const value = '## Overview\nScope\n## Keywords\nalpha, gamma';
+  assert.deepEqual(parsePaperOverviewForDisplay(value, localize('zh-CN'), ['alpha', 'beta']).map(({ title, content }) => ({ title, content })), [
+    { title: '概览', content: 'Scope' },
+    { title: '关键词', content: 'alpha, gamma' },
+  ]);
+  assert.deepEqual(parsePaperOverviewForDisplay(value, localize('en-US')).map(({ title }) => title), ['Overview', 'Keywords']);
+  assert.deepEqual(parsePaperOverviewForDisplay(value, localize('en-US'), ['Gamma', 'ALPHA']).map(({ title }) => title), ['Overview']);
+});
+
+test('library overview display gives unheaded legacy text the localized overview label', () => {
+  assert.deepEqual(parsePaperOverviewForDisplay('Legacy cached overview', localize('zh-CN')), [
+    { key: 'overview', title: '概览', content: 'Legacy cached overview' },
+  ]);
+  assert.deepEqual(parsePaperOverviewForDisplay('Legacy cached overview', localize('en-US')), [
+    { key: 'overview', title: 'Overview', content: 'Legacy cached overview' },
+  ]);
+});
+
+test('library summary storage format keeps its fixed English headings and ordering', () => {
+  assert.equal(formatPaperSummaryForLibrary(summary({
+    abstract: 'Fallback abstract',
+    overview: 'Overview body',
+    background: 'Background body',
+    researchProblem: 'Problem body',
+    approach: 'Approach body',
+    experimentSetup: 'Experiment body',
+    keyFindings: ['Finding A', 'Finding B'],
+    conclusions: 'Conclusion body',
+    limitations: 'Limitations body',
+    takeaways: ['Takeaway A', 'Takeaway B'],
+    keywords: ['alpha', 'beta'],
+  })), '## Overview\nOverview body\n\n## Background\nBackground body\n\n## Research Problem\nProblem body\n\n## Approach\nApproach body\n\n## Experiment Setup\nExperiment body\n\n## Key Findings\nFinding A\nFinding B\n\n## Conclusions\nConclusion body\n\n## Limitations\nLimitations body\n\n## Takeaways\nTakeaway A\nTakeaway B\n\n## Keywords\nalpha, beta');
+});
 
 test('structured summaries keep the eight sections in reading order and render findings as list items', () => {
   const input = summary({ overview: 'Scope', background: 'Context', researchProblem: 'Question',
@@ -223,7 +293,6 @@ test('actual shared panel supports normal and compact rendering with localized l
     for (const locale of ['en-US', 'zh-CN']) {
       const html = render({ ...panelProps, compact }, locale);
       assert.ok(html.includes('Cached overview body'));
-      assert.ok(html.includes('data-tour="generate-summary"'));
       assert.equal((html.match(/role="tab"/g) ?? []).length, 2);
       assert.ok(!html.includes('Overview Ready') && !html.includes('概览已生成'));
       assert.ok(!html.includes('Generate a structured overview') && !html.includes('uppercase'));
@@ -247,7 +316,7 @@ test('actual compact panel keeps cached content and errors visible while unconfi
   for (const content of ['Cached overview body', 'Refresh failed', 'Saved content is available.', 'Model Settings', 'Generating…']) {
     assert.ok(html.includes(content), content);
   }
-  assert.match(html, /<button[^>]*data-tour="generate-summary"[^>]*disabled=""/);
+  assert.ok(html.includes('aria-label="Generating…"') && html.includes('disabled=""'));
 });
 
 test('actual empty panel shows model status, settings, and a disabled generation action without configuration', async () => {
@@ -255,13 +324,13 @@ test('actual empty panel shows model status, settings, and a disabled generation
   const props = { ...panelProps, paperSummary: null, onOpenSettings() {} };
   const unconfigured = render({ ...props, aiConfigured: false });
   assert.ok(unconfigured.includes('Overview model not configured') && unconfigured.includes('Model Settings'));
-  assert.match(unconfigured, /<button[^>]*data-tour="generate-summary"[^>]*disabled=""/);
+  assert.ok(unconfigured.includes('aria-label="Generate Overview"') && unconfigured.includes('disabled=""'));
   const configured = render(props);
   assert.ok(configured.includes('Overview model configured'));
-  assert.doesNotMatch(configured, /data-tour="generate-summary"[^>]*disabled=""/);
+  assert.doesNotMatch(configured, /disabled=""[^>]*aria-label="Generate Overview"/);
   const missingSource = render({ ...props, hasBlocks: false });
   assert.ok(missingSource.includes('Load the document content'));
-  assert.match(missingSource, /data-tour="generate-summary"[^>]*disabled=""/);
+  assert.ok(missingSource.includes('aria-label="Generate Overview"') && missingSource.includes('disabled=""'));
 });
 
 test('actual findings-only summary renders a semantic list and selects the first populated tab', async () => {
@@ -279,7 +348,8 @@ function elements(tree: any, predicate: (element: any) => boolean): any[] {
 }
 
 function generateButton(tree: any) {
-  return elements(tree, (element) => element.type === 'button' && element.props['data-tour'] === 'generate-summary')[0];
+  return elements(tree, (element) => element.type === 'button' &&
+    ['生成概览', '重新生成', '生成中…'].includes(element.props['aria-label']))[0];
 }
 
 const flushAction = () => new Promise<void>((resolve) => setImmediate(resolve));

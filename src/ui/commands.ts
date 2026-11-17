@@ -146,20 +146,22 @@ export function useGlobalShortcuts({ onCommandPalette }: GlobalShortcutOptions) 
         return;
       }
 
-      if (!modPressed || event.altKey || event.shiftKey) return;
+      if (!modPressed || event.altKey) return;
 
       const key = event.key.toLowerCase();
+      const command = listCommands().find((item) => {
+        if (!item.shortcut) return false;
+        const parsed = parseShortcut(item.shortcut);
+        return parsed.key === key && parsed.mod && parsed.shift === event.shiftKey && parsed.alt === event.altKey;
+      });
 
       if (key === 'f') {
-        const command = listCommands().find((item) => item.shortcut && parseShortcut(item.shortcut).key === 'f' && parseShortcut(item.shortcut).mod);
         if (command) { event.preventDefault(); void command.run(); }
         return;
       }
 
       // Cmd/Ctrl+W 关闭当前标签：无输入焦点时也要生效；输入框内不拦截，交给浏览器行为。
       if (key === 'w' && !isEditableTarget(event.target)) {
-        const command = listCommands().find((item) => item.shortcut && parseShortcut(item.shortcut).key === 'w' && parseShortcut(item.shortcut).mod);
-
         if (command) {
           event.preventDefault();
           void command.run();
@@ -169,8 +171,6 @@ export function useGlobalShortcuts({ onCommandPalette }: GlobalShortcutOptions) 
       }
 
       if (key === ',' && !isEditableTarget(event.target)) {
-        const command = listCommands().find((item) => item.shortcut && parseShortcut(item.shortcut).key === ',');
-
         if (command) {
           event.preventDefault();
           void command.run();

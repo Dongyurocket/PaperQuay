@@ -142,20 +142,6 @@ backup*.tar.gz
 /translations/
 /mineru-cloud-test.zip
 
-# Bundled onboarding demo assets are part of the app.
-!public/onboarding/**/*.pdf
-!public/onboarding/**/content_list*.json
-!public/onboarding/**/middle.json
-!public/onboarding/**/full.md
-!public/onboarding/**/paper_reader_manifest.json
-!public/onboarding/**/images/
-!public/onboarding/**/images/**
-!public/onboarding/**/summaries/
-!public/onboarding/**/summaries/**
-!public/onboarding/**/translations/
-!public/onboarding/**/translations/**
-/public/onboarding/welcome.md
-
 # LaTeX build artifacts
 *.aux
 *.out

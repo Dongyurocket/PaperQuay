@@ -422,7 +422,6 @@ function App() {
             <button
               type="button"
               onClick={handleOpenStandalonePdf}
-              data-tour="open-pdf"
               className="pq-icon-button h-8 w-8 cursor-default"
               title={openPdfLabel}
               aria-label={openPdfLabel}
@@ -432,7 +431,6 @@ function App() {
             <button
               type="button"
               onClick={handleOpenPreferences}
-              data-tour="settings"
               className="pq-icon-button h-8 w-8 cursor-default"
               title={settingsLabel}
               aria-label={settingsLabel}
@@ -506,7 +504,6 @@ function App() {
                   <button
                     key={workspace.key}
                     type="button"
-                    data-tour={`workspace-${workspace.key}`}
                     onClick={() => {
                       if (workspace.key === 'library') {
                         setActiveTab(HOME_TAB_ID);

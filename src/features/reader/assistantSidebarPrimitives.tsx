@@ -11,7 +11,7 @@ import type { PaperSummary, SelectedExcerpt } from '../../types/reader';
 import { confirmAction } from '../../ui/confirmHost';
 import { cn } from '../../utils/cn';
 import { normalizeMarkdownMath, remarkFixGluedLatex, remarkSuperscriptPlugin } from '../../utils/markdown';
-import { parseSummarySections, resolveSummaryPanelState, type SummarySectionKey } from './overview/summarySections';
+import { getSummarySectionLabel, parseSummarySections, resolveSummaryPanelState, type SummarySectionKey } from './overview/summarySections';
 
 function SectionCard({
   title,
@@ -281,14 +281,16 @@ function SummaryPanel({
   const hasContent = sections.length > 0;
   const { status, canGenerate } = resolveSummaryPanelState({ hasContent, loading, hasBlocks, aiConfigured });
   const labels: Record<SummarySectionKey, string> = {
-    overview: l('概览', 'Overview'),
-    background: l('背景', 'Background'),
-    problem: l('问题', 'Problem'),
-    approach: l('方法', 'Approach'),
-    experiment: l('实验', 'Experiments'),
-    findings: l('发现', 'Findings'),
-    conclusion: l('结论', 'Conclusion'),
-    limitations: l('局限性', 'Limitations'),
+    overview: getSummarySectionLabel('overview', l),
+    background: getSummarySectionLabel('background', l),
+    problem: getSummarySectionLabel('problem', l),
+    approach: getSummarySectionLabel('approach', l),
+    experiment: getSummarySectionLabel('experiment', l),
+    findings: getSummarySectionLabel('findings', l),
+    conclusion: getSummarySectionLabel('conclusion', l),
+    limitations: getSummarySectionLabel('limitations', l),
+    takeaways: getSummarySectionLabel('takeaways', l),
+    keywords: getSummarySectionLabel('keywords', l),
   };
   const keywordCount = paperSummary?.keywords?.filter((keyword) => keyword.trim()).length ?? 0;
   const findingCount = sections.find((section) => section.key === 'findings')?.items?.length ?? 0;
@@ -352,7 +354,7 @@ function SummaryPanel({
           ) : null}
         </div>
         {hasContent || loading ? (
-          <button type="button" data-tour="generate-summary" onClick={() => void generate()}
+          <button type="button" onClick={() => void generate()}
             disabled={!canGenerate} aria-disabled={!canGenerate || confirming} title={generateHint} aria-label={generateLabel}
             className="pq-icon-button h-8 w-8 shrink-0">
             {loading ? <LoaderCircle aria-hidden="true" className="h-4 w-4 animate-spin" /> : <RefreshCw aria-hidden="true" className="h-4 w-4" strokeWidth={1.8} />}
@@ -411,7 +413,7 @@ function SummaryPanel({
               ))}
             </div>
             <div id={`${id}-body`} role="tabpanel" aria-labelledby={`${id}-tab-${activeSection.key}`} tabIndex={0} className="min-w-0 break-words">
-              {activeSection.key === 'findings' ? (
+              {activeSection.key === 'findings' || activeSection.key === 'takeaways' ? (
                 <ul className="list-disc space-y-2 pl-5 text-[var(--pq-text-muted)]">
                   {activeSection.items?.map((item, index) => <li key={index}><MarkdownPreview content={item} /></li>)}
                 </ul>
@@ -425,8 +427,8 @@ function SummaryPanel({
             <p>{l('尚未生成内容。', 'No summary has been generated yet.')}</p>
             {aiConfigured ? <p className="text-xs">{l('概览模型已配置', 'Overview model configured')}</p> : null}
             {!hasBlocks ? <p className="text-xs">{l('加载文档内容后即可生成。', 'Load the document content to generate a summary.')}</p> : null}
-            <button type="button" data-tour="generate-summary" onClick={() => void generate()}
-              disabled={!canGenerate} aria-disabled={!canGenerate || confirming} title={generateHint} className="pq-button h-8 px-3 text-xs">
+            <button type="button" onClick={() => void generate()}
+              disabled={!canGenerate} aria-disabled={!canGenerate || confirming} title={generateHint} aria-label={generateLabel} className="pq-button h-8 px-3 text-xs">
               {generateLabel}
             </button>
           </div>

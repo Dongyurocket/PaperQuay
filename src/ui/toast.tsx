@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Info, Loader2, X } from 'lucide-react';
 import { cn } from '../utils/cn';
 import { useLocaleText } from '../i18n/uiLanguage';
+import { getToastBridgeEventName, type ToastBridgeInput } from './toastBridge';
 
 /**
  * 全应用统一反馈层。
@@ -39,6 +40,16 @@ const DEFAULT_DURATION: Record<ToastTone, number> = {
 
 let toasts: ToastItem[] = [];
 let sequence = 0;
+const timers = new Map<string, number>();
+
+function clearToastTimer(id: string) {
+  const timer = timers.get(id);
+
+  if (timer !== undefined) {
+    window.clearTimeout(timer);
+    timers.delete(id);
+  }
+}
 const listeners = new Set<(items: ToastItem[]) => void>();
 
 function emit() {
@@ -55,6 +66,7 @@ function subscribe(listener: (items: ToastItem[]) => void) {
 }
 
 export function dismissToast(id: string) {
+  clearToastTimer(id);
   const next = toasts.filter((item) => item.id !== id);
 
   if (next.length === toasts.length) {
@@ -80,7 +92,16 @@ export function toast(input: ToastInput | string) {
     : [...toasts, item];
   emit();
 
-  window.setTimeout(() => dismissToast(item.id), normalized.duration ?? DEFAULT_DURATION[tone]);
+  // 同 key 替换时清掉旧计时器，避免旧 toast 的计时把新内容提前关掉；0 表示不自动关闭。
+  clearToastTimer(item.id);
+  const duration = normalized.duration ?? DEFAULT_DURATION[tone];
+
+  if (duration > 0) {
+    timers.set(item.id, window.setTimeout(() => {
+      timers.delete(item.id);
+      dismissToast(item.id);
+    }, duration));
+  }
 
   return item.id;
 }
@@ -113,6 +134,23 @@ export function Toaster() {
   const [items, setItems] = useState<ToastItem[]>(toasts);
 
   useEffect(() => subscribe(setItems), []);
+  useEffect(() => {
+    const handleBridgeEvent = (event: Event) => {
+      const detail = (event as CustomEvent<ToastBridgeInput & { dismissKey?: string }>).detail;
+
+      if (detail?.dismissKey) {
+        dismissToast(`key:${detail.dismissKey}`);
+        return;
+      }
+
+      if (detail?.message) {
+        toast(detail);
+      }
+    };
+
+    window.addEventListener(getToastBridgeEventName(), handleBridgeEvent);
+    return () => window.removeEventListener(getToastBridgeEventName(), handleBridgeEvent);
+  }, []);
 
   const dismiss = useCallback((id: string) => dismissToast(id), []);
 

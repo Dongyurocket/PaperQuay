@@ -585,7 +585,6 @@ export interface ZoteroDownloadResult {
 export type WorkspaceItemSource =
   | "zotero-local"
   | "standalone"
-  | "onboarding"
   | "native-library";
 
 export interface WorkspaceItem extends ZoteroLibraryItem {

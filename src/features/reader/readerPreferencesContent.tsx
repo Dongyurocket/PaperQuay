@@ -595,7 +595,7 @@ export function ReaderPreferencesContent({
             />
           </div>
 
-          <div data-tour="zotero-settings">
+          <div>
             <SettingsField
               label={l('Zotero 本地数据目录', 'Zotero Local Data Directory')}
               description={l(

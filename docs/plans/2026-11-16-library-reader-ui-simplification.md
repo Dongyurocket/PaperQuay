@@ -1,7 +1,7 @@
 # 文库与阅读器界面精简优化计划
 
 - 日期：2026-11-16
-- 状态：**方案已确认（2026-11-16）**；决策见第 6 节。P0 + P1 已随 0.4.26 发布；P2（文库顶栏与筛选，含 MinerU 结果定位修正）已随 0.4.27 发布（记录见 `docs/changes/2026-11-16-ui-p2-library-toolbar-filters.md`）；P3a（元数据字段）与 P3（详情面板）已随 0.4.28 发布（记录见 `docs/changes/2026-11-17-p3-details-metadata.md`）；三者的安装版桌面验收已通过（用户确认，2026-11-17）；P4（概览页）已随 0.4.29 发布（记录见 `docs/changes/2026-11-17-p4-overview.md`），安装版桌面验收待做；P5 未开始
+- 状态：**方案已确认（2026-11-16）**；决策见第 6 节。P0 + P1 已随 0.4.26 发布；P2（文库顶栏与筛选，含 MinerU 结果定位修正）已随 0.4.27 发布（记录见 `docs/changes/2026-11-16-ui-p2-library-toolbar-filters.md`）；P3a（元数据字段）与 P3（详情面板）已随 0.4.28 发布（记录见 `docs/changes/2026-11-17-p3-details-metadata.md`）；三者的安装版桌面验收已通过（用户确认，2026-11-17）；P4（概览页）已随 0.4.29 发布（记录见 `docs/changes/2026-11-17-p4-overview.md`），安装版桌面验收已通过（用户确认，2026-11-17）；第 0 步（概览小标题本地化、新手引导移除）、P5（阅读器顶栏与工具栏）与 P6（文档收尾）已随 0.4.30 发布（记录见 `docs/changes/2026-11-17-p5-reader-toolbar.md`），安装版桌面验收待用户安装此版本后完成
 - 基线：`main` @ `fe647ec`（package.json 0.4.25），工作区干净
 - 范围：文库顶部工具栏与筛选、右侧文献详情面板（含元数据编辑）、文献右键「打开所在位置」、阅读器助手栏黑色「+」按钮、论文概览页（含「每次都要点生成概览」缺陷）、阅读模式顶部栏与工具栏
 - 依据：`docs/ui-design-system.md`（令牌、圆角、按钮变体、Menu 唯一实现）；`AGENTS.md` 红线（不改 RAG schema、不写真实文库、不擅自提交/发版）
@@ -93,13 +93,13 @@
 
 ## 2. 设计原则（全局）
 
-1. **一层装饰只做一件事**：去掉纯装饰的标题栏、药丸、提示条；提示放 tooltip 或首次引导。
+1. **一层装饰只做一件事**：去掉纯装饰的标题栏、药丸、提示条；提示放 tooltip。
 2. **主次分明**：每个区域最多 1 个主按钮（`.pq-button-primary`），其余为幽灵/图标按钮；低频动作进「⋯ 更多」。
 3. **只用令牌**：禁止 `slate-*`/`white`/`black`/raw rgba；控件圆角 8px（`--pq-radius-sm`）、卡片 12px；新增变体写进 `src/app/index.css` 并同时验 `:root` 与 `.dark`。
 4. **尺寸统一**：顶栏/工具栏按钮 32px，正文控件 36px，主按钮 36px；文字不小于 11px。
 5. **菜单只用 `src/ui/menu.tsx`**（规范 §3）；需要子菜单或键盘导航时在 `Menu` 本体上补，不另起实现。
 6. **中英成对**：所有新文案走 `l('中文','English')`；顺手修掉 "Structured Reading"、"Custom"、"Previous page"、`InlineProgressBar` 的硬编码「处理进度」。
-7. **保留引导锚点**：`data-tour` 属性（概览页 `:100 :129 :152 :189 :291`、顶栏 `reader-tools`/`linked-reading`/`block-translation`）不得删除，只能随元素迁移。
+7. **删除新手引导残留**：新手引导运行接线已经移除，`data-tour`/`dataTour` 锚点和相关契约测试随本轮删除；旧笔记目标中的 `onboarding:` 前缀只保留读取兼容。
 8. **控制合并冲突面**：新逻辑放新文件/新 hook，对超大文件只做小范围接线。冲突热点：`DocumentReaderTab.tsx` 4509 行、`LiteratureLibraryView.tsx` 3794、`PdfViewer.tsx` 3316、`assistantSidebarChat.tsx` 1846、`LiteraturePaperDetails.tsx` 1394。上游 `WangQrkkk/PaperQuay`（`docs/UPSTREAM.md`）本地未配置 remote，但同步关系存在。
 
 ---
@@ -306,7 +306,7 @@ Chengjie Li, Bin Yu, … · 2026 · Journal · 本地文库 / 我的文库
 - 无概览时（P0 修复后仅在确实无缓存时出现）显示一个空状态 + 「生成概览」按钮，并注明是否已配置模型。
 - 全部令牌化；圆角 12/8；验日夜两套主题。
 - `SummaryPanel` 的 `compact`（助手栏）分支一起回归。
-- 保留 `data-tour` 锚点。
+- 删除引导锚点；保留旧笔记 `onboarding:` 目标的读取兼容。
 
 ### P5　阅读顶部栏与工具栏（R7）
 
@@ -323,9 +323,9 @@ Chengjie Li, Bin Yu, … · 2026 · Journal · 本地文库 / 我的文库
 
 - 顶栏：去掉面包屑大写行与作者行，作者/年份/文件名放进标题旁 ⓘ tooltip；概览/阅读、视图模式为 32px 图标分段（窄宽仅图标、宽屏显示文字）；PDF 版本控件只在多版本时出现，且为紧凑下拉；「沉浸」变图标；**删除「收起状态栏」按钮**（顶栏已足够薄），同时移除 `headerCollapsed` 状态；其 localStorage 键 `WORKSPACE_HEADER_COLLAPSED_STORAGE_KEY` 不再读写，残留值无害，不做清理。
 - PDF 工具行：工具按钮 32px；4 色块 + Custom 合并为一个当前色按钮 + 弹层；页码改为**可输入跳转**；缩放百分比可点开预设（适合宽度 / 适合页面 / 100%）；「删除所选」只在 `hasSelectedEditor` 为真时出现，并支持 `Delete` 键；阅读热力、导出批注 PDF 进入「⋯」；保存/错误/翻译进度改为 toast + 细进度线，不再额外占行；去掉 `flex-wrap`，窄宽时低优先级项自动收进「⋯」。
-- 结构化阅读工具行：删除「Structured Reading」药丸和常驻提示（提示改为 ⓘ tooltip 或首次引导）；块数并入 ⓘ；显示模式选中态改 accent-soft；按 `TranslatedPdfPane.tsx:103-144` 的尺寸对齐。
+- 结构化阅读工具行：删除「Structured Reading」药丸和常驻提示（提示改为 ⓘ tooltip）；块数并入 ⓘ；显示模式选中态改 accent-soft；按 `TranslatedPdfPane.tsx:103-144` 的尺寸对齐。
 - 沉浸模式：同时隐藏结构化阅读工具行与底栏；注册快捷键 `mod+shift+f`（Windows 为 `Ctrl+Shift+F`），写进 `src/ui/commands.ts`。不用 `F11`：主进程未调用 `Menu.setApplicationMenu`，Electron 默认菜单可能已把 F11 绑到窗口全屏。该项用户未单独表态，按此默认执行，可随时改。
-- 底栏：信息并入顶栏 tooltip；保留「单击预览，双击进入阅读」类提示为首次引导。
+- 底栏：信息并入顶栏 tooltip；「单击预览，双击进入阅读」类提示放进相应元素 tooltip。
 - 不动 `ReaderWorkspace.tsx:380-480` 的对照同步逻辑。
 - 保持组件名与 `currentPage`/`pageCount` 等 props：`tests/pdfViewerPageCountLifecycle.test.ts` 按组件名查找 `PdfViewerToolbar`、`TranslatedPdfPane`、`BlockViewer`、`ReaderWorkspaceHeader`。
 
@@ -373,7 +373,7 @@ Chengjie Li, Bin Yu, … · 2026 · Journal · 本地文库 / 我的文库
 | 筛选 SQL 与 JS 对照不一致 | 三处同步修改，由 `tests/libraryQuery.test.ts` 的一致性断言兜底 |
 | P3a 改 library 库结构 | 只用 `ensureColumn` 追加可空列；先在拷贝库上验证升级与备份恢复；不碰知识库/RAG 库 |
 | 两种「语言」混淆 | 论文语言（`papers.language`）与译版语言（`attachments.language`）在类型名、文案、筛选里明确区分 |
-| 引导锚点丢失 | 迁移元素时连同 `data-tour` 一起迁移，并实测引导流程 |
+| 旧引导数据断开 | 保留 `onboarding:` 笔记目标的读取兼容，并用纯函数测试锁定解析结果 |
 
 ---
 

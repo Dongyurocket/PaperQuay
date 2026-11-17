@@ -85,12 +85,10 @@ export function OverviewProcessMenu({ tasks, cancelling, aiConfigured, summarySo
     { id: 'open-json', label: l('打开 MinerU JSON', 'Open MinerU JSON'), icon: <FileJson className="h-4 w-4" />, disabled: busy, onSelect: () => runAction('open-json') },
     { id: 'reparse', label: l('重新识别…', 'Re-parse…'), icon: <RefreshCw className="h-4 w-4" />, disabled: busy, onSelect: () => runAction('reparse') },
   ];
-  return <span data-tour="overview-mineru-parse" className="inline-flex">
-    <span data-tour="overview-translate-document" className="inline-flex">
-      <button type="button" className="pq-button !h-9 !rounded-[var(--pq-radius-sm)] px-3 text-sm" aria-label={l('处理', 'Process')} aria-haspopup="menu" aria-expanded={Boolean(anchor)} onClick={(event) => setAnchor(anchor ? null : event.currentTarget)}>
-        {l('处理', 'Process')}<ChevronDown className="h-4 w-4" />
-      </button>
-    </span>
+  return <span className="inline-flex">
+    <button type="button" className="pq-button !h-9 !rounded-[var(--pq-radius-sm)] px-3 text-sm" aria-label={l('处理', 'Process')} aria-haspopup="menu" aria-expanded={Boolean(anchor)} onClick={(event) => setAnchor(anchor ? null : event.currentTarget)}>
+      {l('处理', 'Process')}<ChevronDown className="h-4 w-4" />
+    </button>
     {anchor ? <Menu x={anchor.getBoundingClientRect().left} y={anchor.getBoundingClientRect().bottom + 4} width={320} entries={entries} keyboardAnchor={anchor} onClose={() => setAnchor(null)} /> : null}
   </span>;
 }

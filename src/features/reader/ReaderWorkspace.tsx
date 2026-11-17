@@ -9,6 +9,7 @@ import { ReaderWorkspaceOverview } from './readerWorkspaceOverview';
 import { ReaderWorkspaceHeader } from './readerWorkspaceHeader';
 import { FloatingAssistantPanel, SelectionQuickActions } from './readerWorkspaceOverlays';
 import TranslatedPdfPane from './TranslatedPdfPane';
+import { registerCommands } from '../../ui/commands';
 import { getFileNameFromPath } from '../../utils/text';
 import { getPdfSourceSignature } from '../pdf/pdfDocumentSource';
 import { isSameLocalPath } from './documentReaderPdfPaths';
@@ -17,6 +18,10 @@ import {
   type ReaderWorkspaceDocument,
 } from './readerWorkspaceShared';
 import type { MineruOutlineIndexItem } from './mineruSegments.ts';
+import {
+  buildReaderImmersiveCommand,
+  getReaderImmersiveVisibility,
+} from './readerImmersive';
 import type { Note } from '../../types/notes';
 import type {
   DocumentChatAttachment,
@@ -289,6 +294,7 @@ export function ReadingStage(props: ReaderWorkspaceProps & { immersiveReading: b
     onReadingViewModeChange,
     active,
   } = props;
+  const immersiveVisibility = getReaderImmersiveVisibility(immersiveReading);
   const pdfCompareMode = readingViewMode === 'pdf-compare';
   const showDualPane = readingViewMode === 'dual-pane' || pdfCompareMode;
   const translatedPdfPath = currentDocument.translatedPdfPath ?? '';
@@ -488,11 +494,11 @@ export function ReadingStage(props: ReaderWorkspaceProps & { immersiveReading: b
   );
 
   return (
-    <div data-tour="linked-reading" className="relative flex min-h-0 flex-1 overflow-hidden">
+    <div className="relative flex min-h-0 flex-1 overflow-hidden">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <div ref={layoutRef} className="flex min-h-0 flex-1">
           <section
-            className={`min-h-0 min-w-0 bg-[#eef3f9] ${
+            className={`min-h-0 min-w-0 bg-[var(--pq-bg-secondary)] ${
               resizingSplit ? 'transition-none' : 'transition-all duration-300'
             }`}
             style={{
@@ -519,7 +525,7 @@ export function ReadingStage(props: ReaderWorkspaceProps & { immersiveReading: b
               translating={translating}
               translationProgressCompleted={translationProgressCompleted}
               translationProgressTotal={translationProgressTotal}
-              hideToolbar={immersiveReading}
+              hideToolbar={!immersiveVisibility.showPaneToolbars}
               blocks={blocks}
               mineruOutlineIndex={mineruOutlineIndex}
               activeBlockId={activeBlockId}
@@ -556,13 +562,12 @@ export function ReadingStage(props: ReaderWorkspaceProps & { immersiveReading: b
                 onPointerDown={onStartResize}
                 className="group relative z-20 w-2 shrink-0 cursor-col-resize bg-transparent transition-all duration-200"
               >
-                <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-slate-300/80 transition-all duration-200 group-hover:w-[3px] group-hover:bg-[var(--pq-accent-bg)]" />
+                <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-[var(--pq-border-strong)] transition-all duration-200 group-hover:w-[3px] group-hover:bg-[var(--pq-accent-bg)]" />
                 <div className="absolute left-1/2 top-1/2 h-14 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--pq-surface-3)] transition-all duration-200 group-hover:w-1.5 group-hover:bg-[var(--pq-accent)]" />
               </div>
 
               <section
-                data-tour="block-translation"
-                className={`min-h-0 min-w-0 flex-1 bg-[#f7f9fc] ${
+                className={`min-h-0 min-w-0 flex-1 bg-[var(--pq-bg-secondary)] ${
                   resizingSplit ? 'transition-none' : 'transition-all duration-300'
                 }`}
               >
@@ -580,6 +585,7 @@ export function ReadingStage(props: ReaderWorkspaceProps & { immersiveReading: b
                     active={active}
                     smoothScroll={smoothScroll}
                     softPageShadow={softPageShadow}
+                    hideToolbar={!immersiveVisibility.showPaneToolbars}
                   />
                 ) : (
                   <BlockViewer
@@ -595,6 +601,7 @@ export function ReadingStage(props: ReaderWorkspaceProps & { immersiveReading: b
                   compactMode={compactReading}
                   showBlockMeta={showBlockMeta}
                   hidePageDecorations={hidePageDecorationsInBlockView}
+                  hideToolbar={!immersiveVisibility.showPaneToolbars}
                   smoothScroll={smoothScroll}
                   active={active}
                   translationBusy={translating}
@@ -726,9 +733,24 @@ function ReaderWorkspace(props: ReaderWorkspaceProps) {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [active, immersiveReading]);
 
+  // 多个阅读标签同时挂载且共用同一命令 id：只由当前激活的标签注册，避免隐藏标签覆盖或删除它。
+  useEffect(() => {
+    if (!active) {
+      return undefined;
+    }
+
+    return registerCommands([buildReaderImmersiveCommand({
+      available: workspaceStage === 'reading',
+      localize: l,
+      onToggle: () => setImmersiveReading((current) => !current),
+    })]);
+  }, [active, l, workspaceStage]);
+
+  const immersiveVisibility = getReaderImmersiveVisibility(immersiveReading);
+
   return (
     <div className="flex h-full min-h-0 flex-col bg-[var(--pq-bg)]">
-      {!immersiveReading ? (
+      {immersiveVisibility.showHeader ? (
         <ReaderWorkspaceHeader
           sourceLabel={sourceLabel}
           documentTitle={currentDocument.title}
@@ -744,6 +766,8 @@ function ReaderWorkspace(props: ReaderWorkspaceProps) {
           loading={loading}
           translating={translating}
           translationCancelling={translationCancelling}
+          statusMessage={statusMessage}
+          activeBlockSummary={activeBlockSummary}
           onStageChange={onStageChange}
           onReadingViewModeChange={onReadingViewModeChange}
           onCurrentPdfPathChange={onCurrentPdfPathChange}
@@ -802,11 +826,11 @@ function ReaderWorkspace(props: ReaderWorkspaceProps) {
         <ReadingStage {...props} immersiveReading={immersiveReading} />
       )}
 
-      {immersiveReading ? (
+      {immersiveVisibility.showExitControl ? (
         <button
           type="button"
           onClick={() => setImmersiveReading(false)}
-          className="fixed bottom-14 right-5 z-[120] inline-flex h-10 items-center gap-2 rounded-2xl border border-[var(--pq-border)] bg-white/92 px-3 text-sm font-medium text-[var(--pq-text-muted)] shadow-[0_14px_34px_rgba(15,23,42,0.16)] backdrop-blur-xl transition hover:bg-white dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:text-[var(--pq-text)] dark:hover:bg-[var(--pq-surface-2)]"
+          className="pq-button-secondary fixed bottom-14 right-5 z-[120] !h-8 px-3 text-sm"
           title={l('退出沉浸', 'Exit Immersive')}
           aria-label={l('退出沉浸', 'Exit Immersive')}
         >
@@ -823,16 +847,6 @@ function ReaderWorkspace(props: ReaderWorkspaceProps) {
         />
       ) : null}
 
-      <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-[var(--pq-border)] bg-[var(--pq-surface)] px-6 py-2.5 text-xs text-[var(--pq-text-muted)]">
-        <div className="min-w-0 truncate">
-          {loading || translating ? statusMessage || l('正在处理中...', 'Processing...') : statusMessage}
-        </div>
-        <div className="hidden items-center gap-4 lg:flex">
-          <span>{activeBlockSummary}</span>
-          <span>{l('单击预览，双击进入阅读', 'Single-click to preview, double-click to read')}</span>
-          <span>Ctrl + {l('滚轮缩放', 'Scroll to zoom')}</span>
-        </div>
-      </footer>
     </div>
   );
 }

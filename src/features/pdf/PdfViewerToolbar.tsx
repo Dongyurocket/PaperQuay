@@ -1,11 +1,14 @@
-import type { Dispatch, SetStateAction, ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Activity,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Download,
   Highlighter,
   Loader2,
+  MoreHorizontal,
   MousePointer2,
   PenTool,
   Trash2,
@@ -13,6 +16,7 @@ import {
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
+import { Menu, type MenuEntry } from '../../ui/menu';
 import { cn } from '../../utils/cn';
 import {
   getPdfAnnotationColorValue,
@@ -24,6 +28,11 @@ import {
   getPdfAnnotationColorLabel,
   getPercentProgress,
 } from './pdfViewerUtils';
+import {
+  allocatePdfToolbarOverflow,
+  parseAndClampPdfPageInput,
+  type PdfZoomPreset,
+} from './toolbar/pdfToolbarLogic';
 
 type Localize = (zh: string, en: string) => string;
 
@@ -37,13 +46,11 @@ interface ToolbarTool {
   label: string;
   icon: ReactNode;
 }
-
 interface PdfViewerToolbarProps {
   activeColorTool: PdfAnnotationColorTool;
   annotationColors: PdfAnnotationToolColors;
   canShowReadingHeatmapBar: boolean;
   currentPage: number;
-  documentError: string;
   editorTool: AnnotationEditorTool;
   enableReadingHeatmap: boolean;
   hasLiveTextSelection: boolean;
@@ -61,9 +68,9 @@ interface PdfViewerToolbarProps {
   onToggleReadingHeatmapBar: () => void;
   onZoomIn: () => void;
   onZoomOut: () => void;
+  onZoomPresetChange: (preset: PdfZoomPreset) => void;
   pageCount: number;
   readingHeatmapToggleLabel: string;
-  saveMessage: string;
   saving: boolean;
   showReadingHeatmapBar: boolean;
   translating: boolean;
@@ -72,12 +79,22 @@ interface PdfViewerToolbarProps {
   zoomLabel: string;
 }
 
+const TOOLBAR_OVERFLOW_ITEMS = [
+  { id: 'tools', width: 148, priority: 100 },
+  { id: 'page', width: 168, priority: 90 },
+  { id: 'zoom', width: 126, priority: 80 },
+] as const;
+const TOOLBAR_DELETE_ITEM = { id: 'delete', width: 40, priority: 30 } as const;
+/** 始终可见的「当前颜色」按钮与「⋯」按钮（含间距）所占宽度。 */
+const TOOLBAR_RESERVED_WIDTH = 88;
+const ZOOM_PRESETS = ['page-width', 'page-fit', '100%'] as const;
+const COLOR_PANEL_WIDTH = 176;
+
 export function PdfViewerToolbar({
   activeColorTool,
   annotationColors,
   canShowReadingHeatmapBar,
   currentPage,
-  documentError,
   editorTool,
   enableReadingHeatmap,
   hasLiveTextSelection,
@@ -95,9 +112,9 @@ export function PdfViewerToolbar({
   onToggleReadingHeatmapBar,
   onZoomIn,
   onZoomOut,
+  onZoomPresetChange,
   pageCount,
   readingHeatmapToggleLabel,
-  saveMessage,
   saving,
   showReadingHeatmapBar,
   translating,
@@ -105,11 +122,86 @@ export function PdfViewerToolbar({
   translationProgressTotal,
   zoomLabel,
 }: PdfViewerToolbarProps) {
+  const toolbarRef = useRef<HTMLDivElement | null>(null);
+  const [containerWidth, setContainerWidth] = useState(0);
+  const [pageInput, setPageInput] = useState(String(currentPage));
+  const [colorPanel, setColorPanel] = useState<{ x: number; y: number } | null>(null);
+  const [zoomMenu, setZoomMenu] = useState<{ x: number; y: number; anchor: HTMLButtonElement } | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; anchor: HTMLButtonElement } | null>(null);
+  const colorPanelRef = useRef<HTMLDivElement | null>(null);
+  const colorButtonRef = useRef<HTMLButtonElement | null>(null);
+  const skipPageBlurRef = useRef(false);
+
+  useEffect(() => {
+    setPageInput(String(currentPage));
+  }, [currentPage]);
+
+  useEffect(() => {
+    const element = toolbarRef.current;
+
+    if (!element || typeof ResizeObserver === 'undefined') {
+      return undefined;
+    }
+
+    const observer = new ResizeObserver(([entry]) => {
+      setContainerWidth(entry.contentRect.width);
+    });
+    observer.observe(element);
+
+    return () => observer.disconnect();
+  }, []);
+
+  // 颜色弹层渲染到 body（工具行 overflow-hidden 会裁掉内部弹层），这里负责点外部、Esc 和窗口缩放时关闭。
+  useEffect(() => {
+    if (!colorPanel) {
+      return undefined;
+    }
+
+    const close = () => setColorPanel(null);
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+
+      if (
+        target instanceof Node &&
+        (colorPanelRef.current?.contains(target) || colorButtonRef.current?.contains(target))
+      ) {
+        return;
+      }
+
+      close();
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        close();
+        colorButtonRef.current?.focus();
+      }
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('resize', close);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('resize', close);
+    };
+  }, [colorPanel]);
+
   const activeToolColor = annotationColors[activeColorTool];
   const translationProgressRatio = getPercentProgress(
     translationProgressCompleted,
     translationProgressTotal,
   );
+  const allocation = useMemo(
+    () => allocatePdfToolbarOverflow(
+      hasSelectedEditor ? [...TOOLBAR_OVERFLOW_ITEMS, TOOLBAR_DELETE_ITEM] : TOOLBAR_OVERFLOW_ITEMS,
+      containerWidth,
+      TOOLBAR_RESERVED_WIDTH,
+    ),
+    [containerWidth, hasSelectedEditor],
+  );
+  const overflowIds = new Set(allocation.overflow);
+
   const toolbarTools: ToolbarTool[] = [
     {
       key: 'select',
@@ -140,61 +232,333 @@ export function PdfViewerToolbar({
     return l('手写批注', 'Ink Annotation');
   };
 
+  const getZoomPresetLabel = (preset: PdfZoomPreset) =>
+    preset === 'page-width'
+      ? l('适合宽度', 'Fit width')
+      : preset === 'page-fit'
+        ? l('适合页面', 'Fit page')
+        : '100%';
+
+  const isToolActive = (key: ToolbarToolKey) =>
+    (key === 'select' && editorTool === 'none') ||
+    (key !== 'select' && key !== 'highlight' && editorTool === key);
+
+  const isToolDisabled = (key: ToolbarToolKey) =>
+    key === 'highlight'
+      ? !hasLiveTextSelection || editorTool !== 'none' || loading || saving
+      : loading || saving;
+
+  const runTool = (key: ToolbarToolKey) => {
+    if (key === 'highlight') {
+      onActiveColorToolChange('highlight');
+      void onCreateHighlight();
+      return;
+    }
+
+    if (key === 'select') {
+      onEditorToolChange('none');
+      return;
+    }
+
+    const editableTool = key as EditableToolbarToolKey;
+    onActiveColorToolChange(editableTool);
+    onEditorToolChange((current) => (current === editableTool ? 'none' : editableTool));
+  };
+
+  const goToPreviousPage = () => onScrollToPage(Math.max(0, currentPage - 2));
+  const goToNextPage = () => onScrollToPage(Math.min(Math.max(pageCount - 1, 0), currentPage));
+
+  const handlePageSubmit = () => {
+    const page = parseAndClampPdfPageInput(pageInput, pageCount, currentPage);
+    setPageInput(String(page));
+    onScrollToPage(page - 1);
+  };
+
+  // 被挤进「⋯」的分组在菜单里给出完整等价操作，窄宽时不丢功能。
+  const overflowEntries: MenuEntry[] = [
+    ...(overflowIds.has('tools')
+      ? toolbarTools.map((item) => ({
+          id: `overflow-tool-${item.key}`,
+          label: getToolLabel(item.key),
+          icon: item.icon,
+          checked: item.key === 'highlight' ? undefined : isToolActive(item.key),
+          disabled: isToolDisabled(item.key),
+          onSelect: () => runTool(item.key),
+        }))
+      : []),
+    ...(overflowIds.has('page')
+      ? [
+          {
+            id: 'overflow-previous-page',
+            label: `${l('上一页', 'Previous page')} (${currentPage}/${pageCount || '—'})`,
+            icon: <ChevronLeft className="h-4 w-4" strokeWidth={1.8} />,
+            disabled: currentPage <= 1,
+            onSelect: goToPreviousPage,
+          },
+          {
+            id: 'overflow-next-page',
+            label: l('下一页', 'Next page'),
+            icon: <ChevronRight className="h-4 w-4" strokeWidth={1.8} />,
+            disabled: pageCount <= 0 || currentPage >= pageCount,
+            onSelect: goToNextPage,
+          },
+        ]
+      : []),
+    ...(overflowIds.has('zoom')
+      ? [
+          {
+            id: 'overflow-zoom-out',
+            label: l('缩小', 'Zoom out'),
+            icon: <ZoomOut className="h-4 w-4" strokeWidth={1.8} />,
+            onSelect: onZoomOut,
+          },
+          {
+            id: 'overflow-zoom-in',
+            label: `${l('放大', 'Zoom in')} (${zoomLabel})`,
+            icon: <ZoomIn className="h-4 w-4" strokeWidth={1.8} />,
+            onSelect: onZoomIn,
+          },
+          ...ZOOM_PRESETS.map((preset) => ({
+            id: `overflow-zoom-${preset}`,
+            label: getZoomPresetLabel(preset),
+            onSelect: () => onZoomPresetChange(preset),
+          })),
+        ]
+      : []),
+    ...(overflowIds.has('delete') && hasSelectedEditor
+      ? [{
+          id: 'overflow-delete',
+          label: l('删除所选', 'Delete Selected'),
+          icon: <Trash2 className="h-4 w-4" strokeWidth={1.8} />,
+          tone: 'danger' as const,
+          disabled: loading || saving,
+          onSelect: onDeleteSelected,
+        }]
+      : []),
+  ];
+  const menuEntries: MenuEntry[] = [
+    ...overflowEntries,
+    ...(overflowEntries.length > 0 ? [{ type: 'separator' as const, id: 'overflow-separator' }] : []),
+    ...(enableReadingHeatmap
+      ? [{
+          id: 'reading-heatmap',
+          label: readingHeatmapToggleLabel,
+          icon: <Activity className="h-4 w-4" strokeWidth={1.8} />,
+          checked: showReadingHeatmapBar,
+          onSelect: onToggleReadingHeatmapBar,
+          disabled: !canShowReadingHeatmapBar,
+        }]
+      : []),
+    {
+      id: 'export-annotated-pdf',
+      label: saving ? l('正在导出…', 'Exporting…') : l('导出批注 PDF', 'Export Annotated PDF'),
+      icon: saving
+        ? <Loader2 className="h-4 w-4 animate-spin" strokeWidth={1.8} />
+        : <Download className="h-4 w-4" strokeWidth={1.8} />,
+      onSelect: onSave,
+      disabled: saving || loading,
+      tone: 'accent' as const,
+    },
+  ];
+
+  const renderToolButtons = () => (
+    <div className="inline-flex shrink-0 items-center gap-1">
+      {toolbarTools.map((item) => (
+        <button
+          key={item.key}
+          type="button"
+          onClick={() => runTool(item.key)}
+          disabled={isToolDisabled(item.key)}
+          title={getToolLabel(item.key)}
+          aria-label={getToolLabel(item.key)}
+          aria-pressed={item.key === 'highlight' ? undefined : isToolActive(item.key)}
+          className={cn(
+            'pq-icon-button !h-8 !w-8 shrink-0 border border-transparent disabled:cursor-not-allowed disabled:opacity-55',
+            isToolActive(item.key)
+              ? '!bg-[var(--pq-accent-soft)] !text-[var(--pq-accent)] !shadow-[inset_0_0_0_1px_var(--pq-accent-border)]'
+              : '',
+          )}
+        >
+          {item.icon}
+        </button>
+      ))}
+    </div>
+  );
+
   return (
-    <div className={cn(
-      'border-b border-slate-200/80 bg-white/78 px-4 py-3 backdrop-blur-xl dark:border-white/10 dark:bg-[var(--pq-bg-primary)]',
-      hideToolbar && 'hidden',
-    )}>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="inline-flex flex-wrap items-center gap-2 rounded-2xl border border-[var(--pq-border)] bg-[var(--pq-surface-2)] p-1 dark:border-white/10 dark:bg-[var(--pq-surface-1)]">
-          {toolbarTools.map((item) => (
+    <div
+      ref={toolbarRef}
+      className={cn(
+        'pq-toolbar relative flex min-w-0 shrink-0 items-center gap-2 px-3 [container-type:inline-size]',
+        '!h-9',
+        hideToolbar && 'hidden',
+      )}
+    >
+      <div className="flex min-w-0 flex-1 flex-nowrap items-center gap-2 overflow-hidden whitespace-nowrap">
+        {overflowIds.has('tools') ? null : renderToolButtons()}
+
+        <button
+          ref={colorButtonRef}
+          type="button"
+          onClick={(event) => {
+            if (colorPanel) {
+              setColorPanel(null);
+              return;
+            }
+
+            const rect = event.currentTarget.getBoundingClientRect();
+            setColorPanel({
+              x: Math.max(8, Math.min(rect.left, window.innerWidth - COLOR_PANEL_WIDTH - 8)),
+              y: rect.bottom + 4,
+            });
+          }}
+          className="pq-icon-button !h-8 !w-8 shrink-0 border border-[var(--pq-border)] bg-[var(--pq-surface-1)]"
+          title={l('当前颜色', 'Current color')}
+          aria-label={l('当前颜色', 'Current color')}
+          aria-haspopup="dialog"
+          aria-expanded={Boolean(colorPanel)}
+        >
+          <span
+            className="h-4 w-4 rounded-full border border-[var(--pq-border-strong)]"
+            style={{ backgroundColor: activeToolColor }}
+          />
+        </button>
+
+        {overflowIds.has('page') ? null : (
+          <div className="inline-flex shrink-0 items-center gap-1 rounded-[var(--pq-radius-sm)] border border-[var(--pq-border)] bg-[var(--pq-surface-1)] px-1">
             <button
-              key={item.key}
               type="button"
-              onClick={() => {
-                if (item.key === 'highlight') {
-                  onActiveColorToolChange('highlight');
-                  void onCreateHighlight();
-                  return;
-                }
-
-                if (item.key === 'select') {
-                  onEditorToolChange('none');
-                  return;
-                }
-
-                const editableTool = item.key as EditableToolbarToolKey;
-                onActiveColorToolChange(editableTool);
-                onEditorToolChange((current) => (current === editableTool ? 'none' : editableTool));
-              }}
-              disabled={
-                item.key === 'highlight'
-                  ? !hasLiveTextSelection || editorTool !== 'none' || loading || saving
-                  : loading || saving
-              }
-              title={getToolLabel(item.key)}
-              aria-label={getToolLabel(item.key)}
-              className={cn(
-                'inline-flex h-10 w-10 items-center justify-center rounded-xl border text-[var(--pq-text-muted)] transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-55',
-                ((item.key === 'select' && editorTool === 'none') ||
-                  (item.key !== 'select' &&
-                    item.key !== 'highlight' &&
-                    editorTool === item.key))
-                  ? 'border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-white text-[var(--pq-accent)] shadow-[0_8px_18px_rgba(79,70,229,0.12)] dark:bg-[var(--pq-surface-2)] dark:shadow-[0_8px_18px_rgba(79,70,229,0.18)]'
-                  : 'border-transparent bg-transparent hover:border-[var(--pq-border)] hover:bg-white hover:text-[var(--pq-text)] dark:hover:border-white/15 dark:hover:bg-[var(--pq-surface-2)] dark:hover:text-[var(--pq-text)]',
-              )}
+              onClick={goToPreviousPage}
+              className="pq-icon-button !h-8 !w-8"
+              title={l('上一页', 'Previous page')}
+              aria-label={l('上一页', 'Previous page')}
             >
-              {item.icon}
+              <ChevronLeft className="h-4 w-4" strokeWidth={1.9} />
             </button>
-          ))}
-        </div>
+            <input
+              value={pageInput}
+              onChange={(event) => setPageInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  handlePageSubmit();
+                } else if (event.key === 'Escape') {
+                  event.preventDefault();
+                  // Esc 还原为当前页；跳过随后的 blur 归一化，否则会把输入的值写回去。
+                  skipPageBlurRef.current = true;
+                  setPageInput(String(currentPage));
+                  event.currentTarget.blur();
+                }
+              }}
+              onBlur={() => {
+                if (skipPageBlurRef.current) {
+                  skipPageBlurRef.current = false;
+                  return;
+                }
 
-        <div className="inline-flex flex-wrap items-center gap-2 rounded-2xl border border-[var(--pq-border)] bg-white/86 px-2.5 py-2 dark:border-white/10 dark:bg-[var(--pq-surface-1)]">
-          <div className="flex items-center gap-1.5">
+                setPageInput(String(parseAndClampPdfPageInput(pageInput, pageCount, currentPage)));
+              }}
+              inputMode="numeric"
+              aria-label={l('当前页码', 'Current page')}
+              title={l('输入页码后按 Enter 跳转，Esc 还原', 'Enter a page and press Enter to jump; Esc restores')}
+              className="pq-input !h-7 !w-12 border-0 bg-transparent px-1 text-center text-[11px] font-medium"
+            />
+            <span className="text-[11px] text-[var(--pq-text-faint)]">/{pageCount || '—'}</span>
+            <button
+              type="button"
+              onClick={goToNextPage}
+              className="pq-icon-button !h-8 !w-8"
+              title={l('下一页', 'Next page')}
+              aria-label={l('下一页', 'Next page')}
+            >
+              <ChevronRight className="h-4 w-4" strokeWidth={1.9} />
+            </button>
+          </div>
+        )}
+
+        {overflowIds.has('zoom') ? null : (
+          <div className="inline-flex shrink-0 items-center gap-1">
+            <button
+              type="button"
+              onClick={(event) => {
+                const rect = event.currentTarget.getBoundingClientRect();
+                setZoomMenu({ x: rect.left, y: rect.bottom + 4, anchor: event.currentTarget });
+              }}
+              className="pq-button-secondary !h-8 min-w-16 px-2 text-[11px]"
+              title={l('缩放预设', 'Zoom presets')}
+              aria-label={`${l('缩放预设', 'Zoom presets')}: ${zoomLabel}`}
+              aria-haspopup="menu"
+              aria-expanded={Boolean(zoomMenu)}
+            >
+              <span className="max-w-12 truncate">{zoomLabel}</span>
+              <ChevronDown className="h-3.5 w-3.5" strokeWidth={1.8} />
+            </button>
+            <button
+              type="button"
+              onClick={onZoomOut}
+              className="pq-icon-button !h-8 !w-8"
+              title={l('缩小', 'Zoom out')}
+              aria-label={l('缩小', 'Zoom out')}
+            >
+              <ZoomOut className="h-4 w-4" strokeWidth={1.8} />
+            </button>
+            <button
+              type="button"
+              onClick={onZoomIn}
+              className="pq-icon-button !h-8 !w-8"
+              title={l('放大', 'Zoom in')}
+              aria-label={l('放大', 'Zoom in')}
+            >
+              <ZoomIn className="h-4 w-4" strokeWidth={1.8} />
+            </button>
+          </div>
+        )}
+
+        {overflowIds.has('delete') || !hasSelectedEditor ? null : (
+          <button
+            type="button"
+            onClick={onDeleteSelected}
+            disabled={loading || saving}
+            className="pq-icon-button !h-8 !w-8 shrink-0 !text-[var(--pq-danger)] hover:!bg-[var(--pq-error-bg)] disabled:cursor-not-allowed disabled:opacity-55"
+            title={l('删除当前选中的 PDF 批注', 'Delete the selected PDF annotation')}
+            aria-label={l('删除所选', 'Delete Selected')}
+          >
+            <Trash2 className="h-4 w-4" strokeWidth={1.8} />
+          </button>
+        )}
+      </div>
+
+      <button
+        type="button"
+        onClick={(event) => {
+          const rect = event.currentTarget.getBoundingClientRect();
+          setMenu({ x: rect.right - 224, y: rect.bottom + 4, anchor: event.currentTarget });
+        }}
+        className="pq-icon-button !h-8 !w-8 shrink-0"
+        title={l('更多工具', 'More tools')}
+        aria-label={l('更多工具', 'More tools')}
+        aria-haspopup="menu"
+        aria-expanded={Boolean(menu)}
+      >
+        <MoreHorizontal className="h-4 w-4" strokeWidth={1.8} />
+      </button>
+
+      {colorPanel && typeof document !== 'undefined' ? createPortal(
+        <div
+          ref={colorPanelRef}
+          role="dialog"
+          aria-label={l('批注颜色', 'Annotation color')}
+          className="fixed z-[80] w-44 rounded-[var(--pq-radius-md)] border border-[var(--pq-border)] bg-[var(--pq-surface-1)] p-2 shadow-[var(--pq-shadow-dialog)]"
+          style={{ left: colorPanel.x, top: colorPanel.y }}
+        >
+          <div className="mb-2 text-[11px] font-medium text-[var(--pq-text-muted)]">
+            {l('当前颜色', 'Current color')}
+          </div>
+          <div className="grid grid-cols-5 gap-1.5">
             {PDF_ANNOTATION_COLOR_PRESETS.map((preset) => {
               const colorValue = getPdfAnnotationColorValue(preset, activeColorTool);
-              const active = colorValue.toLowerCase() === activeToolColor.toLowerCase();
               const colorLabel = getPdfAnnotationColorLabel(preset.id, l);
+              const selected = colorValue.toLowerCase() === activeToolColor.toLowerCase();
 
               return (
                 <button
@@ -202,139 +566,71 @@ export function PdfViewerToolbar({
                   type="button"
                   onClick={() => onAnnotationToolColorChange(activeColorTool, colorValue)}
                   className={cn(
-                    'h-6 w-6 rounded-full border-2 transition-all duration-200',
-                    active
-                      ? 'scale-110 border-slate-900 shadow-[0_0_0_2px_rgba(255,255,255,0.9)] dark:border-[var(--pq-text)] dark:shadow-[0_0_0_2px_rgba(255,255,255,0.12)]'
-                      : 'border-white hover:scale-105 hover:border-[var(--pq-border-strong)] dark:border-[var(--pq-border)] dark:hover:border-[var(--pq-border-strong)]',
+                    'h-7 w-7 rounded-full border-2 transition',
+                    selected
+                      ? 'border-[var(--pq-accent)] shadow-[0_0_0_2px_var(--pq-accent-soft)]'
+                      : 'border-[var(--pq-border)] hover:border-[var(--pq-border-strong)]',
                   )}
                   style={{ backgroundColor: colorValue }}
                   title={colorLabel}
                   aria-label={colorLabel}
+                  aria-pressed={selected}
                 />
               );
             })}
           </div>
-          <label
-            className="inline-flex cursor-pointer items-center gap-1 rounded-full border border-[var(--pq-border)] bg-[var(--pq-surface-2)] px-2 py-1 text-xs text-[var(--pq-text-muted)] transition hover:border-[var(--pq-border-strong)] hover:bg-white dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:text-[var(--pq-text-muted)] dark:hover:border-white/15 dark:hover:bg-[var(--pq-surface-2)]"
-            title={l('Custom color', 'Custom color')}
-          >
+          <label className="mt-2 flex items-center gap-2 rounded-[var(--pq-radius-sm)] px-1.5 py-1 text-[11px] text-[var(--pq-text-muted)] hover:bg-[var(--pq-hover)]">
             <input
               type="color"
               value={activeToolColor}
               onChange={(event) => onAnnotationToolColorChange(activeColorTool, event.target.value)}
-              className="sr-only"
+              className="h-6 w-6 cursor-pointer rounded border-0 bg-transparent p-0"
+              aria-label={l('自定义颜色', 'Custom color')}
             />
-            <span
-              className="h-4 w-4 rounded-full border border-white shadow-sm"
-              style={{ backgroundColor: activeToolColor }}
-            />
-            {l('Custom', 'Custom')}
+            {l('自定义颜色', 'Custom color')}
           </label>
-        </div>
+        </div>,
+        document.body,
+      ) : null}
 
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="rounded-full border border-[var(--pq-border)] bg-white px-3 py-1 text-xs font-medium text-[var(--pq-text-muted)] dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:text-[var(--pq-text-faint)]">
-            {pageCount > 0 ? l(`第 ${currentPage}/${pageCount} 页`, `Page ${currentPage}/${pageCount}`) : l('页数未知', 'Page count unknown')}
-          </div>
-          <div className="rounded-full border border-[var(--pq-border)] bg-white px-3 py-1 text-xs font-medium text-[var(--pq-text-muted)] dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:text-[var(--pq-text-faint)]">
-            {zoomLabel}
-          </div>
-          <button
-            type="button"
-            onClick={() => onScrollToPage(Math.max(0, currentPage - 2))}
-            className="inline-flex items-center rounded-xl border border-[var(--pq-border)] bg-white p-2 text-[var(--pq-text-muted)] transition-all duration-200 hover:bg-[var(--pq-surface-2)] dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:text-[var(--pq-text-muted)] dark:hover:bg-[var(--pq-surface-2)]"
-            title={l('Previous page', 'Previous page')}
-          >
-            <ChevronLeft className="h-4 w-4" strokeWidth={1.9} />
-          </button>
-          <button
-            type="button"
-            onClick={() => onScrollToPage(Math.min(Math.max(pageCount - 1, 0), currentPage))}
-            className="inline-flex items-center rounded-xl border border-[var(--pq-border)] bg-white p-2 text-[var(--pq-text-muted)] transition-all duration-200 hover:bg-[var(--pq-surface-2)] dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:text-[var(--pq-text-muted)] dark:hover:bg-[var(--pq-surface-2)]"
-            title={l('Next page', 'Next page')}
-          >
-            <ChevronRight className="h-4 w-4" strokeWidth={1.9} />
-          </button>
-          <button
-            type="button"
-            onClick={onZoomOut}
-            className="inline-flex items-center rounded-xl border border-[var(--pq-border)] bg-white p-2 text-[var(--pq-text-muted)] transition-all duration-200 hover:bg-[var(--pq-surface-2)] dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:text-[var(--pq-text-muted)] dark:hover:bg-[var(--pq-surface-2)]"
-            title={l('缩小', 'Zoom out')}
-          >
-            <ZoomOut className="h-4 w-4" strokeWidth={1.8} />
-          </button>
-          <button
-            type="button"
-            onClick={onZoomIn}
-            className="inline-flex items-center rounded-xl border border-[var(--pq-border)] bg-white p-2 text-[var(--pq-text-muted)] transition-all duration-200 hover:bg-[var(--pq-surface-2)] dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:text-[var(--pq-text-muted)] dark:hover:bg-[var(--pq-surface-2)]"
-            title={l('放大', 'Zoom in')}
-          >
-            <ZoomIn className="h-4 w-4" strokeWidth={1.8} />
-          </button>
-          {enableReadingHeatmap ? (
-            <button
-              type="button"
-              onClick={onToggleReadingHeatmapBar}
-              disabled={!canShowReadingHeatmapBar}
-              className={cn(
-                'inline-flex items-center rounded-xl border p-2 transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-55',
-                showReadingHeatmapBar
-                  ? 'border-[var(--pq-accent-border)] bg-[var(--pq-accent-bg)] text-[var(--pq-accent)] shadow-[0_8px_18px_var(--pq-accent-shadow)] dark:border-[var(--pq-accent-border)] dark:bg-[var(--pq-accent-bg)] dark:text-[var(--pq-accent-text)]'
-                  : 'border-[var(--pq-border)] bg-white text-[var(--pq-text-muted)] hover:bg-[var(--pq-surface-2)] dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:text-[var(--pq-text-muted)] dark:hover:bg-[var(--pq-surface-2)]',
-              )}
-              title={readingHeatmapToggleLabel}
-              aria-label={readingHeatmapToggleLabel}
-            >
-              <Activity className="h-4 w-4" strokeWidth={1.8} />
-            </button>
-          ) : null}
-          <button
-            type="button"
-            onClick={onDeleteSelected}
-            disabled={!hasSelectedEditor || loading || saving}
-            className={cn(
-              'inline-flex items-center rounded-xl border px-3 py-2 text-sm font-medium transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-60',
-              hasSelectedEditor && !loading && !saving
-                ? 'border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-error-bg)] text-[var(--pq-danger)] hover:bg-[var(--pq-error-bg)] '
-                : 'border-[var(--pq-border)] bg-white text-[var(--pq-text-faint)] dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:text-[var(--pq-text-faint)]',
-            )}
-            title={l('删除当前选中的 PDF 批注', 'Delete the selected PDF annotation')}
-          >
-            <Trash2 className="mr-2 h-4 w-4" strokeWidth={1.8} />
-            {l('删除所选', 'Delete Selected')}
-          </button>
-          <button
-            type="button"
-            onClick={() => void onSave()}
-            disabled={saving || loading}
-            className="pq-button-primary px-3 py-2 text-sm disabled:cursor-not-allowed"
-          >
-            {saving ? (
-              <Loader2 className="h-4 w-4 animate-spin" strokeWidth={1.8} />
-            ) : (
-              <Download className="h-4 w-4" strokeWidth={1.8} />
-            )}
-            {saving ? l('正在导出...', 'Exporting...') : l('导出批注 PDF', 'Export Annotated PDF')}
-          </button>
-        </div>
-      </div>
+      {zoomMenu ? (
+        <Menu
+          x={zoomMenu.x}
+          y={zoomMenu.y}
+          width={160}
+          entries={ZOOM_PRESETS.map((preset) => ({
+            id: `zoom-${preset}`,
+            label: getZoomPresetLabel(preset),
+            onSelect: () => onZoomPresetChange(preset),
+          }))}
+          keyboardAnchor={zoomMenu.anchor}
+          onClose={() => setZoomMenu(null)}
+        />
+      ) : null}
 
-      {saveMessage ? <div className="mt-2 text-xs text-[var(--pq-success)]">{saveMessage}</div> : null}
-      {documentError ? <div className="mt-2 text-xs text-[var(--pq-danger)]">{documentError}</div> : null}
+      {menu ? (
+        <Menu
+          x={menu.x}
+          y={menu.y}
+          entries={menuEntries}
+          keyboardAnchor={menu.anchor}
+          onClose={() => setMenu(null)}
+        />
+      ) : null}
+
       {translating && translationProgressTotal > 0 ? (
-        <div className="mt-3 rounded-2xl border border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-[var(--pq-accent-bg)] px-3 py-2.5 ">
-          <div className="flex items-center justify-between gap-3 text-xs font-medium text-[var(--pq-accent)] ">
-            <span>{l('MinerU block translation progress', 'MinerU block translation progress')}</span>
-            <span>
-              {translationProgressCompleted}/{translationProgressTotal}
-            </span>
-          </div>
-          <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--pq-accent-bg)] ">
-            <div
-              className="h-full rounded-full bg-[var(--pq-accent)] transition-all duration-300 "
-              style={{ width: `${translationProgressRatio}%` }}
-            />
-          </div>
+        <div
+          className="pointer-events-none absolute inset-x-0 bottom-0 h-0.5 bg-[var(--pq-accent-soft)]"
+          role="progressbar"
+          aria-label={l('翻译进度', 'Translation progress')}
+          aria-valuemin={0}
+          aria-valuemax={translationProgressTotal}
+          aria-valuenow={translationProgressCompleted}
+        >
+          <div
+            className="h-full bg-[var(--pq-accent)] transition-[width] duration-300"
+            style={{ width: `${translationProgressRatio}%` }}
+          />
         </div>
       ) : null}
     </div>

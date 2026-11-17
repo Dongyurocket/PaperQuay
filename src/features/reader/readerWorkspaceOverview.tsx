@@ -65,7 +65,7 @@ export function ReaderWorkspaceOverview(props: ReaderWorkspaceOverviewProps) {
   const runningTask = runningKind ? deriveOverviewTask(runningKind, tasks) : null;
   return <div className="min-h-0 flex-1 overflow-y-auto bg-[var(--pq-bg)] p-4 sm:p-6" data-overview-page>
     <div className="mx-auto max-w-[1440px] space-y-5">
-      <section data-tour="overview-actions" className="min-w-0 rounded-[var(--pq-radius-md)] border border-[var(--pq-border)] bg-[var(--pq-surface)] p-5">
+      <section className="min-w-0 rounded-[var(--pq-radius-md)] border border-[var(--pq-border)] bg-[var(--pq-surface)] p-5">
         <span className="text-xs font-semibold text-[var(--pq-text-muted)]">{l('论文概览', 'Paper Overview')}</span>
         <h2 title={currentDocument.title} className="mt-3 line-clamp-3 break-words text-2xl font-semibold leading-snug tracking-tight text-[var(--pq-text)]">{currentDocument.title}</h2>
         <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-[var(--pq-text-muted)]">
@@ -96,7 +96,7 @@ export function ReaderWorkspaceOverview(props: ReaderWorkspaceOverviewProps) {
         </div> : null}
       </section>
       <div className="grid min-w-0 items-start gap-5 min-[1200px]:grid-cols-[minmax(0,1fr)_280px]">
-        <div data-tour="ai-summary" className="min-w-0">
+        <div className="min-w-0">
           <SummaryPanel
             key={currentDocument.workspaceId}
             paperSummary={props.paperSummary}

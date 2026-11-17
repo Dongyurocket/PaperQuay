@@ -8,6 +8,7 @@ import type {
 } from '../../types/notes';
 import type { PdfHighlightTarget, SelectedExcerpt } from '../../types/reader';
 import { resolveNoteAnchorLocation } from '../notes/noteAnchorLocation.ts';
+import { normalizeNotePaperTarget } from '../notes/notePaperTarget.ts';
 
 export const READER_NOTES_EDITOR_SOURCE_ID_PREFIX = 'paperquay:reader-notes-sidebar';
 
@@ -28,21 +29,7 @@ export function buildReaderNotesEditorSourceId(tabId: string): string {
 }
 
 export function resolveNoteAnchorWorkspaceId(note: Note, anchor?: NoteAnchor): string {
-  const rawTarget = (anchor?.paperId || note.paperId || '').trim();
-
-  if (!rawTarget) {
-    return '';
-  }
-
-  if (
-    rawTarget.startsWith('native-library:') ||
-    rawTarget.startsWith('standalone:') ||
-    rawTarget.startsWith('onboarding:')
-  ) {
-    return rawTarget;
-  }
-
-  return `native-library:${rawTarget}`;
+  return normalizeNotePaperTarget(anchor?.paperId || note.paperId || '');
 }
 
 export function buildNoteAnchorJumpDetail(note: Note, anchor: NoteAnchor): JumpToNoteAnchorEventDetail {

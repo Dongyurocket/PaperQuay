@@ -74,6 +74,7 @@ import {
   type PreferencesSectionKey,
 } from './readerShared';
 import { confirmAction } from '../../ui/confirmHost';
+import { normalizeNotePaperTarget } from '../notes/notePaperTarget';
 
 interface ReaderProps {
   workspaceActive?: boolean;
@@ -87,19 +88,7 @@ function resolveNoteAnchorWorkspaceId(detail: JumpToNoteAnchorEventDetail) {
     ''
   ).trim();
 
-  if (!rawTarget) {
-    return '';
-  }
-
-  if (
-    rawTarget.startsWith('native-library:') ||
-    rawTarget.startsWith('standalone:') ||
-    rawTarget.startsWith('onboarding:')
-  ) {
-    return rawTarget;
-  }
-
-  return `native-library:${rawTarget}`;
+  return normalizeNotePaperTarget(rawTarget);
 }
 
 function isNoteAnchorJumpForWorkspace(

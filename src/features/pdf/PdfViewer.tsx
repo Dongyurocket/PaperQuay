@@ -43,6 +43,7 @@ import {
 import { cn } from '../../utils/cn';
 import { perfMark, perfMeasure } from '../../utils/perfTrace';
 import { useLocaleText } from '../../i18n/uiLanguage';
+import { emitToast, emitToastDismiss } from '../../ui/toastBridge';
 import { buildPathInDirectory, getParentDirectory, normalizePathForCompare } from '../../utils/path';
 import { getFileNameFromPath } from '../../utils/text';
 import {
@@ -111,6 +112,7 @@ import {
   PdfViewerToolbar,
   type AnnotationEditorTool,
 } from './PdfViewerToolbar';
+import { getPdfZoomPresetValue, type PdfZoomPreset } from './toolbar/pdfToolbarLogic';
 
 GlobalWorkerOptions.workerSrc = new URL(
   'pdfjs-dist/build/pdf.worker.min.mjs',
@@ -123,6 +125,7 @@ const PDF_OUTLINE_COLLAPSED_STORAGE_PREFIX = 'paperquay-pdf-outline-collapsed-v1
 const PDF_READING_HEATMAP_BAR_VISIBLE_STORAGE_KEY =
   'paperquay-pdf-reading-heatmap-bar-visible-v1';
 const USER_SCROLL_RESTORE_GUARD_MS = 700;
+let pdfViewerToastSequence = 0;
 const SCROLL_EMIT_TRAILING_MS = 360;
 const THUMBNAIL_RENDER_IDLE_MS = 420;
 const OVERLAY_PAGE_RADIUS = 1;
@@ -386,6 +389,13 @@ function PdfViewer({
   const loadGenerationRef = useRef(0);
   const paneRef = useRef(pane);
   paneRef.current = pane;
+  // 每个 PdfViewer 实例独立的 toast key：多个标签页或对照窗格同时翻译时互不覆盖。
+  const translationToastKeyRef = useRef('');
+  if (!translationToastKeyRef.current) {
+    pdfViewerToastSequence += 1;
+    translationToastKeyRef.current = `pdf-translation:${pdfViewerToastSequence}`;
+  }
+  const translationToastKey = translationToastKeyRef.current;
   const scrollPositionRef = useRef<PdfScrollPosition | null>(scrollPosition);
   const sourceSignatureRef = useRef('');
   const restoringScrollRef = useRef(false);
@@ -433,7 +443,17 @@ function PdfViewer({
   useEffect(() => {
     onDocumentErrorChange?.(documentError);
   }, [onDocumentErrorChange, documentError]);
-  const [saveMessage, setSaveMessage] = useState('');
+  useEffect(() => {
+    if (!documentError) {
+      return;
+    }
+
+    emitToast({
+      tone: 'error',
+      key: `pdf-error:${paneRef.current}:${documentError}`,
+      message: documentError,
+    });
+  }, [documentError]);
   const [hasSelectedEditor, setHasSelectedEditor] = useState(false);
   const [hasLiveTextSelection, setHasLiveTextSelection] = useState(false);
   const [annotationColors, setAnnotationColors] = useState(() => loadPdfAnnotationToolColors());
@@ -478,7 +498,7 @@ function PdfViewer({
 
   useEffect(() => {
     setZoomLabel((current) =>
-      current === 'Fit Width' ? l('Fit Width', 'Fit Width') : current,
+      current === 'Fit Width' || current === '适合宽度' ? l('适合宽度', 'Fit width') : current,
     );
   }, [l]);
 
@@ -486,6 +506,29 @@ function PdfViewer({
     () => getPdfSourceSignature(source, currentPdfName),
     [currentPdfName, source],
   );
+
+  useEffect(() => {
+    const key = translationToastKey;
+
+    if (translating && translationProgressTotal > 0) {
+      const progress = Math.min(
+        100,
+        Math.max(0, (translationProgressCompleted / translationProgressTotal) * 100),
+      );
+      emitToast({
+        tone: 'progress',
+        key,
+        message: l('正在翻译 PDF 结构块', 'Translating PDF structure blocks'),
+        description: `${translationProgressCompleted}/${translationProgressTotal} · ${Math.round(progress)}%`,
+        duration: 0,
+      });
+      return;
+    }
+
+    emitToastDismiss(key);
+  }, [l, translationToastKey, translating, translationProgressCompleted, translationProgressTotal]);
+
+  useEffect(() => () => emitToastDismiss(translationToastKey), [translationToastKey]);
 
   useEffect(() => {
     sourceSignatureRef.current = sourceSignature;
@@ -1889,7 +1932,6 @@ function PdfViewer({
     try {
       setSaving(true);
       setDocumentError('');
-      setSaveMessage('');
 
       const sourcePath = source?.kind === 'local-path' ? source.path : '';
       const exportDirectory = defaultSaveDirectory.trim();
@@ -1908,7 +1950,10 @@ function PdfViewer({
           });
 
       if (!targetPath) {
-        setSaveMessage(lRef.current('已取消导出批注版 PDF', 'Annotated PDF export canceled'));
+        emitToast({
+          tone: 'info',
+          message: lRef.current('已取消导出批注版 PDF', 'Annotated PDF export canceled'),
+        });
         return;
       }
 
@@ -1929,15 +1974,14 @@ function PdfViewer({
       await writeLocalBinaryFile(targetPath, new Uint8Array(nextBytes));
       const updatingCurrentAnnotatedFile =
         sourcePath && normalizePathForCompare(targetPath) === normalizePathForCompare(sourcePath);
-      setSaveMessage(
-        updatingCurrentAnnotatedFile
-          ? `Updated annotated PDF: ${targetPath}`
-          : exportDirectory
-            ? `Saved annotated PDF to the paper project folder: ${targetPath}`
-            : sourcePath
-              ? `Saved annotated PDF next to the original file: ${targetPath}`
-              : `Exported annotated PDF: ${targetPath}`,
-      );
+      const saveMessage = updatingCurrentAnnotatedFile
+        ? lRef.current(`已更新批注版 PDF：${targetPath}`, `Updated annotated PDF: ${targetPath}`)
+        : exportDirectory
+          ? lRef.current(`已将批注版 PDF 保存到文献项目目录：${targetPath}`, `Saved annotated PDF to the paper project folder: ${targetPath}`)
+          : sourcePath
+            ? lRef.current(`已将批注版 PDF 保存到原文件旁：${targetPath}`, `Saved annotated PDF next to the original file: ${targetPath}`)
+            : lRef.current(`已导出批注版 PDF：${targetPath}`, `Exported annotated PDF: ${targetPath}`);
+      emitToast({ tone: 'success', message: saveMessage });
       onSaveSuccess?.(targetPath);
     } catch (saveError) {
       setDocumentError(
@@ -2100,7 +2144,6 @@ function PdfViewer({
     restoredScrollKeyRef.current = '';
     setNumberStateIfChanged(setCurrentPage, initialPage);
     setStringStateIfChanged(setZoomLabel, '100%');
-    setSaveMessage('');
     setDocumentError('');
     clearSelectionCommitTimer();
     clearPendingBlockSelect();
@@ -2192,7 +2235,7 @@ function PdfViewer({
           primeSavedScrollPage(pdfViewer, pdfViewer.pagesCount);
           pdfViewer.currentScaleValue = 'page-width';
           pdfViewer.update?.();
-          setStringStateIfChanged(setZoomLabel, lRef.current('Fit Width', 'Fit Width'));
+          setStringStateIfChanged(setZoomLabel, lRef.current('适合宽度', 'Fit width'));
           syncPageHosts();
           restoreSavedScroll({ force: true });
           setInitializedDocument({ documentInit, revision: retryRevision });
@@ -2211,7 +2254,7 @@ function PdfViewer({
             setZoomLabel,
             Number.isFinite(scale)
               ? `${Math.round(scale * 100)}%`
-              : lRef.current('Fit Width', 'Fit Width'),
+              : lRef.current('适合宽度', 'Fit width'),
           );
         };
 
@@ -3087,7 +3130,7 @@ function PdfViewer({
 
   return (
     <div
-      className="paperquay-pdf-linked flex h-full min-h-0 flex-col bg-[linear-gradient(180deg,#eff4fb,#e9f0f7)] dark:bg-[var(--pq-bg-primary)]"
+      className="paperquay-pdf-linked flex h-full min-h-0 flex-col bg-[var(--pq-bg)]"
       data-soft-shadow={softPageShadow ? 'true' : 'false'}
       data-pdf-phase={documentError ? 'error' : firstPageRendered ? 'page-rendered' : pageCount ? 'document-ready' : 'loading-document'}
     >
@@ -3096,7 +3139,6 @@ function PdfViewer({
         annotationColors={annotationColors}
         canShowReadingHeatmapBar={canShowReadingHeatmapBar}
         currentPage={currentPage}
-        documentError={documentError}
         editorTool={editorTool}
         enableReadingHeatmap={enableReadingHeatmap}
         hasLiveTextSelection={hasLiveTextSelection}
@@ -3114,9 +3156,25 @@ function PdfViewer({
         onToggleReadingHeatmapBar={() => setReadingHeatmapBarVisible((current) => !current)}
         onZoomIn={() => pdfViewerRef.current?.increaseScale?.()}
         onZoomOut={() => pdfViewerRef.current?.decreaseScale?.()}
+        onZoomPresetChange={(preset: PdfZoomPreset) => {
+          const pdfViewer = pdfViewerRef.current;
+
+          if (!pdfViewer) {
+            return;
+          }
+
+          pdfViewer.currentScaleValue = getPdfZoomPresetValue(preset);
+          pdfViewer.update?.();
+          setZoomLabel(
+            preset === 'page-width'
+              ? l('适合宽度', 'Fit width')
+              : preset === 'page-fit'
+                ? l('适合页面', 'Fit page')
+                : '100%',
+          );
+        }}
         pageCount={pageCount}
         readingHeatmapToggleLabel={readingHeatmapToggleLabel}
-        saveMessage={saveMessage}
         saving={saving}
         showReadingHeatmapBar={showReadingHeatmapBar}
         translating={translating}
@@ -3147,10 +3205,10 @@ function PdfViewer({
                 aria-label={l('页面缩略图', 'Page thumbnails')}
                 aria-pressed={sidebarTab === 'thumbnails'}
                 className={cn(
-                  'inline-flex h-8 w-8 items-center justify-center rounded-xl border transition',
+                  'inline-flex h-8 w-8 items-center justify-center rounded-[var(--pq-radius-sm)] border transition',
                   sidebarTab === 'thumbnails' && !thumbnailsCollapsed
-                    ? 'border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-[var(--pq-accent-bg)] text-[var(--pq-accent)] '
-                    : 'border-[var(--pq-border)] bg-white text-[var(--pq-text-muted)] hover:border-[var(--pq-border-strong)] hover:bg-[var(--pq-surface-2)] dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:text-[var(--pq-text-muted)] dark:hover:border-white/15 dark:hover:bg-[var(--pq-surface-2)]',
+                    ? 'border-[var(--pq-accent-border)] bg-[var(--pq-accent-bg)] text-[var(--pq-accent)] '
+                    : 'border-[var(--pq-border)] bg-[var(--pq-surface-1)] text-[var(--pq-text-muted)] hover:border-[var(--pq-border-strong)] hover:bg-[var(--pq-surface-2)]',
                 )}
               >
                 <Images className="h-4 w-4" strokeWidth={1.8} />
@@ -3165,10 +3223,10 @@ function PdfViewer({
                 aria-label={l('文档目录', 'Document outline')}
                 aria-pressed={sidebarTab === 'outline'}
                 className={cn(
-                  'inline-flex h-8 w-8 items-center justify-center rounded-xl border transition',
+                  'inline-flex h-8 w-8 items-center justify-center rounded-[var(--pq-radius-sm)] border transition',
                   sidebarTab === 'outline' && !thumbnailsCollapsed
-                    ? 'border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-[var(--pq-accent-bg)] text-[var(--pq-accent)] '
-                    : 'border-[var(--pq-border)] bg-white text-[var(--pq-text-muted)] hover:border-[var(--pq-border-strong)] hover:bg-[var(--pq-surface-2)] dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:text-[var(--pq-text-muted)] dark:hover:border-white/15 dark:hover:bg-[var(--pq-surface-2)]',
+                    ? 'border-[var(--pq-accent-border)] bg-[var(--pq-accent-bg)] text-[var(--pq-accent)] '
+                    : 'border-[var(--pq-border)] bg-[var(--pq-surface-1)] text-[var(--pq-text-muted)] hover:border-[var(--pq-border-strong)] hover:bg-[var(--pq-surface-2)]',
                 )}
               >
                 <ListTree className="h-4 w-4" strokeWidth={1.8} />
@@ -3197,8 +3255,8 @@ function PdfViewer({
 
         <div className="relative min-h-0 flex-1">
           {(loading || (pageCount > 0 && !firstPageRendered && !documentError)) ? (
-          <div className="absolute inset-0 z-20 flex items-center justify-center bg-[rgba(241,245,249,0.72)] backdrop-blur-sm dark:bg-[rgba(15,23,42,0.72)]">
-            <div className="inline-flex items-center rounded-full border border-white/70 bg-white/92 px-4 py-2 text-sm text-[var(--pq-text-muted)] shadow-[0_14px_34px_rgba(15,23,42,0.08)] dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:text-[var(--pq-text-muted)] dark:shadow-[0_14px_34px_rgba(0,0,0,0.24)]">
+          <div className="absolute inset-0 z-20 flex items-center justify-center bg-[var(--pq-bg-elevated)] backdrop-blur-sm">
+            <div className="inline-flex items-center rounded-[var(--pq-radius-sm)] border border-[var(--pq-border)] bg-[var(--pq-surface-1)] px-4 py-2 text-sm text-[var(--pq-text-muted)] shadow-[var(--pq-shadow-float)]">
               {pageCount > 0 ? l('正在绘制 PDF 页面…', 'Rendering PDF page...') : l('正在加载 PDF…', 'Loading PDF...')}
             </div>
           </div>
