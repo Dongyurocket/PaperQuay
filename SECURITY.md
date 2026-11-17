@@ -2,7 +2,9 @@
 
 ## Supported Versions
 
-PaperQuay is in an early release stage. Security fixes are currently handled on the latest `main` branch and the latest published release.
+Security fixes go to the latest `main` branch and the latest published release (currently the 0.4.x line).
+
+Since 0.4.24, official releases cover Windows x64 only. Builds for macOS, Linux or other platforms are self-built from source and are not maintained or tested by the maintainer.
 
 ## Reporting a Vulnerability
 
@@ -12,7 +14,7 @@ If you find a vulnerability, contact the maintainer privately through GitHub or 
 
 - A clear description of the issue.
 - Steps to reproduce the problem.
-- Affected platform and PaperQuay version.
+- PaperQuay version and Windows version (or your self-built platform).
 - Whether local files, API keys, PDF contents, model requests, or database records can be exposed or modified.
 - Any suggested mitigation if you already investigated the root cause.
 

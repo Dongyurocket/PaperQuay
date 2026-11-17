@@ -5,11 +5,11 @@
 </p>
 
 <p align="center">
-  <strong>An open-source AI paper workspace for PDF reading, translation, structured overviews, inline notes, Zotero import, Agent workflows, and local RAG.</strong>
+  <strong>An open-source AI paper workspace for PDF reading, full-text translation, structured overviews, inline notes, Zotero import, Agent workflows, and local RAG.</strong>
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.4.24-2563eb?style=flat-square" alt="Version v0.4.24">
+  <img src="https://img.shields.io/badge/version-v0.4.30-2563eb?style=flat-square" alt="Version v0.4.30">
   <img src="https://img.shields.io/badge/maintained-Windows%20x64-4b5563?style=flat-square" alt="Maintained: Windows x64">
   <img src="https://img.shields.io/badge/built%20with-Electron-47848f?style=flat-square" alt="Electron">
   <img src="https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-0f766e?style=flat-square" alt="React TypeScript">
@@ -19,16 +19,16 @@
 </p>
 
 <p align="center">
-  <a href="#quick-navigation">Quick Navigation</a> |
-  <a href="#paperquay---open-ai-paper-workspace-that-keeps-reading-flow-intact">Why PaperQuay</a> |
-  <a href="#completed-features">Features</a> |
-  <a href="#first-run-workflow">Quick Start</a> |
-  <a href="#development">Development</a>
+  <a href="./docs/USER_MANUAL.zh-CN.md">User Manual (Chinese)</a> |
+  <a href="#recent-updates">Recent Updates</a> |
+  <a href="#features">Features</a> |
+  <a href="#download-and-install">Download</a> |
+  <a href="#mcp-and-external-agents">MCP</a> |
+  <a href="#local-development">Development</a> |
+  <a href="./CHANGELOG.md">Changelog</a>
 </p>
 
-> 💡 **Project Background & Fork Notice**:
-> This repository is a personalized fork and secondary development branch based on the upstream open-source project [WangQrkkk/PaperQuay](https://github.com/WangQrkkk/PaperQuay), maintained by [@Dongyurocket](https://github.com/Dongyurocket) under the `AGPL-3.0-only` license.
-> While staying closely synchronized with the upstream core, this fork focuses on **scientific typography & OCR cleaning, raw PDF vector slice (BBox Crop) fallback, LLM-powered block re-parsing/restructuring, automated large document splitting with multi-Key rotation, local RAG index management & self-healing, native MCP hybrid vector retrieval (KNN+FTS5+RRF), and selective Zotero synchronization**. See the [Development Manual](./docs/DEVELOPMENT.zh-CN.md) for fork workflows, upstream sync, and local builds.
+> **About this repository**: a personal fork of [WangQrkkk/PaperQuay](https://github.com/WangQrkkk/PaperQuay), maintained by [@Dongyurocket](https://github.com/Dongyurocket) under the same `AGPL-3.0-only` license. Besides tracking upstream, it adds typography cleanup, raw PDF slice (BBox Crop) comparison, AI block re-parsing, splitting of very long documents with multi-key rotation, local RAG index management, hybrid knowledge-base MCP search (KNN + FTS5 + RRF), and selective Zotero sync. Fork workflow, upstream sync, and builds are covered in the [Development Manual](./docs/DEVELOPMENT.zh-CN.md) (Chinese).
 
 <p align="center">
   <img src="./docs/assets/readme-hero.svg" alt="PaperQuay feature overview" width="920">
@@ -36,642 +36,174 @@
 
 ---
 
-## Quick Navigation
+## What It Is
 
-<p>
-  <a href="#paperquay---open-ai-paper-workspace-that-keeps-reading-flow-intact">Problem & Positioning</a> |
-  <a href="#latest-update">Latest Update</a> |
-  <a href="#what-makes-paperquay-different">What Makes It Different</a> |
-  <a href="#core-workflow">Core Workflow</a> |
-  <a href="#completed-features">Completed Features</a> |
-  <a href="#mcp-server--external-agent-integration">MCP Server</a> |
-  <a href="#authoring-agent-skills--workflow-collaboration">Skills Authoring</a> |
-  <a href="#architecture">Architecture</a> |
-  <a href="#zotero-compatibility">Zotero Compatibility</a> |
-  <a href="#todo-roadmap">Todo</a>
-</p>
+PaperQuay is a local-first, free and open-source desktop AI paper workspace for graduate students, researchers, and anyone who reads many papers. Importing, reading, translating, overviews, annotations, notes, organization, and knowledge-base search all happen in one app. Zotero can be an import source but is not required.
 
----
-
-## Latest Update
-
-### v0.4.24 - Comparison pane fit and initial page synchronization
-
-- **Pane fit**: recalculate fit presets after pane/window resizing and tab reactivation, preserving manual numeric zoom.
-- **Initial page synchronization**: wait for page initialization so the translation does not remain on page one when entering comparison.
-- **Release and maintenance scope**: only Windows x64 is published, maintained, and tested from this release. The author has limited capacity; users build other platforms themselves, and the author does not maintain or test them. Historical assets remain available.
-- **Verification and download**: frontend build and 976 tests passed; installed desktop verification follows the user's update. See [v0.4.24 release](https://github.com/Dongyurocket/PaperQuay/releases/tag/app-v0.4.24) and the [acceptance record](./docs/changes/2026-11-12-pdf-compare-resize-and-initial-sync.md).
-
-### v0.4.20 - MinerU results and PDFs open after a restore
-
-- **MinerU parse results load again**: imports drop the package's `default/` or `custom-xxxxxxxx/` folder level, so caches land where the reader looks. The cache root active on the source machine wins, and duplicate cache folders are skipped as a whole.
-- **PDFs are rebound by attachment ID**: papers opened on the source machine no longer point at a missing original file name, and reading history is rewritten to match. `stored_path` values with forward slashes or different letter case also match.
-- **Data already restored with 0.4.19 repairs itself**: the first launch after upgrading moves MinerU cache folders up one level and relinks missing attachments. Archives exported by 0.4.19 can be imported again directly.
-- **Restore paths resolve only when needed**: a folder whose parent is a junction or symbolic link (for example `Documents\BaiduSyncdisk`) resolves to its real path; other paths keep the text you selected. The restore summary counts restored, unresolved and not-in-package attachments.
-- **Download**: [v0.4.20 release](https://github.com/Dongyurocket/PaperQuay/releases/tag/app-v0.4.20).
-
-### v0.4.19 - Encrypted single-file backup replaces WebDAV
-
-- **`.pqbackup` archives**: a password-protected AES-256-GCM single file. A full migration archive carries configuration and API keys, the three databases, referenced PDFs, agent memory and sessions, survey drafts, graph relations, reading state and annotations, the note vault and MinerU derived caches; about 12.2 GiB full and 2.3 GiB for daily backups. The password cannot be recovered.
-- **Import in four steps**: stage, verify, restart, then swap offline. The previous data directory stays as a rollback point, and MCP writes are guarded during restore.
-- **WebDAV retired**: old remote backups must be restored locally with 0.4.18 or earlier first; the new version does not read them and does not delete remote files.
-- **Download**: [v0.4.19 release](https://github.com/Dongyurocket/PaperQuay/releases/tag/app-v0.4.19).
-
-### v0.4.18 - Failed questions stay, and chat messages can be copied
-
-- **Questions survive failed answers**: only the empty assistant placeholder is removed. Questions, message attachments, history, new drafts and current conversation selection are preserved; requests from an earlier document activation cannot overwrite current state.
-- **Copy individual messages**: both sidebar and floating chat can copy user messages or cleaned assistant Markdown / HTML source, preserving formulas, code and original citation labels, with inline success and failure feedback.
-- **Release platforms at that time**: Windows x64, Linux x64, and macOS x64; the Windows-only maintenance scope above applies from 0.4.24.
-- **Download**: [v0.4.18 release](https://github.com/Dongyurocket/PaperQuay/releases/tag/app-v0.4.18).
-
-### v0.4.17 - UI consistency pass and a library card fix
-
-- **Paper cards keep their titles**: the card grid used fixed columns with a *viewport* breakpoint, but the list column is sized by the three-pane layout. Widening a side panel left the title column with 41–73px, truncating titles, authors and paths to nothing. Cards now use container queries; the title column is back to 354px and cards are 165px instead of ~300px.
-- **Dark mode and status colours are distinguishable**: in the light theme the accent and success greens were 13° apart, so "MinerU parsed" and "RAG indexed" badges looked identical; the dark accent was a desaturated grey-green. Both fixed, along with four unreadable elements in dark mode.
-- **The knowledge graph is readable**: all 191 node labels used to overlap; now only hubs are labelled at overview, the selected node is always labelled, and everything returns when you zoom in. The graph re-fits when the window changes, and gained zoom buttons plus a legend.
-- **Command palette**: `Ctrl/Cmd+K` searches and runs navigation, tab and settings actions; `Ctrl/Cmd+W` closes a tab, `Ctrl/Cmd+,` opens settings.
-- **Long tasks are visible across tabs**: translation and RAG indexing progress now report into a global task bar.
-- **History can no longer be wiped by accident**: clearing agent history and deleting a session now ask for confirmation.
-- **Download**: installers on the [v0.4.17 release](https://github.com/Dongyurocket/PaperQuay/releases/tag/app-v0.4.17).
-
-### v0.4.16 - Reader panels stop following the mouse after you release
-
-- **The sidebar width sticks now**: HTML answers in the assistant sidebar render in an `iframe`, and releasing the drag over one never reached the parent window, so the panel kept following the mouse. Separators now use Pointer Capture and also end on pointer cancel, lost pointer capture, window blur, or a move with no button held; width transitions are off while dragging, so it stops where you release it. The PDF/translation split and the floating chat panel are fixed the same way.
-- **Sizes are saved once on release**: sidebar width and split ratio no longer write `localStorage` on every mouse move.
-- **Download**: installers on the [v0.4.16 release](https://github.com/Dongyurocket/PaperQuay/releases/tag/app-v0.4.16).
-
-### v0.4.15 - Hybrid rebuilds finish an interrupted pdf-text index
-
-- **The badge no longer sticks on a partial index**: a paper stayed on "RAG pending" when MinerU was already indexed and pdf-text had stopped mid-batch. Manual and batch rebuilds now read the PDF text and finish pdf-text.
-- **Download**: installers on the [v0.4.15 release](https://github.com/Dongyurocket/PaperQuay/releases/tag/app-v0.4.15).
-
-### v0.4.14 - Per-paper RAG index opt-out
-
-- **Exclude from the local knowledge base**: the details panel, context menu, and batch bar can remove one paper or a selection from the index. Exclusion deletes that paper's index and keeps the PDF, parsed content, and notes. Rejoining does not rebuild the index.
-- **Retrieval boundary**: excluded papers drop out of knowledge-base search and similarity. Reader QA and single-paper Agent context still fall back to the full text. The list can filter all / included / excluded.
-- **MCP**: `search_papers` and `get_paper_details` return `ragEnabled`. Excluded papers do not appear in `search_knowledge_base` or `read_paper_content`.
-- **Download**: installers on the [v0.4.14 release](https://github.com/Dongyurocket/PaperQuay/releases/tag/app-v0.4.14).
-
-### v0.4.10–v0.4.13 - MCP ships with the installer, and contract alignment
-
-- **MCP ships with the app**: the installer bundles the self-contained knowledge-base service at `resources/paperquay-mcp/` (with `sqlite-vec` and the platform extension). Start it with the app's own Electron binary plus `ELECTRON_RUN_AS_NODE=1` — no separate Node.js install. Settings → MCP server generates ready-to-copy Proma / Claude / Codex snippets with the current install paths.
-- **Translated-PDF tools**: `attach_translated_pdf` and `remove_translated_pdf` join the guarded toolset, sharing the desktop attachment pipeline; each paper keeps a single translated copy, and a page-count mismatch returns a warning instead of rejecting the attach.
-- **Install-build fixes**: v0.4.11 fixed `sqlite-vec` missing from the packaged service; v0.4.12 fixed the write guard misidentifying the MCP process itself (`PaperQuay.exe` launched with `ELECTRON_RUN_AS_NODE=1`) as the desktop app, which had made every write tool fail while the desktop app was closed.
-- **MCP contract alignment (v0.4.13)**: the `update_note` description now matches the write-time rich-text rebuild, its documented `pageKind` parameter (8-value whitelist, empty string clears) is restored, and clearing a page kind now actually persists; README and the Chinese user manual refreshed.
-- **Settings and Responses fixes**: numeric settings (context window, max output, temperature) now commit on blur or Enter so values can be typed continuously; Responses `completed` maps to `stop`, and truncated or failed states report diagnosable errors.
-- **Download**: installers on the [v0.4.13 release](https://github.com/Dongyurocket/PaperQuay/releases/tag/app-v0.4.13).
-
-### v0.4.9 - Survey coverage, delivery quality checks, and budgeted continuation
-
-- **Resumable survey writing**: candidates, abstract screening, body retrieval, key excerpts, citations, and open questions are tracked separately; cancelling keeps completed work and a checkpoint, and resuming reuses the original scope under token and time budgets.
-- **Delivery quality checks**: sections, prose paragraphs, and unfinished output are checked; proactive content checks prioritize numbers, comparisons, causes, conditions, and strong research-gap claims, keeping results unknown when the model response is unusable.
-- **Budgeted body continuation**: tool results keep valid JSON and intact citation tokens; long bodies support version- and offset-bound continuation, and RAG uses deterministic topK batches with source deduplication.
-- **Scope and rendering fixes**: one effective paper scope per run with out-of-range IDs rejected; single-tilde number ranges survive all four Markdown entry points, citations inside math render correctly, drafts are isolated per turn, and queued updates no longer overwrite streamed final state.
-- **Validation**: build plus all 828 tests passed; see the [change record (Chinese)](./docs/changes/2026-10-09-agent-retrieval-rendering-delivery-quality.md).
-
-### v0.4.8 - Ordered fragment references and optional content checks
-
-- **Matching body and reference order**: each answer starts at `[1]` in first-use order. Repeated uses of a fragment share a number; different fragments from the same paper and page retain separate entries. References show available local titles, authors, years, venues, PDF page numbers and expandable excerpts. Body markers and reference titles open the same source.
-- **Immediate source access**: normal generation no longer calls the AI citation verifier. Locally resolved sources are available directly; Check content requests an advisory assessment. Insufficient support, contradiction or a failed check does not hide valid references. A resolved source does not prove a claim, and note writes still undergo independent evidence checks.
-- **Answer-focused layout**: source and content details and full execution traces start collapsed. Recommendation prompts request real paper titles, available years and specific relevance. Missing blocks explicitly fall back to PDF page navigation; unknown, ambiguous and incomplete citations cannot enable navigation.
-- **Validation and downloads**: the user confirmed manual validation on October 9, 2026; all 695 automated tests and packaging for four platform targets passed. Download [v0.4.8](https://github.com/Dongyurocket/PaperQuay/releases/tag/app-v0.4.8); see the [Agent user guide (Chinese)](./docs/USER_MANUAL.zh-CN.md#6-agent-工作区) and [change and acceptance record (Chinese)](./docs/changes/2026-10-09-agent-local-citation-navigation.md) for usage and validation scope.
-
-Versions from v0.4.0 onward introduced Agent capability routing, claim verification, note distillation and read-only graph exploration, with fixes for note math rendering and vault math preservation, Agent network diagnostics and composer layout. See [CHANGELOG.md](./CHANGELOG.md) for each release.
-
-### v0.3.0 - Semantic note search, distill preview, and vault conflict protection
-
-- **Semantic note search**: the built-in Agent and the external MCP server now run hybrid vector + FTS5 note retrieval fused with RRF, so notes worded differently are still found; without an Embedding API it degrades to keyword search with a notice. Notes are indexed incrementally after save, import and vault round-trip, deletes invalidate immediately, and the toolbar gains a "Rebuild note semantic index" action.
-- **Distill preview before writing**: "AI distill to excerpt card" opens a side-by-side panel comparing the original recognized text with the distilled result, and stores nothing until you confirm; a vision model can re-recognize formula/table regions inside the preview, falling back to plain text on failure and marking accepted results as "AI 重识别".
-- **Aggregation recipes and self-maintaining system pages**: the Agent aggregates excerpt cards into paper cards / concept pages with every bullet linking back to its source; each successful write appends a log entry and every five writes refresh the index / overview pages, while hand-edited system pages are never overwritten. The health report gains a "Let the Agent fix" action with a pre-filled repair brief.
-- **Eight page kinds and stable wikilinks**: `page_kind` is stored in the database and flows through editor templates, sidebar filtering, the built-in Agent, MCP and the vault; wikilinks resolve by `noteId`, so renaming a target note no longer breaks links.
-- **Markdown round-trip fidelity and vault conflict copies**: a shared Markdown→Tiptap parser keeps headings, lists, wikilinks, tags, citations and anchors across round trips; edits on both sides are no longer silently overwritten — conflicting content is written to a `--conflict-*.md` copy. The same release adds vault auto-sync with an optional 15–60 minute timer, note-list sorting and batch tidy-up, and citation styles in reader settings.
-
-### v0.2.1 - Table inline-math fix and a Chinese user manual
-
-- **Fixed: inline math inside Markdown tables degraded to literal `$`**: when a table cell contained bare LaTeX (e.g. `仅 T_i`), the inline-math wrapper's candidate run crossed the `|` cell delimiter and swallowed the neighbouring cell, so the inserted `$` landed in two different cells; remark-math never pairs across cells and the whole row rendered as literal `$`. Table rows are now wrapped cell by cell, while expressions containing `|` outside tables (`A = |x| < 1`, `P(A | B) = 0.5`) behave exactly as before.
-- **New Chinese user manual ([docs/USER_MANUAL.zh-CN.md](./docs/USER_MANUAL.zh-CN.md))**: covers installation and first run, library and reader, note authoring and maintenance, the Agent workspace, knowledge graph, review drafting, local RAG, MCP integration, backups and privacy, settings reference and troubleshooting, plus keyboard-shortcut and FAQ appendices.
-
-### v0.2.0 - Notes System Overhaul
-
-- **Agents and MCP can read and write notes**: the built-in Agent gains note read tools and a `write_notes` tool behind a dedicated approval card (creates/updates/deletes land only after diff review); the Knowledge MCP server exposes `create_note` / `update_note` / `delete_note` / `list_note_tags` plus folder management, reusing the same write guardrails.
-- **Structured note workspace**: folder tree moved into the database (survives reinstalls and is included in encrypted backup packages), 8 page types and 11 templates, notes graph and health report (orphans / broken links / untagged / stale 30+ days), and Obsidian-compatible Markdown vault two-way sync where anchor IDs survive the round trip.
-- **Academic citations and excerpt cards**: inline `paperReference` nodes render as sequential `[n]` with a GB/T 7714 reference list in vault exports; "AI Distill to Card" runs a two-step CoT that cleans OCR noise before paraphrasing, keeps source anchors jumpable back to the exact PDF location, and appends multiple page segments onto one multi-anchor card.
-- **Cleanup**: the legacy one-shot Agent path (~800 lines) and the `agentLegacyMode` toggle were removed; the multi-turn ReAct loop is now the only path.
-
-### v0.1.51 - Fixed jump-to-position for note citations
-
-- **Excerpt cards and reference locations jump again**: fixed anchor `blockId` / `pageIndex` being dropped on save, so the page button on note excerpt cards (e.g. `P20`) and the location chips in the reference list scroll to the matching position in the paper.
-- **No migration for existing notes**: positions are recovered at click time from the anchor id (`…:mineru:page-20-block-3:0`) and the page label.
-- **Resilient fallback**: exact MinerU block → same-page body block → whole-page highlight; papers without structure blocks no longer wait forever, and the notice only appears when there is genuinely no location.
-
-### v0.1.50 - Note references, polish retrieval fix, and long-document reader windowing
-
-- **Note references**: insert paper citations from the toolbar, slash menu, or `@`; clicking a citation opens the paper and can jump to a page or block. The sidebar and end-of-note list are derived live from the note JSON and are not stored separately.
-- **AI polish retrieval fix**: queries now match both the bare `paper.id` and the `native-library:` prefix; evidence is ranked globally and truncated to the top 8. Dimension mismatches and missing model citations get explicit notices. Polish defaults to the note's linked papers.
-- **Long-document reader windowing**: dual-pane reading windows structure blocks, thumbnails, and PDF overlay hosts to the viewport, unloads off-screen Markdown/KaTeX, and disables PDF.js eager `getPage`, so dissertations and textbooks no longer slow down linearly with page count.
-
-### v0.1.49 - MCP Library Write & Category Management Tools
-
-- **MCP toolset grows to 15 tools**: new `import_pdfs` (batch PDF import with content-hash dedupe, copy/move/keep modes and find-or-create categories by name), `list_categories`, `manage_category` (create/rename/move/delete with cycle detection and cascading unlink), `set_paper_categories` (batch assignment with all-or-nothing validation), `update_paper` (whitelisted metadata updates), and `delete_papers` (optional file removal) — write semantics fully aligned with the desktop app.
-- **Write safety guard**: every write tool detects the running desktop app and explicitly refuses to write while it is active (the app's in-memory save would silently overwrite external writes); `allowWhileAppRunning: true` overrides, and `PAPERQUAY_MCP_WRITE=off` makes the server globally read-only. Zotero sync is covered by the same guard.
-- **Read enhancements**: `search_papers` supports `categoryId` filtering (including descendant categories), and `get_paper_details` returns category IDs.
-
-### v0.1.48 - Prose Rendering, PDF-image Reparsing and OCR Task State Fixes
-
-- **Preserve prose**: ordinary paragraphs and inline mathematics are no longer automatically reconstructed as symbol tables.
-- **Unified block reparsing**: use the original PDF crop as primary input with OCR as reference; show the actual image or explicit text-only fallback, and preview, save or restore local corrections.
-- **Reliable PaddleOCR completion**: backend document tasks finish after results are saved, retain progress across reader-tab closure, and handle download timeouts and stale callbacks explicitly.
-
-### v0.1.47 - PaddleOCR-VL 1.6 Engine, Forced Re-parsing & Image Reference Self-Healing
-
-- **Fixed: PaddleOCR-VL submits wrongly reported as failures (v0.1.47 hotfix)**: the async Jobs API error envelope actually uses `code` / `msg`, but the implementation checked `errorCode` as documented for the synchronous service — so a **successful** submit was rejected and its `jobId` discarded, leaving the engine unusable in v0.1.46. Success is now determined by the presence of `data.jobId`, failures report the HTTP status, real `code` / `msg`, `traceId`, and a raw response snippet, and pasting the full job URL from the Baidu console no longer breaks the base URL.
-
-- **PaddleOCR-VL 1.6 Structure Recognition Engine**: Settings → Document Parsing now offers an engine selector between MinerU and PaddleOCR-VL 1.6 (cloud async Jobs API), applied uniformly across the reader, library, and batch parsing paths. The adapter normalizes PaddleOCR-VL output into the existing MinerU cache contract, so structured reading, image rendering, PDF↔block geometry linking, translation, RAG, and cache self-healing are reused with zero changes; layout coordinates and page sizes map to `pdf`-space bboxes, figure/table captions attach to the adjacent visual block, assets support both Base64 and presigned URLs, and documents above 100 pages are split and merged automatically.
-- **Forced Re-parsing (Ignore Cache)**: New "Re-parse / Re-recognize" entries in the reader toolbar and overview page; library parsing no longer unconditionally reuses existing results. Translations, summaries, and images are backed up before re-parsing, cleaned up on success, and retained for rollback on failure.
-- **Parse Cache Image Reference Self-Healing**: A new idempotent repair command repoints image references that target missing files to the volume files that actually exist, without re-uploading the PDF or spending quota. It runs automatically when a document is opened, and Settings offers a full-library scan.
-- **Fixed: All Images Broken After Split/Merge of Oversized Documents**: When long documents (>200 pages) are automatically split and merged, the `content_list_v2.json` "page array + per-page block dictionary" structure was not recognized, and asset paths actually live in the nested `content.image_source.path` rather than at block top level, so image references were never rewritten — images were renamed with a `part_N_` prefix and the Markdown was updated, but the structured JSON kept stale references, producing a flood of "No matching image asset was found" cards. References are now rewritten at any depth while preserving all three real-world shapes. Full-library reconciliation: all 2859 broken references across 9 oversized documents were recovered.
-
-### v0.1.43 - Full Library RAG Pool Ingestion, Fixed-Point Resume Self-Healing & Large Thesis Compatibility
-
-- **Full Library RAG Ingestion & State Synchronization**: Fixed issue where home library papers were omitted from RAG candidate pools, causing zero stats and inactive context menus; entire library entries are now actively synced with real-time MinerU status tracking.
-- **RAG Resume Infinite-Loop Self-Healing**: Refactored resume logic to calculate chunk ID diffs against stored rows, thoroughly resolving fixed-point deadlocks caused by missing low-order chunks; added atomic state convergence and stale chunk cleanup.
-- **Large Dissertation MinerU Page Dictionary Compatibility**: Handled `Array<Record<string, Block>>` page object structures produced by MinerU multi-volume merges for 200~300+ page dissertations, successfully restoring full-text structural blocks and RAG vector chunking.
-- **Orphan Failure Cleanup & Error Propagation**: Automatically purges stale `pdf-text:failed` placeholder records when the primary `mineru-markdown` source is already ready. Added structured error notifications for single-paper and batch indexing.
-- **Startup Hang Fix**: Resolved Electron IPC serialization hang caused by unawaited Promises in `paths_exist`, eliminating the bug where library items stayed permanently stuck on "Checking MinerU".
-
-### v0.1.42 - Knowledge Base MCP Hybrid Vector Retrieval (KNN+FTS5+RRF) & RAG Indexing Management
-
-- **MCP Knowledge Base Hybrid Vector Retrieval**: The stdio MCP service `search_knowledge_base` now vectors search queries and fuses vector KNN and FTS5 BM25 results using Reciprocal Rank Fusion (RRF), achieving full semantic parity with desktop in-app search; supports `auto`, `hybrid`, and `keyword` modes with result `channels` tracking and graceful degradation.
-- **Local RAG Knowledge Base Management Console**: Settings panel now features an index management card displaying indexed / pending / failed counts, one-click "Index unindexed papers" and "Rebuild failed indexes" with a real-time progress bar and pause / resume / cancel controls.
-- **Library RAG Status Badges & Context Menu Force-Retry**: Literature items now show dedicated RAG status badges (Indexed / Indexing / Unindexed / Failed); right-click menu provides "Build/Rebuild RAG Index" to force single-paper resume retries without re-spending embedding quota.
-
-*For full historical releases (v0.1.32 - v0.1.45 including multi-key scheduling, large PDF split/merge, selective Zotero sync, BBox crop, and AI re-parsing), see [CHANGELOG.md](./CHANGELOG.md).*
-
----
-
-## PaperQuay - Open AI Paper Workspace That Keeps Reading Flow Intact
-
-**PaperQuay is more than a PDF reader, AI summary tool, or Zotero add-on.** It is a local-first, open-source AI paper workspace designed for graduate students, researchers, and heavy paper-reading users who want to import papers, read PDFs, translate, generate paper overviews, write inline research notes, organize tags, import Zotero libraries, use Agent-assisted literature management, and build a local RAG knowledge base without leaving the same desktop app.
-
-Traditional paper reading often means switching between Zotero, a PDF reader, translation tools, ChatGPT, and a separate note app. PaperQuay brings those steps into one continuous desktop workflow so importing, reading, understanding, translating, annotating, note-taking, organizing, and knowledge-base building can happen in the same place while keeping Zotero compatibility optional rather than mandatory.
-
-Technically, PaperQuay is built as an Electron + React + TypeScript/Vite desktop application. The React renderer implements the literature library, PDF reader, rich notes, Agent workspace, and settings UI; the Electron main process and local Node.js backend handle filesystem access, IPC, Zotero import, SQLite persistence, app updates, and cross-platform packaging. PDF rendering uses PDF.js, rich notes use Tiptap/ProseMirror, local data uses SQLite/sql.js and sqlite-vec, and AI features connect through OpenAI-compatible APIs for translation, paper overviews, Agent tool use, and RAG retrieval.
-
-| Research workflow problem                 | Traditional tools                                                  | PaperQuay                                                                                  |
-| ----------------------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------ |
-| Translation latency interrupts reading    | Translate only after selecting text, often with visible API delay  | Pre-translate MinerU structural blocks and jump instantly to cached translations           |
-| Side-by-side translation hurts focus      | Two columns require constant eye movement and can break formatting | Keep the original PDF visible while navigating to precise translated blocks on demand      |
-| Pure translated files lose source context | Original wording, terminology, and academic expression are hidden  | Keep source text, parsed blocks, translation, notes, and overview linked together          |
-| Paper notes become detached               | Notes live in a separate app and lose PDF position context         | Store rich notes, tags, links, paper references, and backlinks in the local library        |
-| Fast paper screening is repetitive        | Upload PDFs to an LLM one by one and manually organize outputs     | Generate and store structured paper overviews inside the local library                     |
-| AI model choices are locked down          | Built-in models or platform-specific token pricing                 | Bring your own OpenAI-compatible endpoint, model, and runtime parameters                   |
-| Large libraries are hard to clean         | Manual renaming, tagging, metadata fixes, and classification       | Agent tools can assist with batch rename, metadata completion, tagging, and classification |
-| Zotero migration is inconvenient          | Either stay locked in Zotero or rebuild everything manually        | Import Zotero collections, tags, and PDF attachments as an optional source                 |
-
----
-
-## What Makes PaperQuay Different
+| Pain point | Common approach | PaperQuay |
+| ---------- | --------------- | --------- |
+| Translation interrupts reading | Select text and wait for an API call | MinerU blocks are translated and cached ahead of time; click the original to jump to the translation |
+| Side-by-side reading is distracting | Scan back and forth across two columns that lose formatting | Keep the original PDF and jump to the matching translation when needed |
+| Notes lose context | Notes live in another app without PDF positions | Notes, tags, wiki links, and paper references live in the local library and jump back to the source |
+| Screening many papers is slow | Upload PDFs to an LLM again and again | Generate and save structured overviews inside the library |
+| Limited model choice | Only built-in models | Any OpenAI-compatible endpoint, model, and parameters |
+| Library upkeep is manual | Rename, tag, and categorize by hand | The Agent batch-renames, fills metadata, tags, and categorizes; writes require approval first |
 
 <p align="center">
   <img src="./docs/assets/show.gif" alt="PaperQuay workflow demo" width="1200">
 </p>
 
-<p align="center">
-  <em>Live workflow demo: browse the library, open papers, inspect structured reading, and move into the Agent workspace without leaving the same desktop flow.</em>
-</p>
+---
 
-### Instant Block-Level Translation
+## Recent Updates
 
-PaperQuay uses a translation workflow designed for long paper reading sessions. It can translate and cache MinerU-parsed structural blocks in advance. Later, when reading, clicking a source block can instantly jump to its translated counterpart. Translation no longer needs to happen only after each click or selection.
+- **v0.4.30**: the reader top bar is a single row; the PDF toolbar is a single row with page jump and an overflow menu; new immersive reading mode (`Ctrl+Shift+F`); the "collapse status bar" option, the bottom bar, and the onboarding guide are removed; AI overview headings are shown in Chinese when the UI is Chinese.
+- **v0.4.29**: redesigned paper overview. Parsing, translation, and overview generation move into a "Process" menu; the overview is split into section tabs, and a files card lists the original PDF, translated PDF, and MinerU result.
+- **v0.4.28**: papers gain "paper language" and "citation key" fields, and authors gain affiliation and ORCID; the details panel and metadata editor are redesigned; "re-identify by DOI" previews the diff first; MCP `update_paper` supports the new fields.
+- **v0.4.27**: the library top bar is a single row with composable filters (reading status, year, type, tags, file status, and more) and a "recently read" sort; reading progress is written back to the library.
+- **v0.4.26**: cached overviews show as soon as a paper opens; the context menu adds "Open file location".
+- **v0.4.25**: translated PDFs support setting, changing, and batch-setting their language.
+- **v0.4.24**: from this version on, only Windows x64 is released, maintained, and tested.
 
-### Tiptap-Based Notes Workspace
-
-PaperQuay includes a dedicated Notes workspace built on Tiptap. Each note is stored locally as Tiptap JSON, rendered HTML, and searchable plain text. The editor supports headings, lists, task lists, code blocks, tables, images, math, highlights, links, slash-style insertions, folders, pin and favorite states, outline, backlinks, a derived reference list, and autosave.
-
-Notes are designed to stay inline with the research workflow. You can connect ideas with `[[note]]` links, organize topics with `#tags`, cite library papers with `@paper`, and open the cited paper (jumping to a page or block when the reference carries a location). AI polishing defaults to retrieving the note's linked papers from the local knowledge base and writes locatable citations back into the note.
-
-### Fast Paper Screening from the Overview Panel
-
-PaperQuay is designed not only for deep reading, but also for screening large numbers of papers quickly. In the overview panel, each paper can directly surface AI-generated fields such as background, research question, method, experiment setup, key findings, conclusions, and limitations.
-
-### Reading Time Visibility
-
-PaperQuay records time spent across PDF positions and surfaces it as reading heat previews in the library and a dedicated reading-time chart in the paper detail panel. This makes it easier to see which parts of a paper have actually received attention.
-
-### Literature Library, Not Just Import
-
-PaperQuay can build an independent local library with PDF import, a configurable storage folder, categories, tags, metadata editing, search, filtering, notes, and local SQLite persistence. Zotero remains supported as an optional import source, not a required dependency.
-
-### Agent Operations for Paper Management
-
-The agent workspace is designed for library operations, not just conversation. It can assist with batch renaming, metadata completion, smart tagging, tag cleanup, automatic classification, and paper summarization while exposing tool calls and results for user review.
-
-Library-grounded answers share sequential numbers with a fragment-level reference list, providing direct source access. Check content is optional and execution traces start collapsed. Complex tasks support automatic capability routing or manual pinning for claim verification, note distillation and graph exploration; library and note writes require approval plans.
+See [CHANGELOG.md](./CHANGELOG.md) for the full history and [Releases](https://github.com/Dongyurocket/PaperQuay/releases) for installers.
 
 ---
 
-## Core Workflow
+## Features
 
-| Step                   | What happens                                                                          |
-| ---------------------- | ------------------------------------------------------------------------------------- |
-| 1. Import PDFs         | Drag PDFs into the app or choose files from the import dialog.                        |
-| 2. Confirm metadata    | Review title, authors, year, venue, DOI, abstract, keywords, and duplicate warnings.  |
-| 3. Organize library    | Create categories, drag papers into collections, add tags, and mark favorites.        |
-| 4. Parse with MinerU   | Convert PDFs into structured blocks with page-region linkage.                         |
-| 5. Generate overviews  | Produce reusable paper overviews for fast screening and later review.                 |
-| 6. Translate full text | Cache translated blocks so reading can jump instantly between source and translation. |
-| 7. Read and annotate   | Highlight, write, add notes, jump to annotations, and export annotated PDFs.          |
-| 8. Review reading time | Inspect reading-time charts and heat previews to see which parts of the PDF were read. |
-| 9. Write notes         | Create rich Tiptap notes, organize them in folders, link notes with `[[title]]`, add `#tags`, and jump through `@paper` references. |
-| 10. Use the agent      | Ask the agent to rename, classify, tag, clean metadata, or summarize selected papers. |
+| Module | Capabilities |
+| ------ | ------------ |
+| Local library | SQLite stores papers, authors, categories, tags, attachments, notes, annotations, and settings; import PDFs by drag and drop or file picker and confirm metadata first; copy / move / keep-in-place import modes and naming rules; multi-select batch actions; composable filters and sorting |
+| Metadata | Lookup by DOI or title, OpenAlex first with Crossref fallback; an LLM extracts metadata from the first page of Chinese papers that are not found; paper language, citation key, author affiliation and ORCID; BibTeX export |
+| Categories and tags | Nested categories, drag-and-drop ordering, tags, favorites |
+| Document parsing | MinerU cloud parsing (multi-key rotation and failover; very long documents are split and merged automatically); switchable PaddleOCR-VL 1.6; forced re-parsing; self-healing image references in the parse cache |
+| Reader | Linked PDF and block views, annotations, reading heatmap and reading-time chart, windowed rendering for long documents, immersive mode; typography cleanup (ligatures, fake superscripts, drop caps, glossaries); BBox raw-slice fallback and per-block AI re-parsing |
+| Translation | Full-text translation with block-level cache, selection translation, batch title translation; Chinese papers skip translation; attach translated PDFs and set their language |
+| Paper overview | Background, problem, method, experiments, findings, conclusions, and limitations saved by section; cached overviews open instantly |
+| Notes | Tiptap rich text; 8 page kinds and 11 templates; `[[wiki links]]`, `#tags`, and `@paper` references that jump back to the source; excerpt cards; GB/T 7714 / APA 7 / IEEE citation styles; note graph and health check; two-way sync with an Obsidian-compatible Markdown vault. Conventions: [notes-charter.md](./docs/notes-charter.md) |
+| Agent workspace | Library organization (rename, metadata, tags, categories, summaries); answers number fragment-level references in order; optional "check content"; capability routing; library and note writes require approval first |
+| Local RAG | Hybrid vector KNN + FTS5 BM25 + RRF retrieval; index management panel (stats, batch build, pause / resume / cancel); status badges in the paper list; individual papers can be removed from the knowledge base |
+| Knowledge graph | Paper, note, tag, category, and citation nodes; semantic-similarity, reference, co-author, and custom relations; PNG / JSON export |
+| Survey writing | Outline, concurrent section drafting, RAG context, resume after cancel, delivery quality checks, Word export |
+| Zotero | Reads a temporary copy of `zotero.sqlite` and never modifies the original; full import, or browse by collection and filter, preview, then sync selectively |
+| Backup | Password-protected single-file `.pqbackup` export and import; import replaces data after a restart and keeps a rollback point |
+| Other | Light / dark themes; command palette (`Ctrl+K`); in-app update check and automatic updates for the Windows installer |
 
----
-
-## PaperQuay Screenshots
+The [User Manual](./docs/USER_MANUAL.zh-CN.md) (Chinese) explains each feature.
 
 <p align="center">
   <img src="./docs/assets/main.png" alt="PaperQuay literature library workspace" width="1200">
 </p>
 
 <p align="center">
-  <em>Main library workspace: manage papers, categories, metadata, reading progress, notes, and AI-generated overviews in one desktop view.</em>
-</p>
-
-<p align="center">
   <img src="./docs/assets/agent.png" alt="PaperQuay agent workspace" width="1200">
 </p>
 
-<p align="center">
-  <em>Agent workspace: chat with the paper assistant, inspect execution traces, review tool calls, and run batch library operations with human confirmation.</em>
-</p>
+---
+
+## Download and Install
+
+Download the Windows x64 `.exe` installer from [GitHub Releases](https://github.com/Dongyurocket/PaperQuay/releases).
+
+Since 0.4.24 only Windows x64 is released, maintained, and tested. macOS, Linux, and other platforms can be built from source but are not maintained or tested by the author; older installers for other platforms remain in Releases.
+
+## Quick Start
+
+1. In Settings, configure an OpenAI-compatible endpoint (Base URL, API key, model). Translation, overviews, Q&A, and the Agent need it.
+2. Set the paper storage folder and import mode.
+3. Enter a MinerU API token for structured parsing; configure an embedding endpoint if you want local RAG.
+4. Drop in PDFs, confirm metadata, then create categories, add tags, and start reading.
+5. If you already use Zotero, select the Zotero data directory in Settings to import it.
+
+The recommended setup order and what each setting does are in [User Manual section 1.2](./docs/USER_MANUAL.zh-CN.md#12-首次启动建议按顺序配置) (Chinese).
+
+Optional external services: MinerU or PaddleOCR-VL (structure parsing), an OpenAI-compatible API (overviews, translation, Q&A, Agent), an embedding API (RAG and semantic note search), and OpenAlex / Crossref (metadata, needs internet; an OpenAlex API key and `mailto` address are optional).
 
 ---
 
-## Completed Features
+## MCP and External Agents
 
-These items are implemented in the current desktop app.
+PaperQuay ships a standard MCP stdio server that lets external agents read the local SQLite data directly. It exposes 25 tools:
 
-| Area              | Completed capabilities                                                                                                                        |
-| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| Local library     | Local SQLite storage for papers, authors, categories, tags, attachments, notes, annotations, import records, settings, and RAG indexes; full library actively ingested into RAG indexing pool with real-time MinerU status tracking; startup orphan failure record self-healing; async batch file-existence IPC optimization; multi-select and batch operations (delete, move to category, favorite) |
-| Local RAG Index & Management | Vector KNN + FTS5 BM25 + RRF hybrid retrieval with Chinese trigram tokenization; settings panel indexing management console (stats, batch indexing, progress bar, pause/resume/cancel); real-time RAG status badges in literature list; right-click single-paper resume retry using chunk ID diffing and stale chunk cleanup |
-| MinerU & Large Documents | MinerU cloud parsing with PDF region linkage; multi-key entry with Round-Robin scheduling and automatic failover; automated lossless splitting for documents > 200 pages (150-page safe margins) and local precise multi-part merging (page offset calibration, image namespace isolation, page dictionary unpacking); cross-page table stub hiding |
-| PDF import        | File picker and drag-and-drop import with a confirmation screen before files enter the library                                                  |
-| File management   | Configurable storage folder, copy / move / keep-path import modes, naming rules, original-path tracking, and private local file handling        |
-| Metadata          | OpenAlex enrichment by DOI or title, optional OpenAlex API key / mailto settings, Crossref fallback, LLM-based extraction for Chinese papers when remote lookups miss, and manual editing before import |
-| Categories        | System categories, custom categories, nested subcategories, collapsible branches, context menus, drag sorting, hierarchy changes, and favorites |
-| Paper details     | Title, authors, year, venue, DOI, URL, abstract, keywords, tags, notes, citation, favorite state, and a reading-time chart                      |
-| Notes workspace   | Dedicated Tiptap notes workspace with folders, search, tags, pinned notes, favorites, outline, backlinks, a derived reference list, and local autosave; 8 page kinds with 11 built-in templates |
-| Notes editor      | Rich text, headings, lists, task lists, code blocks, tables, images, math, highlights, links, component blocks, and slash-style insertions; insert paper references from the toolbar, `@`, or slash menu, and upsert an end-of-note reference list; AI polishing defaults to the note's linked papers |
-| Inline note links | `[[note]]` wiki links, `#tag` references, `@paper` citations, autocomplete menus; clicking a citation opens the paper and can jump to a page or block |
-| Reader & Typography | PDF reader with MinerU structured block views, region-based linkage, reading heat progress, reading-time recording, and annotation tools; long documents (theses/textbooks/reports) window structured blocks and page thumbnails to the viewport so dual-pane scrolling stays responsive; auto-cleans ligatures and cross-reference fake superscripts, renders semantic academic `<sup>`/`<sub>`, fixes drop-caps, and restructures nomenclature |
-| Raw Crop & AI Re-parsing | PDF raw vector slice (BBox Crop) fallback with KaTeX formula failure safeguards; LLM-powered block re-parsing (smart typography, table/nomenclature, math extraction) with diff preview and one-click undo |
-| Translation       | Full-text translation, cached block translations, and selection translation through OpenAI-compatible models, plus batch paper title translation; Chinese-dominant papers skip translation automatically and Chinese titles are adopted directly; centralized translated PDF storage |
-| Citation export   | Batch Bib export for selected papers as one merged .bib file or one file per paper, with deduplicated citation keys and heuristic entry types       |
-| Paper overview    | AI-generated screening fields for background, research questions, methods, experiment setup, findings, conclusions, and limitations              |
-| Agent workspace   | Conversation UI with collapsed execution traces, tool cards, paper selection, metadata, rename, tagging, classification and summaries; capability routing and pinning, ordered fragment references, optional content checks and approval plans for writes |
-| Zotero import & sync | Full import of local Zotero collections, tags, and available PDF attachments from `zotero.sqlite`; selective on-demand synchronization with collection browsing, conditional search, diff preview, and triple deduplication |
-| MCP knowledge base | Built-in standard stdio MCP server (development entry `bin/paperquay-mcp.cjs`; installers bundle `resources/paperquay-mcp/`) directly querying local SQLite; `search_knowledge_base` upgraded to vector hybrid retrieval (KNN + FTS5 + RRF) with mode options and channel attribution; 25 tools covering literature, chunks, guarded library and note writes, translated-PDF attachments, and Zotero sync |
-| Backup            | Password-protected, single-file `.pqbackup` export and import; import swaps data after a restart and keeps the old directory as a rollback point; forgotten passwords cannot be recovered |
-| Updates           | In-app update checks and Windows installer updates; users build other platforms from source                                                    |
-| Knowledge graph   | Paper, note, tag, category, and reference nodes with semantic-similarity edges, Crossref reference syncing, co-author relations, custom and AI relations, fcose force-directed global layout, local concentric view, and PNG/JSON export |
-| Review writing    | Outline blueprints, concurrent section drafting, RAG retrieval context, per-paper coverage tracking with checkpoint resume, delivery quality checks, and Word export with OMML equations, localized headings, references, and inline figures |
-| Themes            | Light and dark UI modes optimized for long desktop reading sessions                                                                               |
+- **Read-only search**: `search_papers`, `get_paper_details`, `search_knowledge_base` (`auto` / `hybrid` / `keyword` modes), `read_paper_content`, `search_notes`
+- **Zotero sync**: `zotero_list_collections`, `zotero_search_items`, `zotero_preview_sync`, `paperquay_sync_from_zotero`
+- **Library writes**: `import_pdfs`, `list_categories`, `manage_category`, `set_paper_categories`, `update_paper`, `delete_papers`, `attach_translated_pdf`, `remove_translated_pdf`
+- **Note maintenance**: `list_note_tags`, `list_note_folders`, `create_note`, `update_note`, `delete_note`, `create_note_folder`, `rename_note_folder`, `delete_note_folder`
 
----
+Write tools refuse to write by default while the desktop app is running; pass `allowWhileAppRunning: true` to override. Set `PAPERQUAY_MCP_WRITE=off` to make the server read-only, and `PAPERQUAY_MCP_EMBEDDING=off` to disable network requests for vector search.
 
-## MCP Server & External Agent Integration
+**Setup**: in the installed app, copy the Proma / Claude / Codex config snippet from **Settings → MCP Service**. The installed build runs `resources/paperquay-mcp/server.cjs` with `PaperQuay.exe` and `ELECTRON_RUN_AS_NODE=1`, so no separate Node.js install is needed. In development, use `node bin/paperquay-mcp.cjs`.
 
-PaperQuay includes a built-in server adhering to the standard **Model Context Protocol (MCP)**. The development entry point is `bin/paperquay-mcp.cjs`; installed apps ship it at `resources/paperquay-mcp/server.cjs` with `node_modules/sqlite-vec` and the current platform extension. External AI Agents (such as Proma, Claude Desktop, Cursor, Pi Agent, and Codex) can connect via stdio to access the local PaperQuay SQLite knowledge base with millisecond read latency, retrieve grounded citations with page numbers, browse and selectively import from a local Zotero library, and execute guarded library and note writes (PDF import, metadata updates, category management, paper deletion, translated-PDF attachments, note maintenance).
+The [`skills/`](./skills) folder contains four companion Agent Skills: `paperquay-knowledge-search` (evidence search), `paperquay-notes` (note maintenance), `paperquay-zotero-sync` (preview, then sync), and `paperquay-library-manage` (library writes).
 
-### Highlights
-
-1. **Zero Runtime Dependency**: Direct connection to SQLite databases via Node.js—**the PaperQuay desktop application does not need to be running**.
-2. **Lock-Free Concurrency**: Operates under SQLite WAL mode; external Agent read queries never lock or block user operations in the desktop application.
-3. **Hybrid Vector Retrieval (KNN + FTS5 + RRF)**: When an Embedding API is configured in PaperQuay reader settings, `search_knowledge_base` automatically vectors queries, retrieves candidates across both `sqlite-vec` vector index and FTS5 BM25 pools, and merges results via Reciprocal Rank Fusion (RRF); automatically falls back to keyword search if unconfigured or unreachable.
-4. **Academic Evidence Chain with Absolute Page Numbers**: Returns structured evidence chunks with paper titles, 1-based page numbers (`pageNumber`), block IDs (`blockId`), and matched retrieval channels (`channels: ['vector', 'fts']`), enabling hallucination-free citations.
-5. **Write Safety Guard**: Before every mutation, write tools detect whether the PaperQuay desktop app is running—if so, the write is explicitly refused (the app's in-memory save would silently overwrite external writes). Pass `allowWhileAppRunning: true` to override, or set `PAPERQUAY_MCP_WRITE=off` to make the server globally read-only. Process detection excludes the MCP server's own process, so the recommended `PaperQuay.exe` + `ELECTRON_RUN_AS_NODE=1` launch is never mistaken for the desktop app.
-
-### Available MCP Tools
-
-The server registers 25 standard MCP tools across four operational domains:
-
-#### 1. Knowledge Base Read-Only Tools (5 tools)
-| Tool Name | Description | Key Parameters | Return Fields |
-| :--- | :--- | :--- | :--- |
-| `search_papers` | Search literature metadata | `query`, `tag`, `categoryId` (incl. descendant categories), `limit` | Paper ID, titles, authors, year, DOI, tags |
-| `get_paper_details` | Full bibliographic metadata & details | `paperId` (required) | Bibliographic info, abstract, AI overview, notes, publication, category IDs |
-| `search_knowledge_base` | **Hybrid vector retrieval** for RAG chunks | `query` (required), `paperId`, `limit`, `mode` (`auto`/`hybrid`/`keyword`) | Paper title, page number, text snippet, relevance score, `retrievalMode`, `channels` |
-| `read_paper_content` | Read MinerU structured text by page | `paperId` (required), `pageIndex` (0-based), `limit` | Sequential structured markdown & text blocks |
-| `search_notes` | Search user reading notes and highlights | `query`, `paperId`, `limit` | Reading notes, excerpt highlights, and thoughts |
-
-#### 2. Zotero Selective Synchronization Tools (4 tools)
-| Tool Name | Description | Key Parameters | Return Fields |
-| :--- | :--- | :--- | :--- |
-| `zotero_list_collections` | Read local Zotero collection tree | `dataDir` (optional) | Collections (key, name, parent), item counts, detected path |
-| `zotero_search_items` | Search Zotero literature conditionally | `query`, `collectionKey`, `limit`, `dataDir` | Candidates, title, creators, year, DOI, local PDF availability |
-| `zotero_preview_sync` | **Pre-sync diffing & deduplication** | `itemKeys`, `collectionKey`, `dataDir` | Diff report: `ready`, `alreadyExists`, `missingPdf` |
-| `paperquay_sync_from_zotero` | **Execute safe sync & PDF copying** | `itemKeys`, `collectionKey`, `targetCategoryId`, `createCollectionCategory` | Import stats: succeeded count, skipped count, assigned categories |
-
-#### 3. Library Write & Management Tools (8 tools, guarded)
-
-These tools modify the local library database, except the read-only `list_categories`. Each one checks the desktop app process before writing and **explicitly refuses while it is running** (override with `allowWhileAppRunning: true`; disable all writes globally with `PAPERQUAY_MCP_WRITE=off`).
-
-| Tool Name | Description | Key Parameters | Return Fields |
-| :--- | :--- | :--- | :--- |
-| `import_pdfs` | Batch-import local PDFs (content-hash dedupe) | `paths` (required), `metadata` (keyed by path), `targetCategoryId` or `categoryName`, `importMode` (`copy`/`move`/`keep`) | `imported`/`duplicates`/`errors` breakdown + summary |
-| `list_categories` | Read category tree with paper counts (read-only) | — | Categories (incl. system ones, `parentId`, `paperCount` incl. descendants) |
-| `manage_category` | Create/rename/move/delete categories | `action`, `categoryId`, `name`, `parentId` | Mutated category; delete cascades sub-categories and unlinks papers |
-| `set_paper_categories` | Batch-assign paper categories | `paperIds`, `add`/`remove` or `replace` | Updated `categoryIds` per paper (all-or-nothing validation) |
-| `update_paper` | Update paper metadata (whitelisted fields) | `paperId` + `title`/`authors`/`tags`/`isFavorite` etc. | Updated paper object |
-| `delete_papers` | Batch-delete papers | `paperIds`, `deleteFiles` (default `false`) | Deletion report (`deletedFileCount`, `fileErrors`) |
-| `attach_translated_pdf` | Attach a local translated PDF to a paper | `paperId`, `sourcePath` | `attachmentId`, `storedPath`; a page-count mismatch returns `pageCountMismatch` instead of rejecting the attach |
-| `remove_translated_pdf` | Remove a paper's translated PDF | `paperId`, `deleteFile` (default `true`) | Removed `attachmentId` |
-
-#### 4. Note Maintenance Tools (8 tools, guarded)
-
-The note database uses row-level SQL writes and is not overwritten wholesale by the desktop app, but the open UI holds an in-memory snapshot that does not refresh automatically, so external writes use the same "refuse while running + `allowWhileAppRunning` override" guard and require reloading the UI afterwards.
-
-| Tool Name | Description | Key Parameters | Return Fields |
-| :--- | :--- | :--- | :--- |
-| `list_note_tags` | List note tags with usage counts (read-only) | `paperId` (optional) | Tags with counts (`tag`, `count`) |
-| `list_note_folders` | Read the note folder tree (read-only) | — | Folders (`id`, `name`, `parentId`, `sortOrder`) |
-| `create_note` | Create a note (Markdown / plain text) | `title` / `content` (at least one), `tags`, `paperId`, `type`, `folderId` | New `noteId` and metadata |
-| `update_note` | Partial update of title / content / tags / folder | `noteId` (required) | Updated note |
-| `delete_note` | Soft-delete (removed from the full-text index) | `noteId` (required) | Deletion result |
-| `create_note_folder` | Create a folder (nested allowed) | `name`, `parentId` (optional) | Created folder |
-| `rename_note_folder` | Rename a folder | `folderId`, `name` | Updated folder |
-| `delete_note_folder` | Delete a folder and its subfolders; contained notes move to uncategorized (notes are not deleted) | `folderId` | Deletion result |
-
-### Hybrid Search Modes & Configuration
-
-The `mode` parameter in `search_knowledge_base` governs retrieval execution:
-- `auto` (default): Uses embedding settings stored in `<DataDir>/.settings/paperquay.config.json`. If valid, runs dual-channel hybrid retrieval; otherwise falls back gracefully to FTS5 keywords.
-- `hybrid`: Forces hybrid retrieval. If embedding credentials are missing or dimension mismatch occurs, safely falls back to keyword search and returns a `warning` explaining the cause.
-- `keyword`: Forces keyword-only search, generating zero network requests. Ideal for offline use or exact formula/symbol lookups.
-
-*Privacy Note: Hybrid retrieval sends only the search query to your configured Embedding endpoint. Set environment variable `PAPERQUAY_MCP_EMBEDDING=off` to disable all vector network calls globally.*
-
-### Client Configuration Examples
-
-Installed desktop apps should not point at a source checkout. Copy the generated config from Settings → MCP server, or set `command` to `PaperQuay.exe`, point `args` at `resources/paperquay-mcp/server.cjs`, and set `ELECTRON_RUN_AS_NODE=1`. Append `--data-dir` and an absolute path to override the data directory. The examples below use the system `node` binary with `bin/paperquay-mcp.cjs`, which is for development mode.
-
-#### 1. Proma Agent
-Add to `mcp.json` in your Proma workspace:
-```json
-{
-  "servers": {
-    "paperquay": {
-      "type": "stdio",
-      "command": "node",
-      "args": ["<ABSOLUTE_PATH>/bin/paperquay-mcp.cjs"],
-      "enabled": true
-    }
-  }
-}
-```
-
-#### 2. Claude Desktop / Claude Code
-Add to `claude_desktop_config.json` under `mcpServers`:
-```json
-{
-  "mcpServers": {
-    "paperquay": {
-      "command": "node",
-      "args": ["<ABSOLUTE_PATH>/bin/paperquay-mcp.cjs"]
-    }
-  }
-}
-```
-
-#### 3. Cursor
-Add to `.cursor/mcp.json`:
-```json
-{
-  "mcpServers": {
-    "paperquay": {
-      "command": "node",
-      "args": ["<ABSOLUTE_PATH>/bin/paperquay-mcp.cjs"]
-    }
-  }
-}
-```
-
-#### 4. Pi Coding Agent
-Add to `~/.pi/agent/mcp.json`:
-```json
-{
-  "mcpServers": {
-    "paperquay": {
-      "command": "node",
-      "args": ["<ABSOLUTE_PATH>/bin/paperquay-mcp.cjs"]
-    }
-  }
-}
-```
-
----
-
-## Authoring Agent Skills & Workflow Collaboration
-
-While raw MCP tools provide low-level endpoints, complex academic workflows require **Agent Skills** to orchestrate tools into dependable Standard Operating Procedures (SOPs), enforce evidence citation formatting, and protect against unintended database modifications.
-
-PaperQuay provides two official, production-verified reference Skills:
-
-### Official Skill Reference Architectures
-
-#### 1. Literature Evidence Search Skill (`paperquay-knowledge-search`)
-- **Trigger**: Activated when users ask "Does my library discuss X?", "Summarize topic X from my papers", or "What does page 5 of paper Y say?".
-- **Execution Pipeline**:
-  ```
-  User Query ──> search_papers (filter metadata to locate paperId)
-             ──> search_knowledge_base (extract semantic chunks with optional paperId scope)
-             ──> read_paper_content (read continuous pages if deeper context needed)
-             ──> Academic Answer (with strict citations: [1] (Title, P.x, blockId))
-  ```
-- **Guiding Rules**:
-  - Check `channels`: `['vector', 'fts']` double-hits represent highest reliability; `['vector']`-only hits should be checked for topical drift.
-  - Strict grounding: Answers must rely strictly on returned snippets. Provide citations in `[#] (Title, P.x)` format. If no evidence matches, report explicitly rather than hallucinating.
-
-#### 2. Selective Zotero Synchronization Skill (`paperquay-zotero-sync`)
-- **Trigger**: Activated when users ask "Sync collection X from Zotero" or "Import recent diffusion papers into PaperQuay".
-- **Four-Stage Safe Sync SOP (Never write before preview)**:
-  ```
-  [1. Intent & Search]  ──> Call zotero_list_collections or zotero_search_items
-  [2. Pre-sync Diff]    ──> Call zotero_preview_sync to detect ready / duplicate / missing-PDF items
-  [3. Markdown Report]  ──> Present clear summary table and request user confirmation
-  [4. Execute Sync]     ──> Call paperquay_sync_from_zotero upon confirmation and report results
-  ```
-- **Guiding Rules**:
-  - Defense against unapproved writes: Sync is a write operation; the Agent must present a structured preview and receive explicit user consent before calling `paperquay_sync_from_zotero`.
-  - Lifecycle awareness: Inform the user that newly synced papers must be opened in the desktop app to generate MinerU parsing and RAG vector indexes before full-text QA is possible.
-
-### Authoring Your Own Academic Skill
-
-To create custom skills (e.g., automated literature review writing, novelty comparative analysis), follow this standard template in `skills/<skill-name>/SKILL.md`:
-
-```markdown
----
-name: your-skill-name
-description: Define explicit triggers (keywords, phrasing) and non-triggers (negative boundaries) so the Agent router dispatches accurately.
-version: "1.0.0"
----
-
-# Skill Title & Overview
-
-Briefly explain the academic scenario and expected outcomes.
-
-## 1. Tool Selection & Security Boundaries
-- List required PaperQuay MCP tools;
-- Enforce read-only bounds vs. write operations with human confirmation checkpoints.
-
-## 2. Standard Operating Procedure (SOP)
-Step-by-step workflow (Step 1 ➔ Step 2 ➔ Step 3) specifying input schemas, tool parameters, and decision criteria.
-
-## 3. Output Guardrails
-- Citation rules: enforce Paper Title, Authors, Year, and 1-based Page Number;
-- Graceful fallbacks for empty search results or offline environments.
-```
-
----
-
-## First-Run Workflow
-
-1. Open Settings and choose a default paper storage folder.
-2. Import PDFs by drag and drop or by clicking the import button.
-3. Confirm or edit metadata in the import confirmation dialog.
-4. Let PaperQuay copy PDFs into its storage folder and save records in the local library.
-5. Create categories and subcategories from the left sidebar.
-6. Drag papers into categories, add tags, mark favorites, and open papers in the reader.
-7. Open Notes to create rich-text notes, link related ideas, and connect notes to papers.
-8. Configure an OpenAI-compatible endpoint and model if you want AI features.
-9. Configure a MinerU API key if you want MinerU parsing.
-10. Optionally connect a Zotero data directory and import existing Zotero collections and PDFs.
+Tool parameters, client configuration, data directories, and search modes are documented in the [MCP Integration Guide](./docs/MCP_AGENT_INTEGRATION.md) (Chinese).
 
 ---
 
 ## Architecture
 
-PaperQuay uses Electron as its desktop host. The React renderer talks to a local Electron backend through IPC for filesystem access, persistence, Zotero import, PDF handling, and packaging.
+The Electron main process handles the filesystem, IPC, SQLite persistence, Zotero import, updates, and packaging; the React renderer handles the UI. PDF.js renders PDFs, Tiptap / ProseMirror powers the note editor, SQLite (sql.js) with sqlite-vec stores data, and AI features use OpenAI-compatible APIs.
 
-| Path                       | Responsibility                                                                                                    |
-| -------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `src/`                     | React + TypeScript UI, feature modules, state, and frontend services                                              |
-| `src/features/literature/` | Local literature library UI, import workflow, category tree, and paper details                                    |
-| `src/features/reader/`     | Reader shell, linked reading workspace, settings, and AI reading actions                                          |
-| `src/features/pdf/`        | PDF rendering, overlays, annotation surface, and PDF-specific interactions                                        |
-| `src/features/blocks/`     | MinerU block rendering and structured content views                                                               |
-| `src/features/agent/`      | Agent chat UI, execution traces, tool cards, and library operation entry points                                   |
-| `src/features/notes/`      | Tiptap-based notes workspace, editor toolbar, custom autocomplete extensions, outline, and backlinks              |
-| `src/stores/useNotesStore.ts` | Zustand state for notes, tags, active note selection, autosave, and workspace errors                           |
-| `src/services/`            | Frontend bridges to Electron IPC commands                                                                         |
-| `src/platform/electron/`   | Renderer-side bridge wrappers for commands, events, window controls, and file-drop events                         |
-| `electron/`                | Electron main process, preload bridge, command backend, packaging helpers, and local persistence                   |
+| Path | Responsibility |
+| ---- | -------------- |
+| `src/features/literature/` | Library, import, category tree, paper details |
+| `src/features/reader/` | Reader, linked reading, overview, and AI reading actions |
+| `src/features/pdf/` | PDF rendering, overlays, and annotations |
+| `src/features/blocks/` | MinerU block rendering |
+| `src/features/agent/` | Agent chat, execution traces, and tool cards |
+| `src/features/notes/` | Tiptap notes workspace and extensions |
+| `src/services/`, `src/platform/electron/` | Renderer wrappers around Electron IPC |
+| `electron/` | Main process, preload, and backend commands (`electron/backend/`) |
+| `bin/paperquay-mcp.cjs`, `electron/mcp/` | MCP server |
+| `skills/` | Companion Agent Skills |
+| `tests/` | Automated tests |
 
-The Notes editor uses the official Tiptap packages and was implemented against the upstream source at [ueberdosis/tiptap](https://github.com/ueberdosis/tiptap). The local `WikiLink`, `HashTag`, and `PaperReference` extensions follow the same architecture as Tiptap's official `Mention` node and `@tiptap/suggestion` plugin: a Tiptap inline node stores structured attributes, and the Suggestion plugin handles matching, rendering, keyboard navigation, and insertion. The editor also follows Tiptap's React NodeView examples for component blocks: custom blocks are real Tiptap nodes rendered through `ReactNodeViewRenderer`, with `NodeViewWrapper` and `NodeViewContent` separating non-editable controls from editable content.
-
----
-
-## Requirements
-
-- Node.js 22.18 or newer (CI uses 24)
-- Windows x64 for official releases and testing; macOS and Linux require self-builds and are not maintained or tested by the author
-
-Optional external services:
-
-- MinerU API key for cloud PDF structure parsing.
-- OpenAI-compatible API key for paper overviews, translation, QA, and agent tasks.
-- Internet access for OpenAlex and Crossref metadata enrichment.
-- Optional OpenAlex premium API key and `mailto` polite-pool email for steadier batch metadata lookup.
+The note editor's `WikiLink`, `HashTag`, and `PaperReference` extensions follow the architecture of Tiptap's official `Mention` node and `@tiptap/suggestion`; component blocks follow the official React NodeView examples.
 
 ---
 
-## Development
+## Local Development
 
-Install dependencies:
-
-```bash
-npm install
-```
-
-Start the desktop app in development mode:
+Requirements: Node.js 22.18 or newer (CI uses Node.js 24).
 
 ```bash
-npm run dev
+npm ci                   # install dependencies
+npm run dev              # start the desktop app in development mode
+npm run build            # type-check and build the frontend
+npm test                 # run tests
+npm run electron:build   # build the desktop installer
 ```
 
-Build the frontend only:
-
-```bash
-npm run build
-```
-
-Preview the built web assets:
-
-```bash
-npm run preview
-```
-
-Build the desktop installer:
-
-```bash
-npm run electron:build
-```
-
----
-
-## Zotero Compatibility
-
-PaperQuay can read a local Zotero data directory that contains `zotero.sqlite`. During import it copies the Zotero database to a temporary read-only working file and does not modify your original Zotero database.
-
-- **Full import**: pick the Zotero data directory in Settings and import the whole collection tree, tags, and available local PDFs in one pass.
-- **Selective on-demand sync (fork enhancement)**: browse collections, search by keyword / author / year / DOI, and run a pre-import diff that separates ready / already-exists / missing-PDF items before importing only what you choose.
-- **External-agent automation**: the bundled MCP stdio server exposes the same Zotero search, preview, and sync tools, enabling "natural-language request → preview & confirm → transactional import" workflows from Proma and other agents.
-
-Imported data enters PaperQuay's own local literature library. Zotero collections become local categories, and available local PDFs inside those collections are copied into the PaperQuay paper storage folder.
-
-Zotero is an optional compatibility source, not a required dependency. You can build a complete library directly inside PaperQuay without using Zotero.
+Upstream sync, release flow, and documentation conventions are in the [Development Manual](./docs/DEVELOPMENT.zh-CN.md), [UPSTREAM.md](./docs/UPSTREAM.md), and [RELEASE.md](./docs/RELEASE.md); see [CONTRIBUTING.md](./CONTRIBUTING.md) to contribute.
 
 ---
 
 ## Data and Privacy
 
-PaperQuay is local-first. The literature library, notes, and local RAG indexes are stored in SQLite databases, and imported PDFs are stored in the paper storage folder you configure.
+PaperQuay is local-first. The library, notes, and RAG indexes are stored in local SQLite databases, and PDFs are stored in the paper storage folder you configure. AI and embedding requests go to the endpoints you configure.
 
-PaperQuay uses password-protected, single-file `.pqbackup` archives. The password cannot be recovered. Backups may contain API keys and personal data; do not commit the archive or password to source control.
+The full `.pqbackup` migration archive contains configuration and API keys, the three databases, PDFs referenced by the library, Agent memory and conversations, survey drafts, knowledge-graph relations, reading state and annotations, the notes vault, and MinerU / translation / summary caches; the smaller daily backup leaves out the RAG database and MinerU caches. A forgotten password cannot be recovered. New versions cannot read old WebDAV backups; to keep that data, restore it locally with 0.4.18 or earlier before upgrading.
 
-The full migration preset includes:
-
-- App configuration, API keys, and the library, notes, and RAG databases.
-- Referenced PDFs, Agent memory and conversation history, and review drafts.
-- Knowledge-graph relations, reader state and annotations, the notes vault, and MinerU-derived caches, including translation and summary caches.
-
-Based on the current sample, a full archive is about 12.2 GiB. A routine backup is about 2.3 GiB and excludes the RAG database and MinerU cache.
-
-The new version removes WebDAV backup and cannot read old WebDAV backups. To keep old data, restore it locally with PaperQuay 0.4.18 or earlier before upgrading. Remote files are not deleted automatically; remove them yourself after confirming they are no longer needed.
-
-Do not commit local data, API keys, PDFs, parser outputs, notes databases, or backups. The `.gitignore` excludes common local runtime folders, SQLite databases, legacy JSON library data, API key files, build output, backup archives, and private PDFs by default.
+Do not commit local data, API keys, PDFs, parser output, databases, or backup archives to the repository. Report security issues as described in [SECURITY.md](./SECURITY.md).
 
 ---
 
-## Todo Roadmap
+## Roadmap
 
-These items are planned or still being deepened beyond the completed features above.
-
-- Better metadata extraction from PDF first pages.
-- Additional DOI / arXiv / Semantic Scholar enrichment sources.
+- More reliable metadata extraction from the first page of a PDF.
+- Enrichment sources beyond DOI, such as arXiv and Semantic Scholar.
 - Deeper two-way binding between PDF regions, annotations, and standalone notes.
-- Folder watching and automatic import queues.
-- LaTeX draft export and further research-writing capabilities.
-- Optional cloud sync after the local-first model is stable.
+- Folder watching and an automatic import queue.
+- LaTeX draft export and more research-writing features.
+- Optional cloud sync once the local-first model is stable.
 
 ---
 
 ## Acknowledgements
 
-- **Upstream Project**: Sincere thanks to [WangQrkkk/PaperQuay](https://github.com/WangQrkkk/PaperQuay) for providing the outstanding architectural foundation and rich features of this local-first AI paper workbench.
-- **Community**: PaperQuay is also shaped by discussions, feedback, and shared ideas from the [LinuxDo community](https://linux.do/).
-- **Editor Framework**: The Notes workspace builds on [Tiptap](https://github.com/ueberdosis/tiptap). Thanks to the Tiptap maintainers for the extensible editor framework and examples that help power PaperQuay's note-taking experience.
+- **Upstream**: thanks to [WangQrkkk/PaperQuay](https://github.com/WangQrkkk/PaperQuay) for the architecture and features of this local-first AI paper workspace.
+- **Community**: many design and polish decisions were inspired by discussion and feedback in the [LinuxDo community](https://linux.do/).
+- **Editor framework**: the notes workspace is built on [Tiptap](https://github.com/ueberdosis/tiptap); thanks to its maintainers for the framework and examples.
 
 ---
 

@@ -1,179 +1,129 @@
 # PaperQuay 二次开发说明
 
-本仓库用于基于上游 PaperQuay 的个人二次开发。目标是：
+本仓库是上游 `WangQrkkk/PaperQuay` 的个人 Fork，用于个人修复与功能开发。原则：
 
-- 保持与上游 `WangQrkkk/PaperQuay` 的同步能力。
-- 将个人修复和功能放在独立分支，便于本地验证和向上游提 Pull Request。
-- 使用个人 GitHub Fork 的 Release 作为本地安装版的更新源。
-- 将每个 Bug 的复现、根因、修复和验证过程留在仓库中，避免只依赖聊天记录。
+- 保持能与上游同步，修复放独立分支，便于向上游提 PR。
+- 本地安装版的自动更新源是个人 Fork 的 Release。
+- 每个 Bug 的复现、根因、修复和验证记录在仓库中，不只留在聊天记录里。
 
-## 当前状态
+## 基本信息
 
-- 上游仓库：`https://github.com/WangQrkkk/PaperQuay.git`
-- 本地源码目录：当前工作区根目录
-- 本地已安装版本目录：`C:\Users\yusen\AppData\Local\Programs\PaperQuay`
-- 应用类型：Electron + React + TypeScript + Vite
-- Node.js 要求：22.18 或更高；当前项目 CI 使用 Node.js 24
+- 上游：`https://github.com/WangQrkkk/PaperQuay.git`；个人 Fork：`Dongyurocket/PaperQuay`（`package.json` 的 `build.publish` 与 `electron/backend/updateCommands.cjs` 的 `UPDATE_REPOSITORY`）
+- 技术栈：Electron + React + TypeScript + Vite
+- Node.js：22.18 或更高；CI 使用 Node.js 24
+- 平台范围：自 0.4.24 起只维护和测试 Windows x64
+- 本机安装目录：`C:\Users\yusen\AppData\Local\Programs\PaperQuay`
 - 许可证：AGPL-3.0-only
 
-## 第一次配置
+## 首次配置 Fork
 
-1. 在 GitHub 登录你的账号。
-2. 打开上游仓库并点击 Fork，仓库名建议保留为 `PaperQuay`。
-3. 在 PowerShell 中进入本仓库，然后运行：
+在 GitHub 上 Fork 上游仓库后，在 PowerShell 中运行：
 
 ```powershell
 .\scripts\Configure-Fork.ps1 -ForkOwner "你的GitHub用户名"
-```
-
-该脚本会：
-
-- 将原来的 `origin` 改名为 `upstream`。
-- 添加你的 Fork 为 `origin`。
-- 把应用内更新检查和 Electron Builder 发布目标切换到你的 Fork。
-- 输出需要提交的配置变更。
-
-Fork 完成后检查远程：
-
-```powershell
 git remote -v
 ```
 
-预期结果是 `upstream` 指向 `WangQrkkk/PaperQuay`，`origin` 指向你的 GitHub 用户名下的 `PaperQuay`。
+脚本会把原 `origin` 改名为 `upstream`，添加你的 Fork 为 `origin`，并把应用内更新检查和 Electron Builder 发布目标改到你的 Fork。完成后 `upstream` 应指向 `WangQrkkk/PaperQuay`，`origin` 指向你的 Fork。远程分工和同步细节见 [UPSTREAM.md](./UPSTREAM.md)。
 
 ## 日常工作流
 
-### 1. 同步上游
-
-确保没有未提交修改后运行：
+### 同步上游与建分支
 
 ```powershell
-.\scripts\Sync-Upstream.ps1
-```
-
-脚本默认同步 `main`，并把同步后的主分支推送到你的 Fork。若本地有未提交修改，脚本会停止，不会覆盖工作。
-
-### 2. 创建修复分支
-
-```powershell
-git switch main
-git pull --ff-only origin main
+.\scripts\Sync-Upstream.ps1          # 工作区必须干净；默认同步 main 并推送到 origin
 git switch -c fix/简短问题名
 ```
 
-建议命名：
+分支前缀：`fix/`（Bug）、`feat/`（功能）、`docs/`（文档）、`refactor/`（不改行为的重构）、`chore/`（构建、依赖、工具）。
 
-- `fix/xxx`：Bug 修复
-- `feat/xxx`：新功能
-- `docs/xxx`：文档
-- `refactor/xxx`：不改变行为的重构
-- `chore/xxx`：构建、依赖和开发工具
-
-### 3. 本地开发
+### 开发与检查
 
 ```powershell
 npm ci
-npm run dev
+npm run dev                # 桌面开发模式
+npx tsc --noEmit           # 类型检查
+npm run build              # tsc + vite build
+npm test                   # node --test "tests/*.test.ts" "tests/*.test.mjs"
+.\scripts\Run-Checks.ps1   # 依次运行 npm run build 和 npm test
 ```
 
-只做类型检查和前端构建：
+需要串行跑测试时：
 
 ```powershell
+node --test --test-concurrency=1 "tests/*.test.ts" "tests/*.test.mjs"
+```
+
+改动 `electron/backend/backupImport.cjs` 后至少运行 `npm test`，恢复路径回归测试在 `tests/backupRestorePaths.test.ts`。
+
+### Windows 构建报 `Access is denied`
+
+本机默认 `TEMP` 下，`npm run build` 可能因 esbuild 临时目录报 `Access is denied`。这是环境问题，不要为它改产品代码。把 `TEMP`/`TMP` 指到仓库内目录再构建（`.tmp-*/` 已在 `.gitignore` 中）：
+
+```powershell
+New-Item -ItemType Directory -Force .tmp-build | Out-Null
+$env:TEMP = "$PWD\.tmp-build"; $env:TMP = $env:TEMP
 npm run build
 ```
 
-运行测试：
+### 构建并安装 Windows 版本
 
 ```powershell
-npm test
+.\scripts\Build-Local.ps1            # 安装包输出到 release/
+.\scripts\Build-Local.ps1 -Install   # 构建后启动安装程序
 ```
 
-完整检查：
+安装前先关闭正在运行的 PaperQuay。个人构建与正式版使用同一个应用标识（`dev.paperquay.app`）和用户数据目录，首次切换前先在应用内导出 `.pqbackup`（见[用户手册 5.7 节](./USER_MANUAL.zh-CN.md#57-加密备份与迁移)）。
+
+### 提交与提 PR
 
 ```powershell
-.\scripts\Run-Checks.ps1
-```
-
-### 4. 构建并安装 Windows 版本
-
-构建安装包：
-
-```powershell
-.\scripts\Build-Local.ps1
-```
-
-构建完成后，安装包在 `release/`。需要启动安装程序时：
-
-```powershell
-.\scripts\Build-Local.ps1 -Install
-```
-
-安装前请先关闭正在运行的 PaperQuay。个人构建与正式版使用同一个应用标识和用户数据目录。
-
-首次切换前，先导出密码保护的 `.pqbackup` 文件。完整迁移包内容见[用户手册 5.7 节](./USER_MANUAL.zh-CN.md#57-加密备份与迁移)。按当前样本估算，完整包约 12.2 GiB。
-
-如需迁移旧 WebDAV 备份，请先用 PaperQuay 0.4.18 或更早版本恢复到本地。完成恢复后，再升级并导出 `.pqbackup`。新版不读取旧远端备份，也不会自动删除远端文件。确认无需保留后，由用户自行清理。
-
-恢复路径的回归测试在 `tests/backupRestorePaths.test.ts`，覆盖 MinerU 缓存根展开、附件按 ID 改绑、0.4.19 已污染的 pending 和一次性修复的幂等性。改动 `electron/backend/backupImport.cjs` 后至少运行 `npm test`。
-
-### 5. 提交与提 PR
-
-```powershell
-git add .
+git add <文件>
 git commit -m "fix: 简短描述问题"
 git push -u origin fix/简短问题名
 ```
 
-个人 Fork 内部的修改通过 GitHub Actions 验证后，再决定：
+推送到 `main` 和 PR 会触发 `.github/workflows/build.yml`（Windows 上运行 `npm ci`、`npm run build`、`npm test`）。通过后可向上游 `WangQrkkk/PaperQuay:main` 提 PR，或继续在 Fork 中迭代。上游 PR 应聚焦单一问题，附复现步骤、根因、验证方式和必要截图。
 
-- 向上游 `WangQrkkk/PaperQuay:main` 提 Pull Request；或
-- 先在个人 Fork 中继续迭代，等修复稳定后再提 PR。
+## 数据位置与隔离验证
 
-上游 PR 应聚焦单一问题，并附带复现步骤、根因、验证方式和必要截图。
+运行时数据在 `<userData>/PaperQuay/`（`electron/backend/libraryStore.cjs` 的 `createAppPaths`）：
 
-## 本地更新机制
+- `paperquay-library.sqlite`：文库与文库设置
+- `paperquay-notes.sqlite`：笔记
+- `paperquay-rag.sqlite`：知识库检索索引
+- `paperquay-knowledge-graph-relations.json`：知识图谱关系
+- `.settings/paperquay.config.json`、`.mineru-cache/`、`agent-memory/` 等
 
-PaperQuay 的 Windows 自动更新依赖 GitHub Release。个人构建必须使用个人 Fork 的 Release，否则会继续检查上游 Release。
+验证时不要写入真实文库。用 `--user-data-dir=<空目录>` 启动，或使用复制出来的一次性数据目录。不要改动知识库/RAG 的 schema 或 `user_version`。运行安装版时不要加 `--version` 之类的探测参数：打包版会忽略它，并用真实数据目录启动。
 
-推荐流程：
+## 发布与本地更新
 
-1. 在个人 Fork 的 `main` 上准备一个可发布版本。
-2. 修改 `package.json` 的 `version`，例如从 `0.4.20` 改为 `0.4.21`。
-3. 更新 `.github/release-notes.md` 为本次实际变更说明（`{{VERSION}}` 为版本占位符），否则 Release 会沿用上一次的内容。
-4. 提交并推送版本变更。
-5. 创建并推送 `app-v0.4.21` 标签：
+Windows 自动更新依赖 Fork 的 GitHub Release。完整流程、检查清单和回滚见 [RELEASE.md](./RELEASE.md)。要点：
 
-```powershell
-git tag app-v0.4.21
-git push origin app-v0.4.21
-```
+1. 同步递增 `package.json` 和 `package-lock.json` 中的版本号，版本号必须高于上游和已发布版本。
+2. 更新 `CHANGELOG.md` 和 `.github/release-notes.md`（`{{VERSION}}` 为版本占位符）。
+3. 提交、推送后，推送 `app-vX.Y.Z` 标签触发 Release 工作流。
 
-6. 自 0.4.24 起，GitHub Actions 仅构建 Windows x64 安装包，先创建 Draft Release，Windows 构建成功后自动转为正式发布。其他平台由用户自行打包，作者精力有限，不承担维护和测试；历史资产保留。发现说明或产物有误时，可直接在 GitHub 页面编辑 Release 或按 `docs/RELEASE.md` 回滚。
-7. 已安装的个人版本下次检查更新时会从个人 Fork 获取新版本。
-
-版本号必须递增。不要使用与上游相同或更低的版本号，否则更新器会认为没有新版本。
-
-注意：若 Fork 仓库从未运行过 GitHub Actions，GitHub 会默认禁用工作流（Actions 页面显示 “Workflows aren't being run on this forked repository”）。需要先在仓库 Actions 页面手动启用，标签推送才能触发 Release 工作流。
+Fork 仓库首次使用 Actions 时，GitHub 默认禁用工作流，需先在仓库 Actions 页面手动启用，标签推送才会触发 Release。
 
 ## 文档约定
 
-- Bug 记录：`.github/ISSUE_TEMPLATE/bug_report.md`
-- 开发与同步：本文档
-- 发布流程：`docs/RELEASE.md`
-- 上游同步检查：`docs/UPSTREAM.md`
-- 变更记录：`docs/changes/`
+- Bug 报告模板：`.github/ISSUE_TEMPLATE/bug_report.md`
+- 发布流程：[RELEASE.md](./RELEASE.md)；上游同步：[UPSTREAM.md](./UPSTREAM.md)
+- 版本变更：`CHANGELOG.md`；单项变更与验收记录：`docs/changes/`
 
-每个修复建议至少记录：现象、复现步骤、预期行为、实际行为、影响范围、根因、修复方案和验证结果。
+每个修复至少记录：现象、复现步骤、预期与实际行为、影响范围、根因、修复方案和验证结果。
 
 ## 数据与安全边界
 
-不要提交以下内容：
+不要提交：
 
 - API key、Token、密码或证书
 - PDF、解析结果和个人笔记
-- SQLite 数据库、备份包（包括 `.pqbackup`）和运行时目录
+- SQLite 数据库、备份包（含 `.pqbackup`）和运行时目录
 - `release/`、`dist/` 等构建产物
 
-密码保护的 `.pqbackup` 可能包含 API Key 和个人数据；忘记密码后无法恢复包内容。
+`.pqbackup` 可能包含 API Key 和个人数据，忘记密码后无法恢复。
 
-本仓库继承上游 AGPL-3.0-only 许可证。修改后再分发或通过网络提供修改版时，应遵守 AGPL 和上游 `TRADEMARKS.md` 中的品牌说明。
+本仓库继承上游 AGPL-3.0-only 许可证。修改后再分发或通过网络提供修改版时，应遵守 AGPL 和 [TRADEMARKS.md](../TRADEMARKS.md) 中的品牌说明。

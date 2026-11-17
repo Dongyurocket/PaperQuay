@@ -1,109 +1,124 @@
 # PaperQuay 知识库 MCP 接入指南
 
-当前 MCP 协议版本随 PaperQuay 应用版本发布；客户端应以 `initialize` 返回的 `serverInfo.version` 与 `tools/list` 为准，不应依赖硬编码版本或旧参数快照。
+PaperQuay 提供基于 **Model Context Protocol (MCP)** 的 stdio 服务（`paperquay-knowledge-mcp`）。Proma、Pi、Codex、Claude 等 Agent 可以用它检索本地文献库、知识库正文和笔记，并在写入护栏下维护文库与笔记。
 
-PaperQuay 提供了基于标准 **Model Context Protocol (MCP)** 的知识库服务。Proma、Pi、Codex 等各类 AI Agent 可以通过 stdio 协议直连 PaperQuay 本地知识库，进行文献检索、证据定位、学术问答，以及受安全护栏约束的文库与笔记维护（导入 PDF、更新元数据、调整分类、创建/更新/删除笔记、维护笔记分类等）。
+服务版本与应用版本一致。客户端应以 `initialize` 返回的 `serverInfo.version` 和 `tools/list` 为准，不要依赖本文的参数快照。
 
----
+## 特性
 
-## 特性亮点
+- **直连本地数据**：服务直接读写 `<数据目录>` 下的 SQLite 数据库，查询不需要桌面应用运行。
+- **可定位的证据**：`search_knowledge_base` 返回文献 ID、标题、页码和结构块 ID，便于生成 `(Paper Title, P.x)` 形式的引用。
+- **混合检索**：配置 Embedding API 后，知识库与笔记检索走向量 + FTS5 + RRF 融合；未配置或失败时降级为关键词检索，并返回 `warning`。
+- **写入护栏**：桌面应用运行时默认拒绝写入，详见[写入安全护栏](#写入安全护栏)。
 
-1. **零服务依赖**：基于 Node.js 原生直连 SQLite，无需 Electron 桌面应用保持运行即可查询与管理。
-2. **并发安全无锁**：数据库开启 WAL 模式，外部只读查询与桌面应用读写互不阻塞、无锁冲突。
-3. **精准段落引用**：`search_knowledge_base` 返回段落所在的**文献 ID、文献标题、页码与结构块 ID**，便于 Agent 依据事实回答并自动生成 `[1] (Paper Title, P.x)` 格式引用。
-4. **向量混合检索**：在阅读器设置中配置了 Embedding API 时，`search_knowledge_base` 自动将查询向量化，与 FTS5 全文检索双通道召回，经 RRF（Reciprocal Rank Fusion）融合排序；未配置或接口异常时自动降级为关键词检索，并在分词或特殊字符场景下无缝降级到模糊匹配。
-5. **写入安全护栏**：所有写工具在执行前检测 PaperQuay 桌面应用是否运行——已安装版通过进程检测，开发版通过应用运行标记检测。桌面应用持有文库内存态，外部写入会在应用下一次保存时被整体覆盖，因此检测到运行中会**显式拒绝并提示关闭应用**；确需并行写入时可传 `allowWhileAppRunning: true` 强制覆盖，设环境变量 `PAPERQUAY_MCP_WRITE=off` 可将服务切换为全局只读。
+## 工具一览
 
----
+共 25 个工具：11 个只读，14 个写入。写入工具都接受 `allowWhileAppRunning`（默认 `false`）。
 
-## 提供的 MCP 工具（Tools）
+### 只读：文献、知识库与笔记检索
 
-### 知识库只读检索工具
-
-> 本表共 7 项；`list_note_tags`、`list_note_folders` 是笔记写入前的发现工具，README 将它们归入笔记维护（8 项）。
-| 工具名称 | 说明 | 核心参数 | 返回内容 |
+| 工具 | 说明 | 主要参数 | 返回 |
 | :--- | :--- | :--- | :--- |
-| `search_papers` | 检索文献库元数据 | `query`（关键词）、`tag`（标签）、`categoryId`（分类过滤，含后代分类）、`limit` | 匹配文献列表（ID、中英文标题、作者、年份、DOI、标签、`ragEnabled`） |
-| `get_paper_details` | 读取单篇文献完整详情 | `paperId`（必填） | 完整元数据、摘要、用户笔记、AI 概览、分类 ID、`ragEnabled`，以及 `attachments`。`kind: "pdf"` 是原版，`kind: "translated-pdf"` 是唯一一份翻译版 PDF（含 `storedPath`、`relativePath`） |
-| `search_knowledge_base` | 向量 + 全文混合检索 RAG 知识库证据 | `query`（必填）、`paperId`（可选）、`limit`、`mode`（`auto`/`hybrid`/`keyword`） | 带文献标题、页码、段落预览、匹配分数与命中通道（`vector`/`fts`）的证据切片。已移出本地知识库的文献不会出现 |
-| `read_paper_content` | 读取文献在知识库中的分块正文 | `paperId`（必填）、`pageIndex`（可选）、`limit` | 按页面或顺序排列的结构化正文内容。已移出本地知识库的文献返回空 |
-| `search_notes` | 混合检索用户的阅读笔记与批注摘录 | `query`（可选）、`paperId`（可选）、`pageKind`（可选）、`limit`、`mode`（`auto`/`hybrid`/`keyword`） | 笔记内容与 `retrievalMode`、每条 `channels`、降级 `warning` |
-| `list_note_tags` | 列出笔记标签及使用次数 | `paperId`（可选，只看某篇文献的笔记） | 标签列表（`tag`、`count`），供写入前发现现有标签 |
-| `list_note_folders` | 读取笔记分类（文件夹）树 | 无 | 分类列表（`id`、`name`、`parentId`、`sortOrder`） |
+| `search_papers` | 检索文献元数据 | `query`、`tag`、`categoryId`（非系统分类含后代）、`limit`（默认 10，上限 50） | 文献列表，含 `ragEnabled` |
+| `get_paper_details` | 读取单篇详情 | `paperId`（必填） | 完整元数据、摘要、笔记、AI 概览、分类 ID、`ragEnabled`、`attachments`（`kind: "pdf"` 为原版，`"translated-pdf"` 为唯一的翻译版） |
+| `list_categories` | 读取文库分类树 | 无 | 系统与用户分类、`parentId`、`sortOrder`、`paperCount`（含后代） |
+| `search_knowledge_base` | 检索知识库证据 | `query`（必填）、`paperId`、`limit`（默认 8，上限 30）、`mode` | 证据切片：`paperId`、`paperTitle`、`pageNumber`、`blockId`、`snippet`、`score`、`channels`；另含 `retrievalMode`、`warning` |
+| `read_paper_content` | 读取文献正文分块 | `paperId`（必填）、`pageIndex`（从 0 开始）、`limit`（默认 20，上限 100） | 按页或顺序排列的结构化正文 |
+| `search_notes` | 检索笔记 | `query`、`paperId`、`pageKind`、`limit`（默认 10）、`mode` | 笔记、`retrievalMode`、每条 `channels`、降级 `warning` |
+| `list_note_tags` | 列出笔记标签与使用次数 | `paperId`（可选） | `tag`、`count` |
+| `list_note_folders` | 读取笔记文件夹树 | 无 | `id`、`name`、`parentId`、`sortOrder` |
 
-### Zotero 本地选择性同步工具
-| 工具名称 | 说明 | 核心参数 | 返回内容 |
+已移出本地知识库（`ragEnabled: false`）的文献不会出现在 `search_knowledge_base` 结果中，`read_paper_content` 对其返回空。
+
+### 只读：Zotero 本地库
+
+| 工具 | 说明 | 主要参数 | 返回 |
 | :--- | :--- | :--- | :--- |
-| `zotero_list_collections` | 获取本地 Zotero 分类树及条目数 | `dataDir`（可选，默认自动探测） | 分类列表（key、分类名、父分类、条目数）及探测目录 |
-| `zotero_search_items` | 条件检索本地 Zotero 文献条目 | `query`、`collectionKey`、`limit`、`dataDir` | 匹配文献列表（包含是否有本地 PDF 附件、DOI 等） |
-| `zotero_preview_sync` | 同步前差量比对与去重预检 | `itemKeys`、`collectionKey`、`dataDir` | 差量清单（`ready` 待同步、`alreadyExists` 重复跳过、`missingPdf` 缺 PDF） |
-| `paperquay_sync_from_zotero` | 精准导入文献至 PaperQuay | `itemKeys`、`collectionKey`、`targetCategoryId`、`createCollectionCategory` | 导入报告（成功导入数、重复数、自动创建的分类） |
+| `zotero_list_collections` | 列出 Zotero 分类树与条目数 | `dataDir`（可选，默认自动探测） | 分类 key、名称、父分类、条目数 |
+| `zotero_search_items` | 检索 Zotero 条目 | `query`、`collectionKey`、`limit`（默认 50，上限 200）、`dataDir` | 条目列表，含 DOI 与是否有本地 PDF |
+| `zotero_preview_sync` | 同步前预检 | `itemKeys`、`collectionKey`、`dataDir` | `ready`、`alreadyExists`、`missingPdf` |
 
-### 文库写入与管理工具（带运行护栏）
+### 写入：文库管理
 
-以下工具会修改本地文库数据库，执行前均会检查桌面应用运行状态（见下文「写入安全护栏」），并在检测到运行时**显式拒绝**，可传 `allowWhileAppRunning: true` 覆盖。
-
-| 工具名称 | 说明 | 核心参数 | 返回内容 |
+| 工具 | 说明 | 主要参数 | 返回与语义 |
 | :--- | :--- | :--- | :--- |
-| `import_pdfs` | 批量导入本地 PDF 文件 | `paths`（必填，PDF 绝对路径数组）、`metadata`（按路径键控的元数据，含 `title`/`titleZh`/`authors`/`tags` 等）、`targetCategoryId` 或 `categoryName`（互斥，按名称不存在则自动创建）、`importMode`（`copy`/`move`/`keep`，默认取应用设置） | 导入报告（`imported`/`duplicates`/`errors` 明细与汇总；重复文献按内容哈希查重并补挂目标分类） |
-| `list_categories` | 读取分类树及各分类文献数（只读） | 无 | 分类列表（含系统分类、`parentId`、`sortOrder`、`paperCount` 含后代分类计数） |
-| `manage_category` | 分类全生命周期管理 | `action`（`create`/`rename`/`move`/`delete`）、`categoryId`、`name`、`parentId` | 操作后的分类对象；`delete` 级联删除全部子分类并把文献从其中解绑（不删除文献），返回 `deletedCategoryIds` |
-| `set_paper_categories` | 批量调整文献的分类归属 | `paperIds`（必填）、`add`/`remove`（可与 `remove` 组合）或 `replace`（互斥） | 每篇文献更新后的 `categoryIds`；任一文献或分类不存在则整体拒绝，不留部分写入 |
-| `update_paper` | 更新文献元数据（白名单字段） | `paperId`（必填）+ `title`/`titleZh`/`authors`/`authorDetails`/`year`/`doi`/`language`/`citationKey`/`keywords`/`tags`/`isFavorite` 等可更新字段 | 更新后的文献对象；未知字段显式报错 |
-| `delete_papers` | 批量删除文献 | `paperIds`（必填）、`deleteFiles`（默认 `false`，为 `true` 时同时删除已入库的 PDF 文件） | 删除报告（`deleted`、`deletedFileCount`、`fileErrors`）；数据库先提交再删文件 |
-| `attach_translated_pdf` | 把本地翻译版 PDF 附加到一篇文献 | `paperId`、`sourcePath`（必填） | 复制到统一的 `translated-pdfs` 目录并替换该文献已有翻译版；返回 `attachmentId`、`storedPath`、`relativePath`、`replaced`。页数与原版不一致时返回 `pageCountMismatch`，不拒绝附加 |
-| `remove_translated_pdf` | 移除一篇文献的翻译版 PDF | `paperId`（必填）、`deleteFile`（默认 `true`） | 先提交数据库再删除已入库副本。找不到翻译版附件时报错 |
+| `paperquay_sync_from_zotero` | 从 Zotero 导入选定条目或分类 | `itemKeys`、`collectionKey`、`targetCategoryId`、`createCollectionCategory`（默认 `true`）、`dataDir` | 导入、重复与新建分类统计 |
+| `import_pdfs` | 批量导入本地 PDF | `paths`（必填，绝对路径）、`metadata`（按源路径键控）、`targetCategoryId` 或 `categoryName`（二选一，名称不存在时创建根分类）、`importMode`（`copy`/`move`/`keep`，默认取文库设置） | `imported`/`duplicates`/`errors`。按内容哈希查重，提供元数据时也按 DOI/标题查重；不抓取 Crossref 参考文献 |
+| `manage_category` | 创建、重命名、移动、删除分类 | `action`（必填）、`categoryId`、`name`、`parentId`、`sortOrder` | `delete` 级联删除子分类，只解绑文献，不删文献；系统分类不可修改 |
+| `set_paper_categories` | 调整文献分类 | `paperIds`（必填）、`add`/`remove`，或 `replace`（与前两者互斥） | 每篇的 `categoryIds`；任一 ID 不存在则整体不写入 |
+| `update_paper` | 更新元数据（白名单） | `paperId`（必填）＋可更新字段，见下文 | 更新后的文献摘要；未知字段报错 |
+| `delete_papers` | 批量删除文献 | `paperIds`（必填）、`deleteFiles`（默认 `false`） | `deleted`、`deletedFileCount`、`fileErrors`；先提交数据库再删文件 |
+| `attach_translated_pdf` | 附加翻译版 PDF | `paperId`、`sourcePath`（均必填） | 复制到翻译版 PDF 目录（默认存储目录下的 `translated-pdfs`），替换已有翻译版；返回 `attachmentId`、`storedPath`、`relativePath`、`replaced`。页数与原版不同时返回 `pageCountMismatch`，不拒绝附加 |
+| `remove_translated_pdf` | 移除翻译版 PDF | `paperId`（必填）、`deleteFile`（默认 `true`） | 先提交数据库再删除已入库副本；没有翻译版时报错 |
 
-### 笔记维护工具（带运行护栏）
+`update_paper` 可更新字段：`title`、`titleZh`、`authors`、`authorDetails`、`year`、`publication`、`doi`、`url`、`abstractText`、`itemType`、`publisher`、`institution`、`reportNumber`、`volume`、`issue`、`pages`、`isbn`、`issn`、`language`、`citationKey`、`keywords`、`tags`、`userNote`、`aiSummary`、`citation`、`isFavorite`。`import_pdfs` 的 `metadata` 支持其中的书目字段（不含 `userNote`、`aiSummary`、`citation`、`isFavorite`）。
 
-笔记库采用逐条 SQL 写入，不会像文库那样被桌面应用整体覆盖；但应用内的笔记列表与编辑器持有内存快照，外部写入后需要重新加载界面才能看到，因此仍走同一道「默认拒绝 + 可覆盖」护栏。作业规范可参考仓库 `skills/paperquay-notes/SKILL.md`。
+- `authors` 是字符串数组；`authorDetails` 是对象数组，每项可含 `name`、`givenName`、`familyName`、`affiliation`、`orcid`。两者同时提供时以 `authorDetails` 为准。
+- `orcid` 须符合 `0000-0000-0000-000X` 格式并通过 MOD 11-2 校验位，否则报错。
+- `language` 为 BCP 47 标签（如 `en`、`zh-Hans`），无效时报错；传空串清除。它表示文献语言，与翻译版 PDF 无关。
+- `citationKey` 须匹配 `^[A-Za-z0-9_:\-.]+$`；传空串清除。允许重复。
+- `authors`、`authorDetails`、`keywords`、`tags` 都是整体替换。
 
-| 工具名称 | 说明 | 核心参数 |
+### 写入：笔记维护
+
+| 工具 | 说明 | 主要参数 |
 | :--- | :--- | :--- |
-| `create_note` | 新建笔记 | `title` / `content`（至少一个非空，正文为 Markdown/纯文本）、`tags`（去 `#` 前缀，上限 30）、`paperId`（缺省为全局笔记）、`type`（`highlight`/`area`/`standalone`/`ai-chat`）、`pageKind`（8 值白名单）、`folderId` |
-| `update_note` | 局部更新 | `noteId`（必填）+ `title`/`content`/`tags`/`pageKind`/`folderId` 至少一项；`pageKind` 与 `folderId` 传空串分别清除页面类型 / 移动到未分类 |
-| `delete_note` | 软删除（标记删除并移出全文索引） | `noteId`（必填） |
-| `create_note_folder` | 新建分类（可嵌套） | `name`（必填）、`parentId`（可选） |
-| `rename_note_folder` | 重命名分类 | `folderId`、`name` |
-| `delete_note_folder` | 删除分类及子分类；其中笔记移动到未分类（不删除笔记） | `folderId` |
+| `create_note` | 新建笔记 | `title`、`content`（至少一个非空；正文为 Markdown/纯文本）、`tags`（去掉 `#`，最多 30 个）、`paperId`（缺省为全局笔记）、`type`（`standalone`/`highlight`/`area`/`ai-chat`，默认 `standalone`）、`pageKind`、`folderId` |
+| `update_note` | 局部更新 | `noteId`（必填）＋ `title`/`content`/`tags`/`pageKind`/`folderId` 至少一项；`tags` 整体替换；`pageKind` 传空串清除，`folderId` 传空串移到未分类 |
+| `delete_note` | 软删除，并移出全文索引 | `noteId`（必填） |
+| `create_note_folder` | 新建文件夹（可嵌套） | `name`（必填）、`parentId` |
+| `rename_note_folder` | 重命名文件夹 | `folderId`、`name`（均必填） |
+| `delete_note_folder` | 删除文件夹及子文件夹，其中笔记移到未分类 | `folderId`（必填） |
 
-笔记写入的语义约定：
+`pageKind` 取值：`paper-card`、`concept`、`synthesis`、`qa`、`excerpt`、`index`、`log`、`overview`。
 
-- 正文中的 `[[笔记标题]]` 会被解析为双链（仅当目标笔记已存在），`#标签` 自动归一化为标签。
-- 替换 `content` 时，正文由共享 Markdown → Tiptap 解析器在**写入边界**解析并重建富文本 JSON（`contentJson`），`contentHtml` 缓存清除后由编辑器重渲染；标题、列表、基础内联格式、代码块、引用块、表格、公式、双链与标签可重建，只有已知的锚点 ID 与本地文库唯一匹配的 `[n]` 文献引用恢复为专用节点，未知值保留为普通文本。
-- **不要用 MCP 覆盖含摘录卡来源锚点的笔记正文**：锚点块与原文快照无法从普通 Markdown 重建，覆盖后正文中的锚点引用丢失展示，且编辑器再次保存时会按正文同步清理对应锚点数据。含文献引用或表格的笔记，覆盖时须保留规范 Markdown 格式（`[n]` + 文末参考文献列表 / 表格语法），否则对应节点会退化为纯文本；这类笔记更稳妥的做法是在应用内编辑，或只用 MCP 改标题/标签/分类。
-- 批量删除前建议先让 Agent 列出待删清单并人工确认。
+笔记写入约定：
 
----
+- 正文中的 `[[笔记标题]]` 在目标笔记已存在时解析为双链；`#标签` 合并进标签。
+- 写入 `content` 时，共享 Markdown → Tiptap 解析器重建富文本 JSON，并清除 HTML 缓存。标题、列表、内联格式、代码块、引用块、表格、公式、双链和标签可以重建；只有已知锚点 ID 和唯一匹配本地文献的 `[n]` 引用恢复为专用节点，其余保留为普通文本。
+- **不要用 MCP 覆盖含摘录卡锚点的笔记正文**：锚点块和原文快照无法从 Markdown 重建，覆盖后锚点引用丢失，编辑器再次保存时还会清理对应锚点数据。含文献引用或表格的笔记，覆盖时须保留 `[n]` + 文末参考文献列表和表格语法。这类笔记建议在应用内编辑，或只用 MCP 改标题、标签、文件夹。
+- 批量删除前先列出待删清单，由用户确认。
 
 ## 写入安全护栏
 
-文库数据库采用「应用内存态 + 整体落盘」的持久化模型：**桌面应用运行时持有文库的内存副本，其任何保存动作都会全量覆盖数据库**。因此 MCP 写工具默认遵循以下规则：
+桌面应用运行时把文库保存在内存中，每次保存都会全量重写文库数据库，外部写入会被覆盖。笔记库按条写入，不会被整体覆盖，但应用内已加载的笔记列表和编辑器不会自动刷新。因此所有写入工具（含 Zotero 同步和笔记工具）遵循同一套规则：
 
-1. 每次写入前检查应用运行标记，并补充检测 `PaperQuay.exe`（Windows）或 `PaperQuay` 进程（macOS/Linux）；运行标记同时覆盖 `electron` 开发模式。进程检测会排除 MCP 服务自身及其他 `paperquay-mcp` 入口进程，因此官方推荐的 `PaperQuay.exe` + `ELECTRON_RUN_AS_NODE=1` 启动方式不会误触发护栏；
-2. 检测到运行时，写入被**拒绝**并返回明确错误提示（引导先关闭桌面应用），数据库不产生任何修改；
-3. 明确知道风险时可传 `allowWhileAppRunning: true` 强制写入（桌面应用随后的保存可能覆盖本次写入）；
-4. 运行标记损坏或无法读取时按应用运行处理，避免开发期出现无保护的外部写入；进程探测失败但无运行标记时写入放行，并在返回结果中附带 `warning`；
-5. 设环境变量 `PAPERQUAY_MCP_WRITE=off` 可禁用全部写工具（此时服务等价于纯只读），该开关优先级高于 `allowWhileAppRunning`；
-6. 存在待应用的备份恢复（`<数据目录同级>/PaperQuay-restore/pending.json`）时，所有写工具返回 `BACKUP_RESTORE_PENDING`，`allowWhileAppRunning` 不能覆盖，直到启动恢复完成。
+1. 写入前先读桌面应用运行标记（开发模式同样写入），标记不存在时再检测进程：Windows 用 `tasklist` 查 `PaperQuay.exe`，其他平台用 `pgrep -x PaperQuay`。检测会排除 MCP 自身进程和命令行含 `paperquay-mcp` 的进程，所以用 `PaperQuay.exe` + `ELECTRON_RUN_AS_NODE=1` 启动 MCP 不会误判。
+2. 检测到应用运行时拒绝写入，数据库不变，错误提示要求先关闭应用。
+3. 运行标记损坏、不可读，或进程检测失败时，无法确认运行状态，同样拒绝写入。
+4. 传 `allowWhileAppRunning: true` 可以强制写入；此时若应用在运行或状态未知，结果附带 `warning`。应用随后的保存可能覆盖本次写入；笔记写入后需重新加载应用界面。
+5. 环境变量 `PAPERQUAY_MCP_WRITE=off` 禁用全部写入工具，优先级高于 `allowWhileAppRunning`。
+6. 存在待应用的备份恢复（`<数据目录的上级目录>/PaperQuay-restore/pending.json`）时，写入工具返回 `BACKUP_RESTORE_PENDING`，`allowWhileAppRunning` 不能覆盖，直到应用启动完成恢复。
 
-Zotero 同步工具（`paperquay_sync_from_zotero`）同样受该护栏保护。建议让 Agent 形成「写前确认桌面应用已关闭」的标准作业程序。
-
-笔记库的护栏说明：笔记库是逐条 SQL 写入，桌面应用不会像文库那样用内存快照整体覆盖外部写入；但应用界面（笔记列表与编辑器）在写入前已加载的快照不会自动刷新，因此仍采用同一道「默认拒绝 + `allowWhileAppRunning` 可覆盖」护栏，并要求写入后重新加载应用界面。
+建议 Agent 写入前先确认桌面应用已关闭。
 
 ## 仓库 Skills
 
-仓库维护与 MCP 同步发布的作业规范：`skills/paperquay-knowledge-search/SKILL.md`（只读证据检索）、`skills/paperquay-notes/SKILL.md`（笔记维护）、`skills/paperquay-zotero-sync/SKILL.md`（预检后选择性同步）和 `skills/paperquay-library-manage/SKILL.md`（文库写入管理）。Skills 只定义操作顺序和安全边界；完整参数以 MCP `tools/list` 和本指南为准。
+仓库 `skills/` 提供与 MCP 同步维护的作业规范：
 
----
+- [`paperquay-knowledge-search`](../skills/paperquay-knowledge-search/SKILL.md)：只读证据检索
+- [`paperquay-library-manage`](../skills/paperquay-library-manage/SKILL.md)：文库写入与分类管理
+- [`paperquay-notes`](../skills/paperquay-notes/SKILL.md)：笔记维护
+- [`paperquay-zotero-sync`](../skills/paperquay-zotero-sync/SKILL.md)：预检后选择性同步 Zotero
 
-## 客户端配置指南
+Skills 只规定操作顺序和安全边界，参数以 `tools/list` 和本文为准。
 
-### 已安装桌面版
+### 编写自定义 Skill
 
-安装包把 MCP 服务放在 asar 之外，路径为 `resources/paperquay-mcp/server.cjs`。同目录下必须有 `node_modules/sqlite-vec` 和当前平台的 `sqlite-vec-<os>-<arch>/vec0.*`；缺少时入口会在握手前报 `Cannot find module 'sqlite-vec'`。不要再从源码仓库取 `bin/paperquay-mcp.cjs`，也不要直接执行 asar 内的文件。
+新建 `skills/<skill-name>/SKILL.md`，建议包含：
 
-首选启动方式是应用自带的 Electron 二进制，并设置 `ELECTRON_RUN_AS_NODE=1`。Electron 42 内嵌 Node.js 24，满足 `node:sqlite` 的 Node 22.5 要求，安装版用户不需要另装 Node。设置页「MCP 服务」会按当前安装路径生成可复制的 Proma / Claude / Codex 片段，并带上 `--data-dir`。
+1. **frontmatter**：`name` 与 `description`。`description` 写清何时触发（典型提问、关键词）和何时不触发，并指向应改用的其他 Skill。
+2. **工具与权限**：列出依赖的 MCP 工具，区分只读与写入；写入前先预检，并要求用户确认。
+3. **作业步骤**：按步骤写清每一步调用哪个工具、关键参数和继续或停止的判断条件。
+4. **输出约束**：引用须含标题、作者、年份和页码；检索为空、Embedding 降级或文件缺失时如何回答。
+
+## 客户端配置
+
+### 安装版（推荐）
+
+安装包把服务放在 asar 之外：`resources/paperquay-mcp/server.cjs`，同目录 `node_modules/` 下有 `sqlite-vec` 和当前平台的 `sqlite-vec-<os>-<arch>`。缺少时启动会报 `Cannot find module 'sqlite-vec'`。不要执行 asar 内的文件。
+
+用应用自带的 `PaperQuay.exe` 并设置 `ELECTRON_RUN_AS_NODE=1` 启动，不需要另装 Node.js。设置页「MCP 服务」会按当前安装路径生成 Proma、Claude、Codex 的配置片段，并带上 `--data-dir`，优先复制该片段。Proma 示例：
 
 ```json
 {
@@ -116,131 +131,68 @@ Zotero 同步工具（`paperquay_sync_from_zotero`）同样受该护栏保护。
         "--data-dir",
         "C:/Users/<you>/AppData/Roaming/PaperQuay/PaperQuay"
       ],
-      "env": {
-        "ELECTRON_RUN_AS_NODE": "1"
-      },
+      "env": { "ELECTRON_RUN_AS_NODE": "1" },
       "enabled": true
     }
   }
 }
 ```
 
-路径以设置页或实际安装目录为准。若该启动方式不可用，可用系统 Node.js 22.5 或更高版本直接执行同一个 `server.cjs`。
+路径以设置页或实际安装目录为准。也可以用 Node.js 22.5 或更高版本直接执行同一个 `server.cjs`（服务依赖 `node:sqlite`）。
 
-开发模式仍使用源码入口 `bin/paperquay-mcp.cjs`，由系统 Node 启动。下面的示例是开发配置。
+其他客户端的格式：
 
-### 1. Proma Agent 配置（开发模式）
-
-在 Proma 工作区配置文件（例如 `mcp.json`）中添加 `paperquay` 服务：
-
-```json
-{
-  "servers": {
-    "paperquay": {
-      "type": "stdio",
-      "command": "node",
-      "args": [
-        "C:/Users/yusen/.proma/agent-workspaces/paperquery/workspace-files/bin/paperquay-mcp.cjs"
-      ],
-      "enabled": true
-    }
-  }
-}
-```
-
-### 2. Pi Coding Agent 配置
-
-在全局配置 `~/.pi/agent/mcp.json` 或当前项目 `.mcp.json` 中配置：
-
-```json
-{
-  "mcpServers": {
-    "paperquay": {
-      "command": "node",
-      "args": [
-        "C:/Users/yusen/.proma/agent-workspaces/paperquery/workspace-files/bin/paperquay-mcp.cjs"
-      ]
-    }
-  }
-}
-```
-
-### 3. Codex CLI / Desktop 配置
-
-在 `~/.codex/config.toml` 或当前项目的 `.codex/config.toml` 中添加：
+- **Claude Code / Claude Desktop**（Desktop 为 `claude_desktop_config.json`）、**Pi**（`~/.pi/agent/mcp.json` 或项目 `.mcp.json`）：`{"mcpServers": {"paperquay": {"command": ..., "args": [...], "env": {...}}}}`
+- **Codex**（`~/.codex/config.toml` 或项目 `.codex/config.toml`）：
 
 ```toml
 [mcp_servers.paperquay]
-command = "node"
+command = "C:/Program Files/PaperQuay/PaperQuay.exe"
 args = [
-  "C:/Users/yusen/.proma/agent-workspaces/paperquery/workspace-files/bin/paperquay-mcp.cjs"
+  "C:/Program Files/PaperQuay/resources/paperquay-mcp/server.cjs",
+  "--data-dir",
+  "C:/Users/<you>/AppData/Roaming/PaperQuay/PaperQuay",
 ]
+env = { ELECTRON_RUN_AS_NODE = "1" }
 ```
 
-### 4. Claude Code / Desktop 配置
+### 开发模式
 
-在 `claude_desktop_config.json` 的 `mcpServers` 字段下添加：
+从源码运行时入口是 `bin/paperquay-mcp.cjs`，用系统 Node.js（22.5 或更高）启动，也可以执行 `npm run mcp`。配置格式同上，把 `command` 改为 `node`、`args` 第一项改为 `<仓库路径>/bin/paperquay-mcp.cjs`，并去掉 `env`。开发模式下设置页生成的片段也是这种形式。
 
-```json
-{
-  "mcpServers": {
-    "paperquay": {
-      "command": "node",
-      "args": [
-        "C:/Users/yusen/.proma/agent-workspaces/paperquery/workspace-files/bin/paperquay-mcp.cjs"
-      ]
-    }
-  }
-}
+## 数据目录
+
+未指定时，服务按顺序探测下列目录，选第一个含 `paperquay-library.sqlite` 或 `paperquay-rag.sqlite` 的：
+
+- Windows：`%APPDATA%/PaperQuay/PaperQuay`、`%APPDATA%/paperquay/PaperQuay`、`%APPDATA%/PaperQuay`、`%APPDATA%/paperquay`
+- 源码在 macOS / Linux 运行时：`~/Library/Application Support/PaperQuay[/PaperQuay]`、`~/.config/PaperQuay[/PaperQuay]`
+
+指定其他目录（如测试用的一次性目录）：
+
+```bash
+node bin/paperquay-mcp.cjs --data-dir="D:/MyPaperQuayData"
+# 或
+export PAPERQUAY_DATA_DIR="D:/MyPaperQuayData"
 ```
 
----
+## 检索模式
 
-## 自定义数据目录
-
-服务按以下顺序探测 PaperQuay 数据目录，优先选择包含 `paperquay-library.sqlite` 或 `paperquay-rag.sqlite` 的候选：
-- Windows: `%APPDATA%/PaperQuay/PaperQuay`，其次 `%APPDATA%/paperquay/PaperQuay`、`%APPDATA%/PaperQuay`
-- macOS: `~/Library/Application Support/PaperQuay/PaperQuay`，其次 `~/Library/Application Support/PaperQuay`
-- Linux: `~/.config/PaperQuay/PaperQuay`，其次 `~/.config/PaperQuay`
-
-如果你使用了自定义数据目录或在测试环境运行，可通过以下任一方式指定：
-
-1. **命令行参数**：
-   ```bash
-   node bin/paperquay-mcp.cjs --data-dir="D:/MyPaperQuayData"
-   ```
-2. **环境变量**：
-   ```bash
-   export PAPERQUAY_DATA_DIR="D:/MyPaperQuayData"
-   ```
-
----
-
-## 向量混合检索说明
-
-`search_notes` 同样支持 `auto` / `hybrid` / `keyword`，复用下述阅读器 Embedding 配置与 RRF。笔记向量由保存/导入/vault 回导后的后台 Worker 生成，既有笔记可在笔记工具栏手动重建。仅索引标题与可编辑正文，不索引锚点证据及“原文快照”；索引会将这些正文发送至所配置的 Embedding 端点。检索以当前笔记的删除标记、过滤范围、模型键和正文签名约束向量，按笔记融合；未配置或向量不可用时保持 FTS5 trigram 多关键词 AND / 短词 LIKE 兜底，返回 `retrievalMode='keyword'` 和 `warning`，不弹窗。`keyword` 模式不发起 Embedding 请求，空查询按笔记排序返回。
-
-`search_knowledge_base` 的检索行为由 `mode` 参数控制（默认 `auto`）：
+`search_knowledge_base` 和 `search_notes` 都支持 `mode`：
 
 | 模式 | 行为 |
 | :--- | :--- |
-| `auto`（默认） | 检测到可用的 Embedding 配置时走向量 + 全文混合检索，否则静默使用关键词检索 |
-| `hybrid` | 强制尝试混合检索；配置缺失或向量索引不可用时降级为关键词检索，并在响应中返回 `warning` 说明原因 |
-| `keyword` | 强制使用 FTS5 关键词检索（分词/特殊字符场景再降级为模糊匹配），不发起任何网络请求 |
+| `auto`（默认） | 有可用 Embedding 配置时走混合检索，否则静默使用关键词检索 |
+| `hybrid` | 强制尝试混合检索；不可用时降级为关键词检索，并返回 `warning` |
+| `keyword` | 只用关键词检索，不发起网络请求 |
 
-混合检索的实现与桌面端完全一致：查询文本先经已配置的 Embedding API 向量化，在 `sqlite-vec` 向量索引上由底层单条 SQL 跨全库所有就绪文献执行全局 KNN 向量召回（若传 `paperId` 则限定单篇），与 FTS5 的 BM25 候选经 RRF 融合排序，无任何来源数量截断。响应中的 `retrievalMode` 字段标识本次实际生效的检索方式（`hybrid` / `keyword`），每条结果的 `channels` 字段标识命中来源（`vector` / `fts` / `like`）。
+- 混合检索把查询向量化，在 `sqlite-vec` 索引上做 KNN 召回（传 `paperId` 时限定单篇），再与 FTS5 结果经 RRF 融合。`retrievalMode` 标明实际生效的方式（`hybrid`/`keyword`），每条结果的 `channels` 标明命中通道（`vector`/`fts`/`like`）。
+- 关键词检索在分词失败、短词或特殊字符时回退到 LIKE 模糊匹配。
+- 笔记向量只覆盖标题和可编辑正文，不含锚点证据和原文快照。向量由应用在保存、导入、vault 回导后生成；已有笔记可在笔记工具栏手动重建。`search_notes` 空查询按笔记排序返回。
 
-**配置来源与隐私边界**：MCP 服务直接读取 PaperQuay 渲染层持久化的阅读器配置（`<数据目录>/.settings/paperquay.config.json` 中的 `settings.embeddingBaseUrl` / `embeddingModel` / `embeddingDimensions` 与 `secrets.embeddingApiKey`），在应用内修改配置后下一次 MCP 调用即生效。混合检索会把**查询文本**发送到你配置的 Embedding 端点（与桌面端索引/检索时的行为一致）；设环境变量 `PAPERQUAY_MCP_EMBEDDING=off` 可全局禁用该网络请求，强制关键词检索。
+**配置与隐私**：服务读取 `<数据目录>/.settings/paperquay.config.json` 中的 `settings.embeddingBaseUrl`、`embeddingModel`、`embeddingDimensions` 和 `secrets.embeddingApiKey`，应用内改配置后下一次调用即生效。混合检索会把查询文本发送到该 Embedding 端点。设 `PAPERQUAY_MCP_EMBEDDING=off` 可禁用这类请求，强制关键词检索。
 
----
+## 使用示例
 
-## 典型 Agent 交互与提示词示例
+> “在 PaperQuay 知识库里查 Transformer 多头注意力的解释，给出文献和页码。”
 
-Agent 被接入后，即可直接向其提问：
-
-> “请在 PaperQuay 知识库中查找关于 Transformer 多头注意力机制的解释，并给出文献来源和页码。”
-
-Agent 会自动执行：
-1. 调用 `search_knowledge_base({ query: "multi-head attention" })` 提取关键段落；
-2. 依据检索返回的 `paperTitle`、`pageNumber` 和 `snippet` 组织严谨的学术回答；
-3. 输出如：`根据《Attention Is All You Need》（第 2 页）...` 的学术级引用。
+Agent 调用 `search_knowledge_base({ query: "multi-head attention" })`，根据返回的 `paperTitle`、`pageNumber`、`snippet` 作答，并给出如“根据《Attention Is All You Need》第 2 页……”的引用。

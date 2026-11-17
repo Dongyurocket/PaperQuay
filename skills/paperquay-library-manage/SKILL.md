@@ -5,24 +5,29 @@ description: Safely import, categorize, update, and delete PaperQuay library rec
 
 # PaperQuay Library Management
 
-Use the `paperquay` MCP server. Refer to `docs/MCP_AGENT_INTEGRATION.md` for the current tool schemas.
+Use the `paperquay` MCP server. Parameters are defined by `tools/list` and `docs/MCP_AGENT_INTEGRATION.md`.
+
+- Discovery (read-only): `search_papers`, `get_paper_details`, `list_categories`.
+- Writes: `import_pdfs`, `manage_category`, `set_paper_categories`, `update_paper`, `delete_papers`, `attach_translated_pdf`, `remove_translated_pdf`.
 
 ## Procedure
 
-1. Discover target papers and categories using `search_papers`, `get_paper_details`, and `list_categories`.
-2. Before any destructive or broad operation, present the proposed paper IDs, metadata/category changes, and file consequences for confirmation.
-3. Use `import_pdfs`, `manage_category`, `set_paper_categories`, `update_paper`, or `attach_translated_pdf` only after confirmation.
-4. Use `delete_papers` or `remove_translated_pdf` only after an explicit second confirmation. Keep `deleteFiles` false unless the user expressly requests permanent file deletion. `remove_translated_pdf` defaults to deleting the stored translation copy, not the user's source file.
-5. Before attaching a translation, read `get_paper_details` and tell the user if the result includes `pageCountMismatch`. A mismatch warns but does not reject the attach.
+1. Find target papers and categories with the discovery tools.
+2. Before any broad or destructive change, show the user the paper IDs, the metadata or category changes, and any file consequences, and get confirmation.
+3. Then call `import_pdfs`, `manage_category`, `set_paper_categories`, `update_paper`, or `attach_translated_pdf`.
+4. Call `delete_papers` or `remove_translated_pdf` only after a second explicit confirmation. Keep `deleteFiles` false unless the user asks for permanent file deletion. `remove_translated_pdf` deletes the stored translation copy by default, not the user's source file.
+5. If `attach_translated_pdf` returns `pageCountMismatch`, tell the user. The attachment is still made.
 
-## Metadata updates
+## Metadata Updates
 
-- `update_paper` accepts `language` as a BCP 47 paper-language tag and `citationKey` as a citation key matching `^[A-Za-z0-9_:\-.]+$`; an empty citation key restores automatic BibTeX key generation. Duplicate citation keys produce a warning in the desktop editor but remain allowed.
-- `authors` remains a string array for compatibility. Use `authorDetails` to update author names and optional `givenName`, `familyName`, `affiliation`, and `orcid`; when both author fields are present, `authorDetails` takes precedence.
-- ORCID values must have a valid format and MOD 11-2 check digit. Paper language is separate from the language of a translated PDF attachment.
+- `update_paper` rejects unknown fields. `authors`, `authorDetails`, `keywords`, and `tags` replace the whole list.
+- `authors` is a string array. `authorDetails` items accept `name`, `givenName`, `familyName`, `affiliation`, and `orcid`; it takes precedence when both are given.
+- `orcid` must match `0000-0000-0000-000X` and pass the MOD 11-2 check digit.
+- `language` is a BCP 47 tag for the paper itself, not for a translated PDF.
+- `citationKey` must match `^[A-Za-z0-9_:\-.]+$`; an empty value clears it. Duplicates are allowed.
 
 ## Guardrails
 
-- Never set `allowWhileAppRunning` unless the user explicitly accepts its lost-update risk.
-- Prefer metadata/category previews over blind bulk changes.
+- Writes are refused while the desktop app is running or its state is unknown. Ask the user to close PaperQuay. Set `allowWhileAppRunning` only if the user accepts that the app's next save may overwrite the change.
+- Prefer previews over blind bulk changes.
 - Report exactly which records changed, were skipped as duplicates, or failed.

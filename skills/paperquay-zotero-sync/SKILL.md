@@ -5,18 +5,21 @@ description: Preview and selectively synchronize local Zotero papers into PaperQ
 
 # PaperQuay Zotero Sync
 
-Use the `paperquay` MCP server. Consult `docs/MCP_AGENT_INTEGRATION.md` for current tool schemas and write-guard behavior.
+Use the `paperquay` MCP server. Parameters and write-guard behavior are defined by `tools/list` and `docs/MCP_AGENT_INTEGRATION.md`.
 
-## Required Workflow
+- Read-only: `zotero_list_collections`, `zotero_search_items`, `zotero_preview_sync`, `list_categories`.
+- Write: `paperquay_sync_from_zotero`.
 
-1. Discover collections with `zotero_list_collections`, or locate items with `zotero_search_items`.
-2. Call `zotero_preview_sync` before every write request.
-3. Present the separate `ready`, `alreadyExists`, and `missingPdf` results to the user.
-4. Obtain explicit confirmation of the selected ready items or collection.
-5. Only then call `paperquay_sync_from_zotero`.
+## Procedure
+
+1. Find collections with `zotero_list_collections` or items with `zotero_search_items`.
+2. Call `zotero_preview_sync` before every import.
+3. Show the user the `ready`, `alreadyExists`, and `missingPdf` groups separately.
+4. Get explicit confirmation of the items or collection to import, and of the target category (`targetCategoryId` from `list_categories`, or, when importing a collection, the default category named after it).
+5. Then call `paperquay_sync_from_zotero`.
 
 ## Guardrails
 
-- Do not perform a full-library import unless the user explicitly asks for it.
-- Do not set `allowWhileAppRunning` by default. Resolve the desktop application's write guard first.
+- Do not import the whole Zotero library unless the user asks for it.
+- Writes are refused while the desktop app is running or its state is unknown. Ask the user to close PaperQuay; do not set `allowWhileAppRunning` by default.
 - Report imported, duplicate, missing-PDF, and failed counts exactly as returned.

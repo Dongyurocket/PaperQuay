@@ -5,20 +5,22 @@ description: Search the local PaperQuay literature library, RAG evidence, and re
 
 # PaperQuay Knowledge Search
 
-Use the `paperquay` MCP server's read-only tools. Consult `docs/MCP_AGENT_INTEGRATION.md` for the current schemas; do not copy its complete schemas here.
+Use the read-only tools of the `paperquay` MCP server. Parameters are defined by `tools/list` and `docs/MCP_AGENT_INTEGRATION.md`.
 
-## Retrieval Procedure
+Tools: `search_papers`, `get_paper_details`, `list_categories`, `search_knowledge_base`, `read_paper_content`, `search_notes`, `list_note_tags`, `list_note_folders`.
 
-1. Use `search_papers` to discover paper IDs or narrow a library scope.
-2. Use `get_paper_details` only when complete bibliographic metadata or attachments are needed.
-3. Use `search_knowledge_base` for evidence; preserve each result's `paperId`, `paperTitle`, page number, `blockId`, retrieval mode, channels, and warning.
-4. Use `read_paper_content` to inspect enough surrounding structured text before interpreting a matching snippet.
-5. Use `search_notes` only for user-authored notes, and report a keyword fallback or embedding degradation warning when returned.
+## Procedure
+
+1. Use `search_papers` (optionally with `tag` or a `categoryId` from `list_categories`) to find paper IDs.
+2. Use `get_paper_details` only when full metadata or attachments are needed. Papers with `ragEnabled: false` are excluded from the knowledge base.
+3. Use `search_knowledge_base` for evidence. Keep each result's `paperId`, `paperTitle`, `pageNumber`, `blockId`, `channels`, and the response's `retrievalMode` and `warning`.
+4. Use `read_paper_content` (`pageIndex` is 0-based) to read enough surrounding text before interpreting a snippet.
+5. Use `search_notes` only for user-authored notes; filter with `paperId` or `pageKind` when useful.
 
 ## Evidence Rules
 
-- Distinguish source text from your synthesis.
-- Cite the exact PaperQuay paper title, page and block where available.
-- Do not invent a source, page, block, or retrieval result.
-- State when keyword retrieval or a degraded mode limits confidence.
-- These tools are read-only; library and note modifications belong to their dedicated skills.
+- Separate source text from your synthesis.
+- Cite the paper title, page, and block where available.
+- Never invent a source, page, block, or retrieval result.
+- Say so when keyword retrieval or a `warning` limits confidence.
+- Library writes belong to `paperquay-library-manage`, note writes to `paperquay-notes`, Zotero imports to `paperquay-zotero-sync`.
