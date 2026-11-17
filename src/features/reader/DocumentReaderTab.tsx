@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import ReaderWorkspace from './ReaderWorkspace';
+import { shouldReadOverviewCache } from './overview/overviewTaskState';
+import { createOverviewCacheWriter } from './overview/overviewCacheWrites';
 import { useLibraryReadingTracking } from './useLibraryReadingTracking';
 import { getDocumentParseTask, subscribeDocumentParseTasks } from '../../services/documentParseTasks';
 import { shouldShowParseTask, toPaperParseTaskState } from './documentParseTaskState';
@@ -281,6 +283,8 @@ interface DocumentReaderTabProps {
   translationSnapshot?: ReaderDocumentTranslationSnapshot | null;
   /** 文库侧已加载的同一文档概览；阅读器尚无概览时先行显示。 */
   libraryPreviewSummary?: PaperSummary | null;
+  overviewPaper?: LiteraturePaper;
+  libraryStorageDir?: string;
 }
 
 
@@ -297,6 +301,8 @@ function DocumentReaderTab({
   pendingNoteAnchorJump = null,
   translationSnapshot = null,
   libraryPreviewSummary = null,
+  overviewPaper,
+  libraryStorageDir,
 }: DocumentReaderTabProps) {
   const {
     embeddingApiKey,
@@ -360,6 +366,7 @@ function DocumentReaderTab({
   const readerNoteEditorSourceId = GLOBAL_READER_NOTE_EDITOR_SOURCE_ID;
   const layoutRef = useRef<HTMLDivElement>(null);
   const summaryRequestIdRef = useRef(0);
+  const summaryCacheWriter = useRef(createOverviewCacheWriter());
   const openDocumentRequestIdRef = useRef(0);
   const lastDocumentSignatureRef = useRef('');
   const lastCapturedSelectionRef = useRef<{
@@ -438,6 +445,7 @@ function DocumentReaderTab({
   const [statusMessage, setStatusMessage] = useState(() => l('就绪', 'Ready'));
   const [paperSummary, setPaperSummary] = useState<PaperSummary | null>(null);
   const [paperSummaryLoading, setPaperSummaryLoading] = useState(false);
+  const [summaryCacheLoading, setSummaryCacheLoading] = useState(false);
   const [paperSummaryError, setPaperSummaryError] = useState('');
   const [paperSummarySourceKey, setPaperSummarySourceKey] = useState('');
   const [libraryOperation, setLibraryOperation] = useState<LiteraturePaperTaskState | null>(null);
@@ -963,6 +971,7 @@ function DocumentReaderTab({
     pdfReadingHeatmapsRef.current = {};
     setPaperSummary(null);
     setPaperSummaryLoading(false);
+    setSummaryCacheLoading(false);
     setPaperSummaryError('');
     setPaperSummarySourceKey('');
     setLibraryOperation(null);
@@ -1138,18 +1147,18 @@ function DocumentReaderTab({
 
   const saveSummaryCache = useCallback(
     async (item: WorkspaceItem, sourceKey: string, summary: PaperSummary) => {
-      await writePreviewSummaryCache({
+      await summaryCacheWriter.current(() => writePreviewSummaryCache({
         item,
         mineruCacheDir: settings.mineruCacheDir,
         sourceKey,
         summary,
-      });
+      }));
     },
     [settings.mineruCacheDir],
   );
 
   const tryLoadSavedSummary = useCallback(
-    async (item: WorkspaceItem, sourceKey: string) => {
+    async (item: WorkspaceItem, sourceKey: string, isCurrent: () => boolean) => {
       const result = await loadSavedSummaryCache({
         item,
         mineruCacheDir: settings.mineruCacheDir,
@@ -1159,12 +1168,12 @@ function DocumentReaderTab({
       });
 
       if (result && result.matchedSourceKey !== sourceKey && sourceKey.trim()) {
-        await writePreviewSummaryCache({
+        await summaryCacheWriter.current(() => writePreviewSummaryCache({
           item,
           mineruCacheDir: settings.mineruCacheDir,
           sourceKey,
           summary: result.summary,
-        }).catch(() => undefined);
+        }), isCurrent).catch(() => undefined);
       }
 
       return result?.summary ?? null;
@@ -2192,7 +2201,7 @@ function DocumentReaderTab({
   ]);
 
   const handleGeneratePaperSummary = useCallback(
-    async (openPreferencesOnMissingKey = true) => {
+    async (openPreferencesOnMissingKey = true, force = false) => {
       if (paperSummaryLoading || isPaperTaskRunning(libraryOperation, 'overview')) {
         return;
       }
@@ -2201,29 +2210,19 @@ function DocumentReaderTab({
         return;
       }
 
-      if (settings.summarySourceMode === 'mineru-markdown' && summaryBlockInputs.length === 0) {
-        const message = lRef.current(
-          '请先加载 MinerU JSON，再基于 MinerU Markdown 生成概览。',
-          'Load a MinerU JSON file before generating an overview from MinerU Markdown.',
-        );
-        setPaperSummaryError(message);
-        setStatusMessage(lRef.current('请先加载 MinerU JSON 后再生成概览', 'Load MinerU JSON before generating the overview'));
-        updateLibraryOperation('overview', 'error', message, 100, 100);
-        return;
-      }
-
       const requestId = summaryRequestIdRef.current + 1;
       summaryRequestIdRef.current = requestId;
       // 主动生成会接管被动读缓存，丢弃仍在途的被动结果。
       cachedSummaryRequestIdRef.current += 1;
+      setSummaryCacheLoading(false);
 
       setPaperSummaryLoading(true);
       setPaperSummaryError('');
 
       try {
         // 先读本地缓存：命中时不需要模型配置，也不必抽取正文。
-        const cachedSummary = paperSummaryNextSourceKey.trim()
-          ? await tryLoadSavedSummary(currentDocument, paperSummaryNextSourceKey)
+        const cachedSummary = shouldReadOverviewCache(paperSummaryNextSourceKey, force)
+          ? await tryLoadSavedSummary(currentDocument, paperSummaryNextSourceKey, () => summaryRequestIdRef.current === requestId)
           : null;
 
         if (summaryRequestIdRef.current !== requestId) {
@@ -2278,6 +2277,10 @@ function DocumentReaderTab({
           return;
         }
 
+        if (settings.summarySourceMode === 'mineru-markdown' && summaryBlockInputs.length === 0) {
+          throw new Error(lRef.current('请先加载 MinerU JSON，再基于 MinerU Markdown 生成概览。', 'Load a MinerU JSON file before generating an overview from MinerU Markdown.'));
+        }
+
         const runningMessage = lRef.current('正在生成论文概览…', 'Generating the paper overview...');
         setStatusMessage(runningMessage);
         updateLibraryOperation('overview', 'running', runningMessage, 25, 100);
@@ -2320,7 +2323,6 @@ function DocumentReaderTab({
           return;
         }
 
-        setPaperSummary(null);
         const message =
           nextError instanceof Error
             ? nextError.message
@@ -4240,8 +4242,11 @@ function DocumentReaderTab({
     const requestId = cachedSummaryRequestIdRef.current + 1;
     cachedSummaryRequestIdRef.current = requestId;
     cachedSummaryAttemptKeyRef.current = sourceKey;
+    setSummaryCacheLoading(true);
 
-    void tryLoadSavedSummary(currentDocument, sourceKey)
+    const isCurrent = () => cachedSummaryRequestIdRef.current === requestId &&
+      summaryRequestIdRef.current === generationAtStart;
+    void tryLoadSavedSummary(currentDocument, sourceKey, isCurrent)
       .then((cachedSummary) => {
         if (
           !cachedSummary ||
@@ -4255,7 +4260,10 @@ function DocumentReaderTab({
         setPaperSummarySourceKey(sourceKey);
         setPaperSummaryError('');
       })
-      .catch(() => undefined);
+      .catch(() => undefined)
+      .finally(() => {
+        if (cachedSummaryRequestIdRef.current === requestId) setSummaryCacheLoading(false);
+      });
   }, [
     currentDocument,
     libraryOperation,
@@ -4427,6 +4435,11 @@ function DocumentReaderTab({
         onPdfDocumentErrorChange={handlePdfDocumentErrorChange}
         active={isActive}
         currentDocument={currentDocument}
+        overviewPaper={overviewPaper}
+        libraryStorageDir={libraryStorageDir}
+        mineruCacheDir={settings.mineruCacheDir}
+        autoLoadSiblingJson={settings.autoLoadSiblingJson}
+        overviewOperation={libraryOperation}
         selectedSectionTitle={
           currentDocument.source === 'standalone'
             ? settings.uiLanguage === 'en-US'
@@ -4514,8 +4527,10 @@ function DocumentReaderTab({
         onSelectAnnotation={handleSelectAnnotation}
         paperSummary={paperSummary}
         paperSummaryLoading={paperSummaryLoading}
+        summaryCacheLoading={summaryCacheLoading}
+        summarySourceReady={settings.summarySourceMode === 'pdf-text' ? Boolean(pdfSource) : flatBlocks.length > 0}
         paperSummaryError={paperSummaryError}
-        onGenerateSummary={() => void handleGeneratePaperSummary()}
+        onGenerateSummary={(options) => void handleGeneratePaperSummary(true, options?.force)}
         qaSessions={qaSessions}
         selectedQaSessionId={selectedQaSessionId}
         qaMessages={qaMessages}
@@ -4556,6 +4571,7 @@ function DocumentReaderTab({
         onClearSelectedExcerpt={handleClearSelectedExcerpt}
         onPdfAnnotationSaveSuccess={handlePdfAnnotationSaveSuccess}
         aiConfigured={aiConfigured}
+        overviewConfigured={summaryConfigured}
         assistantDetached={assistantDetached}
         leftSidebarCollapsed={false}
         onToggleLeftSidebar={() => undefined}

@@ -5,6 +5,7 @@
  * MinerU 目录存在三种历史命名，必须以存在性为准，不能直接取第一个候选。
  */
 import type { LiteraturePaper } from '../../types/library.ts';
+import type { WorkspaceItem } from '../../types/reader.ts';
 import {
   ATTACHMENT_KIND_TRANSLATED_PDF,
   paperPdfPath,
@@ -40,6 +41,9 @@ export interface PaperFileLocationOptions {
   storageDir?: string | null;
   mineruCacheDir?: string | null;
   autoLoadSiblingJson?: boolean;
+  /** Reader documents also include standalone PDFs with their own cache identity. */
+  workspaceItem?: WorkspaceItem;
+  mineruPath?: string;
 }
 
 /** 单篇文献最多列出的译版 PDF 数量，避免右键菜单过长。 */
@@ -85,7 +89,7 @@ export function buildPaperFileLocationTargets(
   }
 
   const cacheRoot = options.mineruCacheDir?.trim() ?? '';
-  const workspaceItem = createNativeWorkspaceItemForPaper(paper, storageDir);
+  const workspaceItem = options.workspaceItem ?? createNativeWorkspaceItemForPaper(paper, storageDir);
   const cacheCandidates = workspaceItem && cacheRoot
     ? buildMineruCachePathCandidates(cacheRoot, workspaceItem)
     : [];
@@ -100,6 +104,7 @@ export function buildPaperFileLocationTargets(
     candidates: uniqueNonEmpty([
       ...cacheCandidates.map((cachePaths) => cachePaths.markdownPath),
       siblingMarkdown,
+      options.mineruPath,
       ...cacheCandidates.flatMap(getMineruJsonPathCandidates),
       ...(pdfPath && options.autoLoadSiblingJson ? guessSiblingJsonPaths(pdfPath) : []),
     ]),

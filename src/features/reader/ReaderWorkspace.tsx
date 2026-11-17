@@ -4,6 +4,7 @@ import { Minimize2 } from 'lucide-react';
 import BlockViewer from '../blocks/BlockViewer';
 import PdfViewer from '../pdf/PdfViewer';
 import { useLocaleText } from '../../i18n/uiLanguage';
+import type { LiteraturePaper, LiteraturePaperTaskState } from '../../types/library';
 import { ReaderWorkspaceOverview } from './readerWorkspaceOverview';
 import { ReaderWorkspaceHeader } from './readerWorkspaceHeader';
 import { FloatingAssistantPanel, SelectionQuickActions } from './readerWorkspaceOverlays';
@@ -47,6 +48,11 @@ interface ReaderWorkspaceProps {
   onPdfDocumentErrorChange?: (error: string, source: PdfSource) => void;
   active: boolean;
   currentDocument: ReaderWorkspaceDocument;
+  overviewPaper?: LiteraturePaper;
+  libraryStorageDir?: string;
+  mineruCacheDir: string;
+  autoLoadSiblingJson: boolean;
+  overviewOperation?: LiteraturePaperTaskState | null;
   selectedSectionTitle: string;
   currentPdfName: string;
   currentJsonName: string;
@@ -128,8 +134,10 @@ interface ReaderWorkspaceProps {
   onSelectAnnotation: (annotationId: string) => void;
   paperSummary: PaperSummary | null;
   paperSummaryLoading: boolean;
+  summaryCacheLoading?: boolean;
+  summarySourceReady?: boolean;
   paperSummaryError: string;
-  onGenerateSummary: () => void;
+  onGenerateSummary: (options?: { force?: boolean }) => void;
   qaSessions: DocumentChatSession[];
   selectedQaSessionId: string;
   qaMessages: DocumentChatMessage[];
@@ -173,6 +181,7 @@ interface ReaderWorkspaceProps {
   onAttachTranslatedPdf?: () => void;
   attachTranslatedPdfBusy?: boolean;
   aiConfigured: boolean;
+  overviewConfigured: boolean;
   assistantDetached: boolean;
   leftSidebarCollapsed: boolean;
   onToggleLeftSidebar: () => void;
@@ -718,7 +727,7 @@ function ReaderWorkspace(props: ReaderWorkspaceProps) {
   }, [active, immersiveReading]);
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-[linear-gradient(180deg,#f8fafc,#f1f5f9)] dark:bg-[linear-gradient(180deg,#0f1a2e,#0c1525)]">
+    <div className="flex h-full min-h-0 flex-col bg-[var(--pq-bg)]">
       {!immersiveReading ? (
         <ReaderWorkspaceHeader
           sourceLabel={sourceLabel}
@@ -757,6 +766,15 @@ function ReaderWorkspace(props: ReaderWorkspaceProps) {
       {workspaceStage === 'overview' ? (
         <ReaderWorkspaceOverview
           currentDocument={props.currentDocument}
+          paper={props.overviewPaper}
+          storageDir={props.libraryStorageDir}
+          mineruCacheDir={props.mineruCacheDir}
+          mineruPath={props.mineruPath}
+          originalPdfPath={props.originalPdfPath}
+          autoLoadSiblingJson={props.autoLoadSiblingJson}
+          operation={props.overviewOperation}
+          translatedCount={props.translatedCount}
+          onOpenPreferences={props.onOpenPreferences}
           selectedSectionTitle={props.selectedSectionTitle}
           currentPdfName={props.currentPdfName}
           currentJsonName={props.currentJsonName}
@@ -768,6 +786,8 @@ function ReaderWorkspace(props: ReaderWorkspaceProps) {
           translationProgressTotal={props.translationProgressTotal}
           paperSummary={props.paperSummary}
           paperSummaryLoading={props.paperSummaryLoading}
+          summaryCacheLoading={props.summaryCacheLoading}
+          summarySourceReady={props.summarySourceReady}
           paperSummaryError={props.paperSummaryError}
           onGenerateSummary={props.onGenerateSummary}
           onEnterReading={() => props.onStageChange('reading')}
@@ -776,7 +796,7 @@ function ReaderWorkspace(props: ReaderWorkspaceProps) {
           onForceReparse={props.onForceReparse}
           onTranslateDocument={props.onTranslateDocument}
           onCancelTranslateDocument={props.onCancelTranslateDocument}
-          aiConfigured={props.aiConfigured}
+          aiConfigured={props.overviewConfigured}
         />
       ) : (
         <ReadingStage {...props} immersiveReading={immersiveReading} />
@@ -803,7 +823,7 @@ function ReaderWorkspace(props: ReaderWorkspaceProps) {
         />
       ) : null}
 
-      <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-slate-200/80 bg-white/70 px-6 py-2.5 text-xs text-[var(--pq-text-muted)] backdrop-blur-xl dark:border-white/10 dark:bg-[var(--pq-bg-primary)] dark:text-[var(--pq-text-faint)]">
+      <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-[var(--pq-border)] bg-[var(--pq-surface)] px-6 py-2.5 text-xs text-[var(--pq-text-muted)]">
         <div className="min-w-0 truncate">
           {loading || translating ? statusMessage || l('正在处理中...', 'Processing...') : statusMessage}
         </div>

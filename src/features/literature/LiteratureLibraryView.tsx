@@ -3319,7 +3319,7 @@ export default function LiteratureLibraryView({
         />
       </div>
 
-      <div data-tour="ai-summary" className="h-full min-h-0 overflow-hidden">
+      <div data-tour="library-ai-summary" className="h-full min-h-0 overflow-hidden">
         {selectedCount >= 2 ? (
           <div className="flex h-full min-h-0 flex-col overflow-y-auto p-4">
             <div className="rounded-[22px] border border-[var(--pq-border)] bg-white/70 p-4 dark:bg-white/5">

@@ -9,6 +9,7 @@ import {
   resolvePaperFileLocationsOnDisk,
 } from '../src/features/literature/paperFileLocations.ts';
 import type { LiteratureAttachment, LiteraturePaper } from '../src/types/library.ts';
+import { buildMineruCachePaths } from '../src/utils/mineruCache.ts';
 
 function attachment(overrides: Partial<LiteratureAttachment> & Pick<LiteratureAttachment, 'id' | 'kind'>): LiteratureAttachment {
   return {
@@ -58,6 +59,16 @@ function paper(attachments: LiteratureAttachment[]): LiteraturePaper {
 }
 
 const pdf = attachment({ id: 'a-pdf', kind: 'pdf', storedPath: 'D:\\lib\\papers\\paper.pdf' });
+
+test('reader file locations preserve standalone cache identity and include explicitly opened JSON', () => {
+  const workspaceItem = { itemKey: 'standalone:file', workspaceId: 'standalone:D:\\paper.pdf', groupKey: 'standalone:file', title: 'Standalone', creators: '', year: '', itemType: 'pdf', source: 'standalone' as const, localPdfPath: pdf.storedPath };
+  const targets = buildPaperFileLocationTargets(paper([pdf]), { mineruCacheDir: 'D:\\cache', workspaceItem, mineruPath: 'D:\\custom\\result.json' });
+  const output = targets.find((target) => target.kind === 'mineru-output')!;
+  assert.equal(output.candidates[0], buildMineruCachePaths('D:\\cache', workspaceItem).markdownPath);
+  assert.ok(output.candidates.includes('D:\\custom\\result.json'));
+  const flags = flattenPaperFileLocationCandidates(targets).map((path) => path === 'D:\\custom\\result.json');
+  assert.equal(resolvePaperFileLocations(targets, flags).find((location) => location.kind === 'mineru-output')?.path, 'D:\\custom\\result.json');
+});
 
 test('builds targets for PDF and MinerU output with all three cache naming candidates', () => {
   const targets = buildPaperFileLocationTargets(paper([pdf]), {

@@ -1,268 +1,129 @@
-import { ArrowRight, CircleStop, FileJson, FileText, Languages, RefreshCw, ScanSearch, Sparkles } from 'lucide-react';
+import { ArrowRight } from 'lucide-react';
 import { useLocaleText } from '../../i18n/uiLanguage';
 import type { PaperSummary, PositionedMineruBlock } from '../../types/reader';
-import { SectionCard, SummaryPanel } from './AssistantSidebar';
+import type { LiteraturePaper, LiteraturePaperTaskState } from '../../types/library';
+import { SummaryPanel } from './assistantSidebarPrimitives';
 import type { ReaderWorkspaceDocument } from './readerWorkspaceShared';
+import { OverviewFilesCard } from './overview/OverviewFilesCard';
+import { OverviewProcessMenu } from './overview/OverviewProcessMenu';
+import { deriveOverviewTask } from './overview/overviewTaskState';
 
 export interface ReaderWorkspaceOverviewProps {
   currentDocument: ReaderWorkspaceDocument;
   selectedSectionTitle: string;
   currentPdfName: string;
   currentJsonName: string;
+  originalPdfPath: string;
+  mineruPath: string;
+  mineruCacheDir: string;
+  storageDir?: string;
+  autoLoadSiblingJson: boolean;
+  paper?: LiteraturePaper | null;
+  operation?: LiteraturePaperTaskState | null;
   loading: boolean;
   translating: boolean;
   translationCancelling: boolean;
   blocks: PositionedMineruBlock[];
+  translatedCount: number;
   translationProgressCompleted: number;
   translationProgressTotal: number;
   paperSummary: PaperSummary | null;
   paperSummaryLoading: boolean;
+  summaryCacheLoading?: boolean;
+  summarySourceReady?: boolean;
   paperSummaryError: string;
-  onGenerateSummary: () => void;
+  onGenerateSummary: (options?: { force?: boolean }) => void;
   onEnterReading: () => void;
   onOpenMineruJson: () => void;
   onCloudParse: () => void;
   onForceReparse: () => void;
   onTranslateDocument: () => void;
   onCancelTranslateDocument: () => void;
+  onOpenPreferences: () => void;
   aiConfigured: boolean;
 }
 
-function InlineProgressBar({
-  completed,
-  total,
-  label,
-}: {
-  completed: number;
-  total: number;
-  label?: string;
-}) {
-  if (total <= 0) {
-    return null;
-  }
-
-  const ratio = Math.min(100, Math.max(0, (completed / total) * 100));
-
-  return (
-    <div className="rounded-2xl border border-slate-200/80 bg-white/84 px-4 py-3">
-      <div className="flex items-center justify-between gap-3 text-sm">
-        <div className="font-medium text-[var(--pq-text)]">
-          {label || '处理进度'}
+export function ReaderWorkspaceOverview(props: ReaderWorkspaceOverviewProps) {
+  const l = useLocaleText();
+  const { currentDocument, paper, selectedSectionTitle, blocks } = props;
+  const sourceLabel = currentDocument.source === 'standalone'
+    ? l('独立文献', 'Standalone Document')
+    : `${l('本地文库', 'Local Library')} / ${selectedSectionTitle}`;
+  const tasks = {
+    operation: props.operation,
+    loading: props.loading,
+    translating: props.translating,
+    summaryLoading: props.paperSummaryLoading,
+    blockCount: blocks.length,
+    translatedCount: props.translatedCount,
+    translationCompleted: props.translationProgressCompleted,
+    translationTotal: props.translationProgressTotal,
+    hasSummary: Boolean(props.paperSummary),
+    summaryError: props.paperSummaryError,
+  };
+  const runningKind = props.translating ? 'translation' : props.loading ? 'mineru' : props.paperSummaryLoading ? 'overview' : null;
+  const runningTask = runningKind ? deriveOverviewTask(runningKind, tasks) : null;
+  return <div className="min-h-0 flex-1 overflow-y-auto bg-[var(--pq-bg)] p-4 sm:p-6" data-overview-page>
+    <div className="mx-auto max-w-[1440px] space-y-5">
+      <section data-tour="overview-actions" className="min-w-0 rounded-[var(--pq-radius-md)] border border-[var(--pq-border)] bg-[var(--pq-surface)] p-5">
+        <span className="text-xs font-semibold text-[var(--pq-text-muted)]">{l('论文概览', 'Paper Overview')}</span>
+        <h2 title={currentDocument.title} className="mt-3 line-clamp-3 break-words text-2xl font-semibold leading-snug tracking-tight text-[var(--pq-text)]">{currentDocument.title}</h2>
+        <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-[var(--pq-text-muted)]">
+          <span>{currentDocument.creators || l('未知作者', 'Unknown Author')}</span>
+          {currentDocument.year ? <span>· {currentDocument.year}</span> : null}
+          {paper?.publication ? <span>· {paper.publication}</span> : null}
+          <span>· {sourceLabel}</span>
         </div>
-        <div className="text-[var(--pq-text-muted)]">
-          {completed}/{total}
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <button type="button" onClick={props.onEnterReading} className="pq-button-primary !h-9 !rounded-[var(--pq-radius-sm)] px-4 text-sm">{l('进入阅读', 'Start Reading')}<ArrowRight className="h-4 w-4" /></button>
+          <OverviewProcessMenu
+            key={currentDocument.workspaceId}
+            tasks={tasks}
+            cancelling={props.translationCancelling}
+            aiConfigured={props.aiConfigured}
+            summarySourceReady={props.summarySourceReady ?? blocks.length > 0}
+            onParse={props.onCloudParse}
+            onReparse={props.onForceReparse}
+            onTranslate={props.onTranslateDocument}
+            onCancelTranslate={props.onCancelTranslateDocument}
+            onGenerate={props.onGenerateSummary}
+            onOpenJson={props.onOpenMineruJson}
+          />
         </div>
-      </div>
-      <div className="mt-3 h-2 overflow-hidden rounded-full bg-[var(--pq-surface-2)]">
-        <div
-          className="h-full rounded-full bg-[var(--pq-accent)] transition-all duration-300"
-          style={{ width: `${ratio}%` }}
+        {runningTask ? <div role="status" className="mt-4 space-y-2 text-xs text-[var(--pq-text-muted)]">
+          <div className="flex justify-between gap-3"><span>{runningTask.message || l('正在处理', 'Processing')}</span><span className="tabular-nums">{runningTask.progress.countText || l('进行中…', 'Running…')}</span></div>
+          <div role="progressbar" aria-label={l('处理进度', 'Processing progress')} aria-valuemin={0} aria-valuemax={100} aria-valuenow={runningTask.progress.indeterminate ? undefined : runningTask.progress.percent} className="h-1.5 overflow-hidden rounded-[var(--pq-radius-sm)] bg-[var(--pq-surface-3)]"><div className={`h-full bg-[var(--pq-accent)] ${runningTask.progress.indeterminate ? 'animate-pulse' : ''}`} style={{ width: `${runningTask.progress.percent}%` }} /></div>
+        </div> : null}
+      </section>
+      <div className="grid min-w-0 items-start gap-5 min-[1200px]:grid-cols-[minmax(0,1fr)_280px]">
+        <div data-tour="ai-summary" className="min-w-0">
+          <SummaryPanel
+            key={currentDocument.workspaceId}
+            paperSummary={props.paperSummary}
+            loading={props.paperSummaryLoading || props.summaryCacheLoading || props.loading}
+            loadingLabel={props.summaryCacheLoading
+              ? l('正在读取本地概览…', 'Loading the saved overview…')
+              : props.loading ? l('正在加载文档…', 'Loading the document…') : undefined}
+            error={props.paperSummaryError}
+            hasBlocks={props.summarySourceReady ?? blocks.length > 0}
+            aiConfigured={props.aiConfigured}
+            onGenerateSummary={props.onGenerateSummary}
+            onOpenSettings={props.onOpenPreferences}
+          />
+        </div>
+        <OverviewFilesCard
+          document={currentDocument}
+          paper={paper}
+          originalPdfPath={props.originalPdfPath}
+          currentPdfName={props.currentPdfName}
+          currentJsonName={props.currentJsonName}
+          mineruPath={props.mineruPath}
+          mineruCacheDir={props.mineruCacheDir}
+          storageDir={props.storageDir}
+          autoLoadSiblingJson={props.autoLoadSiblingJson}
+          blockCount={blocks.length}
         />
       </div>
     </div>
-  );
-}
-
-export function ReaderWorkspaceOverview({
-  currentDocument,
-  selectedSectionTitle,
-  currentPdfName,
-  currentJsonName,
-  loading,
-  translating,
-  translationCancelling,
-  blocks,
-  translationProgressCompleted,
-  translationProgressTotal,
-  paperSummary,
-  paperSummaryLoading,
-  paperSummaryError,
-  onGenerateSummary,
-  onEnterReading,
-  onOpenMineruJson,
-  onCloudParse,
-  onForceReparse,
-  onTranslateDocument,
-  onCancelTranslateDocument,
-  aiConfigured,
-}: ReaderWorkspaceOverviewProps) {
-  const l = useLocaleText();
-  const sourceLabel =
-    currentDocument.source === 'standalone'
-      ? l('独立文献', 'Standalone Document')
-      : `${l('本地文库', 'Local Library')} / ${selectedSectionTitle}`;
-
-  return (
-    <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1.38fr)_360px]">
-        <div className="space-y-5">
-          <section
-            data-tour="overview-actions"
-            className="rounded-[30px] border border-white/70 bg-[linear-gradient(135deg,rgba(255,255,255,0.9),rgba(248,250,252,0.78))] p-6 shadow-[0_24px_60px_rgba(15,23,42,0.08)] backdrop-blur-xl"
-          >
-            <div className="flex flex-wrap items-start justify-between gap-5">
-              <div className="min-w-0 flex-1">
-                <div className="inline-flex items-center rounded-full border border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-[var(--pq-accent-bg)] px-3 py-1 text-xs font-medium text-[var(--pq-accent)]">
-                  {l('论文概览', 'Paper Overview')}
-                </div>
-                <h2 className="mt-4 text-[30px] font-semibold tracking-tight text-[var(--pq-text)]">
-                  {currentDocument.title}
-                </h2>
-                <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-[var(--pq-text-muted)]">
-                  <span>{currentDocument.creators || l('未知作者', 'Unknown Author')}</span>
-                  {currentDocument.year ? <span>· {currentDocument.year}</span> : null}
-                  <span>· {sourceLabel}</span>
-                </div>
-              </div>
-
-              <div className="flex shrink-0 flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={onEnterReading}
-                  className="pq-button-primary px-4 py-2.5 text-sm"
-                >
-                  {l('进入阅读', 'Start Reading')}
-                  <ArrowRight className="h-4 w-4" strokeWidth={1.8} />
-                </button>
-                <button
-                  type="button"
-                  data-tour="overview-mineru-parse"
-                  onClick={onCloudParse}
-                  disabled={loading}
-                  className="inline-flex items-center rounded-2xl border border-[var(--pq-border)] bg-white px-4 py-2.5 text-sm font-medium text-[var(--pq-text-muted)] transition-all duration-200 hover:border-[var(--pq-border-strong)] hover:bg-[var(--pq-surface-2)] disabled:opacity-60"
-                >
-                  <Sparkles className="mr-2 h-4 w-4" strokeWidth={1.8} />
-                  {l('MinerU 解析', 'MinerU Parse')}
-                </button>
-                <button
-                  type="button"
-                  onClick={onForceReparse}
-                  disabled={loading}
-                  title={l(
-                    '忽略已有缓存，重新执行一次完整识别（会重新上传 PDF 并消耗额度）',
-                    'Ignore the existing cache and re-run a full parse (re-uploads the PDF and consumes quota)',
-                  )}
-                  className="inline-flex items-center rounded-2xl border border-[var(--pq-border)] bg-white px-4 py-2.5 text-sm font-medium text-[var(--pq-text-muted)] transition-all duration-200 hover:border-[var(--pq-border-strong)] hover:bg-[var(--pq-surface-2)] disabled:opacity-60"
-                >
-                  <RefreshCw className="mr-2 h-4 w-4" strokeWidth={1.8} />
-                  {l('重新识别', 'Re-parse')}
-                </button>
-                <button
-                  type="button"
-                  data-tour="overview-translate-document"
-                  onClick={translating ? onCancelTranslateDocument : onTranslateDocument}
-                  disabled={translating ? translationCancelling : loading || blocks.length === 0}
-                  className={[
-                    'inline-flex items-center rounded-2xl border px-4 py-2.5 text-sm font-medium transition-all duration-200 disabled:opacity-60',
-                    translating
-                      ? 'border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-error-bg)] text-[var(--pq-danger)] hover:bg-[var(--pq-error-bg)]'
-                      : 'border-[var(--pq-border)] bg-white text-[var(--pq-text-muted)] hover:border-[var(--pq-border-strong)] hover:bg-[var(--pq-surface-2)]',
-                  ].join(' ')}
-                >
-                  {translating ? (
-                    <CircleStop className="mr-2 h-4 w-4" strokeWidth={1.8} />
-                  ) : (
-                    <Languages className="mr-2 h-4 w-4" strokeWidth={1.8} />
-                  )}
-                  {translating
-                    ? translationCancelling
-                      ? l('取消中...', 'Cancelling...')
-                      : l('取消翻译', 'Cancel Translation')
-                    : l('翻译全文', 'Translate Document')}
-                </button>
-              </div>
-            </div>
-          </section>
-
-          {translating ? (
-            <InlineProgressBar
-              completed={translationProgressCompleted}
-              total={translationProgressTotal}
-              label={
-                translationCancelling
-                  ? l('正在取消全文翻译', 'Cancelling Full Translation')
-                  : l('MinerU 结构块翻译进度', 'MinerU Block Translation Progress')
-              }
-            />
-          ) : null}
-
-          <div data-tour="ai-summary">
-            <SummaryPanel
-              paperSummary={paperSummary}
-              loading={paperSummaryLoading}
-              error={paperSummaryError}
-              hasBlocks={blocks.length > 0}
-              aiConfigured={aiConfigured}
-              onGenerateSummary={onGenerateSummary}
-            />
-          </div>
-        </div>
-
-        <div className="space-y-5">
-          <SectionCard
-            title={l('论文信息', 'Document Info')}
-            description={l(
-              '显示当前文档的文件状态、结构化结果和后续入口。',
-              'Show the file status, structured parsing result, and next actions for the current document.',
-            )}
-            icon={<ScanSearch className="h-4 w-4" strokeWidth={1.8} />}
-            contentClassName="space-y-4"
-          >
-            <div className="rounded-[22px] border border-slate-200/80 bg-white px-4 py-4">
-              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--pq-text-faint)] dark:text-[var(--pq-text-faint)]">
-                {l('来源', 'Source')}
-              </div>
-              <div className="mt-2 text-sm leading-6 text-[var(--pq-text-muted)]">{sourceLabel}</div>
-            </div>
-
-            <div className="rounded-[20px] border border-slate-200/80 bg-white px-4 py-4">
-              <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--pq-text-faint)]">
-                <FileText className="h-4 w-4" strokeWidth={1.8} />
-                PDF
-              </div>
-              <div className="mt-2 break-words text-sm leading-6 text-[var(--pq-text-muted)]">
-                {currentPdfName || l('未加载 PDF', 'No PDF Loaded')}
-              </div>
-            </div>
-
-            <div className="rounded-[20px] border border-slate-200/80 bg-white px-4 py-4">
-              <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--pq-text-faint)]">
-                <FileJson className="h-4 w-4" strokeWidth={1.8} />
-                MinerU JSON
-              </div>
-              <div className="mt-2 break-words text-sm leading-6 text-[var(--pq-text-muted)]">
-                {currentJsonName || l('未加载 JSON', 'No JSON Loaded')}
-              </div>
-            </div>
-
-            <div className="rounded-[20px] border border-slate-200/80 bg-white px-4 py-4 text-sm leading-7 text-[var(--pq-text-muted)]">
-              {loading || translating
-                ? l('正在处理中，请稍候...', 'Processing, please wait...')
-                : blocks.length > 0
-                  ? l(
-                      `已检测到 ${blocks.length} 个结构块，可以直接切换到双栏对照阅读。`,
-                      `Detected ${blocks.length} structured blocks. You can switch to Dual Pane reading immediately.`,
-                    )
-                  : l(
-                      '当前还没有结构块，请先加载 JSON 或执行 MinerU 解析。',
-                      'No structured blocks are available yet. Load a JSON file or run MinerU parsing first.',
-                    )}
-            </div>
-
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={onOpenMineruJson}
-                disabled={loading}
-                className="inline-flex items-center rounded-xl border border-[var(--pq-border)] bg-white px-4 py-2 text-sm font-medium text-[var(--pq-text-muted)] transition-all duration-200 hover:border-[var(--pq-border-strong)] hover:bg-[var(--pq-surface-2)] disabled:opacity-60"
-              >
-                <FileJson className="mr-2 h-4 w-4" strokeWidth={1.8} />
-                {l('打开 JSON', 'Open JSON')}
-              </button>
-            </div>
-          </SectionCard>
-        </div>
-      </div>
-    </div>
-  );
+  </div>;
 }

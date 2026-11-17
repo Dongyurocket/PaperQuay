@@ -25,6 +25,7 @@ interface LocationState {
 }
 
 const ICON_CLASS = 'h-4 w-4 text-[var(--pq-text-muted)]';
+export type PaperFileLocationMenuEntry = MenuEntry & { filePath?: string | null };
 
 /**
  * 文献右键菜单的「打开所在位置」分组。
@@ -35,8 +36,10 @@ export function usePaperFileLocationMenu({
   storageDir,
   mineruCacheDir,
   autoLoadSiblingJson,
+  workspaceItem,
+  mineruPath,
   l,
-}: UsePaperFileLocationMenuOptions): MenuEntry[] {
+}: UsePaperFileLocationMenuOptions): PaperFileLocationMenuEntry[] {
   const [state, setState] = useState<LocationState | null>(null);
 
   useEffect(() => {
@@ -50,7 +53,7 @@ export function usePaperFileLocationMenu({
 
     void resolvePaperFileLocationsOnDisk(
       paper,
-      { storageDir, mineruCacheDir, autoLoadSiblingJson },
+      { storageDir, mineruCacheDir, autoLoadSiblingJson, workspaceItem, mineruPath },
       localPathsExist,
     )
       .then((locations) => {
@@ -67,7 +70,7 @@ export function usePaperFileLocationMenu({
     return () => {
       cancelled = true;
     };
-  }, [autoLoadSiblingJson, mineruCacheDir, paper, storageDir]);
+  }, [autoLoadSiblingJson, mineruCacheDir, paper, storageDir, workspaceItem, mineruPath]);
 
   return useMemo(() => {
     if (!paper) {
@@ -109,11 +112,12 @@ export function usePaperFileLocationMenu({
       location: ResolvedPaperFileLocation | null,
       label: string,
       icon: ReactNode,
-    ): MenuEntry => ({
+    ): PaperFileLocationMenuEntry => ({
       id,
       label: `${label}${suffix(location)}`,
       icon,
       disabled: !location?.path,
+      filePath: location?.path,
       onSelect: () => {
         if (location?.path) {
           void reveal(location.path);
@@ -123,7 +127,7 @@ export function usePaperFileLocationMenu({
 
     const pdf = find('pdf');
     const translated = locations.filter((location) => location.kind === 'translated-pdf');
-    const entries: MenuEntry[] = [
+    const entries: PaperFileLocationMenuEntry[] = [
       { type: 'separator', id: 'file-locations-separator' },
       revealItem(
         'reveal-pdf',

@@ -1,15 +1,17 @@
-import { Component, useMemo, useState, type ReactNode } from 'react';
+import { Component, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
 import type { Components } from 'react-markdown';
 import rehypeKatex from 'rehype-katex';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import 'katex/dist/katex.min.css';
-import { Bot, Languages, PanelRightClose, Quote, Sparkles } from 'lucide-react';
+import { Bot, Languages, LoaderCircle, PanelRightClose, Quote, RefreshCw, Settings, Sparkles } from 'lucide-react';
 import { useLocaleText } from '../../i18n/uiLanguage';
 import type { PaperSummary, SelectedExcerpt } from '../../types/reader';
+import { confirmAction } from '../../ui/confirmHost';
 import { cn } from '../../utils/cn';
 import { normalizeMarkdownMath, remarkFixGluedLatex, remarkSuperscriptPlugin } from '../../utils/markdown';
+import { parseSummarySections, resolveSummaryPanelState, type SummarySectionKey } from './overview/summarySections';
 
 function SectionCard({
   title,
@@ -31,15 +33,15 @@ function SectionCard({
   return (
     <section
       className={cn(
-        'rounded-[24px] border border-white/70 bg-white/82 shadow-[0_18px_48px_rgba(15,23,42,0.06)] backdrop-blur-xl',
+        'rounded-[var(--pq-radius-md)] border border-[var(--pq-border)] bg-[var(--pq-surface)] shadow-[var(--pq-shadow-soft)]',
         className,
       )}
     >
-      <div className="flex flex-col gap-4 border-b border-slate-200/70 px-5 py-4 xl:flex-row xl:items-start xl:justify-between">
+      <div className="flex flex-col gap-3 border-b border-[var(--pq-border)] px-4 py-3 xl:flex-row xl:items-start xl:justify-between">
         <div className="min-w-0 flex-1">
           <div className="flex items-start gap-2">
             {icon ? (
-              <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[var(--pq-surface-2)] text-[var(--pq-text-muted)]">
+              <span className="inline-flex h-8 w-8 items-center justify-center rounded-[var(--pq-radius-sm)] bg-[var(--pq-surface-2)] text-[var(--pq-text-muted)]">
                 {icon}
               </span>
             ) : null}
@@ -53,7 +55,7 @@ function SectionCard({
         </div>
         {actions ? <div className="min-w-0 shrink-0 xl:max-w-[58%]">{actions}</div> : null}
       </div>
-      <div className={cn('px-5 py-4', contentClassName)}>{children}</div>
+      <div className={cn('px-4 py-3', contentClassName)}>{children}</div>
     </section>
   );
 }
@@ -91,7 +93,7 @@ function HintPanel({
   return (
     <div
       className={cn(
-        'rounded-2xl border border-dashed border-[var(--pq-border)] bg-white/60 px-4 py-4 text-sm leading-7 text-[var(--pq-text-muted)]',
+        'rounded-[var(--pq-radius-md)] border border-dashed border-[var(--pq-border)] bg-[var(--pq-surface-2)] p-4 text-sm leading-7 text-[var(--pq-text-muted)]',
         className,
       )}
     >
@@ -101,12 +103,12 @@ function HintPanel({
   );
 }
 
-function formatMarkdownError(error: unknown) {
+function formatMarkdownError(error: unknown, fallback: string) {
   if (error instanceof Error && error.message) {
     return error.message;
   }
 
-  return String(error || 'Unknown markdown render error');
+  return String(error || fallback);
 }
 
 class MarkdownRenderBoundary extends Component<
@@ -146,12 +148,12 @@ function MarkdownFallback({
   return (
     <div className="space-y-3">
       {error ? (
-        <div className="rounded-2xl border border-[color-mix(in_srgb,var(--pq-warning)_28%,transparent)] bg-[var(--pq-warning-bg)] px-3 py-2 text-xs leading-5 text-[var(--pq-warning)]">
+        <div className="rounded-[var(--pq-radius-md)] border border-[color-mix(in_srgb,var(--pq-warning)_28%,transparent)] bg-[var(--pq-warning-bg)] px-3 py-2 text-xs leading-5 text-[var(--pq-warning)]">
           {l('Markdown 预览暂时无法渲染，已切换为纯文本预览。', 'Markdown preview failed and fell back to plain text.')}
           <div className="mt-1 break-all opacity-80">{error}</div>
         </div>
       ) : null}
-      <pre className="max-h-[420px] overflow-auto whitespace-pre-wrap rounded-2xl border border-[var(--pq-border)] bg-[var(--pq-surface-2)] px-4 py-3 text-sm leading-7 text-[var(--pq-text-muted)]">
+      <pre className="max-h-[420px] overflow-auto whitespace-pre-wrap rounded-[var(--pq-radius-md)] border border-[var(--pq-border)] bg-[var(--pq-surface-2)] px-4 py-3 text-sm leading-7 text-[var(--pq-text-muted)]">
         {content}
       </pre>
     </div>
@@ -169,6 +171,7 @@ function MarkdownPreview({
   normalizeMath?: boolean;
   components?: Components;
 }) {
+  const l = useLocaleText();
   const normalized = useMemo(() => {
     try {
       return {
@@ -178,10 +181,10 @@ function MarkdownPreview({
     } catch (error) {
       return {
         content,
-        error: formatMarkdownError(error),
+        error: formatMarkdownError(error, l('Markdown 渲染失败', 'Markdown rendering failed')),
       };
     }
-  }, [content, normalizeMath]);
+  }, [content, normalizeMath, l]);
 
   if (normalized.error) {
     return <MarkdownFallback content={content} error={normalized.error} />;
@@ -202,9 +205,9 @@ function MarkdownPreview({
           '[&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:my-1 [&_li]:pl-1',
           '[&_blockquote]:my-3 [&_blockquote]:border-l-4 [&_blockquote]:border-[var(--pq-accent-border)] [&_blockquote]:bg-[var(--pq-accent-soft)] [&_blockquote]:py-2 [&_blockquote]:pl-4 [&_blockquote]:pr-3 [&_blockquote]:text-[var(--pq-text-muted)]',
           '[&_code]:rounded [&_code]:bg-[var(--pq-surface-2)] [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.88em] [&_code]:text-[var(--pq-accent)]',
-          '[&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre]:rounded-2xl [&_pre]:border [&_pre]:border-[var(--pq-border)] [&_pre]:bg-slate-950 [&_pre]:p-4 [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-slate-100',
+          '[&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre]:rounded-[var(--pq-radius-md)] [&_pre]:border [&_pre]:border-[var(--pq-border)] [&_pre]:bg-[var(--pq-surface-2)] [&_pre]:p-4 [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-[var(--pq-text)]',
           '[&_a]:font-medium [&_a]:text-[var(--pq-accent)] [&_a]:underline [&_a]:underline-offset-2',
-          '[&_table]:my-3 [&_table]:w-full [&_table]:border-collapse [&_table]:overflow-hidden [&_table]:rounded-xl [&_th]:border [&_th]:border-[var(--pq-border)] [&_th]:bg-[var(--pq-surface-2)] [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:font-semibold [&_td]:border [&_td]:border-[var(--pq-border)] [&_td]:px-3 [&_td]:py-2',
+          '[&_table]:my-3 [&_table]:w-full [&_table]:border-collapse [&_table]:overflow-hidden [&_table]:rounded-[var(--pq-radius-sm)] [&_th]:border [&_th]:border-[var(--pq-border)] [&_th]:bg-[var(--pq-surface-2)] [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:font-semibold [&_td]:border [&_td]:border-[var(--pq-border)] [&_td]:px-3 [&_td]:py-2',
           '[&_hr]:my-5 [&_hr]:border-[var(--pq-border)] [&_.katex]:text-[var(--pq-text)] [&_.katex-display]:my-4 [&_.katex-display]:overflow-x-auto [&_.katex-display]:overflow-y-hidden [&_.katex-display]:py-2',
           className,
         )}
@@ -230,15 +233,19 @@ function MarkdownPreview({
   );
 }
 
-type SummaryTabKey =
-  | 'overview'
-  | 'background'
-  | 'problem'
-  | 'approach'
-  | 'experiment'
-  | 'findings'
-  | 'conclusion'
-  | 'limitations';
+export interface SummaryPanelProps {
+  paperSummary: PaperSummary | null;
+  loading: boolean;
+  loadingLabel?: string;
+  error: string;
+  /** Whether the selected generation source is ready (including PDF text mode). */
+  hasBlocks: boolean;
+  /** Configuration of the overview model, independent of other AI features. */
+  aiConfigured: boolean;
+  compact?: boolean;
+  onGenerateSummary: (options?: { force?: boolean }) => void | Promise<void>;
+  onOpenSettings?: () => void;
+}
 
 function SummaryPanel({
   paperSummary,
@@ -248,143 +255,184 @@ function SummaryPanel({
   aiConfigured,
   compact = false,
   onGenerateSummary,
-}: {
-  paperSummary: PaperSummary | null;
-  loading: boolean;
-  error: string;
-  hasBlocks: boolean;
-  aiConfigured: boolean;
-  compact?: boolean;
-  onGenerateSummary: () => void;
-}) {
+  onOpenSettings,
+  loadingLabel,
+}: SummaryPanelProps) {
   const l = useLocaleText();
-  const [activeTab, setActiveTab] = useState<SummaryTabKey>('overview');
-  const sections = useMemo(
-    () =>
-      paperSummary
-        ? [
-            { key: 'overview' as const, label: l('概览', 'Overview'), content: paperSummary.overview },
-            { key: 'background' as const, label: l('背景', 'Background'), content: paperSummary.background },
-            { key: 'problem' as const, label: l('问题', 'Problem'), content: paperSummary.researchProblem },
-            { key: 'approach' as const, label: l('方法', 'Approach'), content: paperSummary.approach },
-            { key: 'experiment' as const, label: l('实验', 'Experiments'), content: paperSummary.experimentSetup },
-            { key: 'findings' as const, label: l('发现', 'Findings'), content: paperSummary.keyFindings.join('\n') },
-            { key: 'conclusion' as const, label: l('结论', 'Conclusion'), content: paperSummary.conclusions },
-            { key: 'limitations' as const, label: l('局限性', 'Limitations'), content: paperSummary.limitations },
-          ]
-        : [],
-    [paperSummary, l],
-  );
+  const id = useId();
+  const [activeTab, setActiveTab] = useState<SummarySectionKey>('overview');
+  const [confirming, setConfirming] = useState(false);
+  const [actionError, setActionError] = useState('');
+  const actionPending = useRef(false);
+  // Document-key remounts invalidate the old instance, even if both documents share a summary.
+  const mounted = useRef<object | null>(null);
+  useEffect(() => {
+    const lifetime = {};
+    mounted.current = lifetime;
+    return () => { mounted.current = null; };
+  }, []);
+  const scope = useMemo(() => ({}), [paperSummary, loading, hasBlocks, aiConfigured]);
+  const latest = useRef({ scope, paperSummary, loading, hasBlocks, aiConfigured, onGenerateSummary });
+  latest.current = { scope, paperSummary, loading, hasBlocks, aiConfigured, onGenerateSummary };
+  useEffect(() => setActionError(''), [paperSummary]);
+
+  const sections = useMemo(() => parseSummarySections(paperSummary), [paperSummary]);
   const activeSection = sections.find((section) => section.key === activeTab) ?? sections[0];
+  const hasContent = sections.length > 0;
+  const { status, canGenerate } = resolveSummaryPanelState({ hasContent, loading, hasBlocks, aiConfigured });
+  const labels: Record<SummarySectionKey, string> = {
+    overview: l('概览', 'Overview'),
+    background: l('背景', 'Background'),
+    problem: l('问题', 'Problem'),
+    approach: l('方法', 'Approach'),
+    experiment: l('实验', 'Experiments'),
+    findings: l('发现', 'Findings'),
+    conclusion: l('结论', 'Conclusion'),
+    limitations: l('局限性', 'Limitations'),
+  };
+  const keywordCount = paperSummary?.keywords?.filter((keyword) => keyword.trim()).length ?? 0;
+  const findingCount = sections.find((section) => section.key === 'findings')?.items?.length ?? 0;
+  const generateLabel = loading
+    ? loadingLabel || l('生成中…', 'Generating…')
+    : hasContent ? l('重新生成', 'Regenerate') : l('生成概览', 'Generate Overview');
+  const generateHint = !aiConfigured
+    ? l('请先配置概览模型', 'Configure an overview model first')
+    : !hasBlocks ? l('请先加载文档内容', 'Load the document content first') : generateLabel;
+
+  const generate = async () => {
+    const lifetime = mounted.current;
+    const requested = latest.current;
+    if (!lifetime || actionPending.current || requested.scope !== scope || requested.loading || !requested.aiConfigured || !requested.hasBlocks) return;
+    actionPending.current = true;
+    setConfirming(true);
+    setActionError('');
+    const requestedSummary = requested.paperSummary;
+    try {
+      if (hasContent) {
+        const confirmed = await confirmAction({
+          title: l('重新生成概览？', 'Regenerate the overview?'),
+          description: l(
+            '将重新调用概览模型并消耗额度。生成成功后替换已保存内容；失败时保留原内容。',
+            'This calls the overview model again and uses quota. The saved content is replaced on success and kept if generation fails.',
+          ),
+          confirmLabel: l('重新生成', 'Regenerate'),
+          cancelLabel: l('取消', 'Cancel'),
+        });
+        const current = latest.current;
+        if (!confirmed || mounted.current !== lifetime || current.scope !== requested.scope || current.loading || !current.aiConfigured || !current.hasBlocks) return;
+        await current.onGenerateSummary({ force: true });
+      } else {
+        await requested.onGenerateSummary();
+      }
+    } catch (cause) {
+      if (mounted.current === lifetime && latest.current.paperSummary === requestedSummary) {
+        setActionError(cause instanceof Error && cause.message
+          ? cause.message : l('生成失败，请重试。', 'Generation failed. Please try again.'));
+      }
+    } finally {
+      actionPending.current = false;
+      if (mounted.current === lifetime) setConfirming(false);
+    }
+  };
 
   return (
-    <SectionCard
-      title={compact ? l('论文概览', 'Paper Overview') : l('AI 概览', 'AI Overview')}
-      description={l(
-        '根据当前文档内容生成结构化概览。',
-        'Generate a structured overview from the current document.',
-      )}
-      icon={<Sparkles className="h-4 w-4" strokeWidth={1.8} />}
-      actions={
-        <button
-          type="button"
-          data-tour="generate-summary"
-          onClick={onGenerateSummary}
-          disabled={loading}
-          className="rounded-xl border border-[var(--pq-border)] bg-white px-3 py-2 text-xs font-medium text-[var(--pq-text-muted)] transition hover:border-[var(--pq-border-strong)] hover:bg-[var(--pq-surface-2)] disabled:opacity-60"
-        >
-          {loading
-            ? l('生成中...', 'Generating...')
-            : paperSummary
-              ? l('刷新整篇概览', 'Regenerate')
-              : l('生成概览', 'Generate Overview')}
-        </button>
-      }
-      contentClassName="space-y-4"
-    >
-      {!paperSummary && !hasBlocks ? (
-        <HintPanel icon={<Bot className="h-4 w-4" strokeWidth={1.8} />}>
-          {l(
-            '请先加载 PDF 和对应的 MinerU JSON，再生成概览。',
-            'Load the PDF and its MinerU JSON before generating an overview.',
-          )}
-        </HintPanel>
-      ) : null}
-
-      {!paperSummary && hasBlocks && !aiConfigured ? (
-        <HintPanel icon={<Bot className="h-4 w-4" strokeWidth={1.8} />}>
-          {l(
-            '请先配置可用的 chat/completions 模型，然后再生成概览。',
-            'Configure an available chat/completions model before generating an overview.',
-          )}
-        </HintPanel>
-      ) : null}
-
-      {error ? (
-        <div className="rounded-2xl border border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-error-bg)] px-4 py-3 text-sm text-[var(--pq-danger)]">
-          {error}
-        </div>
-      ) : null}
-
-      {loading ? (
-        <div className="space-y-3">
-          <div className="h-24 animate-pulse rounded-2xl bg-[var(--pq-surface-2)]" />
-          <div className="h-24 animate-pulse rounded-2xl bg-[var(--pq-surface-2)]" />
-          <div className="h-24 animate-pulse rounded-2xl bg-[var(--pq-surface-2)]" />
-        </div>
-      ) : null}
-
-      {!loading && paperSummary ? (
-        <div className="space-y-4">
-          <div className="rounded-[22px] border border-slate-200/80 bg-[linear-gradient(180deg,rgba(248,250,252,0.96),rgba(255,255,255,0.86))] px-5 py-5">
-            <div className="flex flex-wrap items-center gap-2">
-              <StatusBadge tone="accent">{l('概览已生成', 'Overview Ready')}</StatusBadge>
-              <StatusBadge>
-                {l(`${paperSummary.keywords.length} 个关键词`, `${paperSummary.keywords.length} keywords`)}
-              </StatusBadge>
-              <StatusBadge>
-                {l(
-                  `${paperSummary.keyFindings.length} 条关键发现`,
-                  `${paperSummary.keyFindings.length} key findings`,
-                )}
-              </StatusBadge>
-            </div>
-            <h3 className="mt-4 text-xl font-semibold text-[var(--pq-text)]">{paperSummary.title}</h3>
-            <MarkdownPreview content={paperSummary.abstract} className="mt-3 text-[var(--pq-text-muted)]" />
-          </div>
-
-          <div className="flex flex-wrap gap-2">
-            {sections.map((section) => (
-              <button
-                key={section.key}
-                type="button"
-                onClick={() => setActiveTab(section.key)}
-                className={cn(
-                  'rounded-full border px-3 py-1.5 text-sm font-medium transition',
-                  activeTab === section.key
-                    ? 'border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-[var(--pq-accent-bg)] text-[var(--pq-accent)]'
-                    : 'border-[var(--pq-border)] bg-white text-[var(--pq-text-muted)] hover:border-[var(--pq-border-strong)] hover:bg-[var(--pq-surface-2)]',
-                )}
-              >
-                {section.label}
-              </button>
-            ))}
-          </div>
-
-          {activeSection ? (
-            <div className="rounded-[22px] border border-slate-200/80 bg-white px-5 py-4">
-              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--pq-text-faint)]">
-                {activeSection.label}
-              </div>
-              <MarkdownPreview
-                content={activeSection.content || l('暂无内容', 'No content yet')}
-                className="mt-3 text-[var(--pq-text-muted)]"
-              />
+    <section aria-labelledby={`${id}-title`} className="min-w-0 rounded-[var(--pq-radius-md)] border border-[var(--pq-border)] bg-[var(--pq-surface)] shadow-[var(--pq-shadow-soft)]">
+      <div className={cn('flex items-start gap-3 border-b border-[var(--pq-border)] py-3', compact ? 'px-3' : 'px-4')}>
+        <Sparkles aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-[var(--pq-accent)]" strokeWidth={1.8} />
+        <div className={cn('min-w-0 flex-1', !compact && 'flex flex-wrap items-center gap-x-3 gap-y-1')}>
+          <h2 id={`${id}-title`} className="text-sm font-semibold leading-5 text-[var(--pq-text)]">
+            {compact ? l('论文概览', 'Paper Overview') : l('AI 概览', 'AI Overview')}
+          </h2>
+          {hasContent ? (
+            <div className={cn('flex flex-wrap gap-x-2 gap-y-1 text-xs leading-5 text-[var(--pq-text-muted)]', compact && 'mt-1')}>
+              <span>{l('已生成', 'Generated')}</span>
+              <span>· {l(`${keywordCount} 个关键词`, `${keywordCount} keywords`)}</span>
+              <span>· {l(`${findingCount} 条发现`, `${findingCount} findings`)}</span>
             </div>
           ) : null}
         </div>
-      ) : null}
-    </SectionCard>
+        {hasContent || loading ? (
+          <button type="button" data-tour="generate-summary" onClick={() => void generate()}
+            disabled={!canGenerate} aria-disabled={!canGenerate || confirming} title={generateHint} aria-label={generateLabel}
+            className="pq-icon-button h-8 w-8 shrink-0">
+            {loading ? <LoaderCircle aria-hidden="true" className="h-4 w-4 animate-spin" /> : <RefreshCw aria-hidden="true" className="h-4 w-4" strokeWidth={1.8} />}
+          </button>
+        ) : null}
+      </div>
+      <div className={cn('space-y-3 py-3', compact ? 'px-3' : 'px-4')}>
+        {error || actionError ? (
+          <div role="alert" className="rounded-[var(--pq-radius-md)] border border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-error-bg)] px-3 py-2 text-sm text-[var(--pq-danger)]">
+            {error || actionError}
+          </div>
+        ) : null}
+        {!aiConfigured ? (
+          <div className="flex flex-wrap items-center gap-2 text-xs leading-5 text-[var(--pq-text-muted)]">
+            <span>{hasContent
+              ? l('未配置概览模型，可继续查看已保存内容。', 'No overview model configured. Saved content is available.')
+              : l('概览模型未配置', 'Overview model not configured')}</span>
+            {onOpenSettings ? (
+              <button type="button" onClick={onOpenSettings} className="pq-button h-8 !gap-1 px-2 text-xs">
+                <Settings aria-hidden="true" className="h-3.5 w-3.5" />{l('模型设置', 'Model Settings')}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+        {loading ? (
+          <div role="status" className="flex items-center gap-2 text-xs text-[var(--pq-text-muted)]">
+            <LoaderCircle aria-hidden="true" className="h-4 w-4 animate-spin" />{loadingLabel || l('正在生成…', 'Generating…')}
+          </div>
+        ) : null}
+        {activeSection ? (
+          <>
+            {paperSummary?.title?.trim() ? (
+              <h3 title={paperSummary.title} className={cn('line-clamp-3 break-words font-semibold leading-6 text-[var(--pq-text)]', compact ? 'text-sm' : 'text-base')}>{paperSummary.title}</h3>
+            ) : null}
+            <div role="tablist" aria-label={l('内容分节', 'Summary sections')} className="flex flex-wrap gap-1">
+              {sections.map((section, index) => (
+                <button key={section.key} id={`${id}-tab-${section.key}`} type="button" role="tab"
+                  aria-selected={activeSection.key === section.key} aria-controls={`${id}-body`}
+                  tabIndex={activeSection.key === section.key ? 0 : -1}
+                  onClick={() => setActiveTab(section.key)}
+                  onKeyDown={(event) => {
+                    const next = event.key === 'ArrowRight' ? (index + 1) % sections.length
+                      : event.key === 'ArrowLeft' ? (index - 1 + sections.length) % sections.length
+                        : event.key === 'Home' ? 0 : event.key === 'End' ? sections.length - 1 : -1;
+                    if (next < 0) return;
+                    event.preventDefault();
+                    setActiveTab(sections[next].key);
+                    event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[next]?.focus();
+                  }}
+                  className={cn('min-h-8 rounded-[var(--pq-radius-sm)] border px-3 py-1 text-xs font-medium transition-colors',
+                    activeSection.key === section.key
+                      ? 'border-[var(--pq-accent-border)] bg-[var(--pq-accent-soft)] text-[var(--pq-accent)]'
+                      : 'border-transparent text-[var(--pq-text-muted)] hover:bg-[var(--pq-surface-2)]')}>
+                  {labels[section.key]}
+                </button>
+              ))}
+            </div>
+            <div id={`${id}-body`} role="tabpanel" aria-labelledby={`${id}-tab-${activeSection.key}`} tabIndex={0} className="min-w-0 break-words">
+              {activeSection.key === 'findings' ? (
+                <ul className="list-disc space-y-2 pl-5 text-[var(--pq-text-muted)]">
+                  {activeSection.items?.map((item, index) => <li key={index}><MarkdownPreview content={item} /></li>)}
+                </ul>
+              ) : <MarkdownPreview content={activeSection.content} />}
+            </div>
+          </>
+        ) : status === 'loading' ? (
+          <div aria-hidden="true" className="h-24 animate-pulse rounded-[var(--pq-radius-md)] bg-[var(--pq-surface-2)]" />
+        ) : (
+          <div className="space-y-3 py-2 text-sm leading-6 text-[var(--pq-text-muted)]">
+            <p>{l('尚未生成内容。', 'No summary has been generated yet.')}</p>
+            {aiConfigured ? <p className="text-xs">{l('概览模型已配置', 'Overview model configured')}</p> : null}
+            {!hasBlocks ? <p className="text-xs">{l('加载文档内容后即可生成。', 'Load the document content to generate a summary.')}</p> : null}
+            <button type="button" data-tour="generate-summary" onClick={() => void generate()}
+              disabled={!canGenerate} aria-disabled={!canGenerate || confirming} title={generateHint} className="pq-button h-8 px-3 text-xs">
+              {generateLabel}
+            </button>
+          </div>
+        )}
+      </div>
+    </section>
   );
 }
 
