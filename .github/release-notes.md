@@ -1,25 +1,22 @@
 # PaperQuay v{{VERSION}}
 
-## Redesigned paper overview
+## Leaner reader top bar and toolbars
 
-- The title spans the full width (up to three lines, full text on hover), with authors, year, journal and library below. "Start Reading" is the only primary button.
-- MinerU parsing, full translation and overview generation are in a "Process" menu that shows done, running or failed for each; a running translation can be cancelled there.
-- The "AI Overview" card drops the repeated "overview" labels. Status, keyword and finding counts and the refresh button sit in its title row. Sections (background, problem, method, experiments, findings, conclusion, limitations) appear only when they have content; findings are a list; section tabs support arrow keys, Home and End.
-- The files card is a compact list of the original PDF, translated PDF, MinerU output and block count, each with "Show in folder"; missing items are greyed out. From 1200px wide it sits on the right, otherwise below the overview.
-- The overview page and the shared overview component use theme tokens and match in light and dark themes.
+- The reader top bar is now a single 40px row. Breadcrumbs and the author line are gone; authors, year, file, status and usage tips sit in the ⓘ next to the title, which shows a spinner while parsing or translating. "Overview / Read" and the PDF views are icon segments, the PDF version picker appears only when there are several versions, and less-used actions are under "⋯". The "Collapse status bar" button and the bottom bar are removed.
+- The PDF toolbar is a single 36px row that never wraps. The four color swatches are one "Current color" popover; the page number can be typed (Enter jumps, Esc restores, out-of-range values are clamped); zoom offers Fit width, Fit page and 100%; "Delete Selected" appears only when an annotation is selected. The reading heatmap and "Export Annotated PDF" are under "⋯". When the window is narrow, tools, page navigation and zoom that do not fit move into "⋯" with full equivalents.
+- The structured-reading toolbar drops its permanent labels; block counts and linking tips are in ⓘ, and it matches the PDF toolbar height.
+- New immersive reading: click the top-bar icon or press `Ctrl+Shift+F` (`Command+Shift+F` on macOS). The top bar and all toolbars hide, leaving only an exit button; press the shortcut again or `Esc` to exit.
+- The onboarding guide has been removed. Notes on the old welcome document still open normally.
 
 ## Fixes
 
-- With no cached overview, the page shows whether a model is configured and offers "Model Settings" when it is not. PDF text mode no longer needs MinerU blocks before generating.
-- "Regenerate overview" asks before spending model quota, and keeps the old overview if generation fails. Closing or switching documents during the confirmation no longer runs the old action.
-- Old-cache migration and new overview saves are written in order, so a late old cache cannot overwrite a new overview.
-- AI actions on a reading selection are no longer hidden when only the overview model is unconfigured.
-- Library details and the overview page use distinct guide anchors.
+- In the Chinese UI, AI Overview subheadings in library details were shown in English (Background, Key Findings and so on). They now follow the UI language and switch immediately, with no need to regenerate old overviews. The stored format is unchanged, so MCP and agents read the same content. AI keywords are omitted from the overview only when all of them already appear in the paper's keywords.
+- Translation progress now shows as a toast plus a thin progress line under the toolbar instead of taking a row. Toasts meant to stay open no longer disappear immediately.
 
 ## Verification
 
-- `npm run build` passed; `npm test` passed all 1094 tests, including 46 new tests for section parsing, empty states, Process menu state and confirmation, cache write order, guide anchors and file location.
-- Component browser checks covered 1040×720 and 1920×1080, light and dark themes, Chinese and English, and special states. Installed-app acceptance is pending installation of this release: cache restore after restart, real generation and quota confirmation, MinerU and translation status, and revealing files in Explorer.
+- `npm run build` passed; `npm test` passed all 1103 tests, including new tests for toolbar overflow and page input, immersive mode, overview heading localization and old note-target compatibility.
+- Before release, three independent reviews (reader logic, overview and onboarding, UI rules and accessibility) with adversarial verification found and fixed 9 kinds of issues. The development Electron build could not start on the release machine, so desktop visual acceptance of the new reader UI is pending installation of this release.
 
 ## Windows release scope
 
@@ -29,26 +26,23 @@ Download the Windows x64 `.exe` installer from Assets. `stable.yml` and `.blockm
 
 ---
 
-## 论文概览页重做
+## 阅读器顶栏与工具栏精简
 
-- 标题占整行（最多三行，悬停显示全文），下方显示作者、年份、期刊和所在文库；「进入阅读」是唯一主按钮。
-- MinerU 解析、全文翻译和生成概览收进「处理」菜单，逐项显示完成、进行中或失败；翻译运行时可在菜单中取消。
-- 「AI 概览」卡片去掉重复的「概览」字样，状态、关键词数、发现数和刷新按钮并入标题行。背景、问题、方法、实验、发现、结论、局限等分节只在有内容时显示；发现以列表呈现；分节标签支持方向键、Home 和 End。
-- 文件卡改为紧凑列表，显示原始 PDF、译版 PDF、MinerU 结果和结构块数，每项可「在文件夹中显示」，缺失的项置灰。窗口宽 1200px 起排在右侧，更窄时排在概览下方。
-- 概览页与共用的概览组件改用主题令牌，深浅主题一致。
+- 阅读器顶栏压缩为一行（40px）：去掉面包屑和作者行，作者、年份、文件、状态和操作提示收进标题旁的 ⓘ，解析或翻译进行中时显示进度图标。「概览 / 阅读」和 PDF 视图改为图标分段，PDF 版本下拉只在有多个版本时出现，低频操作进入「⋯」。删除「收起状态栏」按钮和底栏。
+- PDF 工具行改为不换行的 36px 单行：四个色块合并为「当前颜色」弹层；页码可输入跳转（Enter 跳转、Esc 还原、越界自动夹取）；缩放可选适合宽度、适合页面、100%；「删除所选」只在选中批注时出现。阅读热力图和「导出批注 PDF」在「⋯」里；窗口变窄时，放不下的工具、翻页和缩放收进「⋯」，菜单中有完整对应项。
+- 结构化阅读工具行去掉常驻说明标签，块数和联动说明收进 ⓘ，与 PDF 工具行同高。
+- 新增沉浸阅读：点顶栏图标或按 `Ctrl+Shift+F`（macOS 为 `Command+Shift+F`）进入，顶栏和所有工具行隐藏，只留退出按钮；再按一次或按 `Esc` 退出。
+- 新手引导已整体移除。旧欢迎文档上的笔记仍能正常打开。
 
 ## 修复
 
-- 没有概览缓存时显示模型配置状态，未配置时提供「模型设置」入口；PDF 文本模式生成概览不再要求先有 MinerU 结构块。
-- 「重新生成概览」先确认额度消耗，失败时保留原概览；确认期间关闭或切换文档，不会再执行旧操作。
-- 旧缓存迁移与新概览保存按顺序写入，迟到的旧缓存不会覆盖新概览。
-- 仅概览模型未配置时，阅读选区的 AI 提炼不再被隐藏。
-- 文库详情和概览页的引导锚点改用不同名称。
+- 中文界面下，文库详情「AI 概览」的小标题显示为英文（Background、Key Findings 等）。现在按界面语言显示，切换语言立即生效，旧概览无需重新生成；存储格式不变，MCP 和 Agent 读到的内容不受影响。AI 关键词只在全部已出现在文献关键词中时才在概览里省略。
+- 翻译进度改为 toast 加工具行底部细进度线，不再占用一行；「不自动关闭」的 toast 不会再一出现就消失。
 
 ## 验证
 
-- `npm run build` 通过；`npm test` 全部 1094 项通过，含分节解析、空状态、处理菜单状态与确认、缓存写入顺序、引导锚点和文件定位等 46 项新测试。
-- 组件浏览器验收覆盖 1040×720 与 1920×1080、浅深主题、中英文及特殊状态。安装版验收待安装此版本后完成：重启后缓存恢复、真实生成与额度确认、MinerU 与翻译状态、资源管理器定位。
+- `npm run build` 通过；`npm test` 全部 1103 项通过，含工具栏溢出与页码、沉浸模式、概览标题本地化和旧笔记目标兼容等新测试。
+- 发版前经阅读器逻辑、概览与引导、界面规则与可访问性三个方向的独立审查与反驳复核，修复 9 类问题。本机无法启动开发版 Electron，阅读器新界面的桌面视觉验收待安装此版本后完成。
 
 ## Windows 发布范围
 
