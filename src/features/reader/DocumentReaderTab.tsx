@@ -176,6 +176,8 @@ import {
 } from './readerShared';
 import type { LocalRagResolution } from './readerQaContext';
 import { buildQaContext, formatQaContextStatus } from './readerQaContext';
+import { buildQaNoteContent } from './readerQaNote';
+import { awaitQaRequest } from './readerQaAbort';
 import { useDocumentTranslation } from './useDocumentTranslation';
 import { usePointerDragResize } from './usePointerDragResize';
 import { useReaderLayoutStore } from '../../stores/useReaderLayoutStore';
@@ -378,6 +380,7 @@ function DocumentReaderTab({
   const restoredHistoryRef = useRef('');
   const qaHistoryReadyWorkspaceRef = useRef('');
   const qaHistoryGenerationRef = useRef(0);
+  const qaAbortControllersRef = useRef(new Map<string, AbortController>());
   const qaHistoryExpectedRef = useRef<{
     workspaceId: string;
     qaSessions: DocumentChatSession[];
@@ -2071,7 +2074,7 @@ function DocumentReaderTab({
     summaryBlockInputs,
   ]);
 
-  const resolveQaRequest = useCallback(async () => {
+  const resolveQaRequest = useCallback(async (question: string) => {
     let pdfDocumentText = '';
     let mineruDocumentText = '';
 
@@ -2143,7 +2146,7 @@ function DocumentReaderTab({
           dimensions: settings.embeddingDimensions,
           timeoutSeconds: settings.embeddingRequestTimeoutSeconds,
         },
-        question: qaInput.trim(),
+        question,
         excerptText: selectedExcerpt?.text,
         mineruBlocks: flatBlocks,
         mineruDocumentText,
@@ -2192,7 +2195,7 @@ function DocumentReaderTab({
     embeddingApiKey,
     flatBlocks,
     pdfSource,
-    qaInput,
+    qaRagEnabled,
     selectedExcerpt?.text,
     settings,
     settings.qaSourceMode,
@@ -2898,7 +2901,6 @@ function DocumentReaderTab({
         sortReaderNotes(current.map((note) => (note.id === updated.id ? updated : note))),
       );
       setReaderNoteExternalUpdate((current) => (current?.id === updated.id ? null : current));
-      setActiveNoteId(updated.id);
       setStatusMessage(lRef.current('已保存笔记', 'Saved note'));
     } catch (nextError) {
       setNotesError(
@@ -2906,6 +2908,7 @@ function DocumentReaderTab({
           ? nextError.message
           : lRef.current('保存笔记失败', 'Failed to save note'),
       );
+      if (options.expectedUpdatedAt !== undefined) throw nextError;
     } finally {
       setNotesSaving(false);
     }
@@ -3263,13 +3266,23 @@ function DocumentReaderTab({
         .filter(Boolean)
         .join('\n\n');
 
+      const noteContent = buildQaNoteContent({
+        content,
+        citations: message.citations ?? [],
+        paperId: currentDocument.workspaceId,
+        paperTitle: currentDocument.title,
+        messageId: message.id,
+        createdAt: message.createdAt,
+      });
+
       void handleCreateNote({
         paperId: currentDocument.workspaceId,
         type: 'ai-chat',
         title: titleFromText(question || answer, lRef.current('AI 对话笔记', 'AI Chat Note')),
-        content,
+        content: noteContent.content,
+        contentJson: noteContent.contentJson,
+        anchors: noteContent.anchors,
         excerpt: question || undefined,
-        pdfLocation: selectedExcerpt?.pdfLocation ?? null,
         aiChatId: session?.id ?? selectedQaSessionId,
         aiChatMessageIds: [message.id],
         tags: ['AI'],
@@ -3279,9 +3292,9 @@ function DocumentReaderTab({
     [
       activeQaSession,
       currentDocument.workspaceId,
+      currentDocument.title,
       handleCreateNote,
       qaSessions,
-      selectedExcerpt?.pdfLocation,
       selectedQaSessionId,
     ],
   );
@@ -3613,13 +3626,16 @@ function DocumentReaderTab({
     setQaError('');
 
     const requestGeneration = qaHistoryGenerationRef.current;
+    const controller = new AbortController();
+    qaAbortControllersRef.current.set(currentSession.id, controller);
     const isRequestCurrent = () =>
+      !controller.signal.aborted &&
       qaHistoryGenerationRef.current === requestGeneration &&
       qaHistoryReadyWorkspaceRef.current === currentDocument.workspaceId;
     let streamedAnswer = '';
 
     try {
-      const qaRequest = await resolveQaRequest();
+      const qaRequest = await awaitQaRequest(resolveQaRequest(question), controller.signal);
       if (!isRequestCurrent()) return;
 
       if (qaRequest.documentText === '__never__') {
@@ -3678,6 +3694,7 @@ function DocumentReaderTab({
         {
           onDelta: (_delta, fullText) => updateStreamingAnswer(fullText),
         },
+        controller.signal,
       );
 
       if (answer !== streamedAnswer) {
@@ -3688,6 +3705,9 @@ function DocumentReaderTab({
         setStatusMessage(formatQaContextStatus(qaRequest.qaContext, lRef.current));
       }
     } catch (nextError) {
+      if (controller.signal.aborted) {
+        return;
+      }
       const sessionStillActive = isRequestCurrent();
 
       if (!streamedAnswer.trim() && sessionStillActive) {
@@ -3700,7 +3720,13 @@ function DocumentReaderTab({
         setQaError(nextError instanceof Error ? nextError.message : lRef.current('文档问答失败', 'Document QA failed'));
       }
     } finally {
-      if (isRequestCurrent()) {
+      if (controller.signal.aborted && qaHistoryGenerationRef.current === requestGeneration && !streamedAnswer.trim()) {
+        setQaSessions((current) => removeFailedQaAssistantPlaceholder(current, currentSession.id, nextAssistantMessage.id));
+      }
+      if (qaAbortControllersRef.current.get(currentSession.id) === controller) {
+        qaAbortControllersRef.current.delete(currentSession.id);
+      }
+      if (qaHistoryGenerationRef.current === requestGeneration) {
         setQaRunningSessionIds((current) => current.filter((sessionId) => sessionId !== currentSession.id));
       }
     }
@@ -3718,6 +3744,10 @@ function DocumentReaderTab({
     resolveQaRequest,
     selectedExcerpt?.text,
   ]);
+
+  const handleStopQa = useCallback(() => {
+    if (selectedQaSessionId) qaAbortControllersRef.current.get(selectedQaSessionId)?.abort();
+  }, [selectedQaSessionId]);
 
   useEffect(() => {
     const workspaceId = currentDocument.workspaceId;
@@ -3751,6 +3781,8 @@ function DocumentReaderTab({
     setQaError('');
     return () => {
       qaHistoryGenerationRef.current += 1;
+      for (const controller of qaAbortControllersRef.current.values()) controller.abort();
+      qaAbortControllersRef.current.clear();
     };
   }, [currentDocument.workspaceId, isActive]);
 
@@ -4093,6 +4125,7 @@ function DocumentReaderTab({
         screenshotLoading: screenshotBusy,
         onQaInputChange: setQaInput,
         onQaSubmit: handleAssistantQaSubmit,
+        onQaStop: handleStopQa,
         onQaPresetChange: handleQaPresetChange,
         onQaRagEnabledChange: setQaRagEnabled,
         onQaAnswerRenderModeChange: setQaAnswerRenderMode,
@@ -4155,6 +4188,7 @@ function DocumentReaderTab({
       handlePreviewQaCitationContext,
       handleSelectQaSession,
       handleAssistantQaSubmit,
+      handleStopQa,
       handleAssistantTranslateSelectedExcerpt,
       handleAssistantUpdateNote,
       notePaperCandidates,
@@ -4544,6 +4578,7 @@ function DocumentReaderTab({
         screenshotLoading={screenshotBusy}
         onQaInputChange={setQaInput}
         onQaSubmit={(inputOverride?: string) => void handleSubmitQa(inputOverride)}
+        onQaStop={handleStopQa}
         onQaPresetChange={handleQaPresetChange}
         onQaRagEnabledChange={setQaRagEnabled}
         onQaAnswerRenderModeChange={setQaAnswerRenderMode}

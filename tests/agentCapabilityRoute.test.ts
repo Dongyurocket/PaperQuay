@@ -28,7 +28,7 @@ test('pinned capability takes highest priority even when keywords match another 
   assert.equal(route.source, 'user');
 });
 
-test('pinned comparative-survey is kept even if paperCount < 2 for runner explanation', () => {
+test('legacy pinned comparative-survey falls back to ordinary Agent', () => {
   const route = resolveAgentCapabilityRoute({
     instruction: '请对这篇文献进行深度分析',
     paperCount: 1,
@@ -36,8 +36,8 @@ test('pinned comparative-survey is kept even if paperCount < 2 for runner explan
     mountContext: { ...defaultMountContext, papersCount: 1 },
   });
 
-  assert.equal(route.capabilityId, 'comparative-survey');
-  assert.equal(route.source, 'user');
+  assert.equal(route.capabilityId, null);
+  assert.equal(route.source, 'none');
 });
 
 test('pinned capability falls back when available check fails', () => {
@@ -53,15 +53,15 @@ test('pinned capability falls back when available check fails', () => {
   assert.equal(route.source, 'none');
 });
 
-test('keyword fallback matches when unpinned or auto and paperCount >= 2', () => {
+test('comparison requests use ordinary Agent when unpinned or auto', () => {
   const routeUnpinned = resolveAgentCapabilityRoute({
     instruction: '请对比调研这些文献中关于气动噪声的计算方法',
     paperCount: 2,
     mountContext: defaultMountContext,
   });
 
-  assert.equal(routeUnpinned.capabilityId, 'comparative-survey');
-  assert.equal(routeUnpinned.source, 'keyword');
+  assert.equal(routeUnpinned.capabilityId, null);
+  assert.equal(routeUnpinned.source, 'none');
 
   const routeAuto = resolveAgentCapabilityRoute({
     instruction: '请对比综述这两篇论文的核心创新点',
@@ -70,8 +70,8 @@ test('keyword fallback matches when unpinned or auto and paperCount >= 2', () =>
     mountContext: defaultMountContext,
   });
 
-  assert.equal(routeAuto.capabilityId, 'comparative-survey');
-  assert.equal(routeAuto.source, 'keyword');
+  assert.equal(routeAuto.capabilityId, null);
+  assert.equal(routeAuto.source, 'none');
 });
 
 test('keyword fallback does not match if paperCount < 2', () => {
@@ -281,7 +281,7 @@ test('returns none when no rule matches', () => {
   assert.equal(route.source, 'none');
 });
 
-test('a full survey follow-up routes with its derived requirements while pins keep priority', () => {
+test('a full survey follow-up uses ordinary Agent while other pins keep priority', () => {
   const base = {
     instruction: '请继续给出完整版',
     paperCount: 176,
@@ -289,8 +289,8 @@ test('a full survey follow-up routes with its derived requirements while pins ke
     deliveryRequirement: { kind: 'survey' as const, completeness: 'full' as const, requiredSections: ['背景', '方法比较'] },
   };
   const route = resolveAgentCapabilityRoute(base);
-  assert.equal(route.capabilityId, 'comparative-survey');
-  assert.equal(route.source, 'keyword');
+  assert.equal(route.capabilityId, null);
+  assert.equal(route.source, 'none');
   assert.equal(resolveAgentCapabilityRoute({ ...base, pinnedCapabilityId: 'citation-audit' }).capabilityId, 'citation-audit');
   assert.equal(resolveAgentCapabilityRoute({ ...base, paperCount: 1 }).capabilityId, null);
   assert.equal(resolveAgentCapabilityRoute({ ...base, deliveryRequirement: { kind: 'general', completeness: 'full' } }).capabilityId, null);

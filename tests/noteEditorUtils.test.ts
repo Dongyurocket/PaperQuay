@@ -139,7 +139,7 @@ test('snapshotFromNote and signature normalize saved note state', () => {
   );
 });
 
-test('note editor drafts restore only for the same saved note version', () => {
+test('note editor drafts preserve their base version for conflict detection', () => {
   const sourceId = 'reader-sidebar';
   const noteId = 'note-1';
   const saved = note({ id: noteId, title: 'Saved', updatedAt: 10 });
@@ -174,8 +174,11 @@ test('note editor drafts restore only for the same saved note version', () => {
     updatedAt: 20,
   });
 
-  assert.equal(readNoteEditorDraft(sourceId, noteId, saved.updatedAt)?.title, 'Draft title');
-  assert.equal(readNoteEditorDraft(sourceId, noteId, saved.updatedAt + 1), null);
+  const restored = readNoteEditorDraft(sourceId, noteId);
+  assert.equal(restored?.title, 'Draft title');
+  assert.equal(restored?.baseUpdatedAt, saved.updatedAt);
+  assert.notEqual(restored?.baseUpdatedAt, saved.updatedAt + 1);
+  assert.equal(readNoteEditorDraft(sourceId, noteId)?.title, 'Draft title');
 
   writeNoteEditorDraft(sourceId, {
     noteId,
@@ -191,7 +194,7 @@ test('note editor drafts restore only for the same saved note version', () => {
   });
   clearNoteEditorDraft(sourceId, noteId);
 
-  assert.equal(readNoteEditorDraft(sourceId, noteId, saved.updatedAt), null);
+  assert.equal(readNoteEditorDraft(sourceId, noteId), null);
 });
 
 test('isNoteRecord validates note identity and update timestamp', () => {

@@ -76,6 +76,42 @@ test('note RRF is deterministic and marks both channels', () => {
   assert.deepEqual(result[0].channels, ['vector', 'fts']);
 });
 
+test('IPC search confines keyword and vector candidates to the supplied note IDs', async () => {
+  const f = fixture();
+  try {
+    const included = f.add('shared query');
+    const excluded = f.add('shared query');
+    const ipc = createNoteCommands({ noteStore: f.notes, appPaths: f.appPaths, ragStore: f.rag });
+    const result = await ipc.notes_search({ request: { query: 'shared', noteIds: [included.id], mode: 'keyword' } });
+    assert.deepEqual(result.notes.map((note: any) => note.id), [included.id]);
+    assert.deepEqual((await ipc.notes_search({ request: { query: 'shared', noteIds: [], mode: 'keyword' } })).notes, []);
+    const embedding = configure(f);
+    for (const note of [included, excluded]) await indexNote(f.rag, { note, embedding }, async () => [[1, 0, 0]]);
+    const keyword = f.notes.searchNotes({ query: 'shared', noteIds: [included.id], limit: 10 });
+    const hybrid = await hybridNotes({ query: 'shared', limit: 10, keyword, embedding,
+      eligible: () => f.notes.eligibleSearchNotes({ noteIds: [included.id] }),
+      embed: async () => [1, 0, 0], retrieve: (args: any) => f.rag.retrieveNoteVectors(args) });
+    assert.deepEqual(hybrid.notes.map((note: any) => note.id), [included.id]);
+  } finally { f.close(); }
+});
+
+test('conditional note updates reject concurrent edits and deletion across store connections', () => {
+  const f = fixture();
+  const other = createNoteStore(f.appPaths);
+  try {
+    const original = f.add('Original');
+    const external = other.updateNote({ id: original.id, patch: { title: 'External' } });
+    assert.ok(external.updatedAt > original.updatedAt);
+    assert.throws(() => f.notes.updateNote({ id: original.id, patch: { title: 'Stale' }, expectedUpdatedAt: original.updatedAt }), /NOTE_CONFLICT/);
+    assert.equal(f.notes.getNote({ id: original.id }).title, 'External');
+    const saved = f.notes.updateNote({ id: original.id, patch: { title: 'Confirmed' }, expectedUpdatedAt: external.updatedAt });
+    assert.ok(saved.updatedAt > external.updatedAt);
+    other.deleteNote({ id: original.id });
+    assert.throws(() => f.notes.updateNote({ id: original.id, patch: { title: 'Resurrected' }, expectedUpdatedAt: saved.updatedAt }), /NOTE_CONFLICT/);
+    assert.equal(f.notes.getNote({ id: original.id }), null);
+  } finally { other.close(); f.close(); }
+});
+
 test('note vector storage shares RAG DB and scopes eligible notes, model and signature', () => {
   const dir = mkdtempSync(path.join(tmpdir(), 'pq-note-vectors-'));
   const store = createRagStore({ ragDatabasePath: path.join(dir, 'rag.sqlite') });

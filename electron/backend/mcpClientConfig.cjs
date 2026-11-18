@@ -38,7 +38,7 @@ function probeSystemNode() {
 function resolveMcpLayout({ isPackaged, resourcesPath, appPath }) {
   const installedEntry = path.join(resourcesPath || '', 'paperquay-mcp', 'server.cjs');
   const sourceEntry = path.join(appPath || '', 'bin', 'paperquay-mcp.cjs');
-  if (isPackaged && fs.existsSync(installedEntry)) {
+  if (isPackaged) {
     return { mode: 'installed', entry: installedEntry };
   }
   if (fs.existsSync(installedEntry) && !fs.existsSync(sourceEntry)) {

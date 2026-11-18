@@ -13,6 +13,7 @@ import type {
 export interface NoteMutationOptions {
   sourceId?: string;
   silent?: boolean;
+  expectedUpdatedAt?: number;
 }
 
 function toErrorMessage(error: unknown, fallback: string): string {
@@ -87,7 +88,7 @@ export async function updateNote(
   options: NoteMutationOptions = {},
 ): Promise<Note> {
   try {
-    const note = await invoke<Note>('notes_update', { id, patch });
+    const note = await invoke<Note>('notes_update', { id, patch, expectedUpdatedAt: options.expectedUpdatedAt });
     if (!options.silent) {
       emitNoteChanged({
         action: 'updated',

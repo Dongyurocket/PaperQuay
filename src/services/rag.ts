@@ -9,6 +9,7 @@ import type {
   RagIndexedChunkInput,
   RagReportDocumentIndexFailureRequest,
   RagRetrievalResult,
+  RagRetrievalDiagnostics,
   RagSourceMode,
 } from '../types/reader';
 
@@ -22,11 +23,14 @@ interface RagEmbeddingOptions {
 
 interface RagRetrieveRequest {
   documentKey?: string;
+  embeddingModelKey?: string;
+  sourceSignature?: string;
   documentKeys?: string[];
   sourceType?: Exclude<RagSourceMode, 'off' | 'hybrid'> | null;
   queryEmbedding: number[];
   /** The original retrieval text used by the FTS5 keyword channel. */
   queryText?: string;
+  includeIndexCoverage?: boolean;
   topK: number;
 }
 
@@ -178,6 +182,18 @@ export async function ragRetrieveDocumentChunks(
 ): Promise<RagRetrievalResult[]> {
   try {
     return await invoke<RagRetrievalResult[]>('rag_retrieve_document_chunks', { request });
+  } catch (error) {
+    throw new Error(toErrorMessage(error, '本地 RAG 检索失败'));
+  }
+}
+
+export async function ragRetrieveDocumentChunksWithDiagnostics(
+  request: RagRetrieveRequest,
+): Promise<RagRetrievalDiagnostics> {
+  try {
+    return await invoke<RagRetrievalDiagnostics>('rag_retrieve_document_chunks', {
+      request: { ...request, includeDiagnostics: true },
+    });
   } catch (error) {
     throw new Error(toErrorMessage(error, '本地 RAG 检索失败'));
   }

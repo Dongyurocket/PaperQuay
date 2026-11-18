@@ -38,8 +38,8 @@ function createNoteCommands(context) {
       return noteStore.createNote(request ?? {});
     },
 
-    notes_update({ id, patch }) {
-      return noteStore.updateNote({ id, patch: patch ?? {} });
+    notes_update({ id, patch, expectedUpdatedAt }) {
+      return noteStore.updateNote({ id, patch: patch ?? {}, expectedUpdatedAt });
     },
 
     notes_delete({ id }) {

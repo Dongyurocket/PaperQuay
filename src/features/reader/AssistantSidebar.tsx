@@ -8,6 +8,7 @@ import {
   Settings2,
 } from 'lucide-react';
 import { useLocaleText } from '../../i18n/uiLanguage';
+import type { NoteMutationOptions } from '../../services/notes';
 import type {
   Note,
   NoteAnchor,
@@ -76,6 +77,7 @@ export interface AssistantSidebarCoreProps {
   chatLayoutMode?: 'compact' | 'workspace';
   onQaInputChange: (value: string) => void;
   onQaSubmit: (inputOverride?: string) => void;
+  onQaStop?: () => void;
   onQaPresetChange: (presetId: string) => void;
   onQaRagEnabledChange: (value: boolean) => void;
   onQaAnswerRenderModeChange: (mode: DocumentChatRenderMode) => void;
@@ -91,7 +93,7 @@ export interface AssistantSidebarCoreProps {
   onCitationContext?: (citation: DocumentChatCitation) => void;
   onCreateStandaloneNote: () => void;
   onSelectNote: (note: Note) => void;
-  onUpdateNote: (noteId: string, patch: UpdateNoteRequest, options?: { sourceId?: string }) => Note | void | Promise<Note | void>;
+  onUpdateNote: (noteId: string, patch: UpdateNoteRequest, options?: NoteMutationOptions) => Note | void | Promise<Note | void>;
   onDeleteNote: (noteId: string) => void;
   onJumpToNoteAnchor: (note: Note, anchor: NoteAnchor) => void;
   onNotePaperClick?: (paperId: string) => void;
@@ -161,6 +163,7 @@ function AssistantSidebar({
   chatLayoutMode = 'compact',
   onQaInputChange,
   onQaSubmit,
+  onQaStop,
   onQaPresetChange,
   onQaRagEnabledChange,
   onQaAnswerRenderModeChange,
@@ -259,6 +262,7 @@ function AssistantSidebar({
                 layoutMode={chatLayoutMode}
                 onInputChange={onQaInputChange}
                 onSubmit={onQaSubmit}
+                onStop={onQaStop}
                 onQaPresetChange={onQaPresetChange}
                 onQaRagEnabledChange={onQaRagEnabledChange}
                 onQaAnswerRenderModeChange={onQaAnswerRenderModeChange}

@@ -6,7 +6,7 @@ import { stripTypeScriptTypes } from 'node:module';
 import {
   latestAgentRecoveryCheckpoint,
   latestAgentRecoveryCitations,
-  latestComparativeSurveyCheckpoint,
+  latestCapabilityCheckpoint,
   recoveryCheckpointToChatMessages,
 } from '../src/features/agent/agentRunRecovery.ts';
 import type { AgentRunEventRecord } from '../src/services/agentRuns.ts';
@@ -191,118 +191,12 @@ test('recovery ignores malformed checkpoint payloads', () => {
   ]), null);
 });
 
-test('recovery extracts the newest comparative-survey stage checkpoint', () => {
-  const checkpoint = latestComparativeSurveyCheckpoint([
-    event(1, 'checkpoint', {
-      capabilityId: 'comparative-survey',
-      artifacts: {
-        rephrasedQuestion: 'Saved question',
-        subquestions: ['Q1'],
-        citations: [{
-          paperId: 'paper-a',
-          paperTitle: 'Paper A',
-          pageIndex: 2,
-          blockId: 'block-a',
-          previewText: 'Saved evidence',
-          sourceType: 'mineru-markdown',
-        }],
-        completedStages: ['rephrase', 'decompose', 'invalid'],
-      },
-    }),
-  ]);
-
-  assert.deepEqual(checkpoint, {
-    rephrasedQuestion: 'Saved question',
-    subquestions: ['Q1'],
-    researchNotes: undefined,
-    citations: [{
-      paperId: 'paper-a',
-      paperTitle: 'Paper A',
-      pageIndex: 2,
-      blockId: 'block-a',
-      previewText: 'Saved evidence',
-      sourceType: 'mineru-markdown',
-    }],
-    completedStages: ['rephrase', 'decompose'],
-  });
-});
-
-test('recovery backward compatibility: checkpoint without capabilityId defaults to comparative-survey', () => {
-  const checkpoint = latestComparativeSurveyCheckpoint([
-    event(1, 'checkpoint', {
-      // 旧版 checkpoint 没有 capabilityId 字段
-      artifacts: {
-        rephrasedQuestion: 'Old legacy question',
-        completedStages: ['rephrase'],
-      },
-    }),
-  ]);
-
-  assert.ok(checkpoint);
-  assert.equal(checkpoint.rephrasedQuestion, 'Old legacy question');
-  assert.deepEqual(checkpoint.completedStages, ['rephrase']);
-});
-
-test('comparative recovery preserves canonical token identity and display label', () => {
-  const checkpoint = latestComparativeSurveyCheckpoint([event(1, 'checkpoint', {
-    artifacts: { citations: [{ id: 'source-a', label: '7', paperId: 'paper-a', paperTitle: 'Paper A' }] },
-  })]);
-  assert.equal(checkpoint?.citations?.[0].id, 'source-a');
-  assert.equal(checkpoint?.citations?.[0].label, '7');
-});
-
-test('comparative recovery preserves a normalized coverage ledger when present', () => {
-  const checkpoint = latestComparativeSurveyCheckpoint([event(1, 'checkpoint', {
-    capabilityId: 'comparative-survey',
-    artifacts: {
-      coverage: {
-        version: 1,
-        runState: 'partial',
-        papers: [{
-          paperId: 'paper-a',
-          candidate: true,
-          abstractReviewed: true,
-          bodySearched: false,
-          focusedRead: false,
-          cited: false,
-          unresolved: true,
-          irrelevant: false,
-          failed: false,
-          attempts: 1,
-          citationIds: ['c1', 'c1'],
-          subquestionIds: ['q1'],
-        }],
-        subquestions: [{
-          id: 'q1',
-          question: 'Missing evidence?',
-          state: 'partial',
-          candidatePaperIds: ['paper-a'],
-          evidenceCitationIds: [],
-          evidenceGaps: ['No full text'],
-          completedPaperIds: [],
-          failedPaperIds: [],
-        }],
-        budget: { maxPapers: 1, promptTokens: 2, completionTokens: 3, elapsedMilliseconds: 4 },
-        updatedAt: 123,
-      },
-    },
-  })]);
-
-  assert.equal(checkpoint?.coverage?.runState, 'partial');
-  assert.equal(checkpoint?.coverage?.papers[0]?.unresolved, true);
-  assert.deepEqual(checkpoint?.coverage?.papers[0]?.citationIds, ['c1']);
-  assert.deepEqual(checkpoint?.coverage?.subquestions[0]?.evidenceGaps, ['No full text']);
-});
-
-test('comparative recovery preserves unsynthesized body excerpts and rejects malformed checkpoint entries', () => {
-  const checkpoint = latestComparativeSurveyCheckpoint([event(1, 'checkpoint', {
-    capabilityId: 'comparative-survey', artifacts: { researchContexts: [
-      { paperId: 'paper-a', subquestionId: 'q1', source: 'pdf-text', text: 'Actual [[cite:c1]]', citationIds: ['c1', 'c1'] },
-      { paperId: 'paper-b', subquestionId: 'q1', source: 'pdf-text', text: 9, citationIds: ['bad'] },
-      null,
-    ] },
-  })]);
-  assert.deepEqual(checkpoint?.researchContexts, [{
-    paperId: 'paper-a', subquestionId: 'q1', source: 'pdf-text', text: 'Actual [[cite:c1]]', citationIds: ['c1'],
-  }]);
+test('legacy survey checkpoints are not restored as an active capability', () => {
+  assert.equal(latestCapabilityCheckpoint([
+    event(1, 'checkpoint', { artifacts: { completedStages: ['research'] } }),
+    event(2, 'checkpoint', { capabilityId: 'comparative-survey', artifacts: { completedStages: ['report'] } }),
+  ]), null);
+  assert.equal(latestAgentRecoveryCheckpoint([
+    event(1, 'checkpoint', { capabilityId: 'comparative-survey', artifacts: { researchNotes: 'Old notes' } }),
+  ]), null);
 });

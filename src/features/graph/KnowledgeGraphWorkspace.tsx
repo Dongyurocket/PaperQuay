@@ -4,7 +4,6 @@ import fcose from 'cytoscape-fcose';
 
 cytoscape.use(fcose);
 import {
-  Brain,
   ChevronDown,
   ChevronRight,
   CircleAlert,
@@ -32,16 +31,13 @@ import {
   createKnowledgeGraphRelation,
   deleteKnowledgeGraphRelation,
   getKnowledgeGraph,
-  suggestKnowledgeGraphRelations,
 } from '../../services/knowledgeGraph';
 import {
   fetchAllLibraryReferences,
   listenLibraryReferenceProgress,
 } from '../../services/library';
-import { readReaderConfigFile } from '../../services/readerConfig';
 import { useTabsStore } from '../../stores/useTabsStore';
 import type {
-  KnowledgeGraphAiRelationSuggestion,
   KnowledgeGraphEdge,
   KnowledgeGraphEdgeType,
   KnowledgeGraphNode,
@@ -49,18 +45,7 @@ import type {
   KnowledgeGraphSnapshot,
 } from '../../types/knowledgeGraph';
 import type { LibraryReferenceProgress } from '../../types/library';
-import type { QaModelPreset, ReaderConfigFile, ReaderSecrets, ReaderSettings } from '../../types/reader';
 import { cn } from '../../utils/cn';
-import {
-  DEFAULT_QA_PRESET_ID,
-  DEFAULT_SETTINGS,
-  getModelRuntimeConfig,
-  normalizeQaModelPresets,
-  normalizeReaderSettings,
-  resolveModelPreset,
-  SECRETS_STORAGE_KEY,
-  SETTINGS_STORAGE_KEY,
-} from '../reader/readerShared';
 
 type LayoutMode = 'global' | 'local';
 type GraphPerspective = 'mixed' | 'paper' | 'note' | 'reference' | 'semantic' | 'custom';
@@ -287,62 +272,6 @@ const graphStyles = [
 
 function compactNumber(value: number) {
   return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(value);
-}
-
-function readStorageJson<T>(key: string): Partial<T> {
-  try {
-    const raw = window.localStorage.getItem(key);
-    return raw ? (JSON.parse(raw) as Partial<T>) : {};
-  } catch {
-    return {};
-  }
-}
-
-async function loadGraphModelPreset(): Promise<QaModelPreset | null> {
-  let persisted: Partial<ReaderConfigFile> | null = null;
-
-  try {
-    persisted = await readReaderConfigFile();
-  } catch {
-    persisted = null;
-  }
-
-  const storedSettings = readStorageJson<ReaderSettings>(SETTINGS_STORAGE_KEY);
-  const storedSecrets = readStorageJson<ReaderSecrets>(SECRETS_STORAGE_KEY);
-  const settings = normalizeReaderSettings({
-    ...DEFAULT_SETTINGS,
-    ...(persisted?.settings ?? {}),
-    ...storedSettings,
-  });
-  const secrets = {
-    ...(persisted?.secrets ?? {}),
-    ...storedSecrets,
-  };
-  const presets = normalizeQaModelPresets(secrets.qaModelPresets);
-  return (
-    resolveModelPreset(presets, settings.agentModelPresetId) ??
-    resolveModelPreset(presets, settings.summaryModelPresetId) ??
-    resolveModelPreset(presets, settings.qaActivePresetId) ??
-    resolveModelPreset(presets, DEFAULT_QA_PRESET_ID) ??
-    presets[0] ??
-    null
-  );
-}
-
-function modelOptionsFromPreset(preset: QaModelPreset, settings: Partial<ReaderSettings> = {}) {
-  const runtime = getModelRuntimeConfig(normalizeReaderSettings({
-    ...DEFAULT_SETTINGS,
-    ...settings,
-  }), 'agent');
-
-  return {
-    baseUrl: preset.baseUrl,
-    apiKey: preset.apiKey,
-    model: preset.model,
-    apiMode: preset.apiMode,
-    temperature: runtime.temperature,
-    reasoningEffort: runtime.reasoningEffort,
-  };
 }
 
 function perspectiveNodeTypes(perspective: GraphPerspective): Record<KnowledgeGraphNodeType, boolean> {
@@ -626,8 +555,6 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
   const [embeddingMinSimilarity, setEmbeddingMinSimilarity] = useState(0.82);
   const [relationLabel, setRelationLabel] = useState('related');
   const [relationDescription, setRelationDescription] = useState('');
-  const [aiSuggestions, setAiSuggestions] = useState<KnowledgeGraphAiRelationSuggestion[]>([]);
-  const [aiWorking, setAiWorking] = useState(false);
   const [relationWorking, setRelationWorking] = useState(false);
   const [referenceSyncProgress, setReferenceSyncProgress] = useState<LibraryReferenceProgress | null>(null);
   const [referenceSyncWorking, setReferenceSyncWorking] = useState(false);
@@ -642,7 +569,6 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
     embedding: true,
     customRelations: true,
     graphStats: true,
-    aiRelations: true,
   });
 
   const openGraphNode = useCallback(async (node: KnowledgeGraphNode) => {
@@ -1034,8 +960,6 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
     target: KnowledgeGraphNode | null,
     label = relationLabel,
     description = relationDescription,
-    type: 'custom_relation' | 'ai_suggested' = 'custom_relation',
-    confidence?: number,
   ) => {
     if (!source || !target || source.id === target.id) {
       setError(l('请选择两个不同节点。', 'Select two different nodes.'));
@@ -1051,8 +975,6 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
         target: target.id,
         label,
         description,
-        type,
-        confidence,
       });
       const edge: KnowledgeGraphEdge = {
         id: relation.id,
@@ -1252,43 +1174,6 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
     };
     // selectGraphNode/selectGraphEdge 依赖均为空、引用稳定；createRelation 走 createRelationRef。
   }, [selectGraphEdge, selectGraphNode]);
-
-  const runAiRelationSuggestion = async () => {
-    setAiWorking(true);
-    setError('');
-    setAiSuggestions([]);
-
-    try {
-      const preset = await loadGraphModelPreset();
-
-      if (!preset?.apiKey.trim() || !preset.baseUrl.trim() || !preset.model.trim()) {
-        throw new Error(l('请先在设置中配置 Agent 或摘要模型。', 'Configure an Agent or summary model in settings first.'));
-      }
-
-      const settings = readStorageJson<ReaderSettings>(SETTINGS_STORAGE_KEY);
-      const suggestions = await suggestKnowledgeGraphRelations(
-        {
-          focusNodeId: selectedNode?.id ?? null,
-          localDepth: selectedNode ? Math.max(2, localDepth) : 0,
-          maxRelations: 10,
-          embeddingMinSimilarity,
-        },
-        modelOptionsFromPreset(preset, settings),
-      );
-      setAiSuggestions(suggestions);
-    } catch (suggestError) {
-      setError(suggestError instanceof Error ? suggestError.message : String(suggestError));
-    } finally {
-      setAiWorking(false);
-    }
-  };
-
-  const approveAiSuggestion = async (suggestion: KnowledgeGraphAiRelationSuggestion) => {
-    const source = nodeById.get(suggestion.sourceId) ?? null;
-    const target = nodeById.get(suggestion.targetId) ?? null;
-    await createRelation(source, target, suggestion.label, suggestion.description, 'ai_suggested', suggestion.confidence);
-    setAiSuggestions((current) => current.filter((item) => item !== suggestion));
-  };
 
   const nodeCount = filteredSnapshot?.nodes.length ?? 0;
   const edgeCount = filteredSnapshot?.edges.length ?? 0;
@@ -1605,70 +1490,6 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
             </div>
           </CollapsiblePanel>
 
-          <CollapsiblePanel
-            title={l('AI 关系候选', 'AI Relation Candidates')}
-            icon={<Brain className="h-3.5 w-3.5" strokeWidth={1.8} />}
-            summary={aiSuggestions.length > 0 ? aiSuggestions.length : undefined}
-            collapsed={collapsedPanels.aiRelations}
-            onToggle={() => togglePanel('aiRelations')}
-          >
-            <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-[var(--pq-text)]">
-              <Brain className="h-3.5 w-3.5" strokeWidth={1.8} />
-              {l('AI 关系候选', 'AI Relation Candidates')}
-            </div>
-            <button
-              type="button"
-              disabled={aiWorking}
-              onClick={() => void runAiRelationSuggestion()}
-              className="pq-button h-8 w-full justify-center px-2 text-xs disabled:opacity-40"
-            >
-              {aiWorking
-                ? l('正在分析...', 'Analyzing...')
-                : selectedNode
-                  ? l('围绕选中节点生成', 'Suggest around selected node')
-                  : l('生成图谱关系候选', 'Suggest graph relations')}
-            </button>
-            {aiSuggestions.length > 0 ? (
-              <div className="mt-2 space-y-2">
-                {aiSuggestions.map((suggestion, index) => {
-                  const source = nodeById.get(suggestion.sourceId);
-                  const target = nodeById.get(suggestion.targetId);
-                  return (
-                    <div
-                      key={`${suggestion.sourceId}-${suggestion.targetId}-${suggestion.label}-${index}`}
-                      className="rounded-[var(--pq-radius-sm)] border border-[var(--pq-border)] bg-[var(--pq-bg-secondary)] p-2"
-                    >
-                      <div className="text-[11px] font-semibold text-[var(--pq-text)]">
-                        {source?.label ?? suggestion.sourceId} {'->'} {target?.label ?? suggestion.targetId}
-                      </div>
-                      <div className="mt-1 text-[11px] text-[var(--pq-accent)]">
-                        {suggestion.label} · {(suggestion.confidence * 100).toFixed(0)}%
-                      </div>
-                      <div className="mt-1 line-clamp-3 text-[11px] leading-5 text-[var(--pq-text-muted)]">
-                        {suggestion.description}
-                      </div>
-                      <div className="mt-2 flex gap-2">
-                        <button
-                          type="button"
-                          onClick={() => void approveAiSuggestion(suggestion)}
-                          className="pq-button h-7 flex-1 justify-center px-2 text-[11px]"
-                        >
-                          {l('确认', 'Approve')}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setAiSuggestions((current) => current.filter((item) => item !== suggestion))}
-                          className="pq-button h-7 w-9 justify-center px-2 text-[11px]"
-                        >
-                          X
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : null}
-          </CollapsiblePanel>
         </div>
 
         <div className="border-t border-[var(--pq-border)] p-3">

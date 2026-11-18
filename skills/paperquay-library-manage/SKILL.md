@@ -16,7 +16,7 @@ Use the `paperquay` MCP server. Parameters are defined by `tools/list` and `docs
 2. Before any broad or destructive change, show the user the paper IDs, the metadata or category changes, and any file consequences, and get confirmation.
 3. Then call `import_pdfs`, `manage_category`, `set_paper_categories`, `update_paper`, or `attach_translated_pdf`.
 4. Call `delete_papers` or `remove_translated_pdf` only after a second explicit confirmation. Keep `deleteFiles` false unless the user asks for permanent file deletion. `remove_translated_pdf` deletes the stored translation copy by default, not the user's source file.
-5. If `attach_translated_pdf` returns `pageCountMismatch`, tell the user. The attachment is still made.
+5. Re-read changed records with `get_paper_details` or `search_papers` and report successes, skips, and failures. If `attach_translated_pdf` returns `pageCountMismatch`, tell the user; the attachment is still made.
 
 ## Metadata Updates
 

@@ -25,6 +25,7 @@ PaperQuay 提供基于 **Model Context Protocol (MCP)** 的 stdio 服务（`pape
 | `search_knowledge_base` | 检索知识库证据 | `query`（必填）、`paperId`、`limit`（默认 8，上限 30）、`mode` | 证据切片：`paperId`、`paperTitle`、`pageNumber`、`blockId`、`snippet`、`score`、`channels`；另含 `retrievalMode`、`warning` |
 | `read_paper_content` | 读取文献正文分块 | `paperId`（必填）、`pageIndex`（从 0 开始）、`limit`（默认 20，上限 100） | 按页或顺序排列的结构化正文 |
 | `search_notes` | 检索笔记 | `query`、`paperId`、`pageKind`、`limit`（默认 10）、`mode` | 笔记、`retrievalMode`、每条 `channels`、降级 `warning` |
+| `get_note` | 只读获取笔记正文及来源元数据 | `noteId`、`offset`、`limit`（最多 20000 字符） | 正文片段、标签、文件夹、双链、锚点和 `nextOffset`；锚点最多 100 条 |
 | `list_note_tags` | 列出笔记标签与使用次数 | `paperId`（可选） | `tag`、`count` |
 | `list_note_folders` | 读取笔记文件夹树 | 无 | `id`、`name`、`parentId`、`sortOrder` |
 

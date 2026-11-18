@@ -380,6 +380,24 @@ test('initial comparison sync waits for pagesinit before consuming its token', a
   assert.equal(tasks.length, 1);
 });
 
+test('a pending citation jump survives hiding the viewer before its animation frame', async (t) => {
+  const { lifecycle, tasks, buses, viewers, runFrames } = await createViewer(() => {});
+  t.after(() => lifecycle.unmount());
+  materializePages(lifecycle, 15);
+  tasks[0].resolve(pdfDocument(15)); await lifecycle.settle();
+  buses[0].dispatch('pagesinit', {}); await lifecycle.settle(); runFrames(); lifecycle.flush();
+  const container = viewers[0].options.container;
+  const highlight = { blockId: 'page-5-block', pageIndex: 4, bbox: [10, 10, 40, 40], bboxCoordinateSystem: 'normalized-1000' };
+  lifecycle.render({ ...lifecycle.props, activeHighlight: highlight, highlightScrollSignal: 1 });
+  lifecycle.commit(); lifecycle.flush();
+  lifecycle.render({ ...lifecycle.props, active: false });
+  lifecycle.commit(); lifecycle.flush(); runFrames(); lifecycle.flush();
+  assert.equal(container.scrollTop, 0);
+  lifecycle.render({ ...lifecycle.props, active: true });
+  lifecycle.commit(); lifecycle.flush(); runFrames(); lifecycle.flush();
+  assert.ok(container.scrollTop > 3000);
+});
+
 function pdfDocument(numPages: number) {
   return { numPages, cleanup() {}, destroyed: false, destroy() { this.destroyed = true; },
     getPage: async () => ({ getViewport: () => ({ width: 600, height: 800 }) }) };
@@ -843,23 +861,28 @@ test('a cancelled old source resolving after the new source cannot replace its p
 });
 
 test('a second citation page requested while hidden reaches the cached PDF when it becomes active', async (t) => {
-  const { lifecycle, tasks, navigation, runFrames } = await createViewer(() => {});
+  const { lifecycle, tasks, buses, viewers, runFrames } = await createViewer(() => {});
   t.after(() => lifecycle.unmount());
+  materializePages(lifecycle, 15);
   tasks[0].resolve(pdfDocument(15));
   await lifecycle.settle();
-  const highlight = (pageIndex: number) => ({ blockId: `page-${pageIndex + 1}-block`, pageIndex, bbox: [10, 10, 40, 40] });
+  const highlight = (pageIndex: number) => ({ blockId: `page-${pageIndex + 1}-block`, pageIndex, bbox: [10, 10, 40, 40], bboxCoordinateSystem: 'normalized-1000' });
+  const container = viewers[0].options.container;
 
   lifecycle.render({ ...lifecycle.props, activeHighlight: highlight(4), highlightScrollSignal: 1 });
   lifecycle.commit(); lifecycle.flush(); runFrames(); lifecycle.flush();
-  assert.deepEqual(navigation, [5]);
+  assert.equal(container.scrollTop, 0);
+  buses[0].dispatch('pagesinit', {}); await lifecycle.settle(); runFrames(); lifecycle.flush();
+  assert.ok(container.scrollTop > 3000);
+  const firstPosition = container.scrollTop;
 
   lifecycle.render({ ...lifecycle.props, active: false, activeHighlight: highlight(5), highlightScrollSignal: 2 });
   lifecycle.commit(); lifecycle.flush(); runFrames(); lifecycle.flush();
-  assert.deepEqual(navigation, [5], 'A hidden viewer must retain the second highlight for activation');
+  assert.equal(container.scrollTop, firstPosition, 'A hidden viewer must retain the second highlight for activation');
 
   lifecycle.render({ ...lifecycle.props, active: true });
   lifecycle.commit(); lifecycle.flush(); runFrames(); lifecycle.flush();
-  assert.deepEqual(navigation, [5, 6]);
+  assert.ok(container.scrollTop > firstPosition);
   assert.equal(lifecycle.pageCount, 15);
   assert.equal(tasks.length, 1);
 });

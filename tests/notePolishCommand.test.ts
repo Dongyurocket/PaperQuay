@@ -1,11 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 
 const require = createRequire(import.meta.url);
 const { createAiCommands } = require('../electron/backend/aiCommands.cjs');
+const { createRagStore } = require('../electron/backend/ragStore.cjs');
 
-function createContext(receivedDocumentKeySets: string[][]) {
+function createContext(receivedDocumentKeySets: string[][], receivedModelKeys: string[] = []) {
   return {
     agentMemoryStore: {},
     store: {
@@ -14,9 +18,10 @@ function createContext(receivedDocumentKeySets: string[][]) {
       },
     },
     ragStore: {
-      retrieveDocumentChunks({ documentKeys }: { documentKeys?: string[] }) {
+      retrieveDocumentChunks({ documentKeys, embeddingModelKey }: { documentKeys?: string[]; embeddingModelKey?: string }) {
         const keys = Array.isArray(documentKeys) ? documentKeys : [];
         receivedDocumentKeySets.push(keys);
+        receivedModelKeys.push(embeddingModelKey ?? '');
         if (!keys.includes('paper-1')) return [];
         return [{
           documentKey: 'paper-1',
@@ -34,6 +39,7 @@ function createContext(receivedDocumentKeySets: string[][]) {
 
 test('note polish maps only server-known citation IDs to scoped RAG evidence', async (t) => {
   const receivedDocumentKeySets: string[][] = [];
+  const receivedModelKeys: string[] = [];
   let callCount = 0;
   t.mock.method(globalThis, 'fetch', async () => {
     callCount += 1;
@@ -53,7 +59,7 @@ test('note polish maps only server-known citation IDs to scoped RAG evidence', a
     });
   });
 
-  const commands = createAiCommands(createContext(receivedDocumentKeySets));
+  const commands = createAiCommands(createContext(receivedDocumentKeySets, receivedModelKeys));
   const result = await commands.notes_polish_openai_compatible({
     options: {
       baseUrl: 'https://example.test/v1',
@@ -74,6 +80,7 @@ test('note polish maps only server-known citation IDs to scoped RAG evidence', a
   assert.equal(receivedDocumentKeySets.length > 0, true);
   assert.equal(receivedDocumentKeySets[0].includes('paper-1'), true);
   assert.equal(receivedDocumentKeySets[0].includes('native-library:paper-1'), true);
+  assert.deepEqual(receivedModelKeys, ['https://embedding.example.test/v1::embedding-model::default']);
 
   assert.equal(result.text, '## Polished note\n\nClearer wording.');
   assert.deepEqual(result.citations, [{
@@ -106,4 +113,46 @@ test('note polish falls back to plain text when a provider ignores JSON mode', a
 
   assert.equal(result.text, 'Polished plain text.');
   assert.deepEqual(result.citations, []);
+});
+
+test('note polish excludes same-dimension evidence from another embedding model', async (t) => {
+  const dataDir = mkdtempSync(path.join(tmpdir(), 'paperquay-polish-rag-'));
+  const ragStore = createRagStore({ ragDatabasePath: path.join(dataDir, 'rag.sqlite') }, { deferVectorBackfill: true });
+  try {
+    for (const [sourceType, model, text, vector] of [
+      ['pdf-text', 'current', 'Current model evidence about rotor noise.', [0, 1]],
+      ['mineru-markdown', 'old', 'Old model evidence about rotor noise.', [1, 0]],
+    ] as const) {
+      ragStore.indexDocument({ documentKey: 'paper-1', title: 'Scoped evidence paper', sourceType,
+        sourceSignature: sourceType, embeddingModelKey: `https://embedding.example.test/v1::${model}::default`,
+        totalChunkCount: 1, chunks: [{ chunkId: sourceType, chunkIndex: 0, pageIndex: 0, text, embedding: vector }] });
+    }
+    let calls = 0;
+    t.mock.method(globalThis, 'fetch', async () => {
+      calls += 1;
+      return calls % 2 === 1
+        ? Response.json({ data: [{ index: 0, embedding: [1, 0] }] })
+        : Response.json({ choices: [{ message: { content: JSON.stringify({ text: 'Polished.', citations: ['S1'] }) } }] });
+    });
+    const commands = createAiCommands({ ...createContext([]), ragStore });
+    const result = await commands.notes_polish_openai_compatible({ options: {
+      baseUrl: 'https://example.test/v1', apiKey: 'key', model: 'chat', text: 'rotor noise',
+      scope: 'linked-papers', linkedPaperIds: ['paper-1'],
+      embedding: { baseUrl: 'https://embedding.example.test/embeddings', apiKey: 'key', model: 'current' },
+    } });
+    assert.equal(result.citations.length, 1);
+    assert.equal(result.citations[0].sourceType, 'pdf-text');
+    assert.match(result.citations[0].excerpt, /Current model evidence/);
+    assert.doesNotMatch(result.citations[0].excerpt, /Old model evidence/);
+    const unmatched = await commands.notes_polish_openai_compatible({ options: {
+      baseUrl: 'https://example.test/v1', apiKey: 'key', model: 'chat', text: 'rotor noise',
+      scope: 'linked-papers', linkedPaperIds: ['paper-1'],
+      embedding: { baseUrl: 'https://embedding.example.test/embeddings', apiKey: 'key', model: 'unmatched' },
+    } });
+    assert.deepEqual(unmatched.citations, []);
+    assert.match(unmatched.notice, /向量模型与当前模型不一致/);
+  } finally {
+    ragStore.close();
+    rmSync(dataDir, { recursive: true, force: true });
+  }
 });

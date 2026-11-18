@@ -115,6 +115,7 @@ export interface NoteFolder {
 }
 
 export interface ListNotesRequest {
+  noteIds?: string[];
   paperId?: string | null;
   linkedPaperId?: string | null;
   type?: NoteType | null;

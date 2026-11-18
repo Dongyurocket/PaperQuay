@@ -3,10 +3,6 @@ const path = require('node:path');
 const {
   cleanString,
   id,
-  openAiChat,
-  parseJsonObject,
-  pickChatText,
-  toError,
   writeJsonSync,
 } = require('./utils.cjs');
 
@@ -15,8 +11,6 @@ const PAPER_NODE_PREFIX = 'paper:';
 const RELATION_STORE_FILE = 'paperquay-knowledge-graph-relations.json';
 const MAX_REFERENCE_NODES_PER_PAPER = 48;
 const MAX_CO_AUTHOR_EDGES_PER_PAPER = 5;
-const MAX_AI_GRAPH_ITEMS = 60;
-const MAX_AI_GRAPH_SUGGESTIONS = 16;
 
 function normalizeBoolean(value, fallback = true) {
   if (value === undefined || value === null) {
@@ -767,175 +761,6 @@ async function createKnowledgeGraphSnapshot(context, request = {}) {
   return filterLocalGraph(snapshot, localNodeId, localDepth);
 }
 
-function graphItemText(node, library, notes) {
-  if (node.type === 'paper') {
-    const paper = library.papers.find((item) => item.id === node.paperId);
-    return [
-      paper?.title,
-      authorsText(paper || {}),
-      paper?.year,
-      paper?.publication,
-      paper?.abstractText,
-      paper?.keywords?.join(', '),
-      paper?.aiSummary,
-      paper?.userNote,
-    ].filter(Boolean).join('\n').slice(0, 1200);
-  }
-
-  if (node.type === 'note') {
-    const note = notes.find((item) => item.id === node.noteId);
-    return [note?.title, note?.contentText || note?.excerpt || note?.content]
-      .filter(Boolean)
-      .join('\n')
-      .slice(0, 1000);
-  }
-
-  return [node.label, node.subtitle].filter(Boolean).join('\n').slice(0, 500);
-}
-
-function buildAiRelationPrompt(payload) {
-  const system = [
-    'You are PaperQuay Knowledge Graph Builder.',
-    'Infer useful scholarly graph relations among existing nodes only.',
-    'Return strict JSON only. Do not use markdown fences.',
-    'Never invent node ids. sourceId and targetId must be copied exactly from the provided nodes.',
-    'Prefer high-signal relations: builds_on, contrasts_with, same_problem, same_method, uses_dataset, supports, extends, explains, summarizes, prerequisite_of.',
-    'Do not duplicate existing edges. Skip weak or obvious generic relations.',
-    'Each relation needs a concise label, evidence-grounded description, and confidence between 0 and 1.',
-    'Example JSON: {"relations":[{"sourceId":"paper:paper-a","targetId":"note:note-b","label":"explains","description":"The note summarizes the paper method and limitations.","confidence":0.84}]}',
-  ].join('\n');
-
-  return [
-    { role: 'system', content: system },
-    {
-      role: 'user',
-      content: JSON.stringify({
-        task: 'Suggest PaperQuay knowledge graph relations.',
-        allowedNodeIds: payload.nodes.map((node) => node.id),
-        nodes: payload.nodes,
-        existingEdges: payload.edges,
-        focusNodeId: payload.focusNodeId || null,
-        maxRelations: payload.maxRelations,
-      }),
-    },
-  ];
-}
-
-function shouldFallbackToChatCompletions(error) {
-  const message = toError(error);
-  return (
-    /responses HTTP (?:400|404|405|415|422|429|500|502|503|504)/i.test(message) ||
-    /upstream request failed|upstream_error|bad gateway|gateway timeout|not found|method not allowed/i.test(message)
-  );
-}
-
-async function openAiChatWithGraphFallback(options, messages, extra) {
-  try {
-    return await openAiChat(options, messages, extra);
-  } catch (error) {
-    if (options?.apiMode !== 'responses' || !shouldFallbackToChatCompletions(error)) {
-      throw error;
-    }
-
-    return openAiChat(
-      {
-        ...options,
-        apiMode: 'chat_completions',
-      },
-      messages,
-      extra,
-    );
-  }
-}
-
-async function suggestAiRelations(context, request = {}, options = {}) {
-  const maxRelations = normalizeLimit(request.maxRelations, 8, 1, MAX_AI_GRAPH_SUGGESTIONS);
-  const snapshot = await createKnowledgeGraphSnapshot(context, {
-    includeEmbeddingEdges: true,
-    includeCustomRelations: true,
-    embeddingEdgeLimit: 80,
-    embeddingMinSimilarity: Number.isFinite(Number(request.embeddingMinSimilarity))
-      ? Number(request.embeddingMinSimilarity)
-      : 0.78,
-    localNodeId: cleanString(request.focusNodeId),
-    localDepth: cleanString(request.focusNodeId) ? normalizeLimit(request.localDepth, 2, 1, 4) : 0,
-  });
-  const library = context.store.load();
-  const notes = context.noteStore.listNotes({ limit: 5000 });
-  const focusNodeId = cleanString(request.focusNodeId);
-  const nodes = snapshot.nodes
-    .filter((node) => node.type === 'paper' || node.type === 'note')
-    .slice(0, MAX_AI_GRAPH_ITEMS)
-    .map((node) => ({
-      id: node.id,
-      type: node.type,
-      label: node.label,
-      text: graphItemText(node, library, notes),
-    }));
-  const nodeIds = new Set(nodes.map((node) => node.id));
-  const existingEdgeKeys = new Set(
-    snapshot.edges.map((edge) => `${edge.source}->${edge.target}`),
-  );
-
-  if (nodes.length < 2) {
-    return [];
-  }
-
-  const data = await openAiChatWithGraphFallback(
-    options,
-    buildAiRelationPrompt({
-      nodes,
-      edges: snapshot.edges
-        .filter((edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target))
-        .map((edge) => ({
-          sourceId: edge.source,
-          targetId: edge.target,
-          type: edge.type,
-          label: edge.label,
-        }))
-        .slice(0, 160),
-      focusNodeId,
-      maxRelations,
-    }),
-    { responseFormat: { type: 'json_object' } },
-  );
-  const parsed = parseJsonObject(pickChatText(data));
-  const rawRelations = Array.isArray(parsed?.relations) ? parsed.relations : [];
-  const seen = new Set();
-
-  return rawRelations
-    .map((relation) => {
-      const sourceId = cleanString(relation.sourceId || relation.source);
-      const targetId = cleanString(relation.targetId || relation.target);
-      const label = cleanString(relation.label) || 'related';
-      const key = `${sourceId}->${targetId}:${label.toLowerCase()}`;
-
-      if (
-        !nodeIds.has(sourceId) ||
-        !nodeIds.has(targetId) ||
-        sourceId === targetId ||
-        existingEdgeKeys.has(`${sourceId}->${targetId}`) ||
-        existingEdgeKeys.has(`${targetId}->${sourceId}`) ||
-        seen.has(key)
-      ) {
-        return null;
-      }
-
-      seen.add(key);
-      return {
-        sourceId,
-        targetId,
-        label,
-        description: cleanString(relation.description || relation.reason),
-        confidence: Number.isFinite(Number(relation.confidence))
-          ? Math.max(0, Math.min(1, Number(relation.confidence)))
-          : 0.7,
-      };
-    })
-    .filter(Boolean)
-    .slice(0, maxRelations);
-}
-
 function createKnowledgeGraphCommands(context) {
   return {
     async knowledge_graph_get({ request = {} }) {
@@ -945,6 +770,9 @@ function createKnowledgeGraphCommands(context) {
       return listCustomRelations(context.appPaths);
     },
     knowledge_graph_create_relation({ request = {} }) {
+      if (request.type && request.type !== 'custom_relation') {
+        throw new Error('Invalid graph relation type.');
+      }
       const relation = normalizeCustomRelation(request);
 
       if (!relation) {
@@ -966,13 +794,6 @@ function createKnowledgeGraphCommands(context) {
       writeRelationStore(context.appPaths, { version: 1, relations: nextRelations });
       return { deleted: nextRelations.length !== store.relations.length };
     },
-    knowledge_graph_suggest_relations: async ({ request = {}, options = {} }) => {
-      try {
-        return await suggestAiRelations(context, request, options);
-      } catch (error) {
-        throw new Error(`AI graph relation generation failed: ${toError(error)}`);
-      }
-    },
   };
 }
 
@@ -980,5 +801,4 @@ module.exports = {
   createKnowledgeGraphCommands,
   createKnowledgeGraphSnapshot,
   extractPaperReferenceCandidates,
-  shouldFallbackToChatCompletions,
 };

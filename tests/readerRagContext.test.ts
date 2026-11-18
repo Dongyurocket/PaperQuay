@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildMineruRagChunks, buildRagContextText } from '../src/features/reader/readerRag.ts';
+import { buildMineruRagChunks, buildPdfRagChunks, buildRagContextText } from '../src/features/reader/readerRag.ts';
 import type { RagChunkInput, RagRetrievalResult } from '../src/types/reader.ts';
 
 const BODY_SEED_TEXT =
@@ -30,6 +30,41 @@ function makeHit(overrides: Partial<RagRetrievalResult> & { chunkId: string }): 
 function makePreparedSource(chunks: RagChunkInput[]) {
   return [{ sourceType: 'mineru-markdown' as const, sourceSignature: 'sig', chunks }];
 }
+
+test('PDF chunks preserve first, later, and empty-page locations', () => {
+  const chunks = buildPdfRagChunks(`# Page 1\n${'Long first page. '.repeat(100)}\n# Page 2\nSecond page.`);
+  assert.ok(chunks.filter((chunk) => chunk.pageIndex === 0).length > 1);
+  assert.equal(chunks.at(-1)?.pageIndex, 1);
+  assert.ok(!chunks[0]?.text.startsWith('# Page'));
+  assert.equal(buildPdfRagChunks('# Page 3\nFirst nonempty page.')[0]?.pageIndex, 2);
+  assert.equal(buildPdfRagChunks('# Page 1\n\n# Page 2\nSecond page.')[0]?.pageIndex, 1);
+  assert.equal(buildPdfRagChunks('Plain text without a page marker.')[0]?.pageIndex, null);
+});
+
+test('legacy PDF first-page hit gets a location only when its text matches', () => {
+  const chunks = buildPdfRagChunks(`# Page 3\n${'First nonempty page. '.repeat(100)}\n# Page 4\nNext page.`);
+  const preparedSources = [{ sourceType: 'pdf-text' as const, sourceSignature: 'sig', chunks }];
+  const oldText = `# Page 3\n${chunks[0]!.text.slice(0, 400)}`;
+  const context = buildRagContextText({
+    results: [makeHit({ sourceType: 'pdf-text', chunkId: 'pdf:0:0', text: oldText })],
+    topK: 1,
+    mineruBlocks: [],
+    preparedSources,
+  });
+  assert.equal(context.citations[0]?.pageIndex, 2);
+  assert.equal(context.retrievals[0]?.pageIndex, 2);
+  assert.equal(context.retrievals.length, 1);
+
+  for (const text of ['# Page 4\nFirst nonempty page.', '# Page 3\nUnrelated text.', 'First nonempty page.']) {
+    const unmatched = buildRagContextText({
+      results: [makeHit({ sourceType: 'pdf-text', chunkId: 'pdf:0:0', text })],
+      topK: 1,
+      mineruBlocks: [],
+      preparedSources,
+    });
+    assert.equal(unmatched.citations[0]?.pageIndex, null);
+  }
+});
 
 test('buildRagContextText expands plain-text hits with before/after neighbors in reading order', () => {
   const chunks = [

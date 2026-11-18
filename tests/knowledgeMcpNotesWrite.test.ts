@@ -40,6 +40,14 @@ test('create_note 创建笔记并自动抽取标签与 wiki 双链', () => {
     assert.equal(created.note.paperId, 'global-notes');
     assert.deepEqual([...created.note.tags].sort(), ['inference', 'llm']);
     assert.deepEqual(created.note.linkedNoteIds, [target.noteId]);
+    const page = service.getNote({ noteId: created.noteId, limit: 5 });
+    assert.equal(page.note.contentText.length, 5);
+    assert.equal(page.note.nextOffset, 5);
+    assert.deepEqual(page.note.tags.sort(), ['inference', 'llm']);
+    assert.equal(page.note.links[0].noteId, target.noteId);
+    assert.equal(service.getNote({ noteId: created.noteId, offset: 5 }).note.nextOffset, null);
+    assert.throws(() => service.getNote({ noteId: created.noteId, limit: 20001 }), /limit/);
+    assert.equal(service.getNote({ noteId: 'missing' }).note, null);
     const stored = service.withWritableNoteStore((store: any) => store.getNote({ id: created.noteId }));
     assert.equal(stored.contentJson.type, 'doc');
     assert.ok(stored.contentJson.content[0].content.some((node: any) => node.type === 'hashTag'));

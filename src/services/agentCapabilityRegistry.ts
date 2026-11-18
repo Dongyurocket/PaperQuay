@@ -1,5 +1,4 @@
 import type { AgentToolMountContext } from './agentLoop.ts';
-import { runComparativeSurveyCapability, type ComparativeSurveyResult } from './agentCapability.ts';
 import type { AgentNoteWritePlan } from './agentNotePlan.ts';
 import {
   runGraphExploreCapability,
@@ -28,7 +27,6 @@ export type AgentCapabilityId =
   | 'graph-explore';
 
 export type AgentCapabilityResult =
-  | { kind: 'survey'; survey: ComparativeSurveyResult }
   | { kind: 'audit'; audit: CitationAuditResult }
   | {
     kind: 'note-plan';
@@ -96,7 +94,6 @@ export interface AgentCapabilityDefinition {
 
 /**
  * 通用 capability 阶段事件（方案第 4.3 节）：stage 为注册表中的阶段 id。
- * ComparativeSurveyEvent 与各能力事件均可赋值到该类型。
  */
 export type AgentCapabilityEvent =
   | { kind: 'stage_start'; capabilityId?: AgentCapabilityId; stage: string; attempt: number }
@@ -165,15 +162,7 @@ async function runNoteDistillFromRegistry(input: AgentCapabilityRunnerInput): Pr
   });
 }
 
-export const AGENT_CAPABILITIES: Record<AgentCapabilityId, AgentCapabilityDefinition> = {
-  'comparative-survey': {
-    id: 'comparative-survey',
-    title: { 'zh-CN': '库内综述', 'en-US': 'Comparative Survey' },
-    summary: '对比分析选定文献的核心观点、方法与实验证据，输出结构化综述报告与引用出处。',
-    stages: ['rephrase', 'decompose', 'research', 'report'] as const,
-    minPapers: 2,
-    runner: runComparativeSurveyCapability as unknown as AgentCapabilityDefinition['runner'],
-  },
+export const AGENT_CAPABILITIES: Record<Exclude<AgentCapabilityId, 'comparative-survey'>, AgentCapabilityDefinition> = {
   'citation-audit': {
     id: 'citation-audit',
     title: { 'zh-CN': '引用核对', 'en-US': 'Citation Audit' },
@@ -205,7 +194,7 @@ export const AGENT_CAPABILITIES: Record<AgentCapabilityId, AgentCapabilityDefini
 
 export function getAgentCapability(id: string): AgentCapabilityDefinition | undefined {
   if (id in AGENT_CAPABILITIES) {
-    return AGENT_CAPABILITIES[id as AgentCapabilityId];
+    return AGENT_CAPABILITIES[id as keyof typeof AGENT_CAPABILITIES];
   }
   return undefined;
 }

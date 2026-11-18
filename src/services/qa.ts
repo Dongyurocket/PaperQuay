@@ -45,6 +45,7 @@ export async function askDocumentOpenAICompatible(
 export async function askDocumentOpenAICompatibleStream(
   options: OpenAICompatibleQaOptions,
   handlers: QaStreamHandlers = {},
+  signal?: AbortSignal,
 ): Promise<string> {
   const requestId = crypto.randomUUID();
   let answer = '';
@@ -52,7 +53,7 @@ export async function askDocumentOpenAICompatibleStream(
   const unlisten = await listen<QaStreamEventPayload>(QA_STREAM_EVENT, (event) => {
     const payload = event.payload;
 
-    if (!payload || payload.requestId !== requestId) {
+    if (!payload || payload.requestId !== requestId || signal?.aborted) {
       return;
     }
 
@@ -77,22 +78,28 @@ export async function askDocumentOpenAICompatibleStream(
     handlers.onDone?.(cleanQaAssistantOutput(answer));
   });
 
+  const abort = () => { void invoke('ask_document_openai_compatible_stream_cancel', { requestId }).catch(() => {}); };
   try {
-    await invoke<void>('ask_document_openai_compatible_stream', {
+    if (signal?.aborted) throw new DOMException('Cancelled', 'AbortError');
+    signal?.addEventListener('abort', abort, { once: true });
+    const completedAnswer = await invoke<string | void>('ask_document_openai_compatible_stream', {
       requestId,
       options,
     });
 
+    if (signal?.aborted) throw new DOMException('Cancelled', 'AbortError');
     if (streamError) {
       throw new Error(streamError);
     }
 
-    return cleanQaAssistantOutput(answer);
+    return cleanQaAssistantOutput(typeof completedAnswer === 'string' ? completedAnswer : answer);
   } catch (error) {
+    if (signal?.aborted) throw new DOMException('Cancelled', 'AbortError');
     const message = toErrorMessage(error, streamError || '调用论文问答流式接口失败');
     handlers.onError?.(message);
     throw new Error(message);
   } finally {
+    signal?.removeEventListener('abort', abort);
     unlisten();
   }
 }

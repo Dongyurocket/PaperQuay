@@ -8,6 +8,7 @@ import path from 'node:path';
 const require = createRequire(import.meta.url);
 const { createLibraryStore } = require('../electron/backend/libraryStore.cjs');
 const { createRagStore } = require('../electron/backend/ragStore.cjs');
+const { createAiCommands } = require('../electron/backend/aiCommands.cjs');
 const {
   createPaperRagLock,
   guardRagIndexCommands,
@@ -102,6 +103,10 @@ test('excluded paper index writes are rejected without a failed row', async () =
     );
     await assert.rejects(
       () => commands.rag_index_document({ request }),
+      /rag_index_excluded/,
+    );
+    await assert.rejects(
+      () => commands.rag_index_document({ request: { ...request, documentKey: 'native-library:paper-1' } }),
       /rag_index_excluded/,
     );
     assert.equal(rag.getDocumentIndexStatus({ documentKey: 'paper-1', sourceType: 'pdf-text' }), null);
@@ -210,4 +215,109 @@ test('membership rejects the whole batch when one paper is missing', async () =>
     store.close();
     rmSync(appPaths.dataDir, { recursive: true, force: true });
   }
+});
+
+test('retrieval excludes stale paper indexes before ranking while preserving note sources', async () => {
+  const appPaths = createAppPaths();
+  const store = createLibraryStore(appPaths);
+  const rag = createRagStore({ ragDatabasePath: appPaths.ragDatabasePath });
+  try {
+    seedPaper(store, 'excluded');
+    seedPaper(store, 'included');
+    for (const [documentKey, sourceType, embedding, count] of [
+      ['excluded', 'pdf-text', [1, 0], 12],
+      ['native-library:excluded', 'pdf-text', [1, 0], 12],
+      ['included', 'pdf-text', [0, 1], 2],
+      ['excluded', 'note', [1, 0], 1],
+    ] as const) {
+      rag.indexDocument({
+        documentKey, sourceType, title: documentKey, sourceSignature: 'sig', embeddingModelKey: 'model',
+        totalChunkCount: count,
+        chunks: Array.from({ length: count }, (_, index) => ({
+          chunkId: `${sourceType}-${index}`, chunkIndex: index, text: 'shared search phrase', embedding,
+        })),
+      });
+    }
+    store.setPapersRagEnabled(['excluded'], false);
+    const commands = createAiCommands({ store, ragStore: rag });
+    const coverage = await commands.rag_retrieve_document_chunks({ request: {
+      queryEmbedding: [1, 0], queryText: 'shared', topK: 2, embeddingModelKey: 'model',
+      documentKeys: ['excluded', 'included', 'unindexed'], includeDiagnostics: true, includeIndexCoverage: true,
+    } });
+    assert.deepEqual(coverage.indexCoverage, { total: 3, excluded: 1, ready: 1, unavailable: 1 });
+    const wrongModel = await commands.rag_retrieve_document_chunks({ request: {
+      queryEmbedding: [1, 0], topK: 2, embeddingModelKey: 'other', documentKeys: ['included'],
+      includeDiagnostics: true, includeIndexCoverage: true,
+    } });
+    assert.deepEqual(wrongModel.indexCoverage, { total: 1, excluded: 0, ready: 0, unavailable: 1 });
+    const wrongDimension = await commands.rag_retrieve_document_chunks({ request: {
+      queryEmbedding: [1, 0, 0], topK: 2, embeddingModelKey: 'model', documentKeys: ['included'],
+      includeDiagnostics: true, includeIndexCoverage: true,
+    } });
+    assert.deepEqual(wrongDimension.indexCoverage, { total: 1, excluded: 0, ready: 0, unavailable: 1 });
+    for (const embeddingModelKey of ['model', undefined]) {
+      const result = await commands.rag_retrieve_document_chunks({ request: {
+        queryEmbedding: [1, 0], queryText: 'shared search phrase', topK: 2, embeddingModelKey,
+        documentKeys: ['excluded', 'native-library:excluded', 'included'], includeDiagnostics: true,
+      } });
+      assert.equal(result.results.length, 2);
+      assert.ok(result.results.every((row: any) => row.documentKey === 'included'));
+      const global = await commands.rag_retrieve_document_chunks({ request: {
+        queryEmbedding: [1, 0], queryText: 'shared search phrase', topK: 2, embeddingModelKey,
+      } });
+      assert.equal(global.length, 2);
+      assert.ok(global.every((row: any) => row.documentKey === 'included'));
+    }
+    store.setPapersRagEnabled(['included'], false);
+    const allExcluded = await commands.rag_retrieve_document_chunks({ request: {
+      queryEmbedding: [1, 0], queryText: 'shared', topK: 2,
+    } });
+    assert.deepEqual(allExcluded, []);
+    const single = await commands.rag_retrieve_document_chunks({ request: {
+      documentKey: 'native-library:excluded', queryEmbedding: [1, 0], queryText: 'shared', topK: 2,
+    } });
+    assert.deepEqual(single, []);
+    const note = await commands.rag_retrieve_document_chunks({ request: {
+      documentKey: 'excluded', sourceType: 'note', queryEmbedding: [1, 0], queryText: 'shared', topK: 2,
+    } });
+    assert.equal(note.length, 1);
+    const context = await commands.rag_get_chunk_context({ request: {
+      documentKey: 'native-library:excluded', sourceType: 'pdf-text', chunkId: 'pdf-text-0',
+    } });
+    assert.equal(context.status, 'not-ready');
+  } finally {
+    rag.close();
+    store.close();
+    rmSync(appPaths.dataDir, { recursive: true, force: true });
+  }
+});
+
+test('retrieval retries when membership changes during worker execution', async () => {
+  let disabled: string[] = [];
+  let calls = 0;
+  const store = { listRagDisabledPaperIds: () => disabled };
+  const ragStore = {
+    async retrieveDocumentChunks(request: any) {
+      calls += 1;
+      if (calls === 1) {
+        disabled = ['excluded'];
+        return [{ documentKey: 'excluded', sourceType: 'pdf-text' }];
+      }
+      assert.ok(request.excludedDocumentKeys.includes('excluded'));
+      assert.ok(request.excludedDocumentKeys.includes('native-library:excluded'));
+      return [{ documentKey: 'included', sourceType: 'pdf-text' }];
+    },
+    async getChunkContext() {
+      disabled = ['excluded'];
+      return { status: 'ready', slices: [{ text: 'stale' }] };
+    },
+  };
+  const commands = createAiCommands({ store, ragStore });
+  const result = await commands.rag_retrieve_document_chunks({ request: {} });
+  assert.equal(calls, 2);
+  assert.equal(result[0].documentKey, 'included');
+  disabled = [];
+  const context = await commands.rag_get_chunk_context({ request: { documentKey: 'excluded', sourceType: 'pdf-text' } });
+  assert.equal(context.status, 'not-ready');
+  assert.deepEqual(context.slices, []);
 });

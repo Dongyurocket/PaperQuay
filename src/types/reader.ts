@@ -264,6 +264,15 @@ export interface RagRetrievalResult {
   expandedFrom?: string;
 }
 
+export type RagFtsStatus = "searched" | "not-queried" | "unavailable" | "failed";
+
+export interface RagRetrievalDiagnostics {
+  results: RagRetrievalResult[];
+  ftsStatus: RagFtsStatus;
+  ftsHitCount: number;
+  indexCoverage?: { total: number; excluded: number; ready: number; unavailable: number } | null;
+}
+
 /** 「查看上下文」前后邻接切片查询（基于同文档+同来源 chunkIndex 排序）。 */
 export interface RagChunkContextSlice {
   chunkId: string;
@@ -425,6 +434,9 @@ export interface DocumentChatQaContext {
   indexedChunkCount?: number;
   totalChunkCount?: number;
   errorMessage?: string | null;
+  ftsStatuses?: RagFtsStatus[];
+  ftsHitCount?: number;
+  partialSources?: boolean;
 }
 
 export interface DocumentChatCitation {

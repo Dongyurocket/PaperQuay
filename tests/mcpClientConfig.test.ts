@@ -74,3 +74,26 @@ test('development MCP config points at the source entry and system Node', () => 
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('missing packaged entry remains an installed configuration', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'paperquay-mcp-missing-config-'));
+  try {
+    const resourcesPath = path.join(root, 'resources');
+    const execPath = path.join(root, 'PaperQuay.exe');
+    const config = buildMcpClientConfig({
+      isPackaged: true,
+      execPath,
+      resourcesPath,
+      appPath: path.join(resourcesPath, 'app.asar'),
+      systemNodeVersion: null,
+    });
+
+    assert.equal(config.mode, 'installed');
+    assert.equal(config.entry, path.join(resourcesPath, 'paperquay-mcp', 'server.cjs'));
+    assert.equal(config.entryExists, false);
+    assert.equal(config.command, execPath);
+    assert.deepEqual(config.env, { ELECTRON_RUN_AS_NODE: '1' });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

@@ -11,7 +11,7 @@ import {
   upsertRecentPdfScrollPosition,
 } from '../src/features/reader/documentReaderHistory.ts';
 import { aggregateReadingTimeChartBins } from '../src/features/literature/readingTimeChartUtils.ts';
-import { loadPaperHistoryMap } from '../src/utils/paperHistory.ts';
+import { loadPaperHistoryMap, savePaperHistory } from '../src/utils/paperHistory.ts';
 import type { PdfReadingHeatmap, PdfScrollPosition } from '../src/types/reader.ts';
 import type { DocumentChatSession, PaperHistoryRecord } from '../src/types/reader.ts';
 
@@ -36,6 +36,31 @@ function heatmap(overrides: Partial<PdfReadingHeatmap> = {}): PdfReadingHeatmap 
     ...overrides,
   };
 }
+
+test('paper history round-trips retrieval diagnostics', () => {
+  const originalLocalStorage = globalThis.localStorage;
+  let stored = '';
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    value: { getItem: () => stored || null, setItem: (_key: string, value: string) => { stored = value; } },
+  });
+  try {
+    const qaContext = { origin: 'local-rag', retrievalState: 'retrieved', ftsStatuses: ['failed'],
+      ftsHitCount: 0, partialSources: true } as const;
+    const record = {
+      workspaceId: 'synthetic', lastOpenedAt: 1, pdfScrollPositions: {}, pdfReadingHeatmaps: {},
+      workspaceNoteMarkdown: '', annotations: [], selectedQaSessionId: 'session',
+      qaSessions: [{ id: 'session', title: 'Test', createdAt: 1, updatedAt: 1,
+        messages: [{ id: 'answer', role: 'assistant', content: 'Answer', createdAt: 1, qaContext }] }],
+    } as unknown as PaperHistoryRecord;
+    savePaperHistory(record);
+    const restored = restorePaperQaHistory(loadPaperHistoryMap().synthetic, () => { throw new Error('unexpected session'); }, '');
+    assert.deepEqual(restored.qaSessions[0].messages[0].qaContext, qaContext);
+  } finally {
+    if (originalLocalStorage) Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: originalLocalStorage });
+    else delete (globalThis as { localStorage?: Storage }).localStorage;
+  }
+});
 
 test('paper history preserves PDF compare mode', () => {
   const originalLocalStorage = globalThis.localStorage;

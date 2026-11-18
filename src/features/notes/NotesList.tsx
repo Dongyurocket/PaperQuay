@@ -11,6 +11,7 @@ interface NotesListProps {
   onDelete: (note: Note) => void;
   onContextMenu?: (event: MouseEvent, note: Note) => void;
   onBatchUpdate?: (patches: Array<{ noteId: string; patch: { tags?: string[]; folderId?: string | null } }>) => void;
+  channelsById?: Record<string, string[]>;
 }
 
 export function NotesList({
@@ -20,6 +21,7 @@ export function NotesList({
   onDelete,
   onContextMenu,
   onBatchUpdate,
+  channelsById,
 }: NotesListProps) {
   const [sort, setSort] = useState<NoteListSort>('updatedAt');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
@@ -101,6 +103,7 @@ export function NotesList({
         <NoteCard
           key={note.id}
           note={note}
+          channels={channelsById?.[note.id]}
           active={note.id === activeNoteId}
           onSelect={onSelect}
           onDelete={onDelete}

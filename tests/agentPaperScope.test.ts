@@ -1,9 +1,20 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 
 import type { LiteraturePaper } from '../src/types/library.ts';
 import { resolveAgentPaperIds, resolveAgentPaperScope } from '../src/services/agentPaperScope.ts';
 import { createLibraryAgentTools } from '../src/services/agentTools.ts';
+import { runAgentLoop } from '../src/services/agentLoop.ts';
+import { AgentCitationRegistry } from '../src/services/agentCitationRegistry.ts';
+import { applyAgentNoteWritePlan } from '../src/services/agentNotePlan.ts';
+import type { LibraryAgentRagCitation } from '../src/services/libraryAgent.ts';
+
+const require = createRequire(import.meta.url);
+const { createNoteStore } = require('../electron/backend/noteStore.cjs');
 
 function paper(id: string, title = id): LiteraturePaper {
   return {
@@ -34,6 +45,93 @@ function paper(id: string, title = id): LiteraturePaper {
 }
 
 const context = { signal: undefined, citations: [] };
+
+test('ordinary agent retrieves two papers before proposing a synthesis note for approval', async () => {
+  const evidence = [
+    { id: 'a', label: '1', paperId: 'paper-a', paperTitle: 'Paper A', sourceType: 'pdf-text' as const, pageIndex: 0, previewText: 'The first method uses supervised learning to predict rotor noise.' },
+    { id: 'b', label: '2', paperId: 'paper-b', paperTitle: 'Paper B', sourceType: 'pdf-text' as const, pageIndex: 1, previewText: 'The second method uses physical simulations to predict rotor noise.' },
+  ];
+  const citations: LibraryAgentRagCitation[] = [];
+  const registry = new AgentCitationRegistry(citations);
+  const seenScopes: string[][] = [];
+  const tools = createLibraryAgentTools({
+    papers: [paper('paper-a', 'Paper A'), paper('paper-b', 'Paper B')],
+    currentPaperScopeIds: ['paper-a', 'paper-b'],
+    searchRag: async ({ paperIds }) => {
+      seenScopes.push(paperIds ?? []);
+      return { chunks: registry.register(evidence).map((citation) => ({
+        citationId: citation.id, evidenceToken: `[[cite:${citation.id}]]`, paperId: citation.paperId,
+        page: citation.pageIndex == null ? null : citation.pageIndex + 1, blockId: null, snippet: citation.previewText ?? '',
+      })) };
+    },
+    createWritePlan: () => ({ id: 'plan', tool: 'metadata', title: '', description: '', items: [], createdAt: 1 }),
+  });
+  let turn = 0;
+  const result = await runAgentLoop({
+    tools, citations, runtimeContext: { citations },
+    mountContext: { papersCount: 2, hasOpenDocument: false, ragReady: true, localLibraryMode: true },
+    messages: [{ role: 'user', content: 'Compare the two papers and propose a synthesis note.' }],
+    contextLabel: 'two selected papers',
+    chatTurn: async (request) => {
+      turn += 1;
+      if (turn === 1) return { content: '', toolCalls: [{ id: 'search', name: 'rag_search', arguments: { query: 'rotor noise methods' } }] };
+      const toolMessage = request.messages.find((message) => message.toolCallId === 'search');
+      assert.match(toolMessage?.content ?? '', /paper-a/);
+      assert.match(toolMessage?.content ?? '', /paper-b/);
+      return { content: '', toolCalls: [{ id: 'write', name: 'write_notes', arguments: {
+        summary: 'Compare methods', operations: [{ kind: 'create', pageKind: 'synthesis', title: 'Method comparison',
+          content: 'The first method uses supervised learning to predict rotor noise [[cite:a]].\n\nThe second method uses physical simulations to predict rotor noise [[cite:b]].' }],
+      } }] };
+    },
+  });
+  assert.deepEqual(seenScopes, [['paper-a', 'paper-b']]);
+  assert.equal(result.kind, 'note-plan');
+  if (result.kind !== 'note-plan') throw new Error('Expected a reviewable note plan');
+  assert.equal(result.notePlan.operations[0]?.pageKind, 'synthesis');
+  assert.equal(result.notePlan.operations[0]?.kind, 'create');
+  assert.equal(result.citations?.length, 2);
+  const operation = result.notePlan.operations[0];
+  assert.deepEqual(operation?.anchors?.map(({ paperId, pageIndex, excerpt }) => ({ paperId, pageIndex, excerpt })), [
+    { paperId: 'paper-a', pageIndex: 0, excerpt: evidence[0].previewText },
+    { paperId: 'paper-b', pageIndex: 1, excerpt: evidence[1].previewText },
+  ]);
+  assert.match(operation?.content ?? '', /\[Source 1\]/);
+  assert.match(operation?.content ?? '', /\[Source 2\]/);
+  assert.doesNotMatch(operation?.content ?? '', /\[\[cite:/);
+
+  const directory = mkdtempSync(path.join(tmpdir(), 'paperquay-agent-comparison-'));
+  let store = createNoteStore({ notesDatabasePath: path.join(directory, 'notes.sqlite') });
+  const originalWindow = globalThis.window;
+  (globalThis as any).window = {
+    dispatchEvent() {},
+    paperquay: { async invoke(command: string, args: any) {
+      if (command === 'library_list_papers') return [];
+      if (command === 'notes_list') return store.listNotes(args.request);
+      if (command === 'notes_create') return store.createNote(args.request);
+      if (command === 'notes_get') return store.getNote({ id: args.id });
+      throw new Error(`Unexpected command: ${command}`);
+    } },
+  };
+  try {
+    assert.equal(store.listNotes().length, 0);
+    const applied = await applyAgentNoteWritePlan(JSON.parse(JSON.stringify(result.notePlan)));
+    assert.equal(applied.applied, 1);
+    assert.equal(applied.failed, 0);
+    store.close();
+    store = createNoteStore({ notesDatabasePath: path.join(directory, 'notes.sqlite') });
+    const saved = store.getNote({ id: applied.noteIds[0] });
+    assert.equal(saved.pageKind, 'synthesis');
+    assert.deepEqual(saved.anchors.map(({ paperId, pageIndex }: { paperId: string; pageIndex: number }) => ({ paperId, pageIndex })), [
+      { paperId: 'paper-a', pageIndex: 0 },
+      { paperId: 'paper-b', pageIndex: 1 },
+    ]);
+    for (const anchor of saved.anchors) assert.match(JSON.stringify(saved.contentJson), new RegExp(anchor.id));
+  } finally {
+    (globalThis as any).window = originalWindow;
+    store.close();
+    rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+  }
+});
 
 test('scope resolver keeps explicit empty scopes empty and rejects out-of-scope IDs', () => {
   const papers = [paper('paper-a'), paper('paper-b')];
@@ -164,6 +262,23 @@ test('request_paper_context permits omitted paperIds and uses the full library w
   assert.equal(payload.status, 'ok');
   assert.deepEqual(requested, ['paper-a', 'paper-b']);
   assert.equal(payload.requestedCount, 2);
+});
+
+test('paper context exposes retrieval diagnostics to the model', async () => {
+  const tools = createLibraryAgentTools({
+    papers: [paper('paper-a')],
+    getPaperContext: async () => ({
+      text: 'Evidence', source: 'pdf-text-rag', retrievalOutcome: 'hit',
+      retrievalDiagnostics: { ftsStatuses: ['failed'], ftsHitCount: 0, partialSources: true },
+    }),
+    createWritePlan: () => ({ id: 'plan', tool: 'metadata', title: '', description: '', items: [], createdAt: 1 }),
+  });
+  const result = await tools.find((candidate) => candidate.name === 'request_paper_context')!.execute(
+    { mode: 'pdf-text', reason: 'Evidence' }, context,
+  );
+  const payload = JSON.parse(result.content);
+  assert.equal(payload.papers[0].retrievalOutcome, 'hit');
+  assert.deepEqual(payload.papers[0].retrievalDiagnostics, { ftsStatuses: ['failed'], ftsHitCount: 0, partialSources: true });
 });
 
 test('paper context batches expose every omitted ID and permit fetching the remaining papers', async () => {

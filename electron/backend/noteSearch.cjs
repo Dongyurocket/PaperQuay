@@ -7,6 +7,10 @@ function noteConditions(db, request) {
   const columns = new Set(db.prepare('PRAGMA table_info(notes)').all().map((row) => row.name));
   const conditions = ['deleted_at IS NULL'];
   const params = [];
+  if (Array.isArray(request.noteIds)) {
+    conditions.push('id IN (SELECT value FROM json_each(?))');
+    params.push(JSON.stringify(request.noteIds.filter((id) => typeof id === 'string')));
+  }
   if (request.paperId) {
     conditions.push(request.paperIdOnly ? 'paper_id = ?' : '(paper_id = ? OR linked_paper_id = ?)');
     params.push(request.paperId);

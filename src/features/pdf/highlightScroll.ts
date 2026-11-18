@@ -21,3 +21,7 @@ export function shouldScrollToHighlight(
   const nextKey = buildHighlightScrollKey(target);
   return nextKey !== '' && nextKey !== lastScrollKey;
 }
+
+export function isHighlightScrollReady(pagesInitialized: boolean, targetPageExists: boolean): boolean {
+  return pagesInitialized && targetPageExists;
+}

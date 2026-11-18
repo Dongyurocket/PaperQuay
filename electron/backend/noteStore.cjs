@@ -539,7 +539,7 @@ function normalizeNoteInput(input, existing = null) {
     tags: normalizeTags([...explicitTags, ...extractedTags]),
     color: cleanString(input?.color ?? existing?.color) || '#fef3c7',
     createdAt: Number(existing?.createdAt) || Math.trunc(Number(input?.createdAt)) || timestamp,
-    updatedAt: timestamp,
+    updatedAt: Math.max(timestamp, (Number(existing?.updatedAt) || 0) + 1),
     deletedAt:
       input?.deletedAt === undefined
         ? existing?.deletedAt ?? null
@@ -1035,6 +1035,10 @@ function createNoteStore(appPaths) {
     const saved = withTransaction(db, () => {
       const existing = getNoteById(db, noteId, { includeDeleted: true });
       if (!existing) throw new Error(`Note does not exist: ${noteId}`);
+      if (request.expectedUpdatedAt !== undefined &&
+        (existing.deletedAt || existing.updatedAt !== request.expectedUpdatedAt)) {
+        throw new Error('NOTE_CONFLICT: 笔记已被其他操作修改，请刷新或确认后重试。');
+      }
 
       const note = normalizeNoteInput({ ...existing, ...(request.patch ?? {}), id: noteId }, existing);
       upsertNote(db, note);
@@ -1049,7 +1053,7 @@ function createNoteStore(appPaths) {
     if (!noteId) throw new Error('note id is required');
     const timestamp = now();
 
-    db.prepare('UPDATE notes SET deleted_at = ?, updated_at = ? WHERE id = ?')
+    db.prepare('UPDATE notes SET deleted_at = ?, updated_at = MAX(?, updated_at + 1) WHERE id = ?')
       .run(timestamp, timestamp, noteId);
     deleteFtsRow(db, noteId);
     notifyMutation({ id: noteId, deletedAt: timestamp });
@@ -1110,7 +1114,7 @@ function createNoteStore(appPaths) {
     return withTransaction(db, () => {
       const removedIds = [folderId, ...getFolderDescendantIds(db, folderId)];
       const placeholders = removedIds.map(() => '?').join(',');
-      db.prepare(`UPDATE notes SET folder_id = NULL, updated_at = ? WHERE folder_id IN (${placeholders})`)
+      db.prepare(`UPDATE notes SET folder_id = NULL, updated_at = MAX(?, updated_at + 1) WHERE folder_id IN (${placeholders})`)
         .run(now(), ...removedIds);
       db.prepare(`DELETE FROM note_folders WHERE id IN (${placeholders})`).run(...removedIds);
       return { deletedFolderIds: removedIds };

@@ -256,8 +256,6 @@ function snippetWithNeighbors(ragDb, row) {
 
 // ---- 向量混合检索（与桌面端 ragStore.cjs 的混合检索逻辑对齐） ----
 
-const MAX_VECTOR_FANOUT_SOURCES = 500;
-
 // 与 src/services/rag.ts 的 normalizeBaseUrl 保持一致，用于比对 embedding_model_key。
 function normalizeEmbeddingBaseUrl(baseUrl) {
   const trimmed = cleanString(baseUrl);
@@ -299,7 +297,7 @@ function normalizeRetrievalMode(mode) {
 }
 
 function ragResultKey(row) {
-  return `${row.sourceType}::${row.chunkId}`;
+  return JSON.stringify([row.paperId, row.sourceType, row.chunkId]);
 }
 
 // ---- 写工具运行护栏 ----
@@ -378,6 +376,17 @@ class PaperQuayKnowledgeService {
 
   getNotesDb() {
     return openReadOnlyDb(this.appPaths.notesDatabasePath);
+  }
+
+  getExcludedPaperIds() {
+    const db = this.getLibraryDb();
+    if (!db) return new Set();
+    try {
+      if (!getTableColumns(db, 'papers').has('rag_enabled')) return new Set();
+      return new Set(db.prepare('SELECT id FROM papers WHERE rag_enabled = 0').all().map((row) => row.id));
+    } finally {
+      db.close();
+    }
   }
 
   searchPapers({ query = '', tag = '', categoryId = '', limit = 10 } = {}) {
@@ -646,8 +655,6 @@ class PaperQuayKnowledgeService {
     }
   }
 
-  // 选择与当前 embedding 配置最匹配的已索引向量维度：优先 model_key 完全匹配，
-  // 否则退到 ready 文档数最多的维度（调用方需自行校验查询向量维度一致）。
   pickVectorDimension(ragDb, modelKey) {
     let registered;
     try {
@@ -681,53 +688,19 @@ class PaperQuayKnowledgeService {
       return { dimension: Number(exact.dimension), modelKeyMatched: true };
     }
 
-    rows.sort((left, right) => Number(right.documentCount) - Number(left.documentCount));
-    return { dimension: Number(rows[0].dimension), modelKeyMatched: false };
+    return { dimension: null, modelKeyMatched: false };
   }
 
-  // 原生单次全局 KNN 检索：vec0 的 partition key 支持全局缺省查询，
-  // 通过单条 SQL 跨全库直接召回 Top-K 向量，免除逐文档循环与来源截断限制。
-  retrieveVectorChunks(ragDb, { queryVector, dimension, paperId, candidateLimit }) {
+  retrieveVectorChunks(ragDb, { queryVector, dimension, modelKey, paperId, candidateLimit, excludedPaperIds }) {
     const table = vectorTableName(dimension);
     const queryVec = toFloat32Array(queryVector);
-
-    if (paperId) {
-      const search = ragDb.prepare(`
-        SELECT
-          c.document_key AS paperId,
-          c.chunk_id AS chunkId,
-          c.source_type AS sourceType,
-          c.page_index AS pageIndex,
-          c.block_id AS blockId,
-          c.text,
-          v.distance
-        FROM ${table} v
-        JOIN rag_chunks c ON c.id = v.rowid
-        JOIN rag_indexes i
-          ON i.document_key = c.document_key
-         AND i.source_type = c.source_type
-         AND i.status = 'ready'
-         AND i.embedding_dimension = ?
-        WHERE v.embedding MATCH ?
-          AND k = ?
-          AND v.document_key = ?
-        ORDER BY v.distance
-      `);
-
-      const rows = search.all(dimension, queryVec, candidateLimit, paperId);
-      return {
-        rows: rows.map((row) => ({
-          paperId: row.paperId,
-          chunkId: row.chunkId,
-          sourceType: row.sourceType,
-          pageIndex: row.pageIndex ?? null,
-          blockId: row.blockId ?? null,
-          text: row.text,
-          score: Number(row.distance) || 0,
-        })),
-        truncated: false,
-      };
-    }
+    const sources = ragDb.prepare(`
+      SELECT document_key, source_type FROM rag_indexes
+      WHERE status = 'ready' AND embedding_dimension = ? AND embedding_model_key = ?
+        AND source_type IN ('mineru-markdown', 'pdf-text')
+        AND (? = '' OR document_key = ?)
+    `).all(dimension, modelKey, paperId, paperId)
+      .filter((source) => !excludedPaperIds?.has(source.document_key));
 
     const search = ragDb.prepare(`
       SELECT
@@ -740,18 +713,15 @@ class PaperQuayKnowledgeService {
         v.distance
       FROM ${table} v
       JOIN rag_chunks c ON c.id = v.rowid
-      JOIN rag_indexes i
-        ON i.document_key = c.document_key
-       AND i.source_type = c.source_type
-       AND i.status = 'ready'
-       AND i.embedding_dimension = ?
       WHERE v.embedding MATCH ?
         AND k = ?
-        AND v.source_type IN ('mineru-markdown', 'pdf-text')
+        AND v.document_key = ?
+        AND v.source_type = ?
       ORDER BY v.distance
     `);
 
-    const rows = search.all(dimension, queryVec, candidateLimit);
+    const rows = sources.flatMap((source) =>
+      search.all(queryVec, candidateLimit, source.document_key, source.source_type));
     return {
       rows: rows.map((row) => ({
         paperId: row.paperId,
@@ -761,7 +731,7 @@ class PaperQuayKnowledgeService {
         blockId: row.blockId ?? null,
         text: row.text,
         score: Number(row.distance) || 0,
-      })),
+      })).sort((left, right) => left.score - right.score).slice(0, candidateLimit),
       truncated: false,
     };
   }
@@ -807,7 +777,10 @@ class PaperQuayKnowledgeService {
     try {
       const safeLimit = Math.max(1, Math.min(30, Number(limit) || 8));
       const candidateLimit = Math.min(100, Math.max(safeLimit, safeLimit * 2));
+      const hasIndexStatus = getTableColumns(ragDb, 'rag_indexes').has('status');
+      const readySource = "EXISTS (SELECT 1 FROM rag_indexes i WHERE i.document_key = c.document_key AND i.source_type = c.source_type AND i.status = 'ready')";
       const targetPaperId = cleanString(paperId);
+      let excludedPaperIds = this.getExcludedPaperIds();
       const ftsQuery = escapeFtsQuery(cleanQuery);
       let warning;
       let embeddingModel;
@@ -830,7 +803,13 @@ class PaperQuayKnowledgeService {
       if (ftsQuery) {
         try {
           const conditions = ['rag_chunks_fts MATCH ?', "c.source_type != 'note'"];
+          if (hasIndexStatus) conditions.push(readySource);
           const params = [ftsQuery];
+
+          if (excludedPaperIds.size) {
+            conditions.push('c.document_key NOT IN (SELECT value FROM json_each(?))');
+            params.push(JSON.stringify([...excludedPaperIds]));
+          }
 
           if (targetPaperId) {
             conditions.push('c.document_key = ?');
@@ -885,30 +864,53 @@ class PaperQuayKnowledgeService {
 
             if (!pick) {
               warning = 'RAG 知识库中没有已完成的向量索引，已降级为关键词检索。';
+            } else if (!pick.modelKeyMatched) {
+              warning = '当前 Embedding 模型没有匹配的向量索引，已降级为关键词检索。';
             } else {
               const queryVector = await this.embedQuery(cleanQuery, config);
+
+              excludedPaperIds = this.getExcludedPaperIds();
+              ftsRows = ftsRows.filter((row) => !excludedPaperIds.has(row.paperId));
 
               if (queryVector.length !== pick.dimension) {
                 warning = `查询向量维度 (${queryVector.length}) 与索引维度 (${pick.dimension}) 不一致，已降级为关键词检索。`;
               } else {
+                const modelKey = buildEmbeddingModelKey(config);
                 const vectorResult = this.retrieveVectorChunks(ragDb, {
                   queryVector,
                   dimension: pick.dimension,
+                  modelKey,
                   paperId: targetPaperId,
                   candidateLimit,
+                  excludedPaperIds,
                 });
-                vectorRows = vectorResult.rows;
+                vectorRows = vectorResult.rows.filter((row) => !excludedPaperIds.has(row.paperId)).slice(0, candidateLimit);
                 vectorExecuted = true;
 
-                if (vectorResult.truncated) {
-                  warning = `向量检索仅覆盖最近索引的 ${MAX_VECTOR_FANOUT_SOURCES} 个来源（文档, source）组合。`;
-                }
               }
             }
           } catch (error) {
             warning = `向量检索失败，已降级为关键词检索：${error.message}`;
           }
         }
+      }
+
+      excludedPaperIds = this.getExcludedPaperIds();
+      ftsRows = ftsRows.filter((row) => !excludedPaperIds.has(row.paperId));
+      vectorRows = vectorRows.filter((row) => !excludedPaperIds.has(row.paperId));
+      const currentChunk = ragDb.prepare(`
+        SELECT text, page_index AS pageIndex, block_id AS blockId
+        FROM rag_chunks WHERE document_key = ? AND source_type = ? AND chunk_id = ?
+      `);
+      ftsRows = ftsRows.filter((row) => {
+        const current = currentChunk.get(row.paperId, row.sourceType, row.chunkId);
+        return current && current.text === row.text
+          && current.pageIndex === row.pageIndex && current.blockId === row.blockId;
+      });
+      if (hasIndexStatus) {
+        const ready = ragDb.prepare("SELECT 1 FROM rag_indexes WHERE document_key = ? AND source_type = ? AND status = 'ready'");
+        ftsRows = ftsRows.filter((row) => ready.get(row.paperId, row.sourceType));
+        vectorRows = vectorRows.filter((row) => ready.get(row.paperId, row.sourceType));
       }
 
       // 3. 融合排序：向量 + FTS 双通道走 RRF（与桌面端 rrfFuse 相同）；
@@ -926,7 +928,7 @@ class PaperQuayKnowledgeService {
 
           results = fused.map((row) => {
             const chunkId = row.chunkId.slice(row.paperId.length + 2);
-            const key = ragResultKey({ sourceType: row.sourceType, chunkId });
+            const key = ragResultKey({ paperId: row.paperId, sourceType: row.sourceType, chunkId });
             const channels = [];
             if (vectorKeys.has(key)) channels.push('vector');
             if (ftsKeys.has(key)) channels.push('fts');
@@ -946,7 +948,13 @@ class PaperQuayKnowledgeService {
       if (results.length === 0) {
         likeFallbackUsed = true;
         const likeConditions = ['lower(c.text) LIKE ?', "c.source_type != 'note'"];
+        if (hasIndexStatus) likeConditions.push(readySource);
         const likeParams = [`%${cleanQuery.toLowerCase()}%`];
+
+        if (excludedPaperIds.size) {
+          likeConditions.push('c.document_key NOT IN (SELECT value FROM json_each(?))');
+          likeParams.push(JSON.stringify([...excludedPaperIds]));
+        }
 
         if (targetPaperId) {
           likeConditions.push('c.document_key = ?');
@@ -990,6 +998,10 @@ class PaperQuayKnowledgeService {
     const id = cleanString(paperId);
     if (!id) throw new Error('paperId is required');
 
+    if (this.getExcludedPaperIds().has(id)) {
+      return { paperId: id, chunks: [], total: 0 };
+    }
+
     const ragDb = this.getRagDb();
     if (!ragDb) {
       return {
@@ -1001,7 +1013,10 @@ class PaperQuayKnowledgeService {
 
     try {
       const safeLimit = Math.max(1, Math.min(100, Number(limit) || 20));
-      const conditions = ['document_key = ?'];
+      const conditions = ['c.document_key = ?', "c.source_type != 'note'"];
+      if (getTableColumns(ragDb, 'rag_indexes').has('status')) {
+        conditions.push("EXISTS (SELECT 1 FROM rag_indexes i WHERE i.document_key = c.document_key AND i.source_type = c.source_type AND i.status = 'ready')");
+      }
       const params = [id];
 
       if (pageIndex !== null && pageIndex !== undefined && pageIndex !== '') {
@@ -1019,7 +1034,7 @@ class PaperQuayKnowledgeService {
           page_index AS pageIndex,
           block_id AS blockId,
           text
-        FROM rag_chunks
+        FROM rag_chunks c
         WHERE ${conditions.join(' AND ')}
         ORDER BY chunk_index
         LIMIT ?
@@ -1040,6 +1055,40 @@ class PaperQuayKnowledgeService {
     } finally {
       ragDb.close();
     }
+  }
+
+  getNote(request = {}) {
+    const id = cleanString(request.noteId);
+    if (!id) throw new Error('noteId is required');
+    const offset = Number(request.offset ?? 0);
+    const limit = Number(request.limit ?? 12000);
+    if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 20000) {
+      throw new Error('offset must be non-negative and limit must be between 1 and 20000');
+    }
+    const db = this.getNotesDb();
+    if (!db) throw new Error('Notes database not found');
+    try {
+      const row = db.prepare('SELECT * FROM notes WHERE id = ? AND deleted_at IS NULL').get(id);
+      if (!row) return { note: null };
+      const text = String(row.content_text ?? row.content ?? '');
+      let rawAnchors = [];
+      try { rawAnchors = JSON.parse(row.anchors || '[]'); } catch {}
+      const anchors = (Array.isArray(rawAnchors) ? rawAnchors : []).filter((anchor) => anchor && typeof anchor === 'object').slice(0, 100).map((anchor) => ({
+        id: anchor.id, paperId: anchor.paperId ?? null, label: anchor.label,
+        pageIndex: anchor.pageIndex ?? null, blockId: anchor.blockId ?? null,
+        source: anchor.source ?? null, sourceTitle: anchor.sourceTitle ?? null,
+        excerpt: String(anchor.excerpt ?? '').slice(0, 1000),
+      }));
+      const tags = db.prepare('SELECT tag FROM note_tags WHERE note_id = ? ORDER BY tag').all(id).map((item) => item.tag);
+      const rawLinks = db.prepare('SELECT target_note_id AS noteId, link_text AS label FROM note_links WHERE source_note_id = ? ORDER BY target_note_id LIMIT 101').all(id);
+      const links = rawLinks.slice(0, 100);
+      const nextOffset = offset + limit < text.length ? offset + limit : null;
+      return { note: { id: row.id, title: row.title, paperId: row.paper_id, pageKind: row.page_kind ?? null,
+        folderId: row.folder_id ?? null, tags, links, anchors, contentText: text.slice(offset, offset + limit),
+        offset, nextOffset, truncated: nextOffset !== null, totalCharacters: text.length,
+        anchorsTruncated: Array.isArray(rawAnchors) && rawAnchors.length > anchors.length,
+        linksTruncated: rawLinks.length > links.length } };
+    } finally { db.close(); }
   }
 
   searchNotes(request = {}) {

@@ -1,7 +1,6 @@
 import { Component, useEffect, useMemo, useState, type ErrorInfo, type ReactNode } from 'react';
 import {
   Bot,
-  BookOpenCheck,
   FilePlus2,
   GitBranch,
   Library,
@@ -17,7 +16,6 @@ import {
 import Reader from '../features/reader/Reader';
 import AgentWorkspace from '../features/agent/AgentWorkspace';
 import NotesWorkspace from '../features/notes/NotesWorkspace';
-import ReviewWritingWorkspace from '../features/review/ReviewWritingWorkspace';
 import KnowledgeGraphWorkspace from '../features/graph/KnowledgeGraphWorkspace';
 import TabBar from '../components/tabs/TabBar';
 import {
@@ -38,8 +36,8 @@ import { TaskCenter } from '../ui/taskCenter';
 import { ConfirmHost } from '../ui/confirmHost';
 import { CommandPalette } from '../ui/commandPalette';
 import { registerCommands, useGlobalShortcuts } from '../ui/commands';
+import { useWorkspaceRestore, type AppWorkspaceKey } from './useWorkspaceRestore';
 
-type AppWorkspaceKey = 'library' | 'agent' | 'notes' | 'review' | 'graph';
 type UiLanguage = 'zh-CN' | 'en-US';
 
 interface AppWorkspaceItem {
@@ -49,13 +47,11 @@ interface AppWorkspaceItem {
   labelEn: string;
 }
 
-const ACTIVE_WORKSPACE_STORAGE_KEY = 'paperquay-active-workspace-v1';
 const SETTINGS_STORAGE_KEY = 'paper-reader-settings-v3';
 
 const workspaces: AppWorkspaceItem[] = [
   { key: 'library', icon: Library, labelZh: '\u6587\u5e93', labelEn: 'Library' },
   { key: 'agent', icon: Bot, labelZh: 'Agent', labelEn: 'Agent' },
-  { key: 'review', icon: BookOpenCheck, labelZh: '综述', labelEn: 'Review' },
   { key: 'graph', icon: GitBranch, labelZh: '图谱', labelEn: 'Graph' },
   { key: 'notes', icon: NotebookText, labelZh: '\u7b14\u8bb0', labelEn: 'Notes' },
 ];
@@ -124,11 +120,6 @@ function loadUiLanguage(): UiLanguage {
   }
 }
 
-function loadInitialWorkspace(): AppWorkspaceKey {
-  const stored = window.localStorage.getItem(ACTIVE_WORKSPACE_STORAGE_KEY);
-  return stored === 'agent' || stored === 'notes' || stored === 'review' || stored === 'graph' ? stored : 'library';
-}
-
 function isMacPlatform() {
   const bridgePlatform = window.paperquay?.platform;
 
@@ -149,7 +140,6 @@ function App() {
   const setActiveTab = useTabsStore((state) => state.setActiveTab);
   const openAgentTab = useTabsStore((state) => state.openAgentTab);
   const openNotesTab = useTabsStore((state) => state.openNotesTab);
-  const openReviewTab = useTabsStore((state) => state.openReviewTab);
   const openGraphTab = useTabsStore((state) => state.openGraphTab);
   const [uiLanguage, setUiLanguage] = useState<UiLanguage>(loadUiLanguage);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
@@ -162,8 +152,6 @@ function App() {
   const activeWorkspace: AppWorkspaceKey =
     activeTab?.type === 'agent'
       ? 'agent'
-      : activeTab?.type === 'review'
-        ? 'review'
       : activeTab?.type === 'graph'
         ? 'graph'
       : activeTab?.type === 'notes' || activeTab?.type === 'note'
@@ -172,32 +160,7 @@ function App() {
   const activeWorkspaceItem = workspaces.find((workspace) => workspace.key === activeWorkspace) ?? workspaces[0];
   const activeWorkspaceLabel = isEnglish ? activeWorkspaceItem.labelEn : activeWorkspaceItem.labelZh;
 
-  useEffect(() => {
-    window.localStorage.setItem(ACTIVE_WORKSPACE_STORAGE_KEY, activeWorkspace);
-  }, [activeWorkspace]);
-
-  useEffect(() => {
-    const initialWorkspace = loadInitialWorkspace();
-
-    if (initialWorkspace === 'agent') {
-      openAgentTab();
-      return;
-    }
-
-    if (initialWorkspace === 'notes') {
-      openNotesTab();
-      return;
-    }
-
-    if (initialWorkspace === 'review') {
-      openReviewTab();
-      return;
-    }
-
-    if (initialWorkspace === 'graph') {
-      openGraphTab();
-    }
-  }, [openAgentTab, openGraphTab, openNotesTab, openReviewTab]);
+  useWorkspaceRestore(activeWorkspace, openAgentTab, openNotesTab, openGraphTab);
 
   useEffect(() => {
     const handleOpenAgent = () => {
@@ -237,7 +200,7 @@ function App() {
         const { activeTabId: nextActiveTabId, tabs: nextTabs } = useTabsStore.getState();
         const nextActiveTab = nextTabs.find((tab) => tab.id === nextActiveTabId);
 
-        if (!nextActiveTab || nextActiveTab.type === 'agent' || nextActiveTab.type === 'notes' || nextActiveTab.type === 'note' || nextActiveTab.type === 'review' || nextActiveTab.type === 'graph') {
+        if (!nextActiveTab || nextActiveTab.type === 'agent' || nextActiveTab.type === 'notes' || nextActiveTab.type === 'note' || nextActiveTab.type === 'graph') {
           setActiveTab(HOME_TAB_ID);
         }
       }, 0);
@@ -278,13 +241,6 @@ function App() {
         group: isEnglish ? 'Navigation' : '导航',
         keywords: ['notes', 'bijij'],
         run: () => openNotesTab(),
-      },
-      {
-        id: 'nav.review',
-        title: isEnglish ? 'Go to Review' : '切换到综述',
-        group: isEnglish ? 'Navigation' : '导航',
-        keywords: ['review', 'zongshu'],
-        run: () => openReviewTab(),
       },
       {
         id: 'nav.graph',
@@ -337,7 +293,6 @@ function App() {
     openAgentTab,
     openGraphTab,
     openNotesTab,
-    openReviewTab,
     setActiveTab,
     themeMode,
   ]);
@@ -515,11 +470,6 @@ function App() {
                         return;
                       }
 
-                      if (workspace.key === 'review') {
-                        openReviewTab();
-                        return;
-                      }
-
                       if (workspace.key === 'graph') {
                         openGraphTab();
                         return;
@@ -560,12 +510,6 @@ function App() {
             <div className="h-full min-h-0 overflow-hidden rounded-[var(--pq-radius-md)]" hidden={activeWorkspace !== 'notes'}>
               <WorkspaceErrorBoundary name="Notes" resetKey={activeWorkspace}>
                 <NotesWorkspace workspaceActive={activeWorkspace === 'notes'} />
-              </WorkspaceErrorBoundary>
-            </div>
-
-            <div className="h-full min-h-0 overflow-hidden rounded-[var(--pq-radius-md)]" hidden={activeWorkspace !== 'review'}>
-              <WorkspaceErrorBoundary name="Review" resetKey={activeWorkspace}>
-                <ReviewWritingWorkspace />
               </WorkspaceErrorBoundary>
             </div>
 

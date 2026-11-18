@@ -1,4 +1,4 @@
-import { useMemo, useState, type MouseEvent } from 'react';
+import { useEffect, useMemo, useState, type MouseEvent } from 'react';
 import {
   Copy,
   FilePlus2,
@@ -11,7 +11,8 @@ import {
   Search,
   Trash2,
 } from 'lucide-react';
-import type { Note, NoteAnchor, NoteAnchorInsertRequest, NotePageKind, UpdateNoteRequest } from '../../types/notes';
+import type { Note, NoteAnchor, NoteAnchorInsertRequest, NoteFolder, NotePageKind, UpdateNoteRequest } from '../../types/notes';
+import { listNoteFolders, searchNotes, type NoteMutationOptions, type NoteSearchResponse } from '../../services/notes';
 import type { LiteraturePaper } from '../../types/library';
 import type { SelectedExcerpt } from '../../types/reader';
 import { cn } from '../../utils/cn';
@@ -50,7 +51,7 @@ interface NotesSidebarProps {
   onAddSelectionToNote: () => void;
   onCreateStandaloneNote: () => void;
   onSelectNote: (note: Note) => void;
-  onUpdateNote: (noteId: string, patch: UpdateNoteRequest, options?: { sourceId?: string }) => Note | void | Promise<Note | void>;
+  onUpdateNote: (noteId: string, patch: UpdateNoteRequest, options?: NoteMutationOptions) => Note | void | Promise<Note | void>;
   onDeleteNote: (noteId: string) => void;
   onJumpToNoteAnchor: (note: Note, anchor: NoteAnchor) => void;
   onPaperClick?: (paperId: string) => void;
@@ -134,6 +135,9 @@ export function NotesSidebar({
 }: NotesSidebarProps) {
   const [filter, setFilter] = useState<NotesFilterKey>('all');
   const [search, setSearch] = useState('');
+  const [folderId, setFolderId] = useState('');
+  const [folders, setFolders] = useState<NoteFolder[]>([]);
+  const [searchResult, setSearchResult] = useState<{ key: string; result?: NoteSearchResponse; error?: string } | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerTab, setDrawerTab] = useState<DrawerTab>('anchors');
   const [contextMenu, setContextMenu] = useState<SidebarContextMenu | null>(null);
@@ -145,27 +149,34 @@ export function NotesSidebar({
   const activeAnchors = activeNote?.anchors ?? [];
   const canAddSelection = Boolean(selectedExcerpt?.text.trim());
 
-  const filteredNotes = useMemo(() => {
-    const query = search.trim().toLowerCase();
+  const scopedNotes = useMemo(() => notes.filter((note) => noteMatchesFilter(note, filter)
+    && (!folderId || (folderId === '__uncategorized__' ? !note.folderId : note.folderId === folderId))), [filter, folderId, notes]);
+  const scopeIds = JSON.stringify(scopedNotes.map((note) => note.id).sort());
+  const query = search.trim();
+  const searchKey = JSON.stringify([query, scopeIds, scopedNotes.map((note) => [note.id, note.updatedAt])]);
+  const currentSearch = searchResult?.key === searchKey ? searchResult : null;
+  const channelsById = useMemo(() => Object.fromEntries((currentSearch?.result?.notes ?? [])
+    .map((note) => [note.id, note.channels])), [currentSearch]);
+  const filteredNotes = query ? scopedNotes.filter((note) => channelsById[note.id]) : scopedNotes;
 
-    return notes.filter((note) => {
-      if (!noteMatchesFilter(note, filter)) return false;
-      if (!query) return true;
+  useEffect(() => {
+    if (!drawerOpen || drawerTab !== 'notes') return;
+    let cancelled = false;
+    void listNoteFolders().then((items) => { if (!cancelled) setFolders(items); })
+      .catch(() => { if (!cancelled) setFolders([]); });
+    return () => { cancelled = true; };
+  }, [drawerOpen, drawerTab]);
 
-      const haystack = [
-        note.title,
-        note.contentText,
-        note.content,
-        note.excerpt,
-        note.tags.join(' '),
-      ]
-        .filter(Boolean)
-        .join('\n')
-        .toLowerCase();
-
-      return haystack.includes(query);
-    });
-  }, [filter, notes, search]);
+  useEffect(() => {
+    if (!drawerOpen || drawerTab !== 'notes' || !query) return;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      void searchNotes({ query, noteIds: JSON.parse(scopeIds) as string[], limit: 50 })
+        .then((result) => { if (!cancelled) setSearchResult({ key: searchKey, result }); })
+        .catch((error: unknown) => { if (!cancelled) setSearchResult({ key: searchKey, error: error instanceof Error ? error.message : '笔记检索失败' }); });
+    }, 250);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [drawerOpen, drawerTab, query, scopeIds, searchKey]);
 
   const openSurfaceContextMenu = (event: MouseEvent) => {
     if (shouldUseNativeTextContextMenu(event.target)) return;
@@ -462,6 +473,13 @@ export function NotesSidebar({
                 />
               </label>
 
+              <select value={folderId} onChange={(event) => setFolderId(event.target.value)}
+                className="pq-input mt-2 h-8 shrink-0 px-2 text-xs" aria-label="筛选笔记文件夹">
+                <option value="">全部文件夹</option>
+                <option value="__uncategorized__">未分类</option>
+                {folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
+              </select>
+
               <div className="mt-2 flex shrink-0 items-center gap-1 overflow-x-auto">
                 {FILTERS.map((item) => (
                   <button
@@ -479,6 +497,10 @@ export function NotesSidebar({
                   </button>
                 ))}
               </div>
+
+              {query ? <div className="mt-1 text-[11px] text-[var(--pq-text-faint)]" role="status">
+                {!currentSearch ? '正在检索…' : currentSearch.error || `${currentSearch.result?.retrievalMode === 'hybrid' ? '混合检索' : '关键词检索'} · 当前文档 ${scopedNotes.length} 篇${currentSearch.result?.notes.length === 50 ? ' · 最多显示 50 条' : ''}${currentSearch.result?.warning ? ` · ${currentSearch.result.warning}` : ''}`}
+              </div> : null}
               <div className="mt-1 flex shrink-0 items-center gap-1 overflow-x-auto">
                 {PAGE_KIND_FILTERS.map((item) => (
                   <button key={item.key} type="button" onClick={() => setFilter(item.key)}
@@ -499,6 +521,7 @@ export function NotesSidebar({
                 ) : (
                   <NotesList
                     notes={filteredNotes}
+                    channelsById={query ? channelsById : undefined}
                     activeNoteId={activeNoteId}
                     onSelect={(note) => {
                       onSelectNote(note);

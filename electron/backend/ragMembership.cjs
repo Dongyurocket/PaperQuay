@@ -38,7 +38,7 @@ function createPaperRagLock() {
 
 function ragIndexDocumentKey(request) {
   if (!request || request.sourceType === 'note') return '';
-  return cleanId(request.documentKey);
+  return cleanId(request.documentKey).replace(/^native-library:/, '');
 }
 
 function assertPaperAllowsRagIndex(store, request) {

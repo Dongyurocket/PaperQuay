@@ -22,9 +22,8 @@ import type { LibraryAgentFigureReference, LibraryAgentPlan, LibraryAgentRagCita
 import type { AgentMemoryWritePlan } from '../../services/agentMemory';
 import type { AgentNoteWritePlan } from '../../services/agentNotePlan';
 import type { DeliveryQualityIssue, DeliveryQualityResult } from '../../services/agentDeliveryQuality';
-import type { AgentCapabilityView } from './AgentWorkspace.types';
 import { getAgentCapability } from '../../services/agentCapabilityRegistry';
-import { normalizeSurveyCoverageLedger, summarizeSurveyCoverage, type SurveyCoverageStopReason } from '../../services/agentSurveyCoverage';
+import type { AgentCapabilityView } from './AgentWorkspace.types';
 import type { LiteraturePaper } from '../../types/library';
 import type { UiLanguage } from '../../types/reader';
 import type { AgentChatMessage, AgentToolCallView } from './AgentWorkspace.types';
@@ -338,7 +337,7 @@ function CapabilityProgress({
   l: (zh: string, en: string) => string;
 }) {
   const definition = getAgentCapability(capability.id);
-  const title = definition ? l(definition.title['zh-CN'], definition.title['en-US']) : l('对比调研', 'Comparative Survey');
+  const title = definition ? l(definition.title['zh-CN'], definition.title['en-US']) : capability.id;
 
   const labels: Record<string, [string, string]> = {
     rephrase: ['改写问题', 'Rephrase'],
@@ -465,101 +464,6 @@ function DeliveryQualitySummary({
   );
 }
 
-export function SurveyCoverageCard({
-  capability,
-  disabled,
-  l,
-  onContinue,
-}: {
-  capability: AgentCapabilityView;
-  disabled: boolean;
-  l: (zh: string, en: string) => string;
-  onContinue?: () => void;
-}) {
-  if (capability.id !== 'comparative-survey') return null;
-  const artifacts = capability.artifacts && typeof capability.artifacts === 'object'
-    ? capability.artifacts as { coverage?: unknown }
-    : undefined;
-  const coverage = normalizeSurveyCoverageLedger(artifacts?.coverage);
-  if (!coverage || coverage.papers.length === 0) return (
-    <div className="mt-3 text-xs text-[var(--pq-text-muted)] dark:text-chrome-400">
-      {capability.status === 'running' ? l('覆盖情况：等待本轮记录。', 'Coverage: awaiting this run’s records.') : l('覆盖情况：未记录，无法推定已读数量。', 'Coverage: not recorded; reading counts are unknown.')}
-    </div>
-  );
-  const summary = summarizeSurveyCoverage(coverage);
-  const counts: Array<[string, string, number]> = [
-    ['候选', 'Candidates', summary.candidateCount],
-    ['摘要已看', 'Abstracts reviewed', summary.abstractReviewedCount],
-    ['正文已检索', 'Body searched', summary.bodySearchedCount],
-    ['重点正文已读', 'Focused reading', summary.focusedReadCount],
-    ['实际引用', 'Cited', summary.citedCount],
-    ['无关', 'Irrelevant', summary.irrelevantCount],
-    ['证据未解决', 'Unresolved evidence', summary.unresolvedCount],
-    ['检索空命中', 'Empty retrieval', summary.emptyHitCount],
-    ['无正文或未解析', 'Body unavailable', summary.unreadableCount],
-    ['正文检索失败', 'Body retrieval failed', summary.retrievalFailedCount],
-    ['处理失败', 'Processing failed', summary.failedCount],
-    ['待处理', 'Pending', summary.pendingCount],
-  ];
-  const stopLabels: Record<SurveyCoverageStopReason, [string, string]> = {
-    completed: ['检索计划已完成', 'Research plan completed'],
-    'budget-time': ['达到时间预算', 'Time budget reached'],
-    'budget-tokens': ['达到 token 预算', 'Token budget reached'],
-    'budget-papers': ['达到本批文献预算', 'Paper batch budget reached'],
-    'budget-subquestions': ['达到子问题预算', 'Subquestion budget reached'],
-    cancelled: ['用户取消', 'Cancelled'],
-    error: ['执行失败', 'Execution failed'],
-    unknown: ['停止原因未记录', 'Stop reason unknown'],
-  };
-  const { budget } = coverage;
-  const measuredTokens = budget.promptTokens + budget.completionTokens;
-  const executionTokens = measuredTokens - (budget.execution?.promptTokenBaseline ?? 0) - (budget.execution?.completionTokenBaseline ?? 0);
-  const executionMilliseconds = budget.elapsedMilliseconds - (budget.execution?.elapsedBaseline ?? 0);
-  const continueDelivery = summary.canResume || coverage.runState === 'partial' || coverage.runState === 'failed' || coverage.runState === 'cancelled';
-  const evidenceGaps = coverage.subquestions.flatMap((question) => question.evidenceGaps.map((gap) => ({ question: question.question, gap })));
-  const unresolvedLabels = {
-    'no-document': ['无正文来源', 'No body source'],
-    'unreadable-document': ['正文尚未解析或无法读取', 'Body is unparsed or unreadable'],
-    'no-hit': ['检索空命中', 'Empty retrieval'],
-    'no-citable-evidence': ['未取得可引用正文证据', 'No citable body evidence'],
-  } as const;
-  return (
-    <div className="mt-3 rounded-2xl border border-[var(--pq-border)] bg-white/70 p-4 text-xs dark:border-white/10 dark:bg-chrome-950/60">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="font-bold text-[var(--pq-text)] dark:text-white">{l('本轮调研覆盖（篇）', 'Research coverage (papers)')}</span>
-        <span className="text-[var(--pq-text-muted)] dark:text-chrome-400">{coverage.stopReason ? l(...stopLabels[coverage.stopReason]) : l('检索进行中', 'Research in progress')}</span>
-      </div>
-      <dl className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
-        {counts.map(([zh, en, count]) => <div key={en} className="rounded-xl bg-[var(--pq-surface-2)] px-3 py-2 dark:bg-white/5">
-          <dt className="text-[var(--pq-text-muted)] dark:text-chrome-400">{l(zh, en)}</dt>
-          <dd className="mt-1 font-semibold text-[var(--pq-text)] dark:text-white">{count}</dd>
-        </div>)}
-      </dl>
-      <div className="mt-3 space-y-1 leading-5 text-[var(--pq-text-muted)] dark:text-chrome-300">
-        <div>{l(`子问题完成 ${summary.completedSubquestionCount}/${summary.subquestionCount}，部分完成 ${summary.partialSubquestionCount}，失败 ${summary.failedSubquestionCount}，待处理 ${summary.pendingSubquestionCount}。`, `Subquestions: ${summary.completedSubquestionCount}/${summary.subquestionCount} completed, ${summary.partialSubquestionCount} partial, ${summary.failedSubquestionCount} failed, ${summary.pendingSubquestionCount} pending.`)}</div>
-        <div>{l(`累计已记录用量 ${measuredTokens} tokens、${(budget.elapsedMilliseconds / 1000).toFixed(1)} 秒。`, `Recorded cumulative usage: ${measuredTokens} tokens, ${(budget.elapsedMilliseconds / 1000).toFixed(1)} seconds.`)}</div>
-        <div>{l(`本次执行 ${Math.max(0, executionTokens)}${budget.maxTokens === undefined ? '' : `/${budget.maxTokens}`} tokens、${(Math.max(0, executionMilliseconds) / 1000).toFixed(1)}${budget.maxMilliseconds === undefined ? '' : `/${(budget.maxMilliseconds / 1000).toFixed(1)}`} 秒。`, `This execution: ${Math.max(0, executionTokens)}${budget.maxTokens === undefined ? '' : `/${budget.maxTokens}`} tokens, ${(Math.max(0, executionMilliseconds) / 1000).toFixed(1)}${budget.maxMilliseconds === undefined ? '' : `/${(budget.maxMilliseconds / 1000).toFixed(1)}`} seconds.`)}</div>
-        <div>{l('各项记录可重叠。正文切片命中只计为检索；重点阅读与全文通读不同。', 'These records can overlap. A body hit counts as retrieval; focused reading does not mean the entire paper was read.')}</div>
-      </div>
-      {coverage.subquestions.length > 0 || summary.pendingCount || summary.failedCount || summary.unresolvedCount ? (
-        <details className="mt-3 text-[var(--pq-text-muted)] dark:text-chrome-300">
-          <summary className="cursor-pointer font-semibold">{l('查看子问题与待处理项', 'Show subquestions and remaining work')}</summary>
-          <ul className="mt-2 list-disc space-y-1 pl-4 leading-5">
-            {coverage.subquestions.map((question) => <li key={question.id} className="break-words">{question.question} · {l(`检索 ${question.completedPaperIds.length}/${question.candidatePaperIds.length} 篇`, `${question.completedPaperIds.length}/${question.candidatePaperIds.length} papers searched`)}</li>)}
-            {evidenceGaps.map((item, index) => <li key={`gap:${index}`} className="break-words">{item.question} · {item.gap}</li>)}
-            {coverage.papers.filter((paper) => paper.failed || paper.unresolved || (!paper.focusedRead && !paper.irrelevant)).map((paper) => <li key={paper.paperId} className="break-words">{paper.paperTitle || paper.paperId} · {paper.unresolvedReason ? l(unresolvedLabels[paper.unresolvedReason][0], unresolvedLabels[paper.unresolvedReason][1]) : paper.failed ? l('处理失败', 'Processing failed') : paper.unresolved ? l('未取得正文证据', 'Body evidence unavailable') : l('待处理', 'Pending')}{paper.error ? ` · ${paper.error}` : ''}</li>)}
-          </ul>
-        </details>
-      ) : null}
-      {onContinue && continueDelivery && capability.status !== 'running' ? (
-        <button type="button" onClick={onContinue} disabled={disabled} className={`${agentPlanSecondaryActionClass} mt-3`}>
-          <PlayCircle className="h-4 w-4" />{l('从本轮记录继续', 'Continue from these records')}
-        </button>
-      ) : null}
-    </div>
-  );
-}
-
 export function UserMessageCard({ message }: { message: AgentChatMessage }) {
   return (
     <article className="flex items-start justify-end gap-3">
@@ -626,7 +530,6 @@ export function AssistantMessageCard({
   onCancelPlan,
   onCopyToolParameters,
   onContinueWithSelectedPapers,
-  onContinueSurvey,
   onForkFromMessage,
   onOpenRagCitation,
   onVerifyCitations,
@@ -664,7 +567,6 @@ export function AssistantMessageCard({
   onCancelPlan: () => void;
   onCopyToolParameters: (toolCall: AgentToolCallView) => void;
   onContinueWithSelectedPapers: (instruction: string, paperIds: string[]) => void;
-  onContinueSurvey?: (message: AgentChatMessage) => void;
   onForkFromMessage: (messageId: string) => void;
   onOpenRagCitation?: AgentCitationClick;
   onVerifyCitations?: (message: AgentChatMessage) => Promise<void>;
@@ -732,8 +634,7 @@ export function AssistantMessageCard({
                 {message.ragNotice}
               </div>
             ) : null}
-            {message.capability ? <CapabilityProgress capability={message.capability} l={l} /> : null}
-            {message.capability ? <SurveyCoverageCard capability={message.capability} disabled={activeSessionRunning} l={l} onContinue={onContinueSurvey ? () => onContinueSurvey(message) : undefined} /> : null}
+            {message.capability && message.capability.id !== 'comparative-survey' ? <CapabilityProgress capability={message.capability} l={l} /> : null}
             {message.deliveryQuality ? <DeliveryQualitySummary quality={message.deliveryQuality} l={l} /> : null}
             {message.citationAudit && message.citationAudit.rejectedClaimLines.length > 0 && !message.memoryPlan ? (
               <div className="mt-4 rounded-[20px] border border-[color-mix(in_srgb,var(--pq-warning)_28%,transparent)] bg-[var(--pq-warning-bg)] p-4 ">
@@ -838,17 +739,24 @@ export function AssistantMessageCard({
                               : l('删除', 'Delete')}
                         </span>
                         <span className="font-semibold text-[var(--pq-text)] dark:text-chrome-100">
-                          {operation.title || operation.noteId}
+                          {operation.kind === 'create' ? operation.title : operation.noteId}
                         </span>
                       </div>
                       {operation.reason ? (
                         <div className="mt-1 text-[var(--pq-text-muted)] dark:text-chrome-400">{operation.reason}</div>
                       ) : null}
-                      {operation.kind !== 'delete' && operation.content ? (
+                      {operation.kind === 'update' && operation.title ? (
+                        <div className="mt-1 text-[var(--pq-text-muted)]">{l('新标题', 'New title')}: {operation.title}</div>
+                      ) : null}
+                      {operation.kind !== 'delete' && operation.pageKind ? (
+                        <div className="mt-1 text-[var(--pq-text-muted)]">{l('页类型', 'Page type')}: {operation.pageKind}</div>
+                      ) : null}
+                      {operation.kind !== 'delete' && operation.tags !== undefined ? (
+                        <div className="mt-1 text-[var(--pq-text-muted)]">{l('标签', 'Tags')}: {operation.tags.length ? operation.tags.join(', ') : l('无', 'None')}</div>
+                      ) : null}
+                      {operation.kind !== 'delete' && operation.content !== undefined ? (
                         <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap rounded-lg bg-[var(--pq-surface-2)] p-2 text-[var(--pq-text-muted)] dark:bg-chrome-900 dark:text-chrome-200">
-                          {operation.kind === 'update' && operation.before
-                            ? operation.content
-                            : operation.content}
+                          {operation.content || l('清空正文', 'Clear content')}
                         </pre>
                       ) : null}
                     </div>

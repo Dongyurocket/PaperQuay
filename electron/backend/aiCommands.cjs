@@ -25,6 +25,7 @@ const MAX_AGENT_TURN_IMAGES = 4;
 const MAX_AGENT_TURN_IMAGE_BYTES = 8 * 1024 * 1024;
 const MAX_METADATA_EXCERPT_CHARS = 6_000;
 const activeAgentTurnControllers = new Map();
+const activeQaControllers = new Map();
 
 const REQUEST_PAPER_CONTEXT_TOOL_NAME = 'request_paper_context';
 const PAPER_SKILL_DECISION_TOOL_NAME = 'paper_skill_decision';
@@ -1214,6 +1215,41 @@ async function expandNotePolishExcerpt(ragStore, chunk) {
 function createAiCommands(context) {
   const { agentMemoryStore, ragStore, store } = context;
 
+  function excludedRagKeys() {
+    const ids = typeof store?.listRagDisabledPaperIds === 'function'
+      ? store.listRagDisabledPaperIds()
+      : [];
+    return new Set((Array.isArray(ids) ? ids : []).flatMap((id) => [id, `native-library:${id}`]));
+  }
+
+  function isExcludedRagChunk(chunk, excluded) {
+    return chunk?.sourceType !== 'note' && excluded.has(chunk?.documentKey);
+  }
+
+  async function retrieveAllowedChunks(request) {
+    const excluded = excludedRagKeys();
+    for (const key of Array.isArray(request?.excludedDocumentKeys) ? request.excludedDocumentKeys : []) excluded.add(key);
+    let response;
+    let changed = false;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      response = await Promise.resolve(ragStore.retrieveDocumentChunks({ ...request, excludedDocumentKeys: [...excluded] }));
+      const current = excludedRagKeys();
+      changed = [...current].some((key) => !excluded.has(key));
+      for (const key of current) excluded.add(key);
+      if (!changed) break;
+    }
+    const rows = Array.isArray(response) ? response : response?.results;
+    const allowed = (Array.isArray(rows) ? rows : []).filter((chunk) => !isExcludedRagChunk(chunk, excluded));
+    return Array.isArray(response) ? allowed : { ...response, results: allowed, ...(changed ? { indexCoverage: null } : {}) };
+  }
+
+  async function getAllowedChunkContext(request) {
+    const empty = { status: 'not-ready', sectionPath: null, slices: [], hasMoreBefore: false, hasMoreAfter: false, truncated: false, truncationReason: null };
+    if (isExcludedRagChunk(request, excludedRagKeys())) return empty;
+    const result = await Promise.resolve(ragStore.getChunkContext(request));
+    return isExcludedRagChunk(request, excludedRagKeys()) ? empty : result;
+  }
+
   function documentContext(options) {
     return options.documentText || (options.blocks ?? []).map((block) => block.text).join('\n\n');
   }
@@ -1407,12 +1443,16 @@ function createAiCommands(context) {
               // 旧库可能写入过 native-library: 前缀键；两键同查做全局 topK 排序，
               // 替代逐篇检索后用局部 sourceRank 排序的旧实现。
               const documentKeys = scopedPaperIds.flatMap((paperId) => [paperId, `native-library:${paperId}`]);
-              const chunks = await Promise.resolve(ragStore.retrieveDocumentChunks({
+              const embeddingBase = embedding.baseUrl.trim().replace(/\/embeddings\/?$/i, '').replace(/\/+$/, '');
+              const normalizedEmbeddingBase = /\/v\d+$/i.test(embeddingBase) ? embeddingBase : `${embeddingBase}/v1`;
+              const embeddingModelKey = `${normalizedEmbeddingBase}::${embedding.model.trim()}::${embedding.dimensions ?? 'default'}`;
+              const chunks = await retrieveAllowedChunks({
                 documentKeys,
+                embeddingModelKey,
                 queryEmbedding,
                 queryText: text.slice(0, 2_000),
                 topK: NOTE_POLISH_RAG_TOP_K,
-              }));
+              });
               const candidates = [];
               for (const chunk of Array.isArray(chunks) ? chunks : []) {
                 const paperId = String(chunk.documentKey || '').replace(/^native-library:/, '');
@@ -1424,33 +1464,40 @@ function createAiCommands(context) {
                   chunkId: chunk.chunkId,
                   blockId: chunk.blockId ?? null,
                   pageIndex: chunk.pageIndex ?? null,
-                  excerpt: await expandNotePolishExcerpt(ragStore, chunk),
+                  excerpt: await expandNotePolishExcerpt({ getChunkContext: getAllowedChunkContext }, chunk),
                   sourceType: chunk.sourceType ?? null,
                 });
               }
-              evidence = uniqueNotePolishEvidence(candidates)
+              const excluded = excludedRagKeys();
+              evidence = uniqueNotePolishEvidence(candidates.filter((candidate) => !excluded.has(candidate.paperId)))
                 .slice(0, NOTE_POLISH_RAG_TOP_K)
                 .map((entry, index) => ({ ...entry, id: `S${index + 1}` }));
               if (evidence.length === 0) {
                 // 区分"未生成索引"与"索引维度与当前向量模型不一致"（后者旧提示语会误导）
-                let dimensionMismatch = false;
+                let mismatch = '';
                 if (typeof ragStore.listIndexStatuses === 'function') {
                   try {
                     const scopedKeys = new Set(documentKeys);
-                    dimensionMismatch = ((await Promise.resolve(ragStore.listIndexStatuses())) || []).some((status) => (
+                    const excludedKeys = excludedRagKeys();
+                    const statuses = ((await Promise.resolve(ragStore.listIndexStatuses())) || []).filter((status) => (
                       status
                       && scopedKeys.has(String(status.documentKey ?? ''))
+                      && !excludedKeys.has(String(status.documentKey ?? ''))
                       && status.status === 'ready'
                       && Number(status.embeddingDimension) > 0
-                      && Number(status.embeddingDimension) !== queryEmbedding.length
                     ));
+                    if (statuses.length > 0 && !statuses.some((status) => Number(status.embeddingDimension) === queryEmbedding.length && status.embeddingModelKey === embeddingModelKey)) {
+                      mismatch = statuses.some((status) => Number(status.embeddingDimension) === queryEmbedding.length) ? 'model' : 'dimension';
+                    }
                   } catch {
-                    dimensionMismatch = false;
+                    mismatch = '';
                   }
                 }
-                notices.push(dimensionMismatch
+                notices.push(mismatch === 'dimension'
                   ? '已索引文献的向量维度与当前向量模型不一致，请重建索引后再试，已按纯文本润色执行。'
-                  : '未检索到与笔记相关的已索引文献内容。');
+                  : mismatch === 'model'
+                    ? '已索引文献的向量模型与当前模型不一致，请重建索引后再试，已按纯文本润色执行。'
+                    : '未检索到与笔记相关的已索引文献内容。');
               }
             }
           } catch (error) {
@@ -1516,17 +1563,23 @@ function createAiCommands(context) {
 
     async ask_document_openai_compatible_stream({ requestId, options }, event) {
       const sender = event.sender;
-      const response = await openAiChat(options, qaMessages(options), { stream: true });
+      const controller = new AbortController();
+      const key = `${sender.id}:${requestId}`;
+      activeQaControllers.get(key)?.abort();
+      activeQaControllers.set(key, controller);
+      try {
+      const response = await openAiChat(options, qaMessages(options), { stream: true, signal: controller.signal });
 
       if (!response.ok || !response.body) {
         const text = await response.text().catch(() => '');
         sender.send('paperquay:event', QA_STREAM_EVENT, { requestId, kind: 'error', error: `HTTP ${response.status}: ${text}` });
-        return;
+        throw new Error(`HTTP ${response.status}: ${text}`);
       }
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
+      let answer = '';
 
       while (true) {
         const { done, value } = await reader.read();
@@ -1545,12 +1598,28 @@ function createAiCommands(context) {
 
           try {
             const delta = pickStreamTextDelta(JSON.parse(payload), options.apiMode);
-            if (delta) sender.send('paperquay:event', QA_STREAM_EVENT, { requestId, kind: 'delta', text: delta });
+            if (delta) {
+              answer += delta;
+              sender.send('paperquay:event', QA_STREAM_EVENT, { requestId, kind: 'delta', text: delta });
+            }
           } catch {}
         }
       }
 
+      if (!answer.trim()) throw new Error('模型未返回可用的问答内容。');
       sender.send('paperquay:event', QA_STREAM_EVENT, { requestId, kind: 'done' });
+      return answer;
+      } finally {
+        if (activeQaControllers.get(key) === controller) activeQaControllers.delete(key);
+      }
+    },
+
+    async ask_document_openai_compatible_stream_cancel({ requestId }, event) {
+      const key = `${event.sender.id}:${requestId}`;
+      const controller = activeQaControllers.get(key);
+      if (!controller) return false;
+      controller.abort();
+      return true;
     },
 
     async rag_embed_text({ request }) {
@@ -1605,11 +1674,11 @@ function createAiCommands(context) {
     },
 
     async rag_retrieve_document_chunks({ request }) {
-      return Promise.resolve(ragStore.retrieveDocumentChunks(request));
+      return retrieveAllowedChunks(request);
     },
 
     async rag_get_chunk_context({ request }) {
-      return Promise.resolve(ragStore.getChunkContext(request));
+      return getAllowedChunkContext(request);
     },
 
     async agent_run_start({ request }) {

@@ -108,6 +108,7 @@ import {
 } from './bibliography';
 import { buildNotePolishNodes, normalizeNotePolishScope } from './notePolish';
 import { polishNote } from '../../services/notePolish';
+import { getNote, type NoteMutationOptions } from '../../services/notes';
 import {
   clampDocPosition,
   deleteNoteBlock,
@@ -653,7 +654,7 @@ interface NoteEditorProps {
   onUpdate: (
     noteId: string,
     patch: UpdateNoteRequest,
-    options?: { sourceId?: string },
+    options?: NoteMutationOptions,
   ) => Note | void | Promise<Note | void>;
   notes?: Note[];
   tags?: NoteTagSummary[];
@@ -745,7 +746,13 @@ export function NoteEditor({
   const loadedNoteIdRef = useRef<string | null>(note?.id ?? null);
   const appliedUpdatedAtRef = useRef<number | null>(note?.updatedAt ?? null);
   const dirtyRef = useRef(false);
+  const restoringDraftRef = useRef(false);
   const externalUpdateAvailableRef = useRef(false);
+  const externalUpdateGenerationRef = useRef(0);
+  const noteSessionRef = useRef({ noteId: note?.id ?? null, generation: 0 });
+  if (noteSessionRef.current.noteId !== (note?.id ?? null)) {
+    noteSessionRef.current = { noteId: note?.id ?? null, generation: noteSessionRef.current.generation + 1 };
+  }
   const forceApplyIncomingRef = useRef(false);
   const lastSelectionRef = useRef<{ from: number; to: number } | null>(null);
   const handledAnchorInsertRequestRef = useRef('');
@@ -1348,6 +1355,8 @@ export function NoteEditor({
     () => signature({ title, tagText, color, snapshot: snapshotRef.current }),
     [color, revision, tagText, title],
   );
+  const currentSignatureRef = useRef(currentSignature);
+  currentSignatureRef.current = currentSignature;
   const dirty = Boolean(note && currentSignature !== lastSavedSignatureRef.current);
   const currentTags = useMemo(() => normalizeTagInput(tagText), [tagText]);
 
@@ -1360,6 +1369,7 @@ export function NoteEditor({
   }, [externalUpdateAvailable]);
 
   const setExternalUpdateState = useCallback((value: boolean, noteId = note?.id) => {
+    if (value) externalUpdateGenerationRef.current += 1;
     externalUpdateAvailableRef.current = value;
     setExternalUpdateAvailable(value);
     if (noteId) {
@@ -1467,31 +1477,28 @@ export function NoteEditor({
       snapshot: snapshotRef.current,
     });
     const draft = !forceApplyIncoming && noteId
-      ? readNoteEditorDraft(editorSourceIdRef.current, noteId, note?.updatedAt ?? null)
+      ? readNoteEditorDraft(editorSourceIdRef.current, noteId)
       : null;
     const canRestoreDraft =
       draft &&
-      draft.savedSignature === incomingSignature &&
       draft.draftSignature !== incomingSignature &&
       (!sameNote || !dirtyRef.current || localSignature === incomingSignature);
 
     if (canRestoreDraft) {
+      restoringDraftRef.current = true;
       setTitle(draft.title);
       setTagText(draft.tagText);
       setColor(draft.color);
-
-      if (editor && !editor.isDestroyed) {
-        editor.commands.setContent(draft.snapshot.contentJson, { emitUpdate: false });
-      }
 
       snapshotRef.current = draft.snapshot;
       pendingAnchorsRef.current = new Map(draft.pendingAnchors.map((anchor) => [anchor.id, anchor]));
       loadedNoteIdRef.current = noteId;
       setLoadedStateNoteId(noteId);
-      appliedUpdatedAtRef.current = note?.updatedAt ?? null;
-      lastSavedSignatureRef.current = incomingSignature;
-      externalNoteRef.current = null;
-      setExternalUpdateState(false, noteId ?? undefined);
+      const hasConflict = draft.savedSignature !== incomingSignature;
+      appliedUpdatedAtRef.current = hasConflict ? draft.baseUpdatedAt : note?.updatedAt ?? null;
+      lastSavedSignatureRef.current = hasConflict ? draft.savedSignature : incomingSignature;
+      externalNoteRef.current = hasConflict ? note : null;
+      setExternalUpdateState(hasConflict, noteId ?? undefined);
       setRevision((value) => value + 1);
       return;
     }
@@ -1555,7 +1562,26 @@ export function NoteEditor({
   }, [color, editor, note, note?.id, note?.updatedAt, setExternalUpdateState, tagText, title]);
 
   useEffect(() => {
+    if (!editor || editor.isDestroyed || !note || loadedNoteIdRef.current !== note.id) return;
+    const draft = readNoteEditorDraft(editorSourceIdRef.current, note.id);
+    if (!draft || draft.draftSignature !== currentSignature) return;
+    if (JSON.stringify(editor.getJSON()) !== JSON.stringify(draft.snapshot.contentJson)) {
+      let cancelled = false;
+      queueMicrotask(() => {
+        if (cancelled || editor.isDestroyed || noteSessionRef.current.noteId !== note.id || currentSignatureRef.current !== draft.draftSignature) return;
+        editor.commands.setContent(draft.snapshot.contentJson, { emitUpdate: false });
+      });
+      return () => { cancelled = true; };
+    }
+  }, [currentSignature, editor, note?.id]);
+
+  useEffect(() => {
     if (!note || loadedStateNoteId !== note.id || loadedNoteIdRef.current !== note.id || !lastSavedSignatureRef.current) {
+      return;
+    }
+
+    if (restoringDraftRef.current) {
+      restoringDraftRef.current = false;
       return;
     }
 
@@ -1564,6 +1590,12 @@ export function NoteEditor({
       return;
     }
 
+    const previousDraft = readNoteEditorDraft(editorSourceIdRef.current, note.id);
+    const contentAnchorIds = extractNoteAnchorIds(snapshotRef.current.contentJson);
+    const draftAnchors = mergeAnchors(note.anchors, [
+      ...(previousDraft?.pendingAnchors ?? []),
+      ...pendingAnchorsRef.current.values(),
+    ]).filter((anchor) => contentAnchorIds.has(anchor.id));
     writeNoteEditorDraft(editorSourceIdRef.current, {
       noteId: note.id,
       baseUpdatedAt: appliedUpdatedAtRef.current ?? note.updatedAt ?? null,
@@ -1573,7 +1605,7 @@ export function NoteEditor({
       tagText,
       color,
       snapshot: snapshotRef.current,
-      pendingAnchors: Array.from(pendingAnchorsRef.current.values()),
+      pendingAnchors: draftAnchors,
       updatedAt: Date.now(),
     });
   }, [color, currentSignature, dirty, loadedStateNoteId, note, note?.id, note?.updatedAt, revision, tagText, title]);
@@ -1612,23 +1644,34 @@ export function NoteEditor({
 
   const save = useCallback(async () => {
     if (!note || saving) return;
+    const overwritingExternal = externalUpdateAvailableRef.current;
+    if (overwritingExternal && !window.confirm(l(
+      '此笔记已有外部更新。保存会覆盖外部版本，确定继续？',
+      'This note has changed elsewhere. Saving will overwrite the external version. Continue?',
+    ))) return;
 
     const snapshot = editor ? snapshotFromEditor(editor) : snapshotRef.current;
     snapshotRef.current = snapshot;
+    const savedInputSignature = signature({ title, tagText, color, snapshot });
+    const noteSession = noteSessionRef.current.generation;
+    const externalGeneration = externalUpdateGenerationRef.current;
     const contentText = snapshot.contentText || collectText(snapshot.contentJson);
     const nextTitle = title.trim() || titleFromNoteContent(contentText);
     const tags = normalizeTagInput(tagText);
     const contentAnchorIds = extractNoteAnchorIds(snapshot.contentJson);
-    const pendingAnchors = Array.from(pendingAnchorsRef.current.values()).filter((anchor) =>
+    const savedDraft = readNoteEditorDraft(editorSourceIdRef.current, note.id);
+    const pendingAnchors = [...(savedDraft?.pendingAnchors ?? []), ...pendingAnchorsRef.current.values()].filter((anchor) =>
       contentAnchorIds.has(anchor.id),
     );
     const nextAnchors = mergeAnchors(note.anchors, pendingAnchors).filter((anchor) =>
       contentAnchorIds.has(anchor.id),
     );
 
-    const updatedNote = await onUpdate(
-      note.id,
-      {
+    let updatedNote: Note | void;
+    try {
+      updatedNote = await onUpdate(
+        note.id,
+        {
         title: nextTitle,
         color,
         tags,
@@ -1642,22 +1685,41 @@ export function NoteEditor({
         linkedNoteTitles: extractWikiTitles(contentText),
         pageKind,
         linkedPaperIds: extractPaperRefs(contentText),
-      },
-      { sourceId: editorSourceIdRef.current },
-    );
-
-    for (const anchorId of Array.from(pendingAnchorsRef.current.keys())) {
-      if (!contentAnchorIds.has(anchorId)) pendingAnchorsRef.current.delete(anchorId);
+        },
+        { sourceId: editorSourceIdRef.current, expectedUpdatedAt: overwritingExternal
+          ? externalNoteRef.current?.updatedAt ?? appliedUpdatedAtRef.current ?? note.updatedAt
+          : appliedUpdatedAtRef.current ?? note.updatedAt },
+      );
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('NOTE_CONFLICT') &&
+          noteSessionRef.current.generation === noteSession && noteSessionRef.current.noteId === note.id) {
+        const current = await getNote(note.id).catch(() => null);
+        if (noteSessionRef.current.generation !== noteSession || noteSessionRef.current.noteId !== note.id) return;
+        externalNoteRef.current = current;
+        setExternalUpdateState(true, note.id);
+      }
+      return;
     }
+
+    if (!updatedNote) return;
+    if (noteSessionRef.current.generation !== noteSession || noteSessionRef.current.noteId !== note.id) return;
     appliedUpdatedAtRef.current = updatedNote?.updatedAt ?? note.updatedAt ?? Date.now();
-    setExternalUpdateState(false, note.id);
+    if (externalUpdateGenerationRef.current === externalGeneration) {
+      setExternalUpdateState(false, note.id);
+    }
     lastSavedSignatureRef.current = signature({ title: nextTitle, tagText, color, snapshot });
-    clearNoteEditorDraft(editorSourceIdRef.current, note.id);
-    setTitle(nextTitle);
+    if (currentSignatureRef.current === savedInputSignature) {
+      clearNoteEditorDraft(editorSourceIdRef.current, note.id);
+      setTitle(nextTitle);
+    }
     setRevision((value) => value + 1);
-  }, [color, editor, note, onUpdate, pageKind, saving, setExternalUpdateState, tagText, title]);
+  }, [color, editor, l, note, onUpdate, pageKind, saving, setExternalUpdateState, tagText, title]);
 
   const refreshFromExternalUpdate = useCallback(() => {
+    if (dirty && !window.confirm(l(
+      '刷新会丢弃当前未保存的编辑，确定继续？',
+      'Refreshing will discard your unsaved edits. Continue?',
+    ))) return;
     const incomingNote =
       note && isNoteRecord(externalUpdateNote, note.id)
         ? externalUpdateNote
@@ -1690,7 +1752,7 @@ export function NoteEditor({
     setExternalUpdateState(false, incomingNote.id);
     onExternalUpdateApply?.(incomingNote);
     setRevision((value) => value + 1);
-  }, [editor, externalUpdateNote, note, onExternalUpdateApply, setExternalUpdateState]);
+  }, [dirty, editor, externalUpdateNote, l, note, onExternalUpdateApply, setExternalUpdateState]);
 
   const handleEditorKeyDown = useCallback((event: KeyboardEvent<HTMLDivElement>) => {
     if ((event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase() === 's') {

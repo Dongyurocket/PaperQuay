@@ -16,7 +16,7 @@ Use the `paperquay` MCP server. Parameters and write-guard behavior are defined 
 2. Call `zotero_preview_sync` before every import.
 3. Show the user the `ready`, `alreadyExists`, and `missingPdf` groups separately.
 4. Get explicit confirmation of the items or collection to import, and of the target category (`targetCategoryId` from `list_categories`, or, when importing a collection, the default category named after it).
-5. Then call `paperquay_sync_from_zotero`.
+5. Call `paperquay_sync_from_zotero`, then check the imported records with `search_papers` or `get_paper_details`.
 
 ## Guardrails
 

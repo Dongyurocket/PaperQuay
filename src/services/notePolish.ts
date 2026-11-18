@@ -1,6 +1,6 @@
 import { invoke } from '../platform/electron/core';
 import { loadLibraryAgentModelPreset } from './libraryAgent';
-import { loadReviewEmbeddingConfig } from '../features/review/reviewSemantic';
+import { loadEmbeddingConfig } from './embeddingConfig';
 import type { NotePolishResult, NotePolishScope } from '../types/notes';
 
 export interface NotePolishRequest {
@@ -21,7 +21,7 @@ export async function polishNote(request: NotePolishRequest): Promise<NotePolish
     throw new Error('请先在模型设置中配置可用的问答或 Agent 模型。');
   }
 
-  const embedding = request.scope === 'none' ? null : await loadReviewEmbeddingConfig();
+  const embedding = request.scope === 'none' ? null : await loadEmbeddingConfig();
 
   try {
     return await invoke<NotePolishResult>('notes_polish_openai_compatible', {

@@ -79,33 +79,9 @@ export interface KnowledgeGraphRelation {
 export interface KnowledgeGraphRelationCreateRequest {
   source: string;
   target: string;
-  type?: 'custom_relation' | 'ai_suggested';
+  type?: 'custom_relation';
   label: string;
   description?: string;
   confidence?: number;
   weight?: number;
-}
-
-export interface KnowledgeGraphAiRelationSuggestion {
-  sourceId: string;
-  targetId: string;
-  label: string;
-  description: string;
-  confidence: number;
-}
-
-export interface KnowledgeGraphAiSuggestRequest {
-  focusNodeId?: string | null;
-  localDepth?: number;
-  maxRelations?: number;
-  embeddingMinSimilarity?: number;
-}
-
-export interface KnowledgeGraphAiOptions {
-  baseUrl: string;
-  apiKey: string;
-  model: string;
-  apiMode?: 'chat_completions' | 'responses';
-  temperature?: number;
-  reasoningEffort?: string;
 }

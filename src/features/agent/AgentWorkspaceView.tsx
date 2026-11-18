@@ -69,7 +69,6 @@ interface AgentWorkspaceViewProps {
   handleNewAgentSession: () => void;
   handleOpenHistorySession: (session: AgentHistorySession) => void;
   handleRetryAgent: (instruction: string) => void;
-  onContinueSurvey?: (message: AgentChatMessage) => void;
   historySidebarCollapsed: boolean;
   historySidebarRef: Ref<HTMLElement>;
   l: (zh: string, en: string) => string;
@@ -177,7 +176,6 @@ export default function AgentWorkspaceView({
   handleNewAgentSession,
   handleOpenHistorySession,
   handleRetryAgent,
-  onContinueSurvey,
   historySidebarCollapsed,
   historySidebarRef,
   l,
@@ -505,7 +503,6 @@ export default function AgentWorkspaceView({
                       handleAgentChoice={handleAgentChoice}
                       handleModifyPreviousParameters={handleModifyPreviousParameters}
                       handleRetryAgent={handleRetryAgent}
-                      onContinueSurvey={onContinueSurvey}
                       isActivePlan={Boolean(message.plan && plan?.id === message.plan.id)}
                       l={l}
                       lastInstruction={lastInstruction}

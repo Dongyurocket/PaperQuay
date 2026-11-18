@@ -1,5 +1,7 @@
-import type { Note, NotePageKind, NoteType } from '../types/notes';
+import type { Note, NoteAnchor, NotePageKind, NoteType } from '../types/notes';
+import type { JSONContent } from '@tiptap/core';
 import { parseMarkdownToTiptap } from '../shared/markdownToTiptap.cjs';
+import { normalizeAgentCitationTokens, type InputCitation } from './agentAnswerEvidence.ts';
 import {
   prepareSystemPageContent,
   shouldRefreshNavigationPages,
@@ -11,11 +13,11 @@ type NotesService = typeof import('./notes');
 type LibraryService = typeof import('./library');
 
 async function loadNotesService(): Promise<NotesService> {
-  return import('./notes');
+  return import('./notes.ts');
 }
 
 async function loadLibraryService(): Promise<LibraryService> {
-  return import('./library');
+  return import('./library.ts');
 }
 
 export interface AgentNoteWriteOperation {
@@ -35,8 +37,10 @@ export interface AgentNoteWriteOperation {
   pageKind?: NotePageKind;
   /** update 操作在生成计划时读到的原文，供审批卡做 diff 展示。 */
   before?: string;
+  beforeUpdatedAt?: number;
   /** 该操作的目的说明。 */
   reason?: string;
+  anchors?: NoteAnchor[];
 }
 
 export interface AgentNoteWritePlan {
@@ -54,6 +58,35 @@ export interface ApplyAgentNoteWritePlanResult {
 }
 
 const NOTE_PLAN_CONTENT_LIMIT = 100_000;
+
+export function assertNoteStructurePreserved(before: JSONContent | null | undefined, after: JSONContent): void {
+  const collect = (root: JSONContent | null | undefined) => {
+    const counts = new Map<string, number>();
+    const visit = (node: JSONContent) => {
+      let key = '';
+      if (node.type === 'noteAnchorBlock' || node.type === 'noteAnchorLink') {
+        key = `anchor:${String(node.attrs?.anchorId ?? '')}`;
+      } else if (node.type === 'paperReference') {
+        key = `paper:${String(node.attrs?.paperId ?? '')}`;
+      } else if (node.type === 'wikiLink') {
+        key = `note:${String(node.attrs?.id ?? '')}`;
+      } else if (node.type === 'table') {
+        key = `table:${JSON.stringify(node)}`;
+      }
+      if (key) counts.set(key, (counts.get(key) ?? 0) + 1);
+      for (const child of node.content ?? []) visit(child);
+    };
+    if (root) visit(root);
+    return counts;
+  };
+  const previous = collect(before);
+  const next = collect(after);
+  for (const [key, count] of previous) {
+    if ((next.get(key) ?? 0) < count) {
+      throw new Error('笔记正文包含无法保留的锚点、引用、双链或表格，请在笔记编辑器中修改。');
+    }
+  }
+}
 
 function cleanString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
@@ -92,14 +125,15 @@ function normalizeOperation(raw: unknown): AgentNoteWriteOperation | null {
       typeof value.content === 'string' ? value.content.slice(0, NOTE_PLAN_CONTENT_LIMIT) : undefined;
     const title = cleanString(value.title) || undefined;
     const tags = Array.isArray(value.tags) ? cleanStringList(value.tags) : undefined;
-    if (!title && content === undefined && !tags) return null;
+    const pageKind = cleanString(value.pageKind) as NotePageKind || undefined;
+    if (!title && content === undefined && !tags && !pageKind) return null;
     return {
       kind: 'update',
       noteId,
       title,
       content,
       tags,
-      pageKind: cleanString(value.pageKind) as NotePageKind || undefined,
+      pageKind,
       reason: cleanString(value.reason) || undefined,
     };
   }
@@ -124,12 +158,58 @@ function normalizeOperation(raw: unknown): AgentNoteWriteOperation | null {
 export async function createAgentNoteWritePlan(input: {
   summary?: unknown;
   operations?: unknown;
+  citations?: Array<InputCitation & { sourceType?: string }>;
 }): Promise<AgentNoteWritePlan> {
+  const createdAt = Date.now();
+  const planId = `agent-note:${createdAt}:${Math.random().toString(36).slice(2, 8)}`;
   const rawOperations = Array.isArray(input.operations) ? input.operations : [];
   const operations = rawOperations
     .map(normalizeOperation)
     .filter((operation): operation is AgentNoteWriteOperation => Boolean(operation))
-    .slice(0, 20);
+    .slice(0, 20)
+    .map((operation, operationIndex) => {
+      if (operation.kind !== 'create' || !operation.content || !input.citations?.length) return operation;
+      const bindings = normalizeAgentCitationTokens(operation.content, input.citations, { identityOnly: true });
+      const resolved = bindings.filter((binding) => binding.reason === 'source-resolved');
+      const anchors: NoteAnchor[] = [];
+      const sources = new Map<string, string>();
+      for (const binding of resolved) {
+        if (sources.has(binding.citationId)) continue;
+        const citation = input.citations.find((item) => item.id === binding.citationId);
+        if (!citation?.paperId || !citation.paperTitle) continue;
+        const pageIndex = Number.isInteger(citation.pageIndex) && Number(citation.pageIndex) >= 0 ? citation.pageIndex! : null;
+        const blockId = typeof citation.blockId === 'string' && citation.blockId.trim() ? citation.blockId.trim() : null;
+        const title = citation.paperTitle.replace(/[\r\n]+/g, ' ').trim();
+        const label = `Source ${sources.size + 1}`;
+        let location = `${title}${pageIndex === null ? '' : `, p. ${pageIndex + 1}`}`;
+        if (pageIndex !== null || blockId) {
+          const anchor: NoteAnchor = {
+            id: `${planId}:${operationIndex}:${anchors.length}`,
+            paperId: citation.paperId,
+            label: pageIndex === null ? label : `P${pageIndex + 1}`,
+            sourceTitle: title,
+            excerpt: citation.previewText ?? '',
+            source: citation.sourceType === 'pdf-text' ? 'pdf' : 'blocks',
+            pageIndex,
+            blockId,
+            createdAt,
+          };
+          anchors.push(anchor);
+          location += ` ([Open source](paperquay://anchor/${anchor.id}))`;
+        } else {
+          location += ' (location unavailable)';
+        }
+        sources.set(binding.citationId, `${label}: ${location}`);
+      }
+      if (!sources.size) return operation;
+      let content = operation.content;
+      for (const binding of [...resolved].reverse()) {
+        const source = sources.get(binding.citationId);
+        if (source) content = `${content.slice(0, binding.start)}[${source.split(':')[0]}]${content.slice(binding.end)}`;
+      }
+      content += `\n\n## Sources\n\n${[...sources.values()].map((source) => `- ${source}`).join('\n')}`;
+      return { ...operation, content, anchors };
+    });
 
   const withBefore = await Promise.all(
     operations.map(async (operation) => {
@@ -138,7 +218,7 @@ export async function createAgentNoteWritePlan(input: {
         const { getNote } = await loadNotesService();
         const note = await getNote(operation.noteId);
         if (!note || note.deletedAt) return operation;
-        return { ...operation, before: (note.contentText ?? note.content ?? '').slice(0, NOTE_PLAN_CONTENT_LIMIT) };
+        return { ...operation, before: (note.contentText ?? note.content ?? '').slice(0, NOTE_PLAN_CONTENT_LIMIT), beforeUpdatedAt: note.updatedAt };
       } catch {
         return operation;
       }
@@ -146,17 +226,17 @@ export async function createAgentNoteWritePlan(input: {
   );
 
   return {
-    id: `agent-note:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`,
+    id: planId,
     summary: cleanString(input.summary) || `Update ${withBefore.length} note(s).`,
     operations: withBefore,
-    createdAt: Date.now(),
+    createdAt,
   };
 }
 
 /** 用户批准计划后执行实际写入。逐操作独立执行，失败不中断其余操作。 */
 export async function applyAgentNoteWritePlan(plan: AgentNoteWritePlan): Promise<ApplyAgentNoteWritePlanResult> {
   const result: ApplyAgentNoteWritePlanResult = { applied: 0, failed: 0, errors: [], noteIds: [] };
-  const { createNote, updateNote, deleteNote, listNotes } = await loadNotesService();
+  const { createNote, updateNote, deleteNote, listNotes, getNote } = await loadNotesService();
   let knownPapers: Array<{ id: string; title: string; doi?: string }> = [];
   try {
     const { listLibraryPapers } = await loadLibraryService();
@@ -176,7 +256,7 @@ export async function applyAgentNoteWritePlan(plan: AgentNoteWritePlan): Promise
         const parserOptions = {
           notes,
           papers: knownPapers,
-          anchors: notes.flatMap((note) => note.anchors ?? []),
+          anchors: [...notes.flatMap((note) => note.anchors ?? []), ...(operation.anchors ?? [])],
         };
         const note = await createNote(
           {
@@ -187,6 +267,7 @@ export async function applyAgentNoteWritePlan(plan: AgentNoteWritePlan): Promise
             content: operation.content ?? '',
             contentText: operation.content ?? '',
             contentJson: parseMarkdownToTiptap(operation.content ?? '', parserOptions),
+            anchors: operation.anchors ?? [],
             tags: operation.tags ?? [],
             linkedPaperId: operation.paperId ?? null,
           },
@@ -198,22 +279,35 @@ export async function applyAgentNoteWritePlan(plan: AgentNoteWritePlan): Promise
       }
 
       if (operation.kind === 'update' && operation.noteId) {
+        if (!Number.isFinite(operation.beforeUpdatedAt)) {
+          throw new Error('无法确认审批时的笔记版本，请重新生成变更计划。');
+        }
+        const existing = await getNote(operation.noteId);
+        if (!existing || existing.deletedAt || existing.updatedAt !== operation.beforeUpdatedAt) {
+          throw new Error('笔记在审批后已被修改，请重新生成变更计划。');
+        }
         const patch: Record<string, unknown> = {};
         if (operation.title) patch.title = operation.title;
         if (operation.content !== undefined) {
           patch.content = operation.content;
           patch.contentText = operation.content;
-          const notes = await listNotes({ includeDeleted: false });
-          patch.contentJson = parseMarkdownToTiptap(operation.content, {
-            notes,
-            papers: knownPapers,
-            anchors: notes.flatMap((note) => note.anchors ?? []),
-          });
+          if (operation.content === (existing.contentText ?? existing.content ?? '')) {
+            patch.contentJson = existing.contentJson;
+          } else {
+            const notes = await listNotes({ includeDeleted: false });
+            const contentJson = parseMarkdownToTiptap(operation.content, {
+              notes,
+              papers: knownPapers,
+              anchors: existing.anchors ?? [],
+            });
+            assertNoteStructurePreserved(existing.contentJson, contentJson);
+            patch.contentJson = contentJson;
+          }
           patch.contentHtml = null;
         }
         if (operation.tags) patch.tags = operation.tags;
         if (operation.pageKind) patch.pageKind = operation.pageKind;
-        const note = await updateNote(operation.noteId, patch, { sourceId: 'agent' });
+        const note = await updateNote(operation.noteId, patch, { sourceId: 'agent', expectedUpdatedAt: operation.beforeUpdatedAt });
         result.noteIds.push(note.id);
         result.applied += 1;
         continue;

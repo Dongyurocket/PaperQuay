@@ -985,7 +985,7 @@ function upsertStatus(db, status) {
   );
 }
 
-function indexedSourceRows(db, documentKey, sourceType, dimension) {
+function indexedSourceRows(db, documentKey, sourceType, dimension, modelKey, sourceSignature) {
   const sql = `
     SELECT source_type
     FROM rag_indexes
@@ -993,9 +993,12 @@ function indexedSourceRows(db, documentKey, sourceType, dimension) {
       AND status = 'ready'
       AND embedding_dimension = ?
       ${sourceType ? 'AND source_type = ?' : ''}
+      ${modelKey ? 'AND embedding_model_key = ?' : ''}
+      ${sourceSignature ? 'AND source_signature = ?' : ''}
     ORDER BY source_type
   `;
-  const args = sourceType ? [documentKey, dimension, sourceType] : [documentKey, dimension];
+  const args = [documentKey, dimension, ...(sourceType ? [sourceType] : []),
+    ...(modelKey ? [modelKey] : []), ...(sourceSignature ? [sourceSignature] : [])];
   return db.prepare(sql).all(...args);
 }
 
@@ -1411,7 +1414,7 @@ function createRagStore(appPaths, options = {}) {
     });
   }
 
-  function retrieveVectorChunks({ documentKey, documentKeys, sourceType, queryEmbedding, dimension, limit }) {
+  function retrieveVectorChunks({ documentKey, documentKeys, sourceType, queryEmbedding, dimension, limit, modelKey, sourceSignature, excludedDocumentKeys }) {
     if (!hasVectorTable(db, dimension)) {
       return [];
     }
@@ -1419,7 +1422,8 @@ function createRagStore(appPaths, options = {}) {
     const vectorTable = vectorTableName(dimension);
 
     if (documentKey && (!documentKeys || documentKeys.length <= 1)) {
-      const sourceRows = indexedSourceRows(db, documentKey, sourceType, dimension);
+      const sourceRows = indexedSourceRows(db, documentKey, sourceType, dimension, modelKey, sourceSignature)
+        .filter((row) => row.source_type === 'note' || !excludedDocumentKeys.has(documentKey));
       const search = db.prepare(`
         SELECT
           c.document_key AS documentKey,
@@ -1462,8 +1466,55 @@ function createRagStore(appPaths, options = {}) {
       ? documentKeys.filter(Boolean)
       : null;
 
+    if (modelKey || excludedDocumentKeys.size > 0) {
+      const clauses = ["status = 'ready'", 'embedding_dimension = ?'];
+      const args = [dimension];
+      if (modelKey) {
+        clauses.push('embedding_model_key = ?');
+        args.push(modelKey);
+      }
+      if (sourceType) {
+        clauses.push('source_type = ?');
+        args.push(sourceType);
+      } else {
+        clauses.push("source_type IN ('mineru-markdown', 'pdf-text')");
+      }
+      if (sourceSignature) {
+        clauses.push('source_signature = ?');
+        args.push(sourceSignature);
+      }
+      if (targetKeys) {
+        clauses.push('document_key IN (SELECT value FROM json_each(?))');
+        args.push(JSON.stringify(targetKeys));
+      }
+      const sources = db.prepare(`SELECT document_key, source_type FROM rag_indexes WHERE ${clauses.join(' AND ')}`).all(...args)
+        .filter((source) => source.source_type === 'note' || !excludedDocumentKeys.has(source.document_key));
+      const search = db.prepare(`
+        SELECT c.document_key AS documentKey, c.chunk_id AS chunkId,
+          c.source_type AS sourceType, c.page_index AS pageIndex,
+          c.block_id AS blockId, c.text, v.distance
+        FROM ${vectorTable} v
+        JOIN rag_chunks c ON c.id = v.rowid
+        WHERE v.embedding MATCH ? AND k = ? AND v.document_key = ? AND v.source_type = ?
+        ORDER BY v.distance
+      `);
+      return sources.flatMap((source) => search.all(queryEmbedding, limit, source.document_key, source.source_type))
+        .map((chunk) => ({ ...chunk, pageIndex: chunk.pageIndex ?? null, blockId: chunk.blockId ?? null, score: Number(chunk.distance) || 0 }))
+        .sort((left, right) => left.score - right.score)
+        .slice(0, limit);
+    }
+
     let filterClause = '';
     const params = [dimension];
+
+    if (modelKey) {
+      filterClause += ' AND i.embedding_model_key = ?';
+      params.push(modelKey);
+    }
+    if (sourceSignature) {
+      filterClause += ' AND i.source_signature = ?';
+      params.push(sourceSignature);
+    }
 
     if (sourceType) {
       filterClause += ' AND v.source_type = ?';
@@ -1473,9 +1524,8 @@ function createRagStore(appPaths, options = {}) {
     }
 
     if (targetKeys && targetKeys.length > 0) {
-      const placeholders = targetKeys.map(() => '?').join(', ');
-      filterClause += ` AND c.document_key IN (${placeholders})`;
-      params.push(...targetKeys);
+      filterClause += ' AND c.document_key IN (SELECT value FROM json_each(?))';
+      params.push(JSON.stringify(targetKeys));
     }
 
     const globalSearchSql = `
@@ -1523,26 +1573,22 @@ function createRagStore(appPaths, options = {}) {
     }
   }
 
-  function searchFts({ documentKey, documentKeys, sourceType, queryText, dimension, limit }) {
+  function searchFts({ documentKey, documentKeys, sourceType, queryText, dimension, limit, modelKey, sourceSignature, excludedDocumentKeys }) {
     if (!ftsAvailable) {
-      return [];
+      return { rows: [], status: 'unavailable' };
     }
 
     const matchQuery = buildFtsMatchQuery(queryText);
 
     if (!matchQuery) {
-      return [];
+      return { rows: [], status: 'not-queried' };
     }
 
     if (documentKey && (!documentKeys || documentKeys.length <= 1)) {
       const sourceClause = sourceType ? 'AND c.source_type = ?' : '';
-      const args = [matchQuery, documentKey, dimension];
-
-      if (sourceType) {
-        args.push(sourceType);
-      }
-
-      args.push(limit);
+      const modelClause = modelKey ? 'AND i.embedding_model_key = ?' : '';
+      const signatureClause = sourceSignature ? 'AND i.source_signature = ?' : '';
+      const exclusionClause = excludedDocumentKeys.has(documentKey) ? "AND c.source_type = 'note'" : '';
 
       try {
         const rows = db.prepare(`
@@ -1564,11 +1610,15 @@ function createRagStore(appPaths, options = {}) {
           WHERE rag_chunks_fts MATCH ?
             AND c.document_key = ?
             ${sourceClause}
+            ${modelClause}
+            ${signatureClause}
+            ${exclusionClause}
           ORDER BY rank
           LIMIT ?
-        `).all(dimension, matchQuery, documentKey, ...(sourceType ? [sourceType] : []), limit);
+        `).all(dimension, matchQuery, documentKey, ...(sourceType ? [sourceType] : []),
+          ...(modelKey ? [modelKey] : []), ...(sourceSignature ? [sourceSignature] : []), limit);
 
-        return rows.map((chunk) => ({
+        return { status: 'searched', rows: rows.map((chunk) => ({
           documentKey: chunk.documentKey || documentKey,
           chunkId: chunk.chunk_id,
           sourceType: chunk.source_type,
@@ -1576,10 +1626,10 @@ function createRagStore(appPaths, options = {}) {
           blockId: chunk.block_id ?? null,
           text: chunk.text,
           score: Number(chunk.rank) || 0,
-        }));
+        })) };
       } catch (error) {
         console.warn('[paperquay] FTS retrieval failed; local RAG used vector retrieval only.', toError(error));
-        return [];
+        return { rows: [], status: 'failed' };
       }
     }
 
@@ -1590,6 +1640,15 @@ function createRagStore(appPaths, options = {}) {
     let filterClause = '';
     const params = [dimension, matchQuery];
 
+    if (modelKey) {
+      filterClause += ' AND i.embedding_model_key = ?';
+      params.push(modelKey);
+    }
+    if (sourceSignature) {
+      filterClause += ' AND i.source_signature = ?';
+      params.push(sourceSignature);
+    }
+
     if (sourceType) {
       filterClause += ' AND c.source_type = ?';
       params.push(sourceType);
@@ -1598,9 +1657,13 @@ function createRagStore(appPaths, options = {}) {
     }
 
     if (targetKeys && targetKeys.length > 0) {
-      const placeholders = targetKeys.map(() => '?').join(', ');
-      filterClause += ` AND c.document_key IN (${placeholders})`;
-      params.push(...targetKeys);
+      filterClause += ' AND c.document_key IN (SELECT value FROM json_each(?))';
+      params.push(JSON.stringify(targetKeys));
+    }
+
+    if (excludedDocumentKeys.size > 0) {
+      filterClause += " AND (c.source_type = 'note' OR c.document_key NOT IN (SELECT value FROM json_each(?)))";
+      params.push(JSON.stringify([...excludedDocumentKeys]));
     }
 
     params.push(limit);
@@ -1628,7 +1691,7 @@ function createRagStore(appPaths, options = {}) {
         LIMIT ?
       `).all(...params);
 
-      return rows.map((chunk) => ({
+      return { status: 'searched', rows: rows.map((chunk) => ({
         documentKey: chunk.documentKey,
         chunkId: chunk.chunk_id,
         sourceType: chunk.source_type,
@@ -1636,10 +1699,10 @@ function createRagStore(appPaths, options = {}) {
         blockId: chunk.block_id ?? null,
         text: chunk.text,
         score: Number(chunk.rank) || 0,
-      }));
+      })) };
     } catch (error) {
       console.warn('[paperquay] Global FTS retrieval failed', toError(error));
-      return [];
+      return { rows: [], status: 'failed' };
     }
   }
 
@@ -1651,6 +1714,9 @@ function createRagStore(appPaths, options = {}) {
     const documentKey = rawDocKey || null;
     const documentKeys = rawDocKeys.length > 0 ? rawDocKeys : (documentKey ? [documentKey] : null);
     const sourceType = request?.sourceType ? normalizeSourceType(request.sourceType) : null;
+    const modelKey = cleanString(request?.embeddingModelKey) || null;
+    const sourceSignature = cleanString(request?.sourceSignature) || null;
+    const excludedDocumentKeys = new Set(Array.isArray(request?.excludedDocumentKeys) ? request.excludedDocumentKeys.map(cleanString).filter(Boolean) : []);
     const topK = Math.min(
       MAX_RAG_RETRIEVAL_TOP_K,
       Math.max(1, normalizeNonNegativeInteger(request?.topK, 6)),
@@ -1664,21 +1730,50 @@ function createRagStore(appPaths, options = {}) {
       queryEmbedding: toFloat32Array(request.queryEmbedding),
       dimension,
       limit: candidateLimit,
+      modelKey,
+      sourceSignature,
+      excludedDocumentKeys,
     });
-    const ftsRows = searchFts({
+    const fts = searchFts({
       documentKey,
       documentKeys,
       sourceType,
       queryText: normalizeBoundedString(request?.queryText, 'RAG queryText', { maxLength: 2000 }),
       dimension,
       limit: candidateLimit,
+      modelKey,
+      sourceSignature,
+      excludedDocumentKeys,
     });
 
-    if (ftsRows.length === 0) {
-      return vectorRows.slice(0, topK);
+    const results = fts.rows.length === 0
+      ? vectorRows.slice(0, topK)
+      : rrfFuse(vectorRows, fts.rows).slice(0, topK);
+    if (request?.includeDiagnostics === true) {
+      let indexCoverage;
+      if (request?.includeIndexCoverage === true && documentKeys && sourceType !== 'note') {
+        const keys = [...new Set(documentKeys)];
+        const eligible = keys.filter((key) => !excludedDocumentKeys.has(key));
+        const clauses = ["status = 'ready'", 'embedding_dimension = ?', "source_type IN ('mineru-markdown', 'pdf-text')", 'document_key IN (SELECT value FROM json_each(?))'];
+        const args = [dimension, JSON.stringify(eligible)];
+        if (sourceType) {
+          clauses.push('source_type = ?');
+          args.push(sourceType);
+        }
+        if (modelKey) {
+          clauses.push('embedding_model_key = ?');
+          args.push(modelKey);
+        }
+        if (sourceSignature) {
+          clauses.push('source_signature = ?');
+          args.push(sourceSignature);
+        }
+        const ready = db.prepare(`SELECT COUNT(DISTINCT document_key) AS count FROM rag_indexes WHERE ${clauses.join(' AND ')}`).get(...args).count;
+        indexCoverage = { total: keys.length, excluded: keys.length - eligible.length, ready: Number(ready), unavailable: eligible.length - Number(ready) };
+      }
+      return { results, ftsStatus: fts.status, ftsHitCount: fts.rows.length, ...(indexCoverage ? { indexCoverage } : {}) };
     }
-
-    return rrfFuse(vectorRows, ftsRows).slice(0, topK);
+    return results;
   }
 
   function getChunkContext(request) {

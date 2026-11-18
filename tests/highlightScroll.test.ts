@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   buildHighlightScrollKey,
+  isHighlightScrollReady,
   shouldScrollToHighlight,
 } from '../src/features/pdf/highlightScroll.ts';
 import type { PdfHighlightTarget } from '../src/types/reader.ts';
@@ -32,4 +33,11 @@ test('buildHighlightScrollKey changes when the highlight target changes', () => 
   });
 
   assert.notEqual(nextKey, buildHighlightScrollKey(sampleHighlight));
+});
+
+test('highlight scroll waits for PDF initialization and the target page', () => {
+  assert.equal(isHighlightScrollReady(false, false), false);
+  assert.equal(isHighlightScrollReady(false, true), false);
+  assert.equal(isHighlightScrollReady(true, false), false);
+  assert.equal(isHighlightScrollReady(true, true), true);
 });

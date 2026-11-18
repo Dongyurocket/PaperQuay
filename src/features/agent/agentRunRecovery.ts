@@ -1,9 +1,7 @@
 import type { AgentRunEventRecord } from '../../services/agentRuns';
-import type { ComparativeSurveyArtifacts } from '../../services/agentCapability';
 import type { AgentLoopMessage } from '../../services/agentLoop';
 import type { AgentChatMessage } from './AgentWorkspace.types';
 import type { LibraryAgentRagCitation } from '../../services/libraryAgent';
-import { normalizeSurveyCoverageLedger, normalizeSurveyResearchContexts } from '../../services/agentSurveyCoverage.ts';
 import { newMessageId } from './AgentWorkspace.model.ts';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -79,67 +77,14 @@ export function latestCapabilityCheckpoint(
 ): GenericCapabilityCheckpoint | null {
   for (const event of [...events].reverse()) {
     if (event.kind === 'checkpoint' && isRecord(event.payload) && isRecord(event.payload.artifacts)) {
-      const capabilityId = typeof event.payload.capabilityId === 'string' ? event.payload.capabilityId : 'comparative-survey';
+      const capabilityId = typeof event.payload.capabilityId === 'string' ? event.payload.capabilityId : '';
+      if (!capabilityId || capabilityId === 'comparative-survey') continue;
       return {
         capabilityId,
         artifacts: event.payload.artifacts,
       };
     }
   }
-  return null;
-}
-
-export function latestComparativeSurveyCheckpoint(
-  events: AgentRunEventRecord[],
-): Partial<ComparativeSurveyArtifacts> | null {
-  for (const event of [...events].reverse()) {
-    if (
-      event.kind === 'checkpoint' &&
-      isRecord(event.payload) &&
-      (!event.payload.capabilityId || event.payload.capabilityId === 'comparative-survey') &&
-      isRecord(event.payload.artifacts)
-    ) {
-      const artifacts = event.payload.artifacts;
-      const recovered: Partial<ComparativeSurveyArtifacts> = {
-        rephrasedQuestion: typeof artifacts.rephrasedQuestion === 'string' ? artifacts.rephrasedQuestion : undefined,
-        subquestions: Array.isArray(artifacts.subquestions)
-          ? artifacts.subquestions.filter((value): value is string => typeof value === 'string')
-          : undefined,
-        researchNotes: typeof artifacts.researchNotes === 'string' ? artifacts.researchNotes : undefined,
-        ...(Array.isArray(artifacts.researchContexts)
-          ? { researchContexts: normalizeSurveyResearchContexts(artifacts.researchContexts) }
-          : {}),
-        citations: Array.isArray(artifacts.citations)
-          ? artifacts.citations.flatMap((value) => {
-            if (!isRecord(value) || typeof value.paperId !== 'string' || typeof value.paperTitle !== 'string') {
-              return [];
-            }
-            return [{
-              ...(typeof value.id === 'string' ? { id: value.id } : {}),
-              ...(typeof value.label === 'string' ? { label: value.label } : {}),
-              paperId: value.paperId,
-              paperTitle: value.paperTitle,
-              pageIndex: typeof value.pageIndex === 'number' || value.pageIndex === null ? value.pageIndex : undefined,
-              blockId: typeof value.blockId === 'string' || value.blockId === null ? value.blockId : undefined,
-              previewText: typeof value.previewText === 'string' ? value.previewText : undefined,
-              sourceType: value.sourceType === 'mineru-markdown' || value.sourceType === 'pdf-text'
-                ? value.sourceType
-                : undefined,
-            }];
-          })
-          : undefined,
-        completedStages: Array.isArray(artifacts.completedStages)
-          ? artifacts.completedStages.filter((value): value is ComparativeSurveyArtifacts['completedStages'][number] =>
-            value === 'rephrase' || value === 'decompose' || value === 'research' || value === 'report',
-          )
-          : [],
-      };
-      const coverage = normalizeSurveyCoverageLedger(artifacts.coverage);
-      if (coverage) recovered.coverage = coverage;
-      return recovered;
-    }
-  }
-
   return null;
 }
 

@@ -10,7 +10,6 @@ import type {
 import type { AgentMemoryWritePlan } from '../../services/agentMemory';
 import type { AgentCitationBinding } from '../../services/agentAnswerEvidence';
 import type { AgentNoteWritePlan } from '../../services/agentNotePlan';
-import type { ComparativeSurveyArtifacts } from '../../services/agentCapability';
 import type { DeliveryQualityResult } from '../../services/agentDeliveryQuality';
 import type { AgentCapabilityId, CitationAuditResult } from '../../services/agentCapabilityRegistry';
 import type { DocumentChatAttachment } from '../../types/reader';

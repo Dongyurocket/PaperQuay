@@ -100,6 +100,57 @@ test('RAG store appends chunk batches and retrieves inside the requested documen
   }
 });
 
+test('RAG retrieval isolates embedding models and source versions', () => {
+  const { dataDir, store } = createStore();
+  try {
+    for (const [documentKey, embeddingModelKey, sourceSignature, embedding] of [
+      ['doc-current', 'model-current', 'signature-current', [0.8, 0.8]],
+      ['doc-other', 'model-other', 'signature-other', [0.9, 0.9]],
+    ] as const) {
+      store.indexDocument({
+        documentKey, title: documentKey, sourceType: 'pdf-text', sourceSignature,
+        embeddingModelKey, totalChunkCount: 1,
+        chunks: [{ chunkId: 'shared', chunkIndex: 0, text: 'shared keyword', embedding }],
+      });
+    }
+    const request = { queryEmbedding: [0.9, 0.9], queryText: 'shared', topK: 10 };
+    const global = store.retrieveDocumentChunks({ ...request, documentKeys: ['doc-current', 'doc-other'], embeddingModelKey: 'model-current' });
+    assert.deepEqual(global.map((row: { documentKey: string }) => row.documentKey), ['doc-current']);
+    assert.equal(store.retrieveDocumentChunks({ ...request, documentKey: 'doc-other', embeddingModelKey: 'model-current' }).length, 0);
+    assert.equal(store.retrieveDocumentChunks({ ...request, documentKey: 'doc-current', embeddingModelKey: 'model-current', sourceSignature: 'outdated' }).length, 0);
+    assert.equal(store.retrieveDocumentChunks({ ...request, documentKey: 'doc-current', embeddingModelKey: 'model-current', sourceSignature: 'signature-current' }).length, 1);
+  } finally {
+    store.close();
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('cross-document model filtering cannot lose eligible vectors to closer foreign models', () => {
+  const { dataDir, store } = createStore();
+  try {
+    for (const [documentKey, embeddingModelKey, embedding] of [
+      ['eligible', 'current', [0, 1]],
+      ['foreign', 'other', [1, 0]],
+    ] as const) {
+      const chunks = Array.from({ length: 12 }, (_, index) => ({
+        chunkId: `${documentKey}-${index}`, chunkIndex: index,
+        text: `${documentKey} ${index}`, embedding,
+      }));
+      store.indexDocument({ documentKey, title: documentKey, sourceType: 'pdf-text',
+        sourceSignature: documentKey, embeddingModelKey, totalChunkCount: chunks.length, chunks });
+    }
+    const results = store.retrieveDocumentChunks({
+      documentKeys: ['eligible', 'foreign'], embeddingModelKey: 'current',
+      queryEmbedding: [1, 0], topK: 3,
+    });
+    assert.equal(results.length, 3);
+    assert.ok(results.every((row: { documentKey: string }) => row.documentKey === 'eligible'));
+  } finally {
+    store.close();
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
 test('RAG failure status clears partial vectors for that source', () => {
   const { dataDir, store } = createStore();
 
@@ -243,6 +294,25 @@ test('RAG store fuses escaped FTS matches with vector candidates and syncs text 
     assert.equal(hybrid.length, 2);
     assert.ok(hybrid.some((result) => result.chunkId === 'keyword-only'));
 
+    const diagnostic = store.retrieveDocumentChunks({
+      documentKey: 'doc-fts', sourceType: 'pdf-text', queryEmbedding: [1, 0, 0, 0],
+      queryText: 'MTOW', topK: 2, includeDiagnostics: true,
+    });
+    assert.equal(diagnostic.ftsStatus, 'searched');
+    assert.equal(diagnostic.ftsHitCount, 1);
+    assert.deepEqual(diagnostic.results, hybrid);
+    const noMatch = store.retrieveDocumentChunks({
+      documentKey: 'doc-fts', sourceType: 'pdf-text', queryEmbedding: [1, 0, 0, 0],
+      queryText: 'unmatchedterm', topK: 2, includeDiagnostics: true,
+    });
+    assert.equal(noMatch.ftsStatus, 'searched');
+    assert.equal(noMatch.ftsHitCount, 0);
+    const noTerms = store.retrieveDocumentChunks({
+      documentKey: 'doc-fts', sourceType: 'pdf-text', queryEmbedding: [1, 0, 0, 0],
+      queryText: '', topK: 2, includeDiagnostics: true,
+    });
+    assert.equal(noTerms.ftsStatus, 'not-queried');
+
     index('keyword-only', 2, 'The revised payload marker is 1250 kg.', [0, 1, 0, 0]);
     const afterUpdate = store.retrieveDocumentChunks({
       documentKey: 'doc-fts',
@@ -306,6 +376,34 @@ test('RAG store falls back to vector-only retrieval when FTS is unavailable', ()
     });
 
     assert.deepEqual(results.map((result) => result.chunkId), ['nearest']);
+    const diagnostic = store.retrieveDocumentChunks({
+      documentKey: 'doc-vector-only', sourceType: 'pdf-text', queryEmbedding: [1, 0, 0, 0],
+      queryText: 'MTOW', topK: 1, includeDiagnostics: true,
+    });
+    assert.equal(diagnostic.ftsStatus, 'unavailable');
+    assert.deepEqual(diagnostic.results, results);
+  } finally {
+    store.close();
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('RAG diagnostics report FTS failure without discarding vector results', () => {
+  const { dataDir, store } = createStore();
+  try {
+    store.indexDocument({
+      documentKey: 'doc-failed-fts', title: 'Document', sourceType: 'pdf-text',
+      sourceSignature: 'signature', embeddingModelKey: 'model', totalChunkCount: 1,
+      chunks: [{ chunkId: 'one', chunkIndex: 0, pageIndex: 0, text: 'keyword', embedding: [1, 0, 0, 0] }],
+    });
+    const database = new DatabaseSync(path.join(dataDir, 'paperquay-rag.sqlite'));
+    try { database.exec('DROP TABLE rag_chunks_fts'); } finally { database.close(); }
+    const result = store.retrieveDocumentChunks({
+      documentKey: 'doc-failed-fts', sourceType: 'pdf-text', queryEmbedding: [1, 0, 0, 0],
+      queryText: 'keyword', topK: 1, includeDiagnostics: true,
+    });
+    assert.equal(result.ftsStatus, 'failed');
+    assert.equal(result.results[0].chunkId, 'one');
   } finally {
     store.close();
     rmSync(dataDir, { recursive: true, force: true });

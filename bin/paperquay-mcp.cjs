@@ -183,6 +183,19 @@ const TOOLS = [
     },
   },
   {
+    name: 'get_note',
+    description: 'Read a note and its source metadata. Text is paginated; use nextOffset until null.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        noteId: { type: 'string', description: 'Note ID returned by search_notes.' },
+        offset: { type: 'integer', minimum: 0, default: 0 },
+        limit: { type: 'integer', minimum: 1, maximum: 20000, default: 12000 },
+      },
+      required: ['noteId'],
+    },
+  },
+  {
     name: 'create_note',
     description:
       'Create a new PaperQuay note. Tags and [[wiki-links]] inside the content are extracted automatically, the full-text index is updated, and the note is linked to a paper when paperId is given (otherwise it becomes a global note). Refused while the PaperQuay desktop app is running unless allowWhileAppRunning is true (the app UI holds an in-memory snapshot and will not show external writes until reload).',
@@ -665,6 +678,8 @@ async function handleToolCall(name, args) {
       return service.readPaperContent(args || {});
     case 'search_notes':
       return service.searchNotes(args || {});
+    case 'get_note':
+      return service.getNote(args || {});
     case 'create_note':
       return service.createNote(args || {});
     case 'update_note':

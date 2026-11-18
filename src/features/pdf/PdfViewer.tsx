@@ -15,6 +15,9 @@ import {
   getDocument,
 } from 'pdfjs-dist';
 import 'pdfjs-dist/web/pdf_viewer.css';
+import { scrollInstantly } from './instantScroll';
+import { isHighlightScrollReady } from './highlightScroll';
+import { createScrollRestoreScheduler } from './scrollRestoreScheduler';
 import EmptyState from '../../components/EmptyState';
 import { ContextMenu, type ContextMenuEntry } from '../../components/ContextMenu';
 import { useWheelScrollDelegate } from '../../hooks/useWheelScrollDelegate';
@@ -403,6 +406,9 @@ function PdfViewer({
   const externalScrollRestoreKeyRef = useRef('');
   const pendingScrollRestoreKeyRef = useRef('');
   const lastUserScrollAtRef = useRef(0);
+  const scrollRestoreSchedulerRef = useRef(createScrollRestoreScheduler((callback) => {
+    window.requestAnimationFrame(callback);
+  }));
 
   const [editorTool, setEditorTool] = useState<AnnotationEditorTool>('none');
   const [retryRevision, setRetryRevision] = useState(0);
@@ -531,6 +537,7 @@ function PdfViewer({
   useEffect(() => () => emitToastDismiss(translationToastKey), [translationToastKey]);
 
   useEffect(() => {
+    scrollRestoreSchedulerRef.current.cancel();
     sourceSignatureRef.current = sourceSignature;
     restoredScrollKeyRef.current = '';
     externalScrollRestoreKeyRef.current = '';
@@ -1093,7 +1100,7 @@ function PdfViewer({
     const left = Math.min(Math.max(0, position.left), maxLeft);
 
     restoringScrollRef.current = true;
-    container.scrollTo({ top, left, behavior: 'auto' });
+    scrollInstantly(container, { top, left });
     currentPageRef.current = page;
     setNumberStateIfChanged(setCurrentPage, page);
     restoredScrollKeyRef.current = restoreKey;
@@ -1157,11 +1164,7 @@ function PdfViewer({
       return;
     }
 
-    window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(() => {
-        applySavedScrollPosition({ force });
-      });
-    });
+    scrollRestoreSchedulerRef.current.schedule(() => applySavedScrollPosition({ force }));
   }, [applySavedScrollPosition]);
 
   const hasPendingExternalScrollRestore = useCallback(() => {
@@ -1527,6 +1530,12 @@ function PdfViewer({
 
   const scrollToHighlight = useCallback(
     (highlight: PdfHighlightTarget, options?: { retry?: boolean }) => {
+      scrollRestoreSchedulerRef.current.cancel();
+      pendingScrollRestoreKeyRef.current = '';
+      lastUserScrollAtRef.current = Date.now();
+      if (scrollPositionRef.current) {
+        restoredScrollKeyRef.current = buildScrollRestoreKey(scrollPositionRef.current);
+      }
       const retry = () => {
         if (options?.retry === false) {
           return;
@@ -1591,13 +1600,10 @@ function PdfViewer({
       const page = highlight.pageIndex + 1;
 
       restoringScrollRef.current = true;
-      container.scrollTo({
-        top,
-        left,
-        behavior: smoothScroll ? 'smooth' : 'auto',
-      });
+      scrollInstantly(container, { top, left });
       currentPageRef.current = page;
       setNumberStateIfChanged(setCurrentPage, page);
+      updateLocalScrollPosition();
 
       window.requestAnimationFrame(() => {
         syncPageHosts();
@@ -1607,7 +1613,7 @@ function PdfViewer({
       window.setTimeout(() => {
         restoringScrollRef.current = false;
         emitScrollPosition();
-      }, smoothScroll ? 280 : 80);
+      }, 80);
     },
     [
       blockById,
@@ -1615,8 +1621,8 @@ function PdfViewer({
       pageHosts,
       resolveOriginalPageForSources,
       scrollToPage,
-      smoothScroll,
       syncPageHosts,
+      updateLocalScrollPosition,
     ],
   );
 
@@ -1661,7 +1667,9 @@ function PdfViewer({
     };
 
     const cancelPendingExternalRestore = () => {
+      scrollRestoreSchedulerRef.current.cancel();
       pendingScrollRestoreKeyRef.current = '';
+      lastUserScrollAtRef.current = Date.now();
     };
 
     container.addEventListener('wheel', cancelPendingExternalRestore, { passive: true });
@@ -2515,16 +2523,17 @@ function PdfViewer({
 
   useEffect(() => {
     if (!active || !activeHighlight || pageCount === 0 || loading ||
+      !isHighlightScrollReady(pagesInitialized, Boolean(pageHosts[activeHighlight.pageIndex]?.element)) ||
       highlightScrollSignal === lastHandledHighlightSignalRef.current) {
       return;
     }
 
-    lastHandledHighlightSignalRef.current = highlightScrollSignal;
-
-    window.requestAnimationFrame(() => {
+    const frame = window.requestAnimationFrame(() => {
+      lastHandledHighlightSignalRef.current = highlightScrollSignal;
       scrollToHighlight(activeHighlight);
     });
-  }, [active, activeHighlight, highlightScrollSignal, loading, pageCount, scrollToHighlight]);
+    return () => window.cancelAnimationFrame(frame);
+  }, [active, activeHighlight, highlightScrollSignal, loading, pageCount, pageHosts, pagesInitialized, scrollToHighlight]);
 
   useEffect(() => {
     if (!active) {

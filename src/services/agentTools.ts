@@ -143,6 +143,8 @@ export interface AgentPaperContextResult {
   citations?: LibraryAgentRagCitation[];
   figures?: LibraryPaperReviewFigure[];
   ragError?: string | null;
+  retrievalOutcome?: 'hit' | 'empty' | 'failed' | 'unavailable';
+  retrievalDiagnostics?: { ftsStatuses?: string[]; ftsHitCount?: number; partialSources?: boolean };
 }
 
 export interface AgentFigureResult {
@@ -171,6 +173,10 @@ export interface CreateLibraryAgentToolsOptions {
       hasImage?: boolean;
     }>;
     ragErrors?: string[];
+    retrievalMode?: 'hybrid' | 'vector';
+    ftsStatus?: 'searched' | 'not-queried' | 'unavailable' | 'failed';
+    ftsHitCount?: number;
+    indexCoverage?: { total: number; excluded: number; ready: number; unavailable: number } | null;
   }>;
   getPaperContext?: (
     paper: LiteraturePaper,
@@ -405,6 +411,10 @@ export function createLibraryAgentTools(options: CreateLibraryAgentToolsOptions)
               countUnit: 'chunks',
               batchLimit: AGENT_RAG_TOP_K,
               chunks,
+              retrievalMode: result.retrievalMode,
+              ftsStatus: result.ftsStatus,
+              ftsHitCount: result.ftsHitCount,
+              indexCoverage: result.indexCoverage,
               ragErrors: result.ragErrors ?? [],
             }),
             cards: [{ kind: 'citations', title: `${chunks.length} RAG evidence snippets` }],
@@ -552,6 +562,8 @@ export function createLibraryAgentTools(options: CreateLibraryAgentToolsOptions)
             title: paper.title,
             source: context.source,
             sourceCoverage,
+            retrievalOutcome: context.retrievalOutcome,
+            retrievalDiagnostics: context.retrievalDiagnostics,
             text: slice.text,
             textStart: offset,
             textEnd: slice.offset,
@@ -832,6 +844,7 @@ export function createLibraryAgentTools(options: CreateLibraryAgentToolsOptions)
         const notePlan = await createAgentNoteWritePlan({
           summary: args.summary,
           operations: args.operations,
+          citations: liveCitations,
         });
 
         if (notePlan.operations.length === 0) {

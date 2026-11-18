@@ -11,6 +11,7 @@ interface NoteCardProps {
   onContextMenu?: (event: MouseEvent, note: Note) => void;
   selected?: boolean;
   onSelectedChange?: (selected: boolean) => void;
+  channels?: string[];
 }
 
 export function NoteCard({
@@ -21,6 +22,7 @@ export function NoteCard({
   onContextMenu,
   selected = false,
   onSelectedChange,
+  channels,
 }: NoteCardProps) {
   return (
     <article
@@ -48,6 +50,7 @@ export function NoteCard({
           <div className="truncate text-sm font-medium text-[var(--pq-text)]">
             {note.title || 'Untitled Note'}
           </div>
+          {channels?.length ? <div className="mt-0.5 text-[11px] text-[var(--pq-text-faint)]">{channels.join(' + ')}</div> : null}
         </button>
       </div>
 

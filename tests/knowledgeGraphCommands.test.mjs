@@ -6,7 +6,7 @@ import path from 'node:path';
 
 import {
   createKnowledgeGraphSnapshot,
-  shouldFallbackToChatCompletions,
+  createKnowledgeGraphCommands,
 } from '../electron/backend/knowledgeGraphCommands.cjs';
 
 function createContext(overrides = {}) {
@@ -215,19 +215,32 @@ test('knowledge graph includes persisted custom and AI-approved relations', asyn
     assert.equal(customEdge?.label, 'explains');
     assert.equal(aiEdge?.type, 'ai_suggested');
     assert.equal(aiEdge?.confidence, 0.82);
+    const hidden = await createKnowledgeGraphSnapshot(createContext({ dataDir: dir }), { includeCustomRelations: false });
+    assert.equal(hidden.edges.some((edge) => edge.id === 'rel-1' || edge.id === 'rel-2'), false);
+    const commands = createKnowledgeGraphCommands(createContext({ dataDir: dir }));
+    assert.deepEqual(commands.knowledge_graph_delete_relation({ relationId: 'rel-2' }), { deleted: true });
+    assert.equal(commands.knowledge_graph_list_relations().some((relation) => relation.id === 'rel-2'), false);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
 });
 
-test('knowledge graph AI generation falls back when responses upstream fails', () => {
-  assert.equal(
-    shouldFallbackToChatCompletions(
-      new Error('OpenAI-compatible responses HTTP 502: {"error":{"message":"Upstream request failed","type":"upstream_error"}}'),
-    ),
-    true,
-  );
-  assert.equal(shouldFallbackToChatCompletions(new Error('Model returned invalid JSON')), false);
+test('knowledge graph permits manual relations but cannot generate or create AI relations', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'paperquay-graph-'));
+  try {
+    const commands = createKnowledgeGraphCommands(createContext({ dataDir: dir }));
+    assert.equal(commands.knowledge_graph_suggest_relations, undefined);
+    assert.throws(() => commands.knowledge_graph_create_relation({ request: {
+      source: 'paper:paper-1', target: 'note:note-1', type: 'ai_suggested',
+    } }), /Invalid graph relation type/);
+    const relation = commands.knowledge_graph_create_relation({ request: {
+      source: 'paper:paper-1', target: 'note:note-1', label: 'explains',
+    } });
+    assert.equal(relation.type, 'custom_relation');
+    assert.deepEqual(commands.knowledge_graph_delete_relation({ relationId: relation.id }), { deleted: true });
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
 test('knowledge graph local mode keeps only nodes within the requested depth', async () => {

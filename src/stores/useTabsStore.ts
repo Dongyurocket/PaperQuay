@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-export type AppTabType = 'library' | 'reader' | 'agent' | 'notes' | 'note' | 'review' | 'graph';
+export type AppTabType = 'library' | 'reader' | 'agent' | 'notes' | 'note' | 'graph';
 
 export interface BaseAppTab {
   id: string;
@@ -28,11 +28,6 @@ export interface NotesTab extends BaseAppTab {
   type: 'notes';
 }
 
-export interface ReviewTab extends BaseAppTab {
-  id: 'review';
-  type: 'review';
-}
-
 export interface GraphTab extends BaseAppTab {
   id: 'graph';
   type: 'graph';
@@ -44,7 +39,7 @@ export interface NoteTab extends BaseAppTab {
   externalUpdate?: boolean;
 }
 
-export type AppTab = LibraryTab | ReaderTab | AgentTab | NotesTab | NoteTab | ReviewTab | GraphTab;
+export type AppTab = LibraryTab | ReaderTab | AgentTab | NotesTab | NoteTab | GraphTab;
 
 interface TabsState {
   tabs: AppTab[];
@@ -52,7 +47,6 @@ interface TabsState {
   openTab: (documentId: string, title: string) => string;
   openAgentTab: () => string;
   openNotesTab: () => string;
-  openReviewTab: () => string;
   openGraphTab: () => string;
   openNoteTab: (noteId: string, title: string) => string;
   updateNoteTabTitle: (noteId: string, title: string) => void;
@@ -66,7 +60,6 @@ interface TabsState {
 export const HOME_TAB_ID = 'home';
 export const AGENT_TAB_ID = 'agent';
 export const NOTES_TAB_ID = 'notes';
-export const REVIEW_TAB_ID = 'review';
 export const GRAPH_TAB_ID = 'graph';
 
 export function getHomeTabTitle(locale: 'zh-CN' | 'en-US') {
@@ -102,14 +95,6 @@ function createNotesTab(): NotesTab {
     id: NOTES_TAB_ID,
     type: 'notes',
     title: '笔记',
-  };
-}
-
-function createReviewTab(): ReviewTab {
-  return {
-    id: REVIEW_TAB_ID,
-    type: 'review',
-    title: '论文综述',
   };
 }
 
@@ -173,23 +158,6 @@ export const useTabsStore = create<TabsState>()((set, get) => ({
     }
 
     const nextTab = createNotesTab();
-
-    set((state) => ({
-      tabs: [...state.tabs, nextTab],
-      activeTabId: nextTab.id,
-    }));
-
-    return nextTab.id;
-  },
-  openReviewTab: () => {
-    const existingTab = get().tabs.find((tab) => tab.id === REVIEW_TAB_ID);
-
-    if (existingTab) {
-      set({ activeTabId: existingTab.id });
-      return existingTab.id;
-    }
-
-    const nextTab = createReviewTab();
 
     set((state) => ({
       tabs: [...state.tabs, nextTab],

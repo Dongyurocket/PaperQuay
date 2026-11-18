@@ -13,7 +13,7 @@ const { createRagStore } = require('../electron/backend/ragStore.cjs');
 // 润色检索曾用 native-library: 前缀键导致永远不匹配。本测试用真实 ragStore
 // 以裸键索引，端到端验证润色命令能检索到证据并把引用映射回文献。
 
-function createFixture() {
+function createFixture(disabledPaperIds: string[] = []) {
   const dataDir = mkdtempSync(path.join(tmpdir(), 'paperquay-note-polish-rag-'));
   const ragStore = createRagStore({
     ragDatabasePath: path.join(dataDir, 'paperquay-rag.sqlite'),
@@ -24,7 +24,7 @@ function createFixture() {
     title: 'Quantum retrieval paper',
     sourceType: 'mineru-markdown',
     sourceSignature: 'sig-1',
-    embeddingModelKey: 'embedding-test',
+    embeddingModelKey: 'https://embedding.example.test/v1::embedding-model::default',
     totalChunkCount: 2,
     chunks: [
       {
@@ -50,6 +50,7 @@ function createFixture() {
     agentMemoryStore: {},
     ragStore,
     store: {
+      listRagDisabledPaperIds: () => disabledPaperIds,
       load() {
         return { papers: [{ id: 'paper-1', title: 'Quantum retrieval paper' }] };
       },
@@ -103,6 +104,26 @@ test('note polish retrieves evidence indexed under the bare paper id', async (t)
     assert.equal(result.citations[0].chunkId, 'chunk-near');
     assert.equal(result.citations[0].pageIndex, 2);
     assert.equal(result.notice, null);
+  } finally {
+    ragStore.close();
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('note polish does not use evidence from an excluded stale index', async (t) => {
+  const { commands, dataDir, ragStore } = createFixture(['paper-1']);
+  try {
+    let callCount = 0;
+    t.mock.method(globalThis, 'fetch', async () => {
+      callCount += 1;
+      if (callCount === 1) {
+        return Response.json({ data: [{ index: 0, embedding: [0.9, 0.1, 0.1, 0.1] }] });
+      }
+      return Response.json({ choices: [{ message: { content: JSON.stringify({ text: 'Polished note.', citations: ['S1'] }) } }] });
+    });
+    const result = await commands.notes_polish_openai_compatible({ options: polishOptions() });
+    assert.deepEqual(result.citations, []);
+    assert.match(result.notice, /未检索到/);
   } finally {
     ragStore.close();
     rmSync(dataDir, { recursive: true, force: true });

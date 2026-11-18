@@ -33,6 +33,7 @@ export function ReaderPreferencesMcpSection({
   const [error, setError] = useState('');
   const [client, setClient] = useState<McpSnippetClient>('proma');
   const [copied, setCopied] = useState(false);
+  const [copyError, setCopyError] = useState('');
 
   useEffect(() => {
     if (!active) return undefined;
@@ -59,8 +60,14 @@ export function ReaderPreferencesMcpSection({
 
   async function copySnippet() {
     if (!snippet) return;
-    await navigator.clipboard.writeText(snippet);
-    setCopied(true);
+    setCopied(false);
+    setCopyError('');
+    try {
+      await navigator.clipboard.writeText(snippet);
+      setCopied(true);
+    } catch {
+      setCopyError(l('复制失败，请手动选择并复制配置。', 'Copy failed. Select and copy the configuration manually.'));
+    }
   }
 
   return (
@@ -85,7 +92,9 @@ export function ReaderPreferencesMcpSection({
           <div className="mt-1 break-all">{config?.entry || l('正在读取服务路径', 'Reading the service path')}</div>
           {config && !config.entryExists ? (
             <div className="mt-1 text-[var(--pq-warning)]">
-              {l('入口文件当前不存在。安装包需先完成 MCP bundle 构建。', 'The entry file is missing. Build the MCP bundle before packaging.')}
+              {installed
+                ? l('安装包缺少 MCP 入口文件，请检查安装包或重新安装。', 'The installed package is missing the MCP entry. Check the package or reinstall.')
+                : l('开发目录缺少 MCP 入口文件，请检查源码目录。', 'The MCP entry is missing from the development directory. Check the source checkout.')}
             </div>
           ) : null}
         </div>
@@ -127,6 +136,7 @@ export function ReaderPreferencesMcpSection({
           onChange={(event) => {
             setClient(event.target.value as McpSnippetClient);
             setCopied(false);
+            setCopyError('');
           }}
           className="max-w-xs"
         >
@@ -143,6 +153,7 @@ export function ReaderPreferencesMcpSection({
           {copied ? l('已复制', 'Copied') : l('复制配置', 'Copy config')}
         </button>
       </div>
+      {copyError ? <div role="alert" className="mt-2 text-xs text-[var(--pq-danger)]">{copyError}</div> : null}
       <textarea
         readOnly
         value={snippet}

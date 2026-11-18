@@ -43,6 +43,7 @@ export interface BuildReaderAssistantSidebarInput {
   screenshotLoading: NonNullable<AssistantSidebarCoreProps['screenshotLoading']>;
   onQaInputChange: AssistantSidebarCoreProps['onQaInputChange'];
   onQaSubmit: AssistantSidebarCoreProps['onQaSubmit'];
+  onQaStop?: AssistantSidebarCoreProps['onQaStop'];
   onQaPresetChange: AssistantSidebarCoreProps['onQaPresetChange'];
   onQaRagEnabledChange: AssistantSidebarCoreProps['onQaRagEnabledChange'];
   onQaAnswerRenderModeChange: AssistantSidebarCoreProps['onQaAnswerRenderModeChange'];
@@ -117,6 +118,7 @@ export function buildReaderAssistantSidebarProps(
     screenshotLoading: input.screenshotLoading,
     onQaInputChange: input.onQaInputChange,
     onQaSubmit: input.onQaSubmit,
+    onQaStop: input.onQaStop,
     onQaPresetChange: input.onQaPresetChange,
     onQaRagEnabledChange: input.onQaRagEnabledChange,
     onQaAnswerRenderModeChange: input.onQaAnswerRenderModeChange,

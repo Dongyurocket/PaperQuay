@@ -19,6 +19,7 @@ import {
   Plus,
   Quote,
   Sparkles,
+  Square,
   Trash2,
   X,
 } from 'lucide-react';
@@ -687,6 +688,7 @@ export interface ChatWorkspacePanelProps {
   layoutMode?: 'compact' | 'workspace';
   onInputChange: (value: string) => void;
   onSubmit: (inputOverride?: string) => void;
+  onStop?: () => void;
   onQaPresetChange: (presetId: string) => void;
   onQaRagEnabledChange: (value: boolean) => void;
   onQaAnswerRenderModeChange: (mode: DocumentChatRenderMode) => void;
@@ -728,6 +730,7 @@ export function ChatWorkspacePanel({
   layoutMode = 'compact',
   onInputChange,
   onSubmit,
+  onStop,
   onQaPresetChange,
   onQaRagEnabledChange,
   onQaAnswerRenderModeChange,
@@ -1695,22 +1698,22 @@ export function ChatWorkspacePanel({
 
               <button
                 type="button"
-                onClick={() => onSubmit(composerInput.value)}
-                disabled={!canSubmit}
-                title={selectedSessionRunning ? l('回复中', 'Replying') : l('发送', 'Send')}
-                aria-label={selectedSessionRunning ? l('回复中', 'Replying') : l('发送', 'Send')}
+                onClick={() => selectedSessionRunning ? onStop?.() : onSubmit(composerInput.value)}
+                disabled={selectedSessionRunning ? !onStop : !canSubmit}
+                title={selectedSessionRunning ? l('停止生成', 'Stop generating') : l('发送', 'Send')}
+                aria-label={selectedSessionRunning ? l('停止生成', 'Stop generating') : l('发送', 'Send')}
                 className={cn(
                   'pq-button-primary shrink-0 text-sm disabled:cursor-not-allowed disabled:!bg-[var(--pq-surface-3)] disabled:!text-[var(--pq-text-faint)] disabled:!opacity-100',
                   compactComposer ? 'h-10 w-10 rounded-full px-0' : 'h-11 px-4',
                 )}
               >
                 {selectedSessionRunning ? (
-                  <Loader2 className="h-4 w-4 animate-spin" strokeWidth={1.9} />
+                  <Square className="h-4 w-4" strokeWidth={1.9} />
                 ) : (
                   <ArrowUp className="h-4 w-4" strokeWidth={1.9} />
                 )}
                 <span className={cn(compactComposer ? 'hidden' : 'hidden sm:inline')}>
-                  {selectedSessionRunning ? l('回复中', 'Replying') : l('发送', 'Send')}
+                  {selectedSessionRunning ? l('停止', 'Stop') : l('发送', 'Send')}
                 </span>
               </button>
             </div>

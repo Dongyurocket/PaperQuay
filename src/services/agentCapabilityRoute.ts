@@ -3,7 +3,6 @@ import {
   type AgentCapabilityId,
   getAgentCapability,
 } from './agentCapabilityRegistry.ts';
-import { isComparativeSurveyInstruction } from './agentCapabilityTrigger.ts';
 import type { DeliveryRequirement } from './agentDeliveryQuality.ts';
 
 export type AgentCapabilityRouteSource = 'user' | 'keyword' | 'model' | 'none';
@@ -28,7 +27,6 @@ export function resolveAgentCapabilityRoute(input: {
     if (definition) {
       const isAvailable = definition.available ? definition.available(input.mountContext) : true;
       if (isAvailable) {
-        // 具体 ID 且 available 通过时直接命中（若钉选 comparative-survey 且论文 < 2，在 runner 返回说明，不切走 ReAct）
         return {
           capabilityId: input.pinnedCapabilityId,
           source: 'user',
@@ -36,19 +34,6 @@ export function resolveAgentCapabilityRoute(input: {
         };
       }
     }
-  }
-
-  // 2. 关键词兜底：仅当未钉选或为 'auto' 时检测
-  const isAutoOrUnpinned = !input.pinnedCapabilityId || input.pinnedCapabilityId === 'auto';
-  const fullSurveyDelivery = input.paperCount >= 2
-    && input.deliveryRequirement?.kind === 'survey'
-    && input.deliveryRequirement.completeness === 'full';
-  if (isAutoOrUnpinned && (isComparativeSurveyInstruction(input.instruction, input.paperCount) || fullSurveyDelivery)) {
-    return {
-      capabilityId: 'comparative-survey',
-      source: 'keyword',
-      reason: fullSurveyDelivery ? 'Matched full survey delivery requirements' : 'Matched comparative survey keywords',
-    };
   }
 
   // 3. 模型分类兜底（可选注入）

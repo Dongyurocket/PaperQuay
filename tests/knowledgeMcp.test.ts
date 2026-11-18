@@ -276,6 +276,7 @@ test('paperquay-mcp stdio server handles JSON-RPC 2.0 requests', async () => {
     assert.ok(toolNames.includes('search_knowledge_base'));
     assert.ok(toolNames.includes('read_paper_content'));
     assert.ok(toolNames.includes('search_notes'));
+    assert.ok(toolNames.includes('get_note'));
     assert.ok(toolNames.includes('zotero_list_collections'));
     assert.ok(toolNames.includes('zotero_search_items'));
     assert.ok(toolNames.includes('zotero_preview_sync'));
@@ -288,7 +289,7 @@ test('paperquay-mcp stdio server handles JSON-RPC 2.0 requests', async () => {
     assert.ok(toolNames.includes('delete_papers'));
     assert.ok(toolNames.includes('attach_translated_pdf'));
     assert.ok(toolNames.includes('remove_translated_pdf'));
-    assert.equal(toolNames.length, 25);
+    assert.equal(new Set(toolNames).size, toolNames.length);
     const detailsSchema = listRes.result.tools.find((tool: any) => tool.name === 'get_paper_details').inputSchema;
     assert.equal(detailsSchema.properties.pageKind, undefined);
     const createNoteSchema = listRes.result.tools.find((tool: any) => tool.name === 'create_note').inputSchema;
@@ -377,6 +378,199 @@ function setupVectorFixture(dataDir: string) {
     secrets: { embeddingApiKey: 'test-key' },
   }));
 }
+
+test('RAG retrieval excludes disabled papers even when their old chunks remain', async () => {
+  const dataDir = setupTestEnvironment();
+  try {
+    setupVectorFixture(dataDir);
+    const service = new PaperQuayKnowledgeService({ dataDir, embedFn: async () => [0, 0, 1, 0] });
+    for (const mode of ['keyword', 'hybrid']) {
+      const result = await service.searchKnowledgeBase({ query: 'residual', mode });
+      assert.ok(result.results.every((item: any) => item.paperId !== 'paper-2'));
+      const scoped = await service.searchKnowledgeBase({ query: 'residual', mode, paperId: 'paper-2' });
+      assert.equal(scoped.total, 0);
+    }
+    assert.equal(service.readPaperContent({ paperId: 'paper-2' }).total, 0);
+  } finally {
+    cleanupDir(dataDir);
+  }
+});
+
+test('RAG retrieval rechecks exclusions after an asynchronous embedding request', async () => {
+  const dataDir = setupTestEnvironment();
+  try {
+    setupVectorFixture(dataDir);
+    const service = new PaperQuayKnowledgeService({
+      dataDir,
+      embedFn: async () => {
+        const db = new DatabaseSync(path.join(dataDir, 'paperquay-library.sqlite'));
+        try {
+          db.prepare('UPDATE papers SET rag_enabled = 0 WHERE id = ?').run('paper-1');
+        } finally {
+          db.close();
+        }
+        return [1, 0, 0, 0];
+      },
+    });
+    const result = await service.searchKnowledgeBase({ query: 'attention', mode: 'hybrid' });
+    assert.equal(result.total, 0);
+  } finally {
+    cleanupDir(dataDir);
+  }
+});
+
+test('keyword and LIKE searches handle large exclusion sets', async () => {
+  const dataDir = setupTestEnvironment();
+  try {
+    const service = new PaperQuayKnowledgeService({ dataDir });
+    const excluded = new Set(Array.from({ length: 33000 }, (_, index) => `excluded-${index}`));
+    service.getExcludedPaperIds = () => excluded;
+    const fts = await service.searchKnowledgeBase({ query: 'Transformer', mode: 'keyword' });
+    assert.equal(fts.results[0].paperId, 'paper-1');
+    const like = await service.searchKnowledgeBase({ query: 'multi-head attention allows', mode: 'keyword' });
+    assert.ok(like.results.some((item: any) => item.paperId === 'paper-1'));
+  } finally {
+    cleanupDir(dataDir);
+  }
+});
+
+test('search and paper reading do not return pending or failed index chunks', async () => {
+  const dataDir = setupTestEnvironment();
+  try {
+    setupVectorFixture(dataDir);
+    const rag = new DatabaseSync(path.join(dataDir, 'paperquay-rag.sqlite'));
+    rag.prepare('UPDATE rag_indexes SET status = ? WHERE document_key = ?').run('pending', 'paper-1');
+    rag.close();
+    const service = new PaperQuayKnowledgeService({ dataDir, embedFn: async () => [1, 0, 0, 0] });
+    for (const mode of ['keyword', 'hybrid']) {
+      for (const query of ['Transformer', 'ransforme']) {
+        const result = await service.searchKnowledgeBase({ query, paperId: 'paper-1', mode });
+        assert.equal(result.total, 0);
+      }
+    }
+    assert.equal(service.readPaperContent({ paperId: 'paper-1' }).total, 0);
+  } finally {
+    cleanupDir(dataDir);
+  }
+});
+
+test('keyword hits are rechecked if an index becomes pending during embedding', async () => {
+  const dataDir = setupTestEnvironment();
+  try {
+    setupVectorFixture(dataDir);
+    const service = new PaperQuayKnowledgeService({ dataDir, embedFn: async () => {
+      const rag = new DatabaseSync(path.join(dataDir, 'paperquay-rag.sqlite'));
+      rag.prepare('UPDATE rag_indexes SET status = ? WHERE document_key = ?').run('pending', 'paper-1');
+      rag.close();
+      return [1, 0, 0, 0];
+    } });
+    const result = await service.searchKnowledgeBase({ query: 'Transformer', mode: 'hybrid' });
+    assert.equal(result.total, 0);
+  } finally {
+    cleanupDir(dataDir);
+  }
+});
+
+test('keyword hits are discarded when a ready source replaces a chunk during embedding', async () => {
+  const dataDir = setupTestEnvironment();
+  try {
+    setupVectorFixture(dataDir);
+    const service = new PaperQuayKnowledgeService({ dataDir, embedFn: async () => {
+      const rag = new DatabaseSync(path.join(dataDir, 'paperquay-rag.sqlite'));
+      rag.prepare('UPDATE rag_chunks SET text = ? WHERE id = 1').run('Replacement evidence');
+      rag.close();
+      return [1, 0, 0, 0];
+    } });
+    const result = await service.searchKnowledgeBase({ query: 'Transformer', mode: 'hybrid' });
+    const replacement = result.results.find((item: any) => item.blockId === 'b-1');
+    assert.ok(replacement);
+    assert.deepEqual(replacement.channels, ['vector']);
+    assert.match(replacement.snippet, /Replacement evidence/);
+    assert.doesNotMatch(replacement.snippet, /We propose the Transformer/);
+  } finally {
+    cleanupDir(dataDir);
+  }
+});
+
+test('hybrid search does not mix vectors from different embedding models', async () => {
+  const dataDir = setupTestEnvironment();
+  try {
+    setupVectorFixture(dataDir);
+    const library = new DatabaseSync(path.join(dataDir, 'paperquay-library.sqlite'));
+    library.prepare('UPDATE papers SET rag_enabled = 1 WHERE id = ?').run('paper-2');
+    library.close();
+    const rag = new DatabaseSync(path.join(dataDir, 'paperquay-rag.sqlite'));
+    rag.prepare('UPDATE rag_indexes SET embedding_model_key = ? WHERE document_key = ?')
+      .run('http://localhost:11434/v1::other-model::4', 'paper-2');
+    rag.close();
+    const service = new PaperQuayKnowledgeService({ dataDir, embedFn: async () => [0, 0, 1, 0] });
+    const mixed = await service.searchKnowledgeBase({ query: 'nonexistentkeyword', mode: 'hybrid' });
+    assert.equal(mixed.retrievalMode, 'hybrid');
+    assert.ok(mixed.results.length > 0);
+    assert.ok(mixed.results.every((item: any) => item.paperId === 'paper-1'));
+
+    const changed = new DatabaseSync(path.join(dataDir, 'paperquay-rag.sqlite'));
+    changed.prepare('UPDATE rag_indexes SET embedding_model_key = ?').run('http://localhost:11434/v1::other-model::4');
+    changed.close();
+    const incompatible = await service.searchKnowledgeBase({ query: 'attention', mode: 'hybrid' });
+    assert.equal(incompatible.retrievalMode, 'keyword');
+    assert.match(incompatible.warning, /模型/);
+    assert.ok(incompatible.results.every((item: any) => !item.channels.includes('vector')));
+  } finally {
+    cleanupDir(dataDir);
+  }
+});
+
+test('MCP vector retrieval does not lose matching sources to closer incompatible vectors', async () => {
+  const dataDir = setupTestEnvironment();
+  try {
+    setupVectorFixture(dataDir);
+    const sqliteVec = require('sqlite-vec');
+    const rag = new DatabaseSync(path.join(dataDir, 'paperquay-rag.sqlite'), { allowExtension: true });
+    rag.enableLoadExtension(true);
+    rag.loadExtension(sqliteVec.getLoadablePath());
+    rag.enableLoadExtension(false);
+    rag.prepare('INSERT INTO rag_indexes VALUES (?, ?, ?, ?, ?, ?)')
+      .run('paper-1', 'pdf-text', 'ready', 'http://localhost:11434/v1::other-model::4', 4, 3);
+    const insertChunk = rag.prepare('INSERT INTO rag_chunks (id, document_key, source_type, chunk_id, chunk_index, text) VALUES (?, ?, ?, ?, ?, ?)');
+    const insertVector = rag.prepare('INSERT INTO rag_vec_4 (rowid, document_key, source_type, embedding) VALUES (?, ?, ?, ?)');
+    rag.exec('BEGIN');
+    for (let index = 0; index < 40; index += 1) {
+      const id = BigInt(index + 10);
+      insertChunk.run(id, 'paper-1', 'pdf-text', `foreign-${index}`, index, 'unrelated');
+      insertVector.run(id, 'paper-1', 'pdf-text', new Float32Array([0, 0, 1, 0]));
+    }
+    rag.exec('COMMIT');
+    rag.close();
+    const service = new PaperQuayKnowledgeService({ dataDir, embedFn: async () => [0, 0, 1, 0] });
+    for (const paperId of ['', 'paper-1']) {
+      const result = await service.searchKnowledgeBase({ query: 'nonexistentkeyword', mode: 'hybrid', paperId, limit: 2 });
+      assert.equal(result.retrievalMode, 'hybrid');
+      assert.equal(result.total, 2);
+      assert.ok(result.results.every((item: any) => item.paperId === 'paper-1' && item.sourceType === 'mineru-markdown'));
+    }
+  } finally {
+    cleanupDir(dataDir);
+  }
+});
+
+test('hybrid search attributes channels to the correct paper when chunk IDs repeat', async () => {
+  const dataDir = setupTestEnvironment();
+  try {
+    setupVectorFixture(dataDir);
+    const library = new DatabaseSync(path.join(dataDir, 'paperquay-library.sqlite'));
+    library.prepare('UPDATE papers SET rag_enabled = 1 WHERE id = ?').run('paper-2');
+    library.close();
+    const service = new PaperQuayKnowledgeService({ dataDir, embedFn: async () => [1, 0, 0, 0] });
+    service.retrieveVectorChunks = () => ({ rows: [{ paperId: 'paper-2', chunkId: 'c-1',
+      sourceType: 'mineru-markdown', pageIndex: 0, blockId: 'b-3', text: 'Residual evidence', score: 0 }], truncated: false });
+    const result = await service.searchKnowledgeBase({ query: 'transformer', mode: 'hybrid' });
+    assert.deepEqual(result.results.find((item: any) => item.paperId === 'paper-1')?.channels, ['fts']);
+    assert.deepEqual(result.results.find((item: any) => item.paperId === 'paper-2')?.channels, ['vector']);
+  } finally {
+    cleanupDir(dataDir);
+  }
+});
 
 test('PaperQuayKnowledgeService fuses vector and FTS channels in hybrid mode', async () => {
   const dataDir = setupTestEnvironment();

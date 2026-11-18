@@ -43,9 +43,33 @@ test('the actual service exposes each streamed answer as a separate turn draft',
   const result = await runConversationalLibraryAgent({ papers: [paper], instruction: 'Answer the question.', preset,
     streamHandlers: { onDelta: (text: string, fullText: string, turn?: number) => drafts.push({ text, fullText, turn }) } });
   assert.equal(result.answer, 'Final answer.');
+  assert.match(result.ragNotice, /当次文献范围：1 篇/);
+  assert.match(result.ragNotice, /本次运行未执行本地 RAG 检索/);
   assert.equal(calls.length, 2);
   assert.deepEqual(drafts.map((draft) => draft.fullText), ['Inspecting the paper.', 'Final answer.']);
   assert.deepEqual(drafts.map((draft) => draft.turn), [1, 2]);
+});
+
+test('a resumed run distinguishes its own retrieval from historical context', async () => {
+  const { runConversationalLibraryAgent } = await loadRunner(`
+    return { content:'Continued answer.', finishReason:'stop' };
+  `);
+  const result = await runConversationalLibraryAgent({
+    papers: [paper], instruction: 'Continue.', preset,
+    loopResumeMessages: [{ role: 'tool', toolCallId: 'old-search', content: '{"result":"previous evidence"}' }],
+  });
+  assert.match(result.ragNotice, /本次运行未执行本地 RAG 检索/);
+  assert.match(result.ragNotice, /历史上下文可能包含此前的检索结果/);
+});
+
+test('paper context fallback does not claim a successful RAG retrieval', async () => {
+  const { runConversationalLibraryAgent, calls } = await loadRunner(`
+    if (calls.length === 1) return { content:'', toolCalls:[{id:'context',name:'request_paper_context',arguments:{mode:'pdf-text',reason:'Read',paperIds:['paper-a']}}], finishReason:'tool_calls' };
+    return { content:'Answer.', finishReason:'stop' };
+  `);
+  const result = await runConversationalLibraryAgent({ papers: [paper], instruction: 'Read', preset });
+  assert.match(result.ragNotice, /文献「Rotor」未取得本地 RAG 证据/);
+  assert.doesNotMatch(result.ragNotice, /上下文检索返回/);
 });
 
 test('the actual service resets answer and thinking aggregation for a retry in the same turn', async () => {
@@ -71,4 +95,48 @@ test('the actual service resets answer and thinking aggregation for a retry in t
   assert.deepEqual(starts, [1, 1]);
   assert.deepEqual(answers, ['Discarded answer.', 'Successful answer.']);
   assert.deepEqual(thinking, ['Discarded thinking.', 'Successful thinking.']);
+});
+
+test('the actual Agent reports RAG channels and keyword failures to the model and user', async () => {
+  const { runConversationalLibraryAgent, calls } = await loadRunner(`
+    if (calls.length % 2 === 1) return { content:'', toolCalls:[{id:'rag',name:'rag_search',arguments:{query:'rotor'}}], finishReason:'tool_calls' };
+    return { content:'Answer.', finishReason:'stop' };
+  `);
+  const previousWindow = (globalThis as any).window;
+  let ftsStatus = 'failed';
+  let results: unknown[] = [{ documentKey: 'paper-a', chunkId: 'chunk-1', sourceType: 'pdf-text', pageIndex: 0, text: 'Rotor evidence.' }];
+  const requests: Array<{ command: string; args: any }> = [];
+  (globalThis as any).window = {
+    localStorage: { getItem: (key: string) => key === 'paper-reader-secrets-v1' ? JSON.stringify({ embeddingApiKey: 'fixture' }) : null },
+    paperquay: { invoke: async (command: string, args: any) => {
+      requests.push({ command, args });
+      if (command === 'rag_embed_text') return [1, 0];
+      if (command === 'rag_retrieve_document_chunks') return { results, ftsStatus, ftsHitCount: 0, indexCoverage: { total: 1, ready: 1, excluded: 0, unavailable: 0 } };
+      throw new Error(`Unexpected bridge command: ${command}`);
+    } },
+  };
+  try {
+    const first = await runConversationalLibraryAgent({ papers: [paper], instruction: 'Compare', preset });
+    const retrievalRequest = requests.find((request) => request.command === 'rag_retrieve_document_chunks');
+    assert.equal(retrievalRequest?.args.request.includeDiagnostics, true);
+    assert.equal(retrievalRequest?.args.request.includeIndexCoverage, true);
+    const firstTool = JSON.parse(JSON.parse(calls[1].messages.find((message: any) => message.toolCallId === 'rag').content).result);
+    assert.equal(firstTool.ftsStatus, 'failed', JSON.stringify(firstTool));
+    assert.equal(firstTool.retrievalMode, 'vector');
+    assert.match(firstTool.ragErrors[0], /关键词检索失败/);
+    assert.match(first.ragNotice, /范围 1 篇，返回 1 条证据；关键词检索失败/);
+    assert.deepEqual(firstTool.indexCoverage, { total: 1, ready: 1, excluded: 0, unavailable: 0 });
+    assert.match(first.ragNotice, /当前模型和维度可用索引 1\/1 篇，排除 0 篇，未就绪或不匹配 0 篇/);
+
+    ftsStatus = 'searched';
+    results = [];
+    const second = await runConversationalLibraryAgent({ papers: [paper], instruction: 'Compare', preset });
+    const secondTool = JSON.parse(JSON.parse(calls[3].messages.find((message: any) => message.toolCallId === 'rag').content).result);
+    assert.equal(secondTool.retrievalMode, 'hybrid');
+    assert.equal(secondTool.ftsHitCount, 0);
+    assert.deepEqual(secondTool.ragErrors, []);
+    assert.match(second.ragNotice, /返回 0 条证据；关键词候选 0 条/);
+  } finally {
+    (globalThis as any).window = previousWindow;
+  }
 });

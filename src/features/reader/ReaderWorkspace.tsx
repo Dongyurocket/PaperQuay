@@ -157,6 +157,7 @@ interface ReaderWorkspaceProps {
   qaRunningSessionIds?: string[];
   onQaInputChange: (value: string) => void;
   onQaSubmit: (inputOverride?: string) => void;
+  onQaStop?: () => void;
   onQaPresetChange: (presetId: string) => void;
   onQaRagEnabledChange: (value: boolean) => void;
   onQaAnswerRenderModeChange: (mode: DocumentChatRenderMode) => void;
@@ -695,6 +696,7 @@ function ReaderWorkspace(props: ReaderWorkspaceProps) {
     runningSessionIds: props.qaRunningSessionIds ?? [],
     onInputChange: props.onQaInputChange,
     onSubmit: props.onQaSubmit,
+    onStop: props.onQaStop,
     onQaPresetChange: props.onQaPresetChange,
     onQaRagEnabledChange: props.onQaRagEnabledChange,
     onQaAnswerRenderModeChange: props.onQaAnswerRenderModeChange,

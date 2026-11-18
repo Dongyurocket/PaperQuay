@@ -31,8 +31,6 @@ import {
   type AgentNoteWritePlan,
 } from '../../services/agentNotePlan';
 import type { AgentLoopEvent, AgentLoopMessage } from '../../services/agentLoop';
-import { isComparativeSurveyInstruction } from '../../services/agentCapabilityTrigger';
-import type { ComparativeSurveyArtifacts } from '../../services/agentCapability';
 import {
   type AgentCapabilityEvent,
   type AgentCapabilityId,
@@ -40,7 +38,6 @@ import {
 } from '../../services/agentCapabilityRegistry';
 import { resolveAgentCapabilityRoute } from '../../services/agentCapabilityRoute';
 import { deriveAgentDeliveryRequirement } from '../../services/agentDeliveryQuality';
-import { normalizeSurveyCoverageLedger } from '../../services/agentSurveyCoverage';
 import { listLibraryCategories, listLibraryPapers } from '../../services/library';
 import { paperPdfPath } from '../../utils/libraryPaper';
 import type { LiteratureCategory, LiteraturePaper } from '../../types/library';
@@ -52,7 +49,6 @@ import {
 } from './agentSessionState';
 import {
   latestAgentRecoveryCheckpoint,
-  latestComparativeSurveyCheckpoint,
   recoveryCheckpointToChatMessages,
   latestAgentRecoveryCitations,
 } from './agentRunRecovery';
@@ -111,8 +107,8 @@ function createAgentRagCitationJumpRequestId(): string {
   return `agent-rag-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
 }
 
-function createCapabilityView(id: AgentCapabilityId = 'comparative-survey'): AgentCapabilityView {
-  const definition = getAgentCapability(id) ?? getAgentCapability('comparative-survey')!;
+function createCapabilityView(id: AgentCapabilityId = 'citation-audit'): AgentCapabilityView {
+  const definition = getAgentCapability(id) ?? getAgentCapability('citation-audit')!;
   return {
     id: definition.id,
     status: 'running' as const,
@@ -224,10 +220,6 @@ function AgentWorkspace() {
   const [sessionTokenUsage, setSessionTokenUsage] = useState<Record<string, number>>({});
   const abortControllersRef = useRef(new Map<string, AbortController>());
   const memoryPlanInFlightRef = useRef(new Set<string>());
-  const pendingCapabilityResumeRef = useRef(new Map<string, {
-    instruction: string;
-    artifacts: Partial<ComparativeSurveyArtifacts>;
-  }>());
   const pendingLoopResumeRef = useRef(new Map<string, {
     instruction: string;
     messages: AgentLoopMessage[];
@@ -938,7 +930,6 @@ function AgentWorkspace() {
   const runAgent = async (
     rawInstruction: string,
     inlinePaperIds?: string[],
-    capabilityResume?: Partial<ComparativeSurveyArtifacts>,
   ) => {
     const instruction = rawInstruction.trim();
 
@@ -948,13 +939,6 @@ function AgentWorkspace() {
     }
 
     const sessionId = activeSessionId;
-    const pendingCapabilityResume = pendingCapabilityResumeRef.current.get(sessionId);
-    const effectiveCapabilityResume = capabilityResume ?? (
-      pendingCapabilityResume?.instruction.trim() === instruction
-        ? pendingCapabilityResume.artifacts
-        : undefined
-    );
-    pendingCapabilityResumeRef.current.delete(sessionId);
     const pendingLoopResume = pendingLoopResumeRef.current.get(sessionId);
     const effectiveLoopResumeMessages = pendingLoopResume?.instruction.trim() === instruction
       ? pendingLoopResume.messages
@@ -995,7 +979,7 @@ function AgentWorkspace() {
     const assistantMessageId = newMessageId();
     const paperCount = selectedPapersSnapshot.length;
     const historyMessages = buildConversationHistory();
-    const pinnedCapabilityIdForRun = effectiveCapabilityResume ? 'comparative-survey' : pinnedCapabilityId;
+    const pinnedCapabilityIdForRun = pinnedCapabilityId;
     // 触发判定与服务层共用同一路由解析，进度卡展示与实际执行路径保持一致。
     const capabilityRoute = resolveAgentCapabilityRoute({
       instruction,
@@ -1188,7 +1172,7 @@ function AgentWorkspace() {
 
       updateSessionMessage(sessionId, assistantMessageId, (message) => {
         // 分类器路由命中的能力在发送前无法预知，首个阶段事件到达时按事件携带的 capabilityId 建卡。
-        const capability = message.capability ?? createCapabilityView(event.capabilityId ?? 'comparative-survey');
+        const capability = message.capability ?? createCapabilityView(event.capabilityId ?? 'citation-audit');
         const stages = capability.stages.map((stage) => {
           if (stage.id !== event.stage) return stage;
           if (event.kind === 'stage_start') return { ...stage, status: 'running' as const };
@@ -1270,26 +1254,6 @@ function AgentWorkspace() {
           runId: targetRunId, kind: 'citation_verification',
           payload: { bindings: bindings.map(({ tokenId, start, status, reason, model, detail }) => ({ tokenId, start, status, reason, model, detail })) },
         })).then(() => undefined).catch(() => undefined);
-      },
-      onCapabilityCheckpoint: (artifacts) => {
-        updateSessionMessage(sessionId, assistantMessageId, (message) => ({
-          ...message,
-          capability: {
-            ...(message.capability ?? createCapabilityView()),
-            artifacts,
-          },
-        }));
-        if (runId) {
-          const targetRunId = runId;
-          runEventQueue = runEventQueue
-            .then(() => appendAgentRunEvent({
-              runId: targetRunId,
-              kind: 'checkpoint',
-              payload: { capabilityId: 'comparative-survey', artifacts },
-            }))
-            .then(() => undefined)
-            .catch(() => undefined);
-        }
       },
       onRecoveryCheckpoint: appendRecoveryCheckpoint,
       onError: (message) => {
@@ -1374,7 +1338,6 @@ function AgentWorkspace() {
         ragEnabled: agentRagEnabled,
         attachments: attachmentsSnapshot,
         signal: abortController.signal,
-        capabilityResume: effectiveCapabilityResume,
         loopResumeMessages: effectiveLoopResumeMessages,
         loopResumeCitations: effectiveLoopResumeMessages ? pendingLoopResume?.citations : undefined,
         pinnedCapabilityId: pinnedCapabilityIdForRun,
@@ -1383,29 +1346,21 @@ function AgentWorkspace() {
       const durationMs = Math.round(performance.now() - startedAt);
 
       if (result.kind === 'capability') {
-        const content = result.result.kind === 'survey'
-          ? result.result.survey.markdown
-          : result.result.kind === 'audit'
+        const content = result.result.kind === 'audit'
             ? result.result.audit.markdown
             : result.result.kind === 'note-plan'
               ? result.result.answer
               : result.result.kind === 'graph-report'
                 ? result.result.report.markdown
                 : '';
-        const artifacts = result.result.kind === 'survey' ? result.result.survey.artifacts : undefined;
         // 引用核对产物挂到消息上，rejectedClaimLines 非空时渲染「写入工作记忆」入口；
         // 笔记蒸馏走现有笔记审批卡，不新做卡片（方案第 9 节）。
         const citationAudit = result.result.kind === 'audit' ? result.result.audit : undefined;
         const notePlan = result.result.kind === 'note-plan' && result.result.notePlan
           ? result.result.notePlan
           : undefined;
-        const deliveryQuality = result.result.kind === 'survey' ? result.result.survey.deliveryQuality : undefined;
-        const deliveryStatus = deliveryQuality?.state === 'failed' ? 'error' : deliveryQuality?.state === 'partial' || notePlan ? 'warning' : 'success';
-        const deliverySummary = deliveryQuality?.state === 'failed'
-          ? l('本轮交付未完成，请查看交付检查。', 'Delivery failed; review the delivery check.')
-          : deliveryQuality?.state === 'partial'
-            ? l('本轮交付部分完成，请查看交付检查与待处理项。', 'Delivery is partial; review the delivery check and pending work.')
-            : notePlan
+        const deliveryStatus = notePlan ? 'warning' : 'success';
+        const deliverySummary = notePlan
               ? l('笔记计划已生成，等待审批。', 'Note plan prepared; waiting for approval.')
               : l('能力执行已结束。', 'Capability execution finished.');
 
@@ -1420,29 +1375,20 @@ function AgentWorkspace() {
           evidenceStats: result.evidenceStats,
           citationBindings: result.citationBindings,
           citationAudit,
-          deliveryQuality,
           notePlan,
           capability: {
             ...(message.capability ?? createCapabilityView(result.capabilityId)),
-            status: deliveryQuality?.state === 'failed' ? 'error' : deliveryQuality?.state === 'partial' ? 'partial' : 'done',
+            status: 'done',
             activeStage: undefined,
             stages: (message.capability ?? createCapabilityView(result.capabilityId)).stages.map((stage) => ({
               ...stage,
-              status: stage.id === 'report' && deliveryQuality && deliveryQuality.state !== 'complete'
-                ? deliveryQuality.state === 'failed' ? 'error' : 'warning'
-                : stage.id === 'research' && result.result.kind === 'survey' && result.result.survey.coverageSummary?.canResume
-                  ? 'warning'
-                  : artifacts?.completedStages.includes(stage.id as ComparativeSurveyArtifacts['completedStages'][number])
-                    ? 'success'
-                    : stage.status === 'waiting' ? 'skipped' : stage.status === 'running' ? 'warning' : stage.status,
+              status: stage.status === 'waiting' ? 'skipped' : stage.status === 'running' ? 'warning' : stage.status,
             })),
-            artifacts,
           },
           error: undefined,
           trace: settleAgentTrace(message.trace, {
             status: deliveryStatus,
             summary: deliverySummary,
-            detail: deliveryQuality?.issues.map((item) => item.message).join('\n') || undefined,
             durationMs,
           }, locale),
         }));
@@ -1909,7 +1855,7 @@ function AgentWorkspace() {
 
     try {
       const result = await applyAgentNoteWritePlan(notePlan);
-      markNotePlanTerminalStatus(sessionId, notePlan.id, 'applied');
+      if (result.applied > 0) markNotePlanTerminalStatus(sessionId, notePlan.id, 'applied');
       const detail =
         result.failed > 0
           ? l(
@@ -2019,28 +1965,6 @@ function AgentWorkspace() {
 
     setStatusMessage(l('正在重新生成 Agent 计划。', 'Regenerating the Agent plan.'));
     void runAgent(nextInstruction);
-  };
-
-  const handleContinueSurvey = (message: AgentChatMessage) => {
-    const messageIndex = messages.findIndex((item) => item.id === message.id);
-    const originalRequest = messageIndex < 0 ? undefined : [...messages.slice(0, messageIndex)].reverse().find((item) => item.role === 'user');
-    const rawArtifacts = message.capability?.id === 'comparative-survey' && message.capability.artifacts && typeof message.capability.artifacts === 'object'
-      ? message.capability.artifacts as Partial<ComparativeSurveyArtifacts>
-      : undefined;
-    const coverage = normalizeSurveyCoverageLedger(rawArtifacts?.coverage);
-    if (!originalRequest?.content.trim() || !coverage || coverage.papers.length === 0) {
-      setStatusMessage(l('原任务或覆盖记录未保存，请重新提供要继续的任务。', 'The original request or coverage records are unavailable. Provide the task again.'));
-      return;
-    }
-    const artifacts: Partial<ComparativeSurveyArtifacts> = {
-      ...rawArtifacts,
-      coverage,
-      completedStages: Array.isArray(rawArtifacts?.completedStages)
-        ? rawArtifacts.completedStages.filter((stage) => ['rephrase', 'decompose', 'research', 'report'].includes(stage))
-        : [],
-    };
-    setStatusMessage(l('正在沿用原文献范围和覆盖记录继续调研。', 'Continuing the survey with its original paper scope and coverage records.'));
-    void runAgent(originalRequest.content, coverage.papers.map((paper) => paper.paperId), artifacts);
   };
 
   const handleAgentChoice = (instruction: string, paperScopeIds?: string[]) => {
@@ -2269,43 +2193,6 @@ function AgentWorkspace() {
 
         const events = (await getAgentRunEvents(interruptedRun.runId, 0, { order: 'desc', limit: 200 })).reverse();
         const checkpoint = latestAgentRecoveryCheckpoint(events);
-        const capabilityCheckpoint = latestComparativeSurveyCheckpoint(events);
-
-        if (capabilityCheckpoint) {
-          const resumeCapability = await confirmAction({
-            title: l('继续上次对比调研', 'Resume the previous comparative survey'),
-            description: l(
-              '上次对比调研被中断。是否从最近完成的阶段继续？',
-              'The previous comparative survey was interrupted. Continue from the most recently completed stage?',
-            ),
-          });
-
-          await finishAgentRun({ runId: interruptedRun.runId, status: 'aborted' }).catch(() => {});
-
-          // confirm + await 期间用户可能已切换到其他会话，写输入框前必须复查。
-          if (activeSessionIdRef.current !== session.id) {
-            return;
-          }
-
-          if (resumeCapability) {
-            pendingCapabilityResumeRef.current.set(session.id, {
-              instruction: session.lastInstruction,
-              artifacts: capabilityCheckpoint,
-            });
-            setComposerValue(session.lastInstruction);
-            setStatusMessage(l(
-              '已恢复对比调研阶段检查点；发送输入框中的原任务即可继续。',
-              'The comparative-survey stage checkpoint was restored. Send the original task in the composer to continue.',
-            ));
-          } else {
-            setStatusMessage(l(
-              '已放弃恢复上次对比调研，并将中断运行标记为已取消。',
-              'The previous comparative survey was not restored and its interrupted run was marked aborted.',
-            ));
-          }
-          return;
-        }
-
         if (!checkpoint) {
           await finishAgentRun({ runId: interruptedRun.runId, status: 'aborted' }).catch(() => {});
           setStatusMessage(l(
@@ -2488,7 +2375,6 @@ function AgentWorkspace() {
       handleNewAgentSession={handleNewAgentSession}
       handleOpenHistorySession={handleOpenHistorySession}
       handleRetryAgent={handleRetryAgent}
-      onContinueSurvey={handleContinueSurvey}
       historySidebarCollapsed={historySidebarCollapsed}
       historySidebarRef={historySidebarRef}
       l={l}

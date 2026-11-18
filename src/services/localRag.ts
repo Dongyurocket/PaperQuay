@@ -16,6 +16,7 @@ import {
   ragListIndexedChunkIds,
   ragReportDocumentIndexFailure,
   ragRetrieveDocumentChunks,
+  ragRetrieveDocumentChunksWithDiagnostics,
   type RagEmbeddingOptions,
 } from './rag';
 import { emitRagIndexStatusUpdated } from './ragIndexStatus.ts';
@@ -533,9 +534,11 @@ export async function resolveLocalRag(input: {
   try {
     retrievals = await Promise.all(
       readySources.map((source) =>
-        ragRetrieveDocumentChunks({
+        ragRetrieveDocumentChunksWithDiagnostics({
           documentKey: preparedDocument.documentKey,
           sourceType: source.sourceType,
+          embeddingModelKey,
+          sourceSignature: source.sourceSignature,
           queryEmbedding,
           queryText,
           topK: input.settings.localRagTopK,
@@ -549,9 +552,14 @@ export async function resolveLocalRag(input: {
     };
   }
 
+  const diagnostics = {
+    ftsStatuses: [...new Set(retrievals.map((result) => result.ftsStatus))],
+    ftsHitCount: retrievals.reduce((total, result) => total + result.ftsHitCount, 0),
+    partialSources: readySources.length < preparedDocument.sources.length,
+  };
   const merged = filterRelevantRetrievals(
     retrievals
-    .flat()
+    .flatMap((result) => result.results)
     .sort((left, right) => left.score - right.score),
     input.settings.localRagTopK,
   );
@@ -561,6 +569,7 @@ export async function resolveLocalRag(input: {
       kind: 'empty',
       indexedChunkCount: statusSummary.indexedChunkCount,
       totalChunkCount: statusSummary.totalChunkCount,
+      ...diagnostics,
     };
   }
 
@@ -576,6 +585,7 @@ export async function resolveLocalRag(input: {
       kind: 'empty',
       indexedChunkCount: statusSummary.indexedChunkCount,
       totalChunkCount: statusSummary.totalChunkCount,
+      ...diagnostics,
     };
   }
 
@@ -587,6 +597,7 @@ export async function resolveLocalRag(input: {
     retrievals: contextDocument.retrievals,
     indexedChunkCount: statusSummary.indexedChunkCount,
     totalChunkCount: statusSummary.totalChunkCount,
+    ...diagnostics,
   };
 }
 

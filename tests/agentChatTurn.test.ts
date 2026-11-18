@@ -49,6 +49,29 @@ function context() {
   };
 }
 
+test('document QA cancellation aborts the provider and is scoped to its sender', async (t) => {
+  let requestSignal: AbortSignal | undefined;
+  t.mock.method(globalThis, 'fetch', async (_url, init) => {
+    requestSignal = init?.signal ?? undefined;
+    return await new Promise<Response>((_resolve, reject) => {
+      requestSignal?.addEventListener('abort', () => reject(new DOMException('Cancelled', 'AbortError')), { once: true });
+    });
+  });
+  const commands = createAiCommands(context());
+  const sender = { id: 10, send() {} };
+  const pending = commands.ask_document_openai_compatible_stream({
+    requestId: 'qa-1',
+    options: { baseUrl: 'https://example.test/v1', apiKey: 'key', model: 'test', title: 'Paper', messages: [] },
+  }, { sender });
+  assert.ok(requestSignal);
+  assert.equal(await commands.ask_document_openai_compatible_stream_cancel({ requestId: 'qa-1' }, { sender: { id: 11 } }), false);
+  assert.equal(requestSignal.aborted, false);
+  assert.equal(await commands.ask_document_openai_compatible_stream_cancel({ requestId: 'qa-1' }, { sender }), true);
+  await assert.rejects(pending);
+  assert.equal(requestSignal.aborted, true);
+  assert.equal(await commands.ask_document_openai_compatible_stream_cancel({ requestId: 'qa-1' }, { sender }), false);
+});
+
 test('agent_chat_turn streams tool calls and usage through the shared Agent event channel', async (t) => {
   const requests: Array<Record<string, unknown>> = [];
   t.mock.method(globalThis, 'fetch', async (_url, init) => {

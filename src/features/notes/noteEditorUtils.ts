@@ -68,17 +68,11 @@ export function buildNoteEditorDraftKey(editorSourceId: string, noteId: string):
 export function readNoteEditorDraft(
   editorSourceId: string,
   noteId: string,
-  baseUpdatedAt: number | null,
 ): NoteEditorDraft | null {
   const key = buildNoteEditorDraftKey(editorSourceId, noteId);
   const draft = noteEditorDrafts.get(key);
 
   if (!draft) return null;
-
-  if (draft.baseUpdatedAt !== baseUpdatedAt) {
-    noteEditorDrafts.delete(key);
-    return null;
-  }
 
   return cloneNoteEditorDraft(draft);
 }

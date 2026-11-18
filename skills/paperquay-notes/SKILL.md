@@ -10,7 +10,7 @@ description: 通过 PaperQuay Knowledge MCP 维护 PaperQuay 论文阅读器的�
 ## 护栏（先读）
 
 - 桌面应用运行中或运行状态无法确认时，写入工具默认拒绝。请用户先关闭 PaperQuay。
-- 确需在应用运行时写入，才传 `allowWhileAppRunning: true`；应用界面不会自动刷新，写入后需重新加载才能看到。
+- 仅在用户明确接受覆盖风险时传 `allowWhileAppRunning: true`：应用内存中的旧状态可能在下次保存时覆盖外部写入。
 - `PAPERQUAY_MCP_WRITE=off` 时所有写入工具禁用。
 
 ## 笔记工具
@@ -18,6 +18,7 @@ description: 通过 PaperQuay Knowledge MCP 维护 PaperQuay 论文阅读器的�
 | 工具 | 说明 |
 | --- | --- |
 | `search_notes` | 只读。语义 + 关键词混合检索，可按 `paperId`、`pageKind` 过滤；返回 `retrievalMode`、`channels`、`warning` |
+| `get_note` | 只读。按 ID 分页读取正文和锚点；使用 `nextOffset` 继续读取，注意锚点与摘录的截断上限 |
 | `list_note_tags` / `list_note_folders` | 只读。标签与使用次数 / 文件夹树 |
 | `create_note` | 新建；`title`、`content` 至少一个非空；`type` 为 `standalone`（默认）/`highlight`/`area`/`ai-chat`；`tags` 去 `#`、最多 30 个；可带 `paperId`、`pageKind`、`folderId` |
 | `update_note` | 局部更新 `title`/`content`/`tags`/`pageKind`/`folderId`；`tags` 整体替换；`pageKind`、`folderId` 传空串分别清除、移到未分类 |
@@ -40,7 +41,7 @@ description: 通过 PaperQuay Knowledge MCP 维护 PaperQuay 论文阅读器的�
 
 ## 整理流程
 
-1. 用 `search_notes`、`list_note_folders`、`list_note_tags` 了解现状。
-2. 先建文件夹树，再用 `update_note` 改 `folderId` 移动笔记。
-3. 批量改标题、补标签用 `update_note`。
-4. 不批量删除；先向用户列出待删清单并确认。
+1. 用 `search_notes`、`list_note_folders`、`list_note_tags` 找到目标，必要时用 `get_note` 分页读取完整正文及锚点。
+2. 列出待修改或删除的笔记和字段；删除前取得用户明确确认。
+3. 先建文件夹树，再用 `update_note` 改 `folderId` 移动笔记；仅传需要修改的字段。
+4. 写入后重新读取目标，核对字段、锚点及操作结果，并报告失败或跳过的项目。

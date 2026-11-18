@@ -244,21 +244,13 @@ export function buildMineruRagChunks(
 
 export function buildPdfRagChunks(documentText: string): RagChunkInput[] {
   const sections = documentText
-    .split(/\n\s*# Page /)
-    .map((section, index) => {
-      if (index === 0 && !section.startsWith('1\n')) {
-        return {
-          pageIndex: null,
-          text: section,
-        };
-      }
-
-      const normalized = index === 0 ? section : `# Page ${section}`;
-      const match = normalized.match(/^# Page\s+(\d+)\s*\n([\s\S]*)$/);
+    .split(/(?=^# Page[ \t]+[1-9]\d*[ \t]*\r?$)/m)
+    .map((section) => {
+      const match = section.match(/^# Page[ \t]+([1-9]\d*)[ \t]*(?:\r?\n|$)([\s\S]*)$/);
 
       return {
         pageIndex: match ? Number(match[1]) - 1 : null,
-        text: match ? match[2] : normalized,
+        text: match ? match[2] : section,
       };
     })
     .filter((section) => section.text.trim());
@@ -670,7 +662,22 @@ export function buildRagContextText(input: {
   mineruBlocks: PositionedMineruBlock[];
   preparedSources: ReaderRagPreparedSource[];
 }): ReaderRagContextDocument {
-  const results = input.results.slice(0, input.topK);
+  const pdfChunks = input.preparedSources.find((source) => source.sourceType === 'pdf-text')?.chunks ?? [];
+  const results = input.results.slice(0, input.topK).map((result) => {
+    if (result.sourceType !== 'pdf-text' || result.pageIndex !== null || result.chunkId !== 'pdf:0:0') {
+      return result;
+    }
+    const match = result.text.match(/^# Page[ \t]+([1-9]\d*)[ \t]*\r?\n([\s\S]+)$/);
+    const current = pdfChunks.find((chunk) => chunk.chunkId === result.chunkId);
+    const body = match ? normalizeChunkText(match[2]) : '';
+    const currentText = current ? normalizeChunkText(current.text) : '';
+    const pageIndex = match ? Number(match[1]) - 1 : null;
+    if (!body || !currentText || current?.pageIndex !== pageIndex ||
+        !(currentText.startsWith(body) || body.startsWith(currentText))) {
+      return result;
+    }
+    return { ...result, pageIndex };
+  });
   const seeds = results;
 
   if (seeds.length === 0) {
@@ -741,7 +748,11 @@ export function buildRagContextText(input: {
         contextSupplements.push(result);
         usedChunkIds.add(result.chunkId);
       });
-    } else if (questionContextTokenBudget > 0) {
+    } else if (questionContextTokenBudget > 0 && (
+      seed.sourceType !== 'pdf-text' ||
+      (orderedChunksBySource.get(seed.sourceType) ?? []).some((chunk) =>
+        chunk.chunkId === seed.chunkId && chunk.text === seed.text)
+    )) {
       // 普通正文命中：前后邻接扩展，单目标窗口与整次问答双层预算约束（方案 §5.5）。
       const targetBudget = Math.min(
         Math.max(0, CONTEXT_TARGET_TOKEN_BUDGET - estimateTokens(seed.text)),

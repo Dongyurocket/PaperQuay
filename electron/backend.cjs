@@ -13,7 +13,6 @@ const { createNoteCommands } = require('./backend/noteCommands.cjs');
 const { createNoteStore } = require('./backend/noteStore.cjs');
 const { createNoteVault } = require('./backend/noteVault.cjs');
 const { createPaddleOcrCommands } = require('./backend/paddleOcrCommands.cjs');
-const { createReviewCommands } = require('./backend/reviewCommands.cjs');
 const { createUpdateCommands } = require('./backend/updateCommands.cjs');
 const { perfMark, perfMeasure } = require('./perfTrace.cjs');
 const {
@@ -156,7 +155,6 @@ function createBackend({ app }) {
     ...createKnowledgeGraphCommands(context),
     ...createBackupCommands(context),
     ...createIntegrationCommands(context),
-    ...createReviewCommands(context),
     ...createUpdateCommands(context),
     ...createMcpClientConfigCommands(context),
   };

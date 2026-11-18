@@ -5,6 +5,7 @@ import type {
   DocumentChatQaContextState,
   RagDocumentIndexStatus,
   RagRetrievalResult,
+  RagFtsStatus,
 } from '../../types/reader';
 
 export interface QaRequestContextResolution {
@@ -27,6 +28,9 @@ export interface LocalRagResolutionSuccess {
   retrievals: RagRetrievalResult[];
   indexedChunkCount?: number;
   totalChunkCount?: number;
+  ftsStatuses?: RagFtsStatus[];
+  ftsHitCount?: number;
+  partialSources?: boolean;
 }
 
 export interface LocalRagResolutionSkipped {
@@ -40,6 +44,9 @@ export interface LocalRagResolutionSkipped {
   indexedChunkCount?: number;
   totalChunkCount?: number;
   errorMessage?: string | null;
+  ftsStatuses?: RagFtsStatus[];
+  ftsHitCount?: number;
+  partialSources?: boolean;
 }
 
 export interface LocalRagResolutionFailed {
@@ -105,6 +112,9 @@ export function buildQaContext(options: {
       options.rag.kind === 'failed' || options.rag.kind === 'indexing'
         ? options.rag.errorMessage ?? null
         : undefined,
+    ftsStatuses: 'ftsStatuses' in options.rag ? options.rag.ftsStatuses : undefined,
+    ftsHitCount: 'ftsHitCount' in options.rag ? options.rag.ftsHitCount : undefined,
+    partialSources: 'partialSources' in options.rag ? options.rag.partialSources : undefined,
   };
 }
 
@@ -179,7 +189,8 @@ export function getQaContextBadgeTone(
     return 'neutral';
   }
 
-  if (isQaContextRagRetrieved(context)) {
+  if (isQaContextRagRetrieved(context) && !context.partialSources &&
+    !context.ftsStatuses?.some((status) => status === 'failed' || status === 'unavailable')) {
     return 'success';
   }
 
@@ -228,10 +239,24 @@ export function formatQaContextHint(
 
   const originLabel = formatOriginLabel(context.origin, l);
   const indexProgress = formatIndexedProgress(context, l);
+  const retrievalDetails = context.ftsStatuses ? [
+    l('检索范围：当前文献；已检索向量通道。', 'Scope: current paper; vector channel searched.'),
+    context.ftsStatuses.includes('searched')
+      ? l(`关键词通道已检索，命中 ${context.ftsHitCount ?? 0} 个候选。`, `Keyword channel searched; ${context.ftsHitCount ?? 0} candidates matched.`)
+      : '',
+    context.ftsStatuses.includes('not-queried')
+      ? l('查询没有可用于关键词检索的词。', 'The query has no usable keyword terms.') : '',
+    context.ftsStatuses.includes('unavailable')
+      ? l('关键词索引不可用，已降级到向量检索。', 'Keyword index unavailable; fell back to vector retrieval.') : '',
+    context.ftsStatuses.includes('failed')
+      ? l('关键词检索失败，已降级到向量检索。', 'Keyword retrieval failed; fell back to vector retrieval.') : '',
+    context.partialSources
+      ? l('部分来源索引尚未就绪，本次仅检索已就绪来源。', 'Some source indexes were not ready; only ready sources were searched.') : '',
+  ].filter(Boolean).join(' ') : '';
 
   switch (context.retrievalState) {
     case 'retrieved':
-      return hasRetrievedChunks(context)
+      return (hasRetrievedChunks(context)
         ? l(
             indexProgress
               ? `已命中本地 RAG，整理出 ${context.retrievedChunkCount} 组候选上下文。${indexProgress}。`
@@ -240,7 +265,7 @@ export function formatQaContextHint(
               ? `Used local RAG with ${context.retrievedChunkCount} context groups. ${indexProgress}.`
               : `Used local RAG with ${context.retrievedChunkCount} context groups.`,
           )
-        : l('已命中本地 RAG。', 'Used local RAG retrieval.');
+        : l('已命中本地 RAG。', 'Used local RAG retrieval.')) + (retrievalDetails ? ` ${retrievalDetails}` : '');
     case 'disabled':
       return l(
         `本次直接使用${originLabel}，未启用本地 RAG。`,
@@ -269,7 +294,7 @@ export function formatQaContextHint(
       return l(
         `本次未命中本地 RAG：未检索到相关片段，已回退到${originLabel}。`,
         `RAG was attempted, but no relevant chunks were retrieved. Fell back to ${originLabel}.`,
-      );
+      ) + (retrievalDetails ? ` ${retrievalDetails}` : '');
     case 'excluded':
       return l(
         `该文献已移出本地知识库，本次改用${originLabel}回答。`,
