@@ -675,6 +675,34 @@ export interface ScopedLocalRagResult {
   consideredPaperIds: string[];
 }
 
+/**
+ * 全库范围的证据排序：先为每篇可检索文献保留一条最高相关证据，再按相关性补足。
+ * buildRagContextText 从尾部截断时就不会整篇文献被预算挤掉。
+ */
+function interleaveByDocumentKey(results: RagRetrievalResult[]): RagRetrievalResult[] {
+  const groups = new Map<string, RagRetrievalResult[]>();
+  for (const result of results) {
+    const key = result.documentKey ?? '';
+    const group = groups.get(key) ?? [];
+    group.push(result);
+    groups.set(key, group);
+  }
+  const ordered: RagRetrievalResult[] = [];
+  let index = 0;
+  let added = true;
+  while (added) {
+    added = false;
+    for (const group of groups.values()) {
+      if (group[index]) {
+        ordered.push(group[index]);
+        added = true;
+      }
+    }
+    index += 1;
+  }
+  return ordered;
+}
+
 function normalizeRagKey(value: string): string {
   return value.trim().replace(/^native-library:/, '');
 }
@@ -766,6 +794,10 @@ export async function resolveScopedLocalRag(input: {
   tokenBudget?: number;
   signal?: AbortSignal;
 }): Promise<ScopedLocalRagResult> {
+  if (!input.settings.localRagEnabled || input.settings.ragSourceMode === 'off') {
+    return { resolution: { kind: 'disabled' }, skippedDocuments: [], consideredPaperIds: [] };
+  }
+
   const consideredPaperIds: string[] = [];
   const scopePaperIds = Array.isArray(input.scope.paperIds) ? input.scope.paperIds : [];
   const documents = input.scope.mode === 'selected'
@@ -963,7 +995,7 @@ export async function resolveScopedLocalRag(input: {
   }
 
   const contextDocument = buildRagContextText({
-    results: merged,
+    results: interleaveByDocumentKey(merged),
     topK: input.settings.localRagTopK,
     mineruBlocks: [],
     preparedSources: [],
