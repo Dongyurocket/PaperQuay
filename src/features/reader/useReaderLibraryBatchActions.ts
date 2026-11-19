@@ -224,6 +224,9 @@ export function useReaderLibraryBatchActions({
                   embeddingApiKey,
                   blocks: reusedState.blocks,
                   mineruPath: existingParse.path,
+                  // 批量解析复用了旧结果：抽取器签名变化时不在整库扫描中重嵌入，
+                  // 重建留给打开文献或手动重建。
+                  skipIfSignatureMismatch: true,
                   l,
                 }).catch(() => {});
                 existingCount += 1;

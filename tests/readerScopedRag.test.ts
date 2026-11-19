@@ -9,7 +9,8 @@ const bundle = await build({
   stdin: {
     contents: `export { resolveScopedLocalRag } from './src/services/localRag';
       export { buildRagEmbeddingModelKey } from './src/services/rag';
-      export { prepareReaderRagDocument } from './src/features/reader/readerRag';`,
+      export { prepareReaderRagDocument } from './src/features/reader/readerRag';
+      export { ensurePreparedSourceIndexed } from './src/services/localRag';`,
     resolveDir: process.cwd(),
     loader: 'ts',
   },
@@ -21,7 +22,7 @@ const bundle = await build({
 });
 const compiled = { exports: {} as any };
 new Function('require', 'module', 'exports', bundle.outputFiles[0].text)(require, compiled, compiled.exports);
-const { resolveScopedLocalRag, buildRagEmbeddingModelKey, prepareReaderRagDocument } = compiled.exports;
+const { resolveScopedLocalRag, buildRagEmbeddingModelKey, prepareReaderRagDocument, ensurePreparedSourceIndexed } = compiled.exports;
 
 const embedding = {
   baseUrl: 'https://example.test/v1',
@@ -228,6 +229,29 @@ test('selected scope stops with a clear state when every paper is excluded or in
     });
     assert.notEqual(scoped.resolution.kind, 'retrieved');
     assert.equal(scoped.skippedDocuments.length, 2);
+  } finally {
+    bridge.restore();
+  }
+});
+
+
+test('automatic batch indexing skips a ready index with an older extractor signature', async () => {
+  const bridge = installBridge({
+    rag_get_document_index_status: () => makeStatus('paper-old', 'ready', { sourceSignature: 'old-signature' }),
+  });
+  try {
+    const result = await ensurePreparedSourceIndexed({
+      documentKey: 'paper-old',
+      title: 'Paper old',
+      sourceType: 'mineru-markdown',
+      sourceSignature: 'new-signature',
+      chunks: [{ chunkId: 'c1', chunkIndex: 0, pageIndex: 0, blockId: 'b1', text: 'Body' }],
+      embedding,
+      batchSize: 4,
+      skipIfSignatureMismatch: true,
+    });
+    assert.equal(result.outcome, 'skipped');
+    assert.equal(bridge.calls.some((call) => call.command === 'rag_index_document'), false);
   } finally {
     bridge.restore();
   }

@@ -2,15 +2,18 @@
 
 ## Fixes
 
-- Corrected the Settings "Notes & Vault" description: sync runs only on the manual action or a user-enabled timer; opening the notes workspace no longer syncs silently.
-- Removed the remaining Agent mention from the AI model role description; the roles are translation, selection translation, overview, and QA.
-- Corrected backup scope text so new backups no longer claim to include Agent memory, Agent runs, or Agent history. RAG database and reader-state descriptions now match what is actually exported.
-- Removed the remaining Agent tool-choice wording from the reasoning-effort hint.
+- Batch MinerU parsing that reuses an existing cache no longer triggers a whole-library RAG re-embedding when the extractor signature changes (`mineru-chunks-v2`). The batch scan skips old-signature indexes; rebuilding stays on demand when a paper is opened, when reader Q&A lazily builds an index, or when the user runs a manual rebuild.
+- Prevents an automatic/batch parse scan from queueing every paper for indexing at once, reducing unnecessary embedding calls and task-list noise.
+
+## Note
+
+- Old-signature indexes remain readable. This is a one-time signature change from the table-extraction upgrade, not a parse re-run.
+- Indexing tasks already started by an older build stop when the app closes and do not resume after restart.
 
 ## Verification
 
 - Production build passed; 793 tests ran with 792 passing, 1 optional benchmark skipped, 0 failed.
-- Computer Use smoke on the installed 0.4.32 build covered: startup and library load; Settings (document parsing, AI models, Vault copy); knowledge-graph custom relation create → edit → delete; notes workspace and editor toolbar (no AI polish); reader Q&A sidebar with current/selected/library scope chips. The test relation was deleted and no test data was left behind.
+- Added a focused test: an automatic batch index call with a ready but older signature returns skipped and never calls `rag_index_document`.
 
 ## Windows Release
 
@@ -20,15 +23,18 @@ Only Windows x64 installers are published and maintained. Download the `.exe` fr
 
 ## 修复内容
 
-- 修正设置页「笔记与 Vault」说明：同步只在手动触发或用户开启定时任务时执行；打开笔记工作区不再静默同步。
-- 移除「AI 模型」角色说明中残留的 Agent 默认模型文案；角色只保留翻译、选区翻译、论文概览和问答。
-- 修正备份范围说明：新备份不再包含 Agent 记忆、运行记录或 Agent 历史；RAG 数据库与阅读器状态的说明按实际导出范围更新。
-- 移除推理档位提示中残留的 Agent 工具选择文案。
+- 批量 MinerU 解析复用已有缓存时，不再因抽取器签名升级（`mineru-chunks-v2`）对整库触发 RAG 重嵌入。批量扫描会跳过旧签名索引，重建留给打开文献、问答懒建或手动重建。
+- 避免自动/批量解析一次扫描把全部文献同时排入索引队列，减少无谓的 embedding 调用和任务列表噪声。
+
+## 说明
+
+- 旧索引仍可读取。这是表格抽取升级带来的一次性索引签名变化，不是重新解析。
+- 旧版本已经启动的索引任务会在关闭应用后停止，重启后不会续跑。
 
 ## 验证
 
 - 生产构建通过；793 项测试中 792 通过、1 项可选基准跳过、0 失败。
-- 在已安装的 0.4.32 上使用 Computer Use 验证：启动与文库加载、设置页（文档解析 / AI 模型 / Vault 文案）、知识图谱自定义关系新增→编辑→删除、笔记工作区与编辑器工具栏（无 AI 润色）、阅读器问答侧栏（当前文献 / 选定文献 / 全库三档可见）。测试关系已删除，未保留测试数据。
+- 新增定向测试：自动批处理遇到 ready 但签名不同的旧索引时返回 skipped，且不调用 `rag_index_document`。
 
 ## Windows 发布范围
 

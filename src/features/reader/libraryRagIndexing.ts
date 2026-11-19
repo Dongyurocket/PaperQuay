@@ -179,6 +179,8 @@ export async function indexLibraryPaperMineruSource(input: {
   markdownText?: string | null;
   /** 手动触发时传 true：绕过失败冷却与内存失败缓存，立即重试。 */
   force?: boolean;
+  /** 自动批处理使用：旧签名索引保持不动，避免整库重嵌入。 */
+  skipIfSignatureMismatch?: boolean;
   l: <T>(zh: T, en: T) => T;
 }): Promise<LibraryRagIndexResult> {
   if (input.item.ragEnabled === false) {
@@ -232,6 +234,7 @@ export async function indexLibraryPaperMineruSource(input: {
       embedding,
       batchSize: Math.max(1, input.settings.embeddingBatchSize || 24),
       force: input.force,
+      skipIfSignatureMismatch: input.skipIfSignatureMismatch,
     });
 
     if (result.outcome === 'failed' || result.outcome === 'excluded') {

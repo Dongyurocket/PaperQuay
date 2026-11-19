@@ -153,6 +153,11 @@ export async function ensurePreparedSourceIndexed(input: {
   batchSize: number;
   /** 手动触发时传 true：绕过失败冷却与内存失败缓存，立即重试。 */
   force?: boolean;
+  /**
+   * 自动批处理使用：已有 ready 索引但签名不同（例如抽取器升级）时跳过，
+   * 把重建留给打开文献或手动重建，避免一次扫描整库触发全量重嵌入。
+   */
+  skipIfSignatureMismatch?: boolean;
   signal?: AbortSignal;
 }): Promise<RagIndexEnsureResult> {
   if (input.signal?.aborted) {
@@ -168,6 +173,16 @@ export async function ensurePreparedSourceIndexed(input: {
     input.sourceSignature,
     embeddingModelKey,
   );
+
+  if (
+    input.skipIfSignatureMismatch === true &&
+    currentStatus?.status === 'ready' &&
+    currentStatus.embeddingModelKey === embeddingModelKey &&
+    currentStatus.sourceSignature !== input.sourceSignature
+  ) {
+    // 旧索引仍完整，只是抽取器签名变化；不在自动批处理中重建。
+    return { outcome: 'skipped' };
+  }
 
   if (
     currentStatus?.sourceSignature === input.sourceSignature &&
