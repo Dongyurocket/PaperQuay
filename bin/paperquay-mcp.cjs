@@ -48,8 +48,14 @@ const SERVER_VERSION = require('../package.json').version;
 const ALLOW_WHILE_APP_RUNNING_SCHEMA = {
   type: 'boolean',
   description:
-    'Force the write even while the PaperQuay desktop app is running. Dangerous: the app keeps the library in memory and silently overwrites external writes on its next save. Prefer closing the app first.',
+    'Allow a checked parallel write while the PaperQuay desktop app is running (default false). When true, writes must carry the version they read (expectedUpdatedAt, expectedCategoryVersions, or previewVersion); a stale version is rejected with PAPER_CONFLICT/NOTE_CONFLICT instead of overwriting. Prefer closing the app when you cannot re-read versions.',
   default: false,
+};
+
+const EXPECTED_UPDATED_AT_SCHEMA = {
+  type: ['number', 'object'],
+  description:
+    'The updatedAt value read from get_paper_details/list_categories. Required while PaperQuay is running. A single number applies to one record; an object maps paperId to updatedAt for batch tools. A mismatch is rejected with PAPER_CONFLICT and the current updatedAt.',
 };
 
 const TOOLS = [
@@ -481,7 +487,7 @@ const TOOLS = [
   {
     name: 'manage_category',
     description:
-      'Create, rename, move, or delete a PaperQuay library category. delete cascades to all descendant categories and only unlinks papers (never deletes papers). System categories (all/recent/uncategorized/favorites) cannot be modified, moved, deleted, or used as a parent. Refused while the desktop app is running unless allowWhileAppRunning is true.',
+      'Create, rename, move, or delete a PaperQuay library category. delete cascades to all descendant categories, unlinks papers (never deletes papers), and returns affected category/paper counts. System categories (all/recent/uncategorized/favorites) cannot be modified, moved, deleted, or used as a parent. rename/move/delete require expectedUpdatedAt while the app is running; cascading delete also accepts expectedCategoryVersions for every affected descendant.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -506,6 +512,14 @@ const TOOLS = [
           type: 'integer',
           description: 'Optional explicit sort order applied by move.',
         },
+        expectedUpdatedAt: {
+          type: 'number',
+          description: 'Target category updatedAt from list_categories. Required for rename/move/delete while PaperQuay is running.',
+        },
+        expectedCategoryVersions: {
+          type: 'object',
+          description: 'Version snapshot { categoryId: updatedAt } for every affected descendant on a cascading delete. Any changed version rejects the whole delete.',
+        },
         allowWhileAppRunning: ALLOW_WHILE_APP_RUNNING_SCHEMA,
       },
       required: ['action'],
@@ -514,7 +528,7 @@ const TOOLS = [
   {
     name: 'set_paper_categories',
     description:
-      'Assign or remove non-system categories on one or more papers. Use replace to set the exact category list, or add/remove to adjust it (replace cannot be combined with add/remove). System categories are computed by the app and cannot be assigned; use update_paper isFavorite for favorites. Refused while the desktop app is running unless allowWhileAppRunning is true.',
+      'Assign or remove non-system categories on one or more papers. Use replace to set the exact category list, or add/remove to adjust it (replace cannot be combined with add/remove). Every paper is version-checked; any stale expectedUpdatedAt rejects the whole batch (all-or-nothing). System categories are computed by the app and cannot be assigned; use update_paper isFavorite for favorites.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -538,6 +552,7 @@ const TOOLS = [
           items: { type: 'string' },
           description: 'Exact category list to set on each paper (mutually exclusive with add/remove).',
         },
+        expectedUpdatedAt: EXPECTED_UPDATED_AT_SCHEMA,
         allowWhileAppRunning: ALLOW_WHILE_APP_RUNNING_SCHEMA,
       },
       required: ['paperIds'],
@@ -546,7 +561,7 @@ const TOOLS = [
   {
     name: 'update_paper',
     description:
-      'Update bibliographic metadata of an existing paper. Only whitelisted fields are accepted: title, titleZh, authors (string[]), authorDetails (object[]), year, publication, doi, url, abstractText, itemType, publisher, institution, reportNumber, volume, issue, pages, isbn, issn, language (BCP 47), citationKey, keywords (string[]), tags (string[]), userNote, aiSummary, citation, isFavorite. authorDetails takes precedence over authors when both are provided. Unknown fields are rejected. Refused while the desktop app is running unless allowWhileAppRunning is true.',
+      'Update bibliographic metadata of an existing paper. Only whitelisted fields are accepted: title, titleZh, authors (string[]), authorDetails (object[]), year, publication, doi, url, abstractText, itemType, publisher, institution, reportNumber, volume, issue, pages, isbn, issn, language (BCP 47), citationKey, keywords (string[]), tags (string[]), userNote, aiSummary, citation, isFavorite. authorDetails takes precedence over authors when both are provided. Unknown fields are rejected. Pass expectedUpdatedAt for checked parallel writes; stale versions return PAPER_CONFLICT.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -581,27 +596,66 @@ const TOOLS = [
         aiSummary: { type: 'string' },
         citation: { type: 'string' },
         isFavorite: { type: 'boolean' },
+        expectedUpdatedAt: {
+          type: 'number',
+          description: 'Paper updatedAt from get_paper_details. Required while PaperQuay is running; a mismatch returns PAPER_CONFLICT with the current updatedAt.',
+        },
         allowWhileAppRunning: ALLOW_WHILE_APP_RUNNING_SCHEMA,
       },
       required: ['paperId'],
     },
   },
   {
-    name: 'delete_papers',
+    name: 'preview_delete_papers',
     description:
-      'Delete one or more papers from the PaperQuay library. By default only the database records are removed; pass deleteFiles: true to also delete the stored PDF files (the database is committed before files are touched). Every paperId must exist, otherwise nothing is changed. Refused while the desktop app is running unless allowWhileAppRunning is true.',
+      'Read-only delete preview. Lists each target paper with updatedAt, every attachment and its status, files that will be deleted, shared files referenced by other papers/attachments, and files outside the managed library paths. Pass the returned previewVersion to delete_papers. Always preview and confirm with the user before deleting.',
     inputSchema: {
       type: 'object',
       properties: {
         paperIds: {
           type: 'array',
           items: { type: 'string' },
-          description: 'Paper IDs to delete.',
+          description: 'Paper IDs to preview.',
         },
         deleteFiles: {
           type: 'boolean',
-          description: 'Also delete the stored PDF files from the library storage directory (default false).',
+          description: 'Preview removing every attachment file of the selected papers (default false).',
           default: false,
+        },
+        deleteFilePaperIds: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Paper IDs whose attachment files should be removed (must be a subset of paperIds).',
+        },
+      },
+      required: ['paperIds'],
+    },
+  },
+  {
+    name: 'delete_papers',
+    description:
+      'Delete one or more papers from the PaperQuay library. By default only database records are removed; deleteFiles: true removes every managed attachment file, deleteFilePaperIds removes files only for the listed papers. Only managed files not shared with another record are deleted; shared/unmanaged files are kept and reported. The database commits before files are touched, and file failures return partialFailure with fileErrors. While PaperQuay is running you must pass the previewVersion from preview_delete_papers; a stale preview rejects the whole delete.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        paperIds: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Paper IDs to delete. Every ID must exist, otherwise nothing is changed.',
+        },
+        deleteFiles: {
+          type: 'boolean',
+          description: 'Also delete managed attachment files from the library storage directory (default false).',
+          default: false,
+        },
+        deleteFilePaperIds: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Only delete files for these paper IDs (must be a subset of paperIds).',
+        },
+        previewVersion: {
+          type: 'string',
+          description: 'previewVersion returned by preview_delete_papers. Required while PaperQuay is running; a mismatch returns PAPER_CONFLICT and requires a new preview.',
         },
         allowWhileAppRunning: ALLOW_WHILE_APP_RUNNING_SCHEMA,
       },
@@ -617,6 +671,10 @@ const TOOLS = [
       properties: {
         paperId: { type: 'string', description: 'The unique ID of the paper in PaperQuay.' },
         sourcePath: { type: 'string', description: 'Absolute path of the translated PDF to attach.' },
+        expectedUpdatedAt: {
+          type: 'number',
+          description: 'Paper updatedAt from get_paper_details. Required while PaperQuay is running.',
+        },
         allowWhileAppRunning: ALLOW_WHILE_APP_RUNNING_SCHEMA,
       },
       required: ['paperId', 'sourcePath'],
@@ -634,6 +692,10 @@ const TOOLS = [
           type: 'boolean',
           description: 'Also delete the stored translated PDF (default true).',
           default: true,
+        },
+        expectedUpdatedAt: {
+          type: 'number',
+          description: 'Paper updatedAt from get_paper_details. Required while PaperQuay is running.',
         },
         allowWhileAppRunning: ALLOW_WHILE_APP_RUNNING_SCHEMA,
       },
@@ -714,6 +776,8 @@ async function handleToolCall(name, args) {
       return service.setPaperCategories(args || {});
     case 'update_paper':
       return service.updatePaper(args || {});
+    case 'preview_delete_papers':
+      return service.previewDeletePapers(args || {});
     case 'delete_papers':
       return service.deletePapers(args || {});
     case 'attach_translated_pdf':
@@ -786,11 +850,18 @@ async function handleMessage(message) {
             isError: false,
           });
         } catch (toolError) {
+          const rawMessage = String(toolError?.message ?? '');
+          const codePrefix = toolError?.code && !rawMessage.startsWith(`${toolError.code}:`)
+            ? `${toolError.code}: `
+            : '';
+          const details = toolError?.details && typeof toolError.details === 'object'
+            ? `\n${JSON.stringify(toolError.details)}`
+            : '';
           sendResult(id, {
             content: [
               {
                 type: 'text',
-                text: `Error executing ${name}: ${toolError.message}`,
+                text: `Error executing ${name}: ${codePrefix}${rawMessage}${details}`,
               },
             ],
             isError: true,

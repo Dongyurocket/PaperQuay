@@ -143,13 +143,19 @@ test('translated PDF MCP writes reject a missing paper and a running desktop app
       allowWhileAppRunning: true,
     });
     const paperId = imported.imported[0].id as string;
+    const paperVersion = service.getPaperDetails({ paperId }).updatedAt as number;
+    await assert.rejects(
+      () => guarded.attachTranslatedPdf({ paperId, sourcePath: source, allowWhileAppRunning: true }),
+      (error: any) => error.code === 'PAPER_CONFLICT' && /requires expectedUpdatedAt/.test(error.message),
+    );
     const attached = await guarded.attachTranslatedPdf({
       paperId,
       sourcePath: source,
+      expectedUpdatedAt: paperVersion,
       allowWhileAppRunning: true,
     });
     assert.equal(attached.replaced, false);
-    assert.match(String(attached.warning), /运行期间写入/);
+    assert.match(String(attached.warning), /受检并行写/);
 
     process.env.PAPERQUAY_MCP_WRITE = 'off';
     await assert.rejects(

@@ -355,6 +355,8 @@ export interface SetPaperCategoriesRequest {
 
 export interface UpdatePaperRequest {
   paperId: string;
+  /** 读取详情时的 updatedAt；外部已更新时保存会被拒绝（PAPER_CONFLICT）。 */
+  expectedUpdatedAt?: number;
   title?: string | null;
   titleZh?: string | null;
   year?: string | null;

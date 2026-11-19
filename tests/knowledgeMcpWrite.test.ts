@@ -140,7 +140,7 @@ test('import_pdfs 导入新文献：文件复制到 storageDir，元数据与分
   }
 });
 
-test('import_pdfs 内容哈希查重：重复导入计入 duplicates，并补挂目标分类', () => {
+test('import_pdfs 内容哈希查重：重复导入只返回 existingPaperId，不自动改分类', () => {
   const { dir, service } = setupFixture();
   const first = writeFakePdf(dir, 'a.pdf', 'same-bytes');
   const second = writeFakePdf(dir, 'b.pdf', 'same-bytes');
@@ -154,7 +154,8 @@ test('import_pdfs 内容哈希查重：重复导入计入 duplicates，并补挂
     assert.equal(secondResult.duplicates[0].existingPaperId, paperId);
 
     const details = service.getPaperDetails({ paperId });
-    assert.deepEqual(details.categoryIds, [secondResult.categoryId]);
+    // 分类变更必须走带版本检查的 set_paper_categories，导入不去动已有文献。
+    assert.deepEqual(details.categoryIds, []);
   } finally {
     cleanupDir(dir);
   }

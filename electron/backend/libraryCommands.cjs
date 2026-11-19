@@ -964,48 +964,64 @@ function createLibraryCommands(context) {
     },
 
     async library_update_paper({ request }) {
+      const updatePaperFields = (paper) => {
+        for (const key of UPDATABLE_PAPER_FIELDS) {
+          // authorDetails is an update-only request field. Persist it via the
+          // normalized `authors` collection below, but never expose it on a paper.
+          if (request[key] === undefined || key === 'authorDetails') continue;
+          if (key === 'language') {
+            if (request.language === null) paper.language = null;
+            else {
+              const normalized = canonicalizeBcp47Language(request.language);
+              if (!normalized) throw new Error(`无效的 BCP 47 语言标签：${request.language}`);
+              paper.language = normalized;
+            }
+          } else if (key === 'citationKey') {
+            paper.citationKey = normalizeCitationKey(request.citationKey);
+          } else {
+            paper[key] = request[key];
+          }
+        }
+        if (request.keywords !== undefined) {
+          if (!Array.isArray(request.keywords)) throw new Error('keywords must be an array of strings');
+          paper.keywords = request.keywords.map(cleanString).filter(Boolean);
+        }
+        if (request.authorDetails !== undefined) {
+          if (!Array.isArray(request.authorDetails)) throw new Error('authorDetails must be an array of author objects');
+          paper.authors = request.authorDetails
+            .map((author, index) => normalizeAuthor(author, index))
+            .filter((author) => author.name);
+        } else if (request.authors !== undefined) {
+          if (!Array.isArray(request.authors)) throw new Error('authors must be an array of author names');
+          paper.authors = request.authors
+            .map((author, index) => normalizeAuthor(author, index))
+            .filter((author) => author.name);
+        }
+        if (request.tags !== undefined) {
+          if (!Array.isArray(request.tags)) throw new Error('tags must be an array of tag names');
+          paper.tags = request.tags.map(cleanString).filter(Boolean).map(normalizeTag);
+        }
+        if (request.isFavorite != null) paper.isFavorite = Boolean(request.isFavorite);
+        return paper;
+      };
+
+      // 详情表单携带读取时的版本：外部（MCP/其他窗口）已更新则拒绝，由界面提示重载或覆盖。
+      const expectedUpdatedAt = request.expectedUpdatedAt;
+      if (expectedUpdatedAt !== undefined && expectedUpdatedAt !== null) {
+        return store.applyPaperChange({
+          paperId: request.paperId,
+          expectedUpdatedAt,
+          requireVersion: true,
+          change(paper) {
+            updatePaperFields(paper);
+          },
+        });
+      }
+
       const paper = store.getPaper(request.paperId);
       if (!paper) throw new Error('Paper does not exist');
-
-      for (const key of UPDATABLE_PAPER_FIELDS) {
-        // authorDetails is an update-only request field. Persist it via the
-        // normalized `authors` collection below, but never expose it on a paper.
-        if (request[key] === undefined || key === 'authorDetails') continue;
-        if (key === 'language') {
-          if (request.language === null) paper.language = null;
-          else {
-            const normalized = canonicalizeBcp47Language(request.language);
-            if (!normalized) throw new Error(`无效的 BCP 47 语言标签：${request.language}`);
-            paper.language = normalized;
-          }
-        } else if (key === 'citationKey') {
-          paper.citationKey = normalizeCitationKey(request.citationKey);
-        } else {
-          paper[key] = request[key];
-        }
-      }
-      if (request.keywords !== undefined) {
-        if (!Array.isArray(request.keywords)) throw new Error('keywords must be an array of strings');
-        paper.keywords = request.keywords.map(cleanString).filter(Boolean);
-      }
-      if (request.authorDetails !== undefined) {
-        if (!Array.isArray(request.authorDetails)) throw new Error('authorDetails must be an array of author objects');
-        paper.authors = request.authorDetails
-          .map((author, index) => normalizeAuthor(author, index))
-          .filter((author) => author.name);
-      } else if (request.authors !== undefined) {
-        if (!Array.isArray(request.authors)) throw new Error('authors must be an array of author names');
-        paper.authors = request.authors
-          .map((author, index) => normalizeAuthor(author, index))
-          .filter((author) => author.name);
-      }
-      if (request.tags !== undefined) {
-        if (!Array.isArray(request.tags)) throw new Error('tags must be an array of tag names');
-        paper.tags = request.tags.map(cleanString).filter(Boolean).map(normalizeTag);
-      }
-      if (request.isFavorite != null) paper.isFavorite = Boolean(request.isFavorite);
-      paper.updatedAt = now();
-
+      updatePaperFields(paper);
+      paper.updatedAt = Math.max(now(), Number(paper.updatedAt || 0) + 1);
       store.savePaper(paper);
       return paper;
     },

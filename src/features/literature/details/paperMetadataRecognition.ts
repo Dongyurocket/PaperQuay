@@ -3,7 +3,7 @@ import type { MetadataLookupResult } from '../../../types/metadata.ts';
 import { metadataUpdateForPaper } from '../literatureLibraryUtils.ts';
 
 export interface PaperMetadataDifference {
-  key: Exclude<keyof UpdatePaperRequest, 'paperId'>;
+  key: Exclude<keyof UpdatePaperRequest, 'paperId' | 'expectedUpdatedAt'>;
   label: string;
   current: unknown;
   next: unknown;
@@ -34,15 +34,20 @@ export function buildManualMetadataUpdateRequest(
   draft: { title: string; doi: string },
 ): UpdatePaperRequest | null {
   const request = metadata ? metadataUpdateForPaper(paper, metadata) : null;
-  const output: UpdatePaperRequest = { paperId: paper.id, ...(request ?? {}) };
+  const output: UpdatePaperRequest = {
+    paperId: paper.id,
+    expectedUpdatedAt: paper.updatedAt,
+    ...(request ?? {}),
+  };
   output.paperId = paper.id;
+  output.expectedUpdatedAt = paper.updatedAt;
 
   const manualTitle = draft.title.trim();
   const manualDoi = draft.doi.trim();
   if (manualTitle && manualTitle !== paper.title.trim()) output.title = manualTitle;
   if (manualDoi && manualDoi !== (paper.doi ?? '').trim()) output.doi = manualDoi;
 
-  return Object.keys(output).some((key) => key !== 'paperId') ? output : null;
+  return Object.keys(output).some((key) => key !== 'paperId' && key !== 'expectedUpdatedAt') ? output : null;
 }
 
 function currentValue(paper: LiteraturePaper, key: PaperMetadataDifference['key']): unknown {
@@ -79,6 +84,7 @@ export function mergeSelectedPaperMetadata(
   if (selectedKeys.length === 0) return null;
   const selected = new Set(selectedKeys);
   const merged: UpdatePaperRequest = { paperId };
+  if (request.expectedUpdatedAt !== undefined) merged.expectedUpdatedAt = request.expectedUpdatedAt;
   for (const key of selected) {
     const value = request[key];
     if (value !== undefined) Object.assign(merged, { [key]: value });

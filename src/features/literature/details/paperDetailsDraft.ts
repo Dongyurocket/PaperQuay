@@ -171,6 +171,7 @@ export function buildPaperDraftUpdateRequest(
 
   return {
     paperId: paper.id,
+    expectedUpdatedAt: paper.updatedAt,
     title: draft.title.trim() || paper.title,
     titleZh: nullable(draft.titleZh),
     itemType: draft.itemType || 'journalArticle',
@@ -207,7 +208,8 @@ export function normalizeCategorySelection(
 
 export function paperDraftChanged(paper: LiteraturePaper, draft: PaperDetailsDraft): boolean {
   const request = buildPaperDraftUpdateRequest(paper, draft);
-  const fields = Object.keys(request).filter((key) => key !== 'paperId') as Array<keyof UpdatePaperRequest>;
+  const fields = Object.keys(request)
+    .filter((key) => key !== 'paperId' && key !== 'expectedUpdatedAt') as Array<keyof UpdatePaperRequest>;
   const comparable = (value: unknown) => JSON.stringify(value);
   for (const field of fields) {
     if (field === 'authorDetails') {

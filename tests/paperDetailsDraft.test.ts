@@ -216,6 +216,7 @@ test('manual metadata request is pure and includes only changed manual values', 
 
   assert.deepEqual(request, {
     paperId: paper.id,
+    expectedUpdatedAt: paper.updatedAt,
     title: 'Manually corrected title',
     doi: '10.1000/manual',
   });

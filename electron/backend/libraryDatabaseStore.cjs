@@ -1032,14 +1032,248 @@ function createPaperWriters(db) {
   return writers;
 }
 
+function writePaperRowAndRelations(db, paper) {
+  const writers = createPaperWriters(db);
+  writers.upsertRow(paper);
+  writers.replaceRelations(paper);
+  return paper;
+}
+
 /** 单项增量事务（P2-1）：UPSERT 一篇文献并重建其关联表，不重写全库。 */
 function savePaperToDb(db, paper) {
   withTransaction(db, () => {
-    const writers = createPaperWriters(db);
-    writers.upsertRow(paper);
-    writers.replaceRelations(paper);
+    writePaperRowAndRelations(db, paper);
   });
   return paper;
+}
+
+/** 单调递增的 updatedAt：同毫秒连续写入也不会绕过乐观并发检查。 */
+function nextUpdatedAt(previous) {
+  return Math.max(Date.now(), (Number(previous) || 0) + 1);
+}
+
+function versionConflictError(kind, idValue, expectedUpdatedAt, currentUpdatedAt) {
+  const label = kind === 'category' ? 'Category' : 'Paper';
+  const code = kind === 'category' ? 'CATEGORY_CONFLICT' : 'PAPER_CONFLICT';
+  const error = new Error(
+    `${code}: ${label} ${idValue} was modified outside this call `
+    + `(expected updatedAt ${expectedUpdatedAt ?? 'none'}, current ${currentUpdatedAt ?? 'none'}). `
+    + 'Re-read the record and retry.',
+  );
+  error.code = code;
+  error.details = {
+    kind,
+    id: idValue,
+    expectedUpdatedAt: expectedUpdatedAt ?? null,
+    currentUpdatedAt: currentUpdatedAt ?? null,
+    retry: 're-read',
+  };
+  return error;
+}
+
+function versionRequiredError(kind, idValue) {
+  const label = kind === 'category' ? 'Category' : 'Paper';
+  const code = kind === 'category' ? 'CATEGORY_CONFLICT' : 'PAPER_CONFLICT';
+  const error = new Error(
+    `${code}: ${label} ${idValue} requires expectedUpdatedAt while PaperQuay is running. `
+    + 'Read the current version first, then retry the write.',
+  );
+  error.code = code;
+  error.details = { kind, id: idValue, reason: 'missing-version', retry: 're-read' };
+  return error;
+}
+
+function assertRecordVersion(kind, idValue, expectedUpdatedAt, currentUpdatedAt, requireVersion) {
+  const hasExpected = expectedUpdatedAt !== undefined && expectedUpdatedAt !== null;
+  if (!hasExpected) {
+    if (requireVersion) throw versionRequiredError(kind, idValue);
+    return;
+  }
+  if (Number(expectedUpdatedAt) !== Number(currentUpdatedAt ?? 0)) {
+    throw versionConflictError(kind, idValue, expectedUpdatedAt, currentUpdatedAt ?? 0);
+  }
+}
+
+/**
+ * 单篇文献的版本检查写入：读取、校验、变更与 UPSERT 在同一事务内完成。
+ * `change` 直接修改传入的文献对象，返回后统一刷新 updatedAt。
+ */
+function applyPaperChangeToDb(db, { paperId, expectedUpdatedAt, requireVersion, change }) {
+  const idValue = cleanString(paperId);
+  const current = getPaperFromDb(db, idValue);
+  if (!current) throw new Error(`Paper does not exist: ${idValue}`);
+
+  assertRecordVersion('paper', idValue, expectedUpdatedAt, current.updatedAt, requireVersion);
+  change(current);
+  current.updatedAt = nextUpdatedAt(current.updatedAt);
+  writePaperRowAndRelations(db, current);
+  return getPaperFromDb(db, idValue);
+}
+
+function applyPaperChange(db, input) {
+  return withTransaction(db, () => applyPaperChangeToDb(db, input));
+}
+
+function applyPaperChanges(db, { changes = [], requireVersion = false } = {}) {
+  return withTransaction(db, () => {
+    const results = [];
+    for (const change of changes) {
+      if (!change || !cleanString(change.paperId) || typeof change.change !== 'function') {
+        throw new Error('Each paper change requires paperId and change');
+      }
+      results.push(applyPaperChangeToDb(db, { ...change, requireVersion }));
+    }
+    return results;
+  });
+}
+
+/** 分类单行写入：创建或更新，可带版本检查。 */
+function saveCategoryToDb(db, category, { expectedUpdatedAt, requireVersion = false } = {}) {
+  const idValue = cleanString(category?.id);
+  if (!idValue) throw new Error('Category id is required');
+  const existing = db.prepare('SELECT updated_at AS updatedAt FROM categories WHERE id = ?').get(idValue);
+
+  if (existing) {
+    assertRecordVersion('category', idValue, expectedUpdatedAt, existing.updatedAt, requireVersion);
+  } else if (expectedUpdatedAt !== undefined && expectedUpdatedAt !== null) {
+    throw versionConflictError('category', idValue, expectedUpdatedAt, null);
+  }
+
+  const next = {
+    ...category,
+    updatedAt: existing ? nextUpdatedAt(existing.updatedAt) : (Number(category.updatedAt) || Date.now()),
+  };
+
+  db.prepare(`
+    INSERT INTO categories (
+      id, name, parent_id, sort_order, is_system, system_key, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT (id) DO UPDATE SET
+      name = excluded.name,
+      parent_id = excluded.parent_id,
+      sort_order = excluded.sort_order,
+      is_system = excluded.is_system,
+      system_key = excluded.system_key,
+      updated_at = excluded.updated_at
+  `).run(
+    idValue,
+    cleanString(next.name),
+    next.parentId ?? null,
+    Number(next.sortOrder) || 0,
+    boolToInteger(next.isSystem),
+    next.systemKey ?? null,
+    Number(next.createdAt) || Date.now(),
+    Number(next.updatedAt) || Date.now(),
+  );
+
+  return { ...next, isSystem: Boolean(next.isSystem) };
+}
+
+function getCategoryFromDb(db, categoryId) {
+  const row = db.prepare(`
+    SELECT id, name, parent_id AS parentId, sort_order AS sortOrder,
+      is_system AS isSystem, system_key AS systemKey,
+      created_at AS createdAt, updated_at AS updatedAt
+    FROM categories WHERE id = ?
+  `).get(cleanString(categoryId));
+  return row ? { ...row, isSystem: Boolean(row.isSystem) } : null;
+}
+
+/**
+ * 分类级联删除：单事务内校验所有受影响分类版本，先解除 paper_categories 关联再删分类。
+ * `expectedVersions` 为 { categoryId: updatedAt } 快照；任一不匹配即整批拒绝。
+ */
+/**
+ * 删除文献的原子路径：同一事务内读取文献、生成删除预览并校验 previewVersion，再删除记录。
+ * `describe` 由调用方提供，返回 { previewVersion, ... }；不匹配即抛 PAPER_CONFLICT。
+ */
+function deletePapersWithPreviewFromDb(db, {
+  paperIds = [],
+  expectedPreviewVersion = null,
+  requirePreview = false,
+  describe,
+} = {}) {
+  const ids = [...new Set((Array.isArray(paperIds) ? paperIds : []).map(cleanString).filter(Boolean))];
+
+  return withTransaction(db, () => {
+    const papers = ids.map((paperId) => {
+      const paper = getPaperFromDb(db, paperId);
+      if (!paper) throw new Error(`Paper does not exist: ${paperId}`);
+      return paper;
+    });
+    const findAttachmentsByStoredPath = (storedPath) => db
+      .prepare(
+        'SELECT id, paper_id AS paperId, stored_path AS storedPath FROM attachments WHERE lower(stored_path) = lower(?)',
+      )
+      .all(cleanString(storedPath));
+    const settings = loadKeyValueTable(db, 'library_settings');
+    const description = describe({
+      papers,
+      settings,
+      findAttachmentsByStoredPath,
+    });
+
+    if (requirePreview && !expectedPreviewVersion) {
+      const error = new Error('Delete preview version is required while PaperQuay is running.');
+      error.code = 'PAPER_CONFLICT';
+      error.details = { reason: 'missing-preview-version', retry: 'preview' };
+      throw error;
+    }
+    if (expectedPreviewVersion && description.previewVersion !== expectedPreviewVersion) {
+      const error = new Error(
+        'Delete preview is stale: papers or attachments changed after the preview. Re-run the preview and retry.',
+      );
+      error.code = 'PAPER_CONFLICT';
+      error.details = {
+        reason: 'stale-preview',
+        expectedPreviewVersion,
+        currentPreviewVersion: description.previewVersion,
+        retry: 'preview',
+      };
+      throw error;
+    }
+
+    const deleteStatement = db.prepare('DELETE FROM papers WHERE id = ?');
+    for (const paper of papers) deleteStatement.run(paper.id);
+
+    return { ...description, papers: papers.map((paper) => ({ id: paper.id, title: paper.title })) };
+  });
+}
+
+function deleteCategoriesFromDb(db, { categoryIds = [], expectedVersions = null, requireVersion = false } = {}) {
+  const ids = [...new Set((Array.isArray(categoryIds) ? categoryIds : []).map(cleanString).filter(Boolean))];
+  if (ids.length === 0) return { deletedCategoryIds: [], affectedPaperIds: [] };
+
+  return withTransaction(db, () => {
+    const rows = ids.map((categoryId) => {
+      const category = getCategoryFromDb(db, categoryId);
+      if (!category) throw new Error(`Category does not exist: ${categoryId}`);
+      return category;
+    });
+
+    if (expectedVersions && typeof expectedVersions === 'object') {
+      for (const category of rows) {
+        const expected = expectedVersions[category.id];
+        if (expected === undefined || expected === null) {
+          if (requireVersion) throw versionRequiredError('category', category.id);
+          continue;
+        }
+        assertRecordVersion('category', category.id, expected, category.updatedAt, requireVersion);
+      }
+    } else if (requireVersion) {
+      throw versionRequiredError('category', rows[0].id);
+    }
+
+    const placeholders = ids.map(() => '?').join(', ');
+    const affectedPaperIds = db.prepare(
+      `SELECT DISTINCT paper_id AS paperId FROM paper_categories WHERE category_id IN (${placeholders})`,
+    ).all(...ids).map((row) => row.paperId);
+
+    db.prepare(`DELETE FROM paper_categories WHERE category_id IN (${placeholders})`).run(...ids);
+    db.prepare(`DELETE FROM categories WHERE id IN (${placeholders})`).run(...ids);
+
+    return { deletedCategoryIds: ids, affectedPaperIds };
+  });
 }
 
 /** 单篇删除：papers 行删除后关联表（含 paper_references）经外键级联清理。 */
@@ -1184,6 +1418,26 @@ function createLibraryDatabaseStore(appPaths, helpers) {
       return getPaperFromDb(db, paperId);
     },
 
+    getCategory(categoryId) {
+      return getCategoryFromDb(db, categoryId);
+    },
+
+    saveCategory(category, options = {}) {
+      return withTransaction(db, () => saveCategoryToDb(db, category, options));
+    },
+
+    deleteCategories(input = {}) {
+      return deleteCategoriesFromDb(db, input);
+    },
+
+    applyPaperChange(input) {
+      return applyPaperChange(db, input);
+    },
+
+    applyPaperChanges(input = {}) {
+      return applyPaperChanges(db, input);
+    },
+
     getPaperIdByAttachment(attachmentId) {
       return getPaperIdByAttachmentId(db, attachmentId);
     },
@@ -1258,6 +1512,10 @@ function createLibraryDatabaseStore(appPaths, helpers) {
 
     deletePaper(paperId) {
       deletePaperFromDb(db, paperId);
+    },
+
+    deletePapersWithPreview(input = {}) {
+      return deletePapersWithPreviewFromDb(db, input);
     },
 
     loadSettings() {
