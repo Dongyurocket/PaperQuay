@@ -1,23 +1,29 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 const require = createRequire(import.meta.url);
 const { createFileCommands } = require('../electron/backend/fileCommands.cjs');
 
-function createCommands() {
+function createCommands(storeLoad = null, approvedWritePaths = new Set()) {
   const dataDir = mkdtempSync(path.join(tmpdir(), 'paperquay-file-commands-test-'));
   const commands = createFileCommands({
     appPaths: {
+      dataDir,
       configPath: path.join(dataDir, '.settings', 'paperquay.config.json'),
       mineruCacheDir: path.join(dataDir, '.mineru-cache'),
       remotePdfDownloadDir: path.join(dataDir, '.downloads', 'pdfs'),
     },
-    approvedWritePaths: new Set(),
-    store: {},
+    approvedWritePaths,
+    store: {
+      load: storeLoad ?? (() => ({
+        settings: { storageDir: path.join(dataDir, 'paperquay-data') },
+        papers: [],
+      })),
+    },
   });
 
   return { commands, dataDir };
@@ -56,6 +62,52 @@ test('paths_exist rejects non-array payloads', async () => {
   }
 });
 
+test('write_text_file writes utf-8 content under the app data directory', async () => {
+  const { commands, dataDir } = createCommands();
+
+  try {
+    const target = path.join(dataDir, '.mineru-cache', 'document-test', 'translations', 'chinese.json');
+    await commands.write_text_file({ path: target, content: '{"translations":{}}' });
+
+    assert.equal(readFileSync(target, 'utf8'), '{"translations":{}}');
+  } finally {
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('write_text_file recovers from a read-only cache target', async () => {
+  const { commands, dataDir } = createCommands();
+
+  try {
+    const target = path.join(dataDir, '.mineru-cache', 'document-test', 'translations', 'chinese.json');
+    mkdirSync(path.dirname(target), { recursive: true });
+    writeFileSync(target, 'old');
+    chmodSync(target, 0o444);
+
+    await commands.write_text_file({ path: target, content: 'new' });
+
+    assert.equal(readFileSync(target, 'utf8'), 'new');
+  } finally {
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('write_text_file under the app data directory does not depend on the library store', async () => {
+  const { commands, dataDir } = createCommands(() => {
+    throw new Error('database is locked');
+  });
+
+  try {
+    const target = path.join(dataDir, '.mineru-cache', 'document-test', 'translations', 'chinese.json');
+
+    await commands.write_text_file({ path: target, content: '{"translations":{}}' });
+
+    assert.equal(readFileSync(target, 'utf8'), '{"translations":{}}');
+  } finally {
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
 function createRevealCommands(options: { papers?: unknown[] } = {}) {
   const dataDir = mkdtempSync(path.join(tmpdir(), 'paperquay-reveal-test-'));
   const calls: { showItemInFolder: string[]; openPath: string[] } = { showItemInFolder: [], openPath: [] };
@@ -76,6 +128,27 @@ function createRevealCommands(options: { papers?: unknown[] } = {}) {
 
   return { commands, dataDir, calls };
 }
+
+test('write_text_file under an approved cache path does not depend on the library store', async () => {
+  const approvedDir = mkdtempSync(path.join(tmpdir(), 'paperquay-approved-cache-test-'));
+  const { commands, dataDir } = createCommands(
+    () => {
+      throw new Error('database is locked');
+    },
+    new Set([approvedDir]),
+  );
+
+  try {
+    const target = path.join(approvedDir, 'document-test', 'translations', 'chinese.json');
+
+    await commands.write_text_file({ path: target, content: '{"translations":{}}' });
+
+    assert.equal(readFileSync(target, 'utf8'), '{"translations":{}}');
+  } finally {
+    rmSync(dataDir, { recursive: true, force: true });
+    rmSync(approvedDir, { recursive: true, force: true });
+  }
+});
 
 test('reveal_path shows files inside library roots in the file manager', async () => {
   const { commands, dataDir, calls } = createRevealCommands();

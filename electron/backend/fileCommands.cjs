@@ -24,6 +24,23 @@ function comparablePath(filePath) {
   return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
 }
 
+const RETRIABLE_WRITE_ERROR_CODES = new Set([
+  'EBUSY',
+  'EACCES',
+  'EPERM',
+  'ENOTEMPTY',
+  'EMFILE',
+  'ENFILE',
+]);
+
+function isRetriableWriteError(error) {
+  return Boolean(error?.code && RETRIABLE_WRITE_ERROR_CODES.has(error.code));
+}
+
+function delay(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
 function isSamePath(left, right) {
   return comparablePath(left) === comparablePath(right);
 }
@@ -131,42 +148,74 @@ function createFileCommands(context) {
 
   async function writeTextFileAtomically(filePath, content) {
     await fsp.mkdir(path.dirname(filePath), { recursive: true });
-    const temporaryPath = `${filePath}.tmp-${process.pid}-${now()}-${Math.random().toString(16).slice(2)}`;
+    const text = String(content ?? '');
+    let lastError = null;
 
-    try {
-      await fsp.writeFile(temporaryPath, String(content ?? ''), 'utf8');
-      await fsp.rename(temporaryPath, filePath);
-    } catch (error) {
-      await fsp.rm(temporaryPath, { force: true }).catch(() => undefined);
-      throw error;
+    // Windows 上杀软、云同步或另一个进程短暂持有目标文件时，rename 会抛
+    // EPERM/EBUSY/EACCES。缓存写入失败不应该直接丢掉整篇译文，这里做短重试。
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const temporaryPath = `${filePath}.tmp-${process.pid}-${now()}-${attempt}-${Math.random().toString(16).slice(2)}`;
+
+      try {
+        await fsp.writeFile(temporaryPath, text, 'utf8');
+        await fsp.rename(temporaryPath, filePath);
+        return;
+      } catch (error) {
+        lastError = error;
+        await fsp.rm(temporaryPath, { force: true }).catch(() => undefined);
+
+        if (!isRetriableWriteError(error)) {
+          break;
+        }
+
+        // 只读属性会让 rename 在 Windows 上稳定返回 EPERM，缓存文件可以安全清除。
+        await fsp.chmod(filePath, 0o666).catch(() => undefined);
+        await delay(40 * (attempt + 1));
+      }
     }
+
+    // 原子替换失败但文件本身可写时，退化为直接覆盖；缓存文件不是事务性数据，
+    // 保留可用译文比坚持原子性更重要。
+    if (isRetriableWriteError(lastError)) {
+      try {
+        await fsp.writeFile(filePath, text, 'utf8');
+        return;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    const code = lastError?.code ? `${lastError.code}: ` : '';
+    const message = lastError instanceof Error ? lastError.message : String(lastError ?? 'unknown error');
+    const wrapped = new Error(`写入文本文件失败: ${filePath}: ${code}${message}`);
+    wrapped.code = lastError?.code;
+    wrapped.cause = lastError;
+    throw wrapped;
   }
 
   function assertWriteAllowed(filePath) {
     const absolute = path.resolve(filePath);
-    const comparableAbsolute = comparablePath(absolute);
+    const dataRoot = path.resolve(appPaths.dataDir);
+
+    // 应用数据目录与已批准的缓存目录不依赖文库状态；先做无 DB 的快速判断，
+    // 避免文库临时繁忙或损坏时连译文缓存都写不进去。
+    if (isWithinRoot(absolute, dataRoot)) return;
+
+    for (const approvedPath of approvedWritePaths) {
+      if (approvedPath && isWithinRoot(absolute, approvedPath)) return;
+    }
+
     const library = store.load();
     const translatedPdfDir = library.settings?.translatedPdfDir
       ? path.resolve(library.settings.translatedPdfDir)
       : null;
     const roots = [
-      path.resolve(appPaths.dataDir),
+      dataRoot,
       path.resolve(library.settings.storageDir || path.join(appPaths.dataDir, 'paperquay-data')),
       ...(translatedPdfDir ? [translatedPdfDir] : []),
     ];
 
-    if (roots.some((root) => {
-      const comparableRoot = comparablePath(root);
-      return comparableAbsolute === comparableRoot ||
-        comparableAbsolute.startsWith(`${comparableRoot}${path.sep}`);
-    })) return;
-    for (const approvedPath of approvedWritePaths) {
-      const comparableApprovedPath = comparablePath(approvedPath);
-      if (
-        comparableAbsolute === comparableApprovedPath ||
-        comparableAbsolute.startsWith(`${comparableApprovedPath}${path.sep}`)
-      ) return;
-    }
+    if (roots.some((root) => isWithinRoot(absolute, root))) return;
 
     throw new Error(`Writing to this path is not allowed until approved: ${filePath}`);
   }

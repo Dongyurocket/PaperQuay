@@ -478,6 +478,7 @@ export function useDocumentTranslation({
           if (progress.translatedCount > 0) {
             try {
               await saveTranslationCache(currentDocument, progress.translations);
+              cacheWriteError = null;
             } catch (cacheError) {
               cacheWriteError = cacheError;
               console.error('Failed to save translation progress', cacheError);
@@ -520,6 +521,7 @@ export function useDocumentTranslation({
 
       try {
         await saveTranslationCache(currentDocument, nextTranslations);
+        cacheWriteError = null;
       } catch (cacheError) {
         cacheWriteError = cacheError;
         console.error('Failed to save completed translation cache', cacheError);
@@ -751,6 +753,7 @@ export function useDocumentTranslation({
             if (progress.translatedCount > 0) {
               try {
                 await saveTranslationCache(currentDocument, mergedTranslations);
+                cacheWriteError = null;
               } catch (cacheError) {
                 cacheWriteError = cacheError;
                 console.error('Failed to save retranslated block progress', cacheError);
@@ -781,6 +784,7 @@ export function useDocumentTranslation({
         setTranslationProgressCompleted(translatedText ? 1 : 0);
         try {
           await saveTranslationCache(currentDocument, nextTranslations);
+          cacheWriteError = null;
         } catch (cacheError) {
           cacheWriteError = cacheError;
           console.error('Failed to save retranslated block', cacheError);
