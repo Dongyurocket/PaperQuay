@@ -143,6 +143,7 @@ import {
 import { confirmAction } from '../../ui/confirmHost';
 import { useLibraryFilters } from './useLibraryFilters';
 import { useLibraryQueryRefresh } from './useLibraryQueryRefresh';
+import { EXTERNAL_LIBRARY_WRITE_EVENT } from '../../services/externalWrite';
 import { useSelectionFilterGuard } from './useSelectionFilterGuard';
 import { Dialog } from '../../ui/dialog';
 import { Menu, type MenuEntry } from '../../ui/menu';
@@ -898,6 +899,17 @@ export default function LiteratureLibraryView({
     ];
     void refreshMineruStatusesForPapers(prioritizedPapers);
   }, [demoLibrary, onAllPapersChange, refreshMineruStatusesForPapers, refreshPapers, resolveDemoPapers]);
+
+  // MCP/外部进程写入文库：重新加载列表、分类与整个快照；
+  // 详情表单在数据变化时自行保留未保存编辑并显示“外部更新”提示。
+  useEffect(() => {
+    const handleExternalWrite = () => {
+      if (demoMode) return;
+      void refreshAll().catch((error) => console.error('Failed to refresh library after external write', error));
+    };
+    window.addEventListener(EXTERNAL_LIBRARY_WRITE_EVENT, handleExternalWrite);
+    return () => window.removeEventListener(EXTERNAL_LIBRARY_WRITE_EVENT, handleExternalWrite);
+  }, [demoMode, refreshAll]);
 
   const hydrateImportDraftsFromLocalPdf = useCallback(
     async (drafts: ImportDraftItem[]) => {

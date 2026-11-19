@@ -25,6 +25,7 @@ import {
 import {
   NOTE_CHANGED_EVENT,
   emitJumpToNoteAnchor,
+  emitNoteChanged,
   emitOpenLibraryPaper,
   type NoteChangedEventDetail,
 } from '../../app/appEvents';
@@ -44,8 +45,10 @@ import {
   syncNotesVaultNow,
   updateNotesVaultSettings,
   rebuildNotesIndex,
+  getNote,
   getNotesIndexStatus,
 } from '../../services/notes';
+import { EXTERNAL_NOTES_WRITE_EVENT } from '../../services/externalWrite';
 import { selectDirectory } from '../../services/desktop';
 import { loadSettings } from '../reader/readerShared';
 import { shouldRunVaultAutoSync } from './notesQuickWins';
@@ -1138,6 +1141,40 @@ export function NotesWorkspace({ workspaceActive = true }: { workspaceActive?: b
     window.addEventListener(NOTE_CHANGED_EVENT, handleNoteChanged);
     return () => window.removeEventListener(NOTE_CHANGED_EVENT, handleNoteChanged);
   }, [loadNotes, refreshFolders, refreshTags, setNoteTabExternalUpdate, updateNoteTabTitle]);
+
+  // MCP/外部进程写入笔记：刷新列表，并让打开的编辑器进入现有的“外部更新”横幅流程。
+  useEffect(() => {
+    const handleExternalWrite = () => {
+      void (async () => {
+        await Promise.all([
+          loadNotes().catch(() => undefined),
+          refreshTags().catch(() => undefined),
+          refreshFolders().catch(() => undefined),
+        ]);
+        const openTabs = useTabsStore.getState().tabs.filter((tab) => tab.type === 'note');
+        for (const tab of openTabs) {
+          if (tab.type !== 'note') continue;
+          setNoteTabExternalUpdate(tab.noteId, true);
+          try {
+            const note = await getNote(tab.noteId);
+            if (note) {
+              emitNoteChanged({
+                noteId: note.id,
+                action: 'updated',
+                note,
+                sourceId: 'external-write',
+              });
+            }
+          } catch {
+            // 笔记可能已被外部删除；列表刷新会移除对应条目。
+          }
+        }
+      })();
+    };
+
+    window.addEventListener(EXTERNAL_NOTES_WRITE_EVENT, handleExternalWrite);
+    return () => window.removeEventListener(EXTERNAL_NOTES_WRITE_EVENT, handleExternalWrite);
+  }, [loadNotes, refreshFolders, refreshTags, setNoteTabExternalUpdate]);
 
   const handleCreateNote = useCallback((targetFolderId: string | null = activeFolderId) => {
     const folderId =

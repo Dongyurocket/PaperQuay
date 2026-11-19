@@ -13,6 +13,7 @@ const { createNoteCommands } = require('./backend/noteCommands.cjs');
 const { createNoteStore } = require('./backend/noteStore.cjs');
 const { createNoteVault } = require('./backend/noteVault.cjs');
 const { createUpdateCommands } = require('./backend/updateCommands.cjs');
+const { externalWriteRevisions, readExternalWriteMarker } = require('./backend/externalWriteMarker.cjs');
 const { perfMark, perfMeasure } = require('./perfTrace.cjs');
 const {
   createPaperRagLock,
@@ -160,6 +161,9 @@ function createBackend({ app }) {
     store,
     withPaperRagLock: paperRagLock.withPaperRagLock,
   });
+  commands.external_write_state = () => externalWriteRevisions(
+    readExternalWriteMarker(appPaths.dataDir).state,
+  );
   commands.library_set_rag_membership = (args) => setLibraryRagMembership({
     store,
     ragStore,

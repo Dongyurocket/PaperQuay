@@ -165,6 +165,11 @@ export default function LiteraturePaperDetails({
   const [excludeConfirmOpen, setExcludeConfirmOpen] = useState(false);
   const [openMenu, setOpenMenu] = useState<MenuPosition | null>(null);
   const [inlineField, setInlineField] = useState<InlineFieldKey | null>(null);
+  const [externalNotice, setExternalNotice] = useState<'changed' | 'conflict' | null>(null);
+  const [conflictRetry, setConflictRetry] = useState<{
+    request: UpdatePaperRequest;
+    categoryIds?: string[];
+  } | null>(null);
   const [inlineValue, setInlineValue] = useState('');
   const [inlineError, setInlineError] = useState('');
   const [sections, setSections] = useState<PaperDetailsSectionState>(loadPaperDetailsSections);
@@ -187,6 +192,10 @@ export default function LiteraturePaperDetails({
         if (!currentPaper || !currentDraft || !paperDraftChanged(currentPaper, currentDraft)) {
           setDraft(createPaperDetailsDraft(selectedPaper));
           setDraftErrors({});
+          setExternalNotice(null);
+        } else {
+          // 外部（MCP/其他窗口）更新了同一篇文献：保留本地编辑，显式提示重载。
+          setExternalNotice('changed');
         }
       }
       return;
@@ -228,16 +237,45 @@ export default function LiteraturePaperDetails({
 
   const saveRequest = async (request: UpdatePaperRequest, categoryIds?: string[]) => {
     if (!paper) throw new Error(l('没有选中的文献。', 'No paper is selected.'));
-    const saved = await onSavePaper(request, categoryIds);
-    if (saved) {
-      setPaper(saved);
-      setDraft(createPaperDetailsDraft(saved));
+    try {
+      const saved = await onSavePaper(request, categoryIds);
+      if (saved) {
+        setPaper(saved);
+        setDraft(createPaperDetailsDraft(saved));
+      }
+      setDraftErrors({});
+      setEditing(false);
+      setInlineField(null);
+      setExternalNotice(null);
+      setConflictRetry(null);
+      toast({ tone: 'success', message: l('文献信息已保存', 'Paper metadata saved') });
+      return saved;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error ?? '');
+      if (message.includes('PAPER_CONFLICT')) {
+        setConflictRetry({ request, categoryIds });
+        setExternalNotice('conflict');
+      }
+      throw error;
     }
+  };
+
+  const reloadExternalPaper = () => {
+    if (!selectedPaper) return;
+    setPaper(selectedPaper);
+    setDraft(createPaperDetailsDraft(selectedPaper));
     setDraftErrors({});
+    setExternalNotice(null);
+    setConflictRetry(null);
     setEditing(false);
     setInlineField(null);
-    toast({ tone: 'success', message: l('文献信息已保存', 'Paper metadata saved') });
-    return saved;
+    setInlineError('');
+  };
+
+  const overwriteExternalPaper = async () => {
+    if (!conflictRetry) return;
+    const { expectedUpdatedAt: _ignored, ...request } = conflictRetry.request;
+    await saveRequest(request, conflictRetry.categoryIds);
   };
 
   const switchToPending = () => {
@@ -415,6 +453,31 @@ export default function LiteraturePaperDetails({
             <button type="button" disabled={!paperPdfPath(paper, storageDir)} onClick={() => onOpenPaper(paper)} className="pq-button-primary px-3 py-1.5 text-xs"><BookOpenText className="mr-1.5 inline h-3.5 w-3.5" />{l('打开阅读', 'Open Reader')}</button>
             <button type="button" disabled={saving} onClick={() => { setDraft(createPaperDetailsDraft(paper)); setEditing(true); }} className="pq-button px-3 py-1.5 text-xs"><Pencil className="mr-1.5 inline h-3.5 w-3.5" />{l('编辑', 'Edit')}</button>
           </div>
+
+          {externalNotice ? (
+            <div role="status" className="rounded-[var(--pq-radius-sm)] border border-[var(--pq-warning)] bg-[color-mix(in_srgb,var(--pq-warning)_12%,var(--pq-surface))] px-3 py-2 text-xs text-[var(--pq-text)]">
+              <div className="font-medium">
+                {externalNotice === 'conflict'
+                  ? l('这篇文献已在外部被修改，本次保存被拒绝。', 'This paper changed outside the app. The save was rejected.')
+                  : l('这篇文献已由外部工具或其他窗口更新。', 'This paper was updated by an external tool or another window.')}
+              </div>
+              <div className="mt-1 text-[var(--pq-text-muted)]">
+                {externalNotice === 'conflict'
+                  ? l('请选择重新加载最新版本，或确认覆盖外部修改。', 'Reload the latest version, or explicitly overwrite the external change.')
+                  : l('重新加载会丢弃当前未保存的编辑。', 'Reloading discards the current unsaved edits.')}
+              </div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <button type="button" className="pq-button px-2 py-1 text-xs" onClick={reloadExternalPaper}>
+                  {l('重新加载', 'Reload')}
+                </button>
+                {externalNotice === 'conflict' && conflictRetry ? (
+                  <button type="button" className="pq-button px-2 py-1 text-xs" onClick={() => void overwriteExternalPaper().catch(() => undefined)}>
+                    {l('覆盖保存', 'Overwrite')}
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
 
           <PaperDetailsStatusBar
             paper={paper}

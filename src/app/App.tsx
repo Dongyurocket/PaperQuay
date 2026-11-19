@@ -37,6 +37,7 @@ import { ConfirmHost } from '../ui/confirmHost';
 import { CommandPalette } from '../ui/commandPalette';
 import { registerCommands, useGlobalShortcuts } from '../ui/commands';
 import { useWorkspaceRestore, type AppWorkspaceKey } from './useWorkspaceRestore';
+import { startExternalWriteBridge } from '../services/externalWrite';
 
 type UiLanguage = 'zh-CN' | 'en-US';
 
@@ -172,6 +173,8 @@ function App() {
       window.removeEventListener(OPEN_AGENT_WITH_INSTRUCTION_EVENT, handleOpenAgent);
     };
   }, [openAgentTab]);
+
+  useEffect(() => startExternalWriteBridge(), []);
 
   useEffect(() => {
     const handleLanguageChanged = (event: Event) => {

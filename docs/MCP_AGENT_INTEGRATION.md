@@ -13,7 +13,7 @@ PaperQuay 提供基于 **Model Context Protocol (MCP)** 的 stdio 服务（`pape
 
 ## 工具一览
 
-共 25 个工具：11 个只读，14 个写入。写入工具都接受 `allowWhileAppRunning`（默认 `false`）。
+共 26 个工具：12 个只读，14 个写入。写入工具都接受 `allowWhileAppRunning`（默认 `false`）。
 
 ### 只读：文献、知识库与笔记检索
 
@@ -48,7 +48,8 @@ PaperQuay 提供基于 **Model Context Protocol (MCP)** 的 stdio 服务（`pape
 | `manage_category` | 创建、重命名、移动、删除分类 | `action`（必填）、`categoryId`、`name`、`parentId`、`sortOrder` | `delete` 级联删除子分类，只解绑文献，不删文献；系统分类不可修改 |
 | `set_paper_categories` | 调整文献分类 | `paperIds`（必填）、`add`/`remove`，或 `replace`（与前两者互斥） | 每篇的 `categoryIds`；任一 ID 不存在则整体不写入 |
 | `update_paper` | 更新元数据（白名单） | `paperId`（必填）＋可更新字段，见下文 | 更新后的文献摘要；未知字段报错 |
-| `delete_papers` | 批量删除文献 | `paperIds`（必填）、`deleteFiles`（默认 `false`） | `deleted`、`deletedFileCount`、`fileErrors`；先提交数据库再删文件 |
+| `preview_delete_papers` | 删除前预览（只读） | `paperIds`（必填）、`deleteFiles`、`deleteFilePaperIds` | 每篇 `updatedAt`、附件状态、将删除文件、共享文件、非受管路径；返回 `previewVersion` |
+| `delete_papers` | 批量删除文献 | `paperIds`（必填）、`deleteFiles`（默认 `false`）、`deleteFilePaperIds`、`previewVersion`（应用运行时必填） | `deleted`、`deletedFileCount`、`fileErrors`、`partialFailure`；先提交数据库再删受管且未被共用的文件 |
 | `attach_translated_pdf` | 附加翻译版 PDF | `paperId`、`sourcePath`（均必填） | 复制到翻译版 PDF 目录（默认存储目录下的 `translated-pdfs`），替换已有翻译版；返回 `attachmentId`、`storedPath`、`relativePath`、`replaced`。页数与原版不同时返回 `pageCountMismatch`，不拒绝附加 |
 | `remove_translated_pdf` | 移除翻译版 PDF | `paperId`（必填）、`deleteFile`（默认 `true`） | 先提交数据库再删除已入库副本；没有翻译版时报错 |
 
@@ -85,13 +86,14 @@ PaperQuay 提供基于 **Model Context Protocol (MCP)** 的 stdio 服务（`pape
 桌面应用运行时把文库保存在内存中，每次保存都会全量重写文库数据库，外部写入会被覆盖。笔记库按条写入，不会被整体覆盖，但应用内已加载的笔记列表和编辑器不会自动刷新。因此所有写入工具（含 Zotero 同步和笔记工具）遵循同一套规则：
 
 1. 写入前先读桌面应用运行标记（开发模式同样写入），标记不存在时再检测进程：Windows 用 `tasklist` 查 `PaperQuay.exe`，其他平台用 `pgrep -x PaperQuay`。检测会排除 MCP 自身进程和命令行含 `paperquay-mcp` 的进程，所以用 `PaperQuay.exe` + `ELECTRON_RUN_AS_NODE=1` 启动 MCP 不会误判。
-2. 检测到应用运行时拒绝写入，数据库不变，错误提示要求先关闭应用。
+2. 默认检测到应用运行时拒绝写入，数据库不变，错误提示要求先关闭应用或改为受检并行写。
 3. 运行标记损坏、不可读，或进程检测失败时，无法确认运行状态，同样拒绝写入。
-4. 传 `allowWhileAppRunning: true` 可以强制写入；此时若应用在运行或状态未知，结果附带 `warning`。应用随后的保存可能覆盖本次写入；笔记写入后需重新加载应用界面。
-5. 环境变量 `PAPERQUAY_MCP_WRITE=off` 禁用全部写入工具，优先级高于 `allowWhileAppRunning`。
-6. 存在待应用的备份恢复（`<数据目录的上级目录>/PaperQuay-restore/pending.json`）时，写入工具返回 `BACKUP_RESTORE_PENDING`，`allowWhileAppRunning` 不能覆盖，直到应用启动完成恢复。
+4. 传 `allowWhileAppRunning: true` 表示**受检并行写**：应用在运行或状态未知时，写入必须携带读取到的版本（`expectedUpdatedAt`、`expectedCategoryVersions` 或删除预览的 `previewVersion`）。版本缺失或已变化会被拒绝，返回 `PAPER_CONFLICT` / `CATEGORY_CONFLICT` / `NOTE_CONFLICT` 与当前版本号，不会静默覆盖。
+5. 文库写入改为目标记录写（单篇 UPSERT / 分类单行写），不再全表重写；写提交后更新数据目录的外部写入标记，桌面应用收到后刷新列表，正在编辑的详情表单显示“外部更新”提示。
+6. 环境变量 `PAPERQUAY_MCP_WRITE=off` 禁用全部写入工具，优先级高于 `allowWhileAppRunning`。
+7. 存在待应用的备份恢复（`<数据目录的上级目录>/PaperQuay-restore/pending.json`）时，写入工具返回 `BACKUP_RESTORE_PENDING`，`allowWhileAppRunning` 不能覆盖，直到应用启动完成恢复。
 
-建议 Agent 写入前先确认桌面应用已关闭。
+写入冲突的处理顺序：读取最新版本 → 合并本地改动 → 用最新版本重试；删除必须先 `preview_delete_papers`、经用户确认，再按预览版本删除。
 
 ## 仓库 Skills
 

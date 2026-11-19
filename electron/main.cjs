@@ -5,6 +5,7 @@ const { createBackend } = require('./backend.cjs');
 const { createAppPaths } = require('./backend/libraryStore.cjs');
 const { perfMark, perfMeasure } = require('./perfTrace.cjs');
 const { removeDesktopRunMarker, writeDesktopRunMarker } = require('./backend/desktopRunMarker.cjs');
+const { createExternalWriteWatcher } = require('./backend/externalWriteWatch.cjs');
 const {
   registerLocalPdfProtocol,
   registerLocalPdfProtocolScheme,
@@ -15,6 +16,7 @@ const RESTORE_RESUME_ARGUMENT = '--paperquay-restore-resume';
 const isRestoreResume = process.argv.includes(RESTORE_RESUME_ARGUMENT);
 let backend = null;
 let desktopMarkerDataDir = null;
+let externalWriteWatcher = null;
 let rendererRestorePayload = null;
 let restoreResumeLockFile = null;
 let singleInstanceLockAcquired = false;
@@ -321,6 +323,19 @@ app.whenReady().then(async () => {
   }
   perfMark('backend:ready');
   perfMeasure('startup:backend-init', 'app:ready');
+
+  if (desktopMarkerDataDir) {
+    externalWriteWatcher = createExternalWriteWatcher({
+      dataDir: desktopMarkerDataDir,
+      onChange: (payload) => {
+        for (const window of BrowserWindow.getAllWindows()) {
+          if (window.isDestroyed()) continue;
+          window.webContents.send('paperquay:event', 'paperquay://external-write', payload);
+        }
+      },
+    });
+  }
+
   createWindow();
   perfMark('window:created');
   perfMeasure('startup:window-created', 'app:ready');
@@ -341,6 +356,8 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   // Keep the advisory run state through synchronous store shutdown so MCP writes
   // cannot enter between the window closing and backend resource teardown.
+  externalWriteWatcher?.close();
+  externalWriteWatcher = null;
   backend?.close();
   if (desktopMarkerDataDir) {
     removeDesktopRunMarker(desktopMarkerDataDir);
