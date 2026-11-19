@@ -832,6 +832,9 @@ async function processEntries(opened, { destinationDir, resolveDestination, onEn
             throw codedError('UNSAFE_DESTINATION', 'A relative extraction mapping requires destinationDir');
           }
           outputPath = await ensureSafeParent(destinationDir, validateEntryPath(mapping));
+        } else if (mapping && typeof mapping === 'object' && mapping.skip === true) {
+          // 已退役数据：校验完整性但不落盘（旧 Agent 记忆不再进入当前安装）。
+          outputPath = null;
         } else if (mapping && typeof mapping === 'object' && typeof mapping.root === 'string' && path.isAbsolute(mapping.root)) {
           outputPath = await ensureSafeParent(mapping.root, validateEntryPath(mapping.relativePath));
         } else {

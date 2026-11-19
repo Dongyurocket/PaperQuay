@@ -330,7 +330,6 @@ export type ModelRuntimeRole =
   | "selectionTranslation"
   | "summary"
   | "review"
-  | "agent"
   | "qa";
 
 export interface ModelRuntimeConfig {
@@ -632,7 +631,6 @@ export interface ReaderSettings {
   selectionTranslationModelPresetId: string;
   summaryModelPresetId: string;
   reviewModelPresetId: string;
-  agentModelPresetId: string;
   embeddingBaseUrl: string;
   embeddingModel: string;
   embeddingDimensions: number | null;

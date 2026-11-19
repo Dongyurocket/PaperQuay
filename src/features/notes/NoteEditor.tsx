@@ -61,7 +61,6 @@ import {
   Table2,
   Tag,
   Trash2,
-  X,
 } from 'lucide-react';
 import { NOTE_CHANGED_EVENT, type NoteChangedEventDetail } from '../../app/appEvents';
 import { useLocaleText } from '../../i18n/uiLanguage';
@@ -71,8 +70,6 @@ import type {
   NoteAnchor,
   NoteAnchorInsertRequest,
   NotePageKind,
-  NotePolishResult,
-  NotePolishScope,
   NoteTagSummary,
   UpdateNoteRequest,
 } from '../../types/notes';
@@ -106,8 +103,6 @@ import {
   saveNoteCitationStyle,
   type NoteCitationStyle,
 } from './bibliography';
-import { buildNotePolishNodes, normalizeNotePolishScope } from './notePolish';
-import { polishNote } from '../../services/notePolish';
 import { getNote, type NoteMutationOptions } from '../../services/notes';
 import {
   clampDocPosition,
@@ -721,12 +716,6 @@ export function NoteEditor({
   const [pageKind, setPageKind] = useState<NotePageKind | null>(note?.pageKind ?? null);
   const [revision, setRevision] = useState(0);
   const [externalUpdateAvailable, setExternalUpdateAvailable] = useState(false);
-  const [polishOpen, setPolishOpen] = useState(false);
-  // 默认走「笔记关联文献」，让知识库检索开箱即用；无关联文献时后端会显式提示并回退纯文本润色。
-  const [polishScope, setPolishScope] = useState<NotePolishScope>('linked-papers');
-  const [polishLoading, setPolishLoading] = useState(false);
-  const [polishError, setPolishError] = useState('');
-  const [polishResult, setPolishResult] = useState<NotePolishResult | null>(null);
   const [referencePickerOpen, setReferencePickerOpen] = useState(false);
   const [editorContextMenu, setEditorContextMenu] = useState<NoteEditorContextMenuState | null>(null);
   const snapshotRef = useRef<EditorSnapshot>(snapshotFromNote(note));
@@ -756,7 +745,6 @@ export function NoteEditor({
   const forceApplyIncomingRef = useRef(false);
   const lastSelectionRef = useRef<{ from: number; to: number } | null>(null);
   const handledAnchorInsertRequestRef = useRef('');
-  const polishSelectionRef = useRef<{ from: number; to: number } | null>(null);
   const pendingAnchorsRef = useRef(new Map<string, NoteAnchor>());
   const [citationStyle, setCitationStyle] = useState<NoteCitationStyle>(() => loadNoteCitationStyle());
   const latestCitationStyleRef = useRef<NoteCitationStyle>(citationStyle);
@@ -1008,77 +996,6 @@ export function NoteEditor({
     },
     [editor],
   );
-
-  const openPolish = useCallback(() => {
-    if (!editor || editor.isDestroyed || !note) return;
-    const { from, to } = editor.state.selection;
-    polishSelectionRef.current = from !== to ? { from, to } : null;
-    setPolishError('');
-    setPolishResult(null);
-    setPolishOpen(true);
-  }, [editor, note]);
-
-  const runPolish = useCallback(async () => {
-    if (!editor || editor.isDestroyed || !note || polishLoading) return;
-
-    const selection = polishSelectionRef.current;
-    const text = selection
-      ? editor.state.doc.textBetween(selection.from, selection.to, '\n').trim()
-      : snapshotFromEditor(editor).contentText.trim();
-
-    if (!text) {
-      setPolishError('请先输入笔记内容或选择要润色的文字。');
-      return;
-    }
-
-    const linkedPaperIds = Array.from(new Set([
-      note.paperId,
-      note.linkedPaperId ?? '',
-      ...note.linkedPaperIds,
-      ...extractPaperRefs(snapshotFromEditor(editor).contentText),
-    ].filter((paperId) => paperId && paperId !== 'global-notes')));
-
-    setPolishLoading(true);
-    setPolishError('');
-    setPolishResult(null);
-
-    try {
-      const result = await polishNote({ text, scope: polishScope, linkedPaperIds });
-      setPolishResult(result);
-    } catch (error) {
-      setPolishError(error instanceof Error ? error.message : '笔记润色失败，请重试。');
-    } finally {
-      setPolishLoading(false);
-    }
-  }, [editor, note, polishLoading, polishScope]);
-
-  const applyPolish = useCallback(() => {
-    if (!editor || editor.isDestroyed || !polishResult) return;
-
-    const { anchors, content } = buildNotePolishNodes(polishResult.text, polishResult.citations);
-    for (const anchor of anchors) {
-      pendingAnchorsRef.current.set(anchor.id, anchor);
-    }
-
-    const selection = polishSelectionRef.current;
-    if (selection) {
-      editor.chain().focus().insertContentAt(selection, content, { updateSelection: true }).run();
-    } else {
-      const insertAt = editor.state.doc.content.size;
-      editor.chain().focus().insertContentAt(insertAt, [paragraphNode(), ...content], { updateSelection: true }).run();
-    }
-
-    window.requestAnimationFrame(() => {
-      if (editor.isDestroyed) return;
-      snapshotRef.current = snapshotFromEditor(editor);
-      const position = editor.state.selection.to;
-      lastSelectionRef.current = { from: position, to: position };
-      setRevision((value) => value + 1);
-    });
-    setPolishOpen(false);
-    polishSelectionRef.current = null;
-    setPolishResult(null);
-  }, [editor, polishResult]);
 
   const runContextCommand = useCallback((
     context: NoteEditorContextMenuState,
@@ -1966,9 +1883,6 @@ export function NoteEditor({
 
       <NoteEditorToolbar
         editor={editor}
-        onPolish={openPolish}
-        polishActive={polishOpen}
-        polishDisabled={!note || polishLoading}
         papers={papers ?? []}
         citationStyle={citationStyle}
         onCitationStyleChange={handleCitationStyleChange}
@@ -1976,76 +1890,6 @@ export function NoteEditor({
         onReferencePickerToggle={() => setReferencePickerOpen((open) => !open)}
         onReferencePickerClose={() => setReferencePickerOpen(false)}
       />
-
-      {polishOpen ? (
-        <section className="border-b border-[var(--pq-border)] bg-[var(--pq-bg-secondary)] px-3 py-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <label className="text-xs font-medium text-[var(--pq-text)]">
-              润色范围
-              <select
-                value={polishScope}
-                disabled={polishLoading}
-                onChange={(event) => {
-                  setPolishScope(normalizeNotePolishScope(event.target.value));
-                  setPolishResult(null);
-                  setPolishError('');
-                }}
-                className="pq-input ml-2 h-8 max-w-full px-2 text-xs"
-              >
-                <option value="none">仅优化文字与排版</option>
-                <option value="linked-papers">笔记关联文献</option>
-                <option value="library">整个知识库</option>
-              </select>
-            </label>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                className="pq-button h-8 px-3 text-xs"
-                onClick={() => void runPolish()}
-                disabled={polishLoading}
-              >
-                {polishLoading ? '正在润色...' : polishResult ? '重新生成' : '开始润色'}
-              </button>
-              <button
-                type="button"
-                className="pq-icon-button h-8 w-8"
-                title="关闭润色"
-                onClick={() => {
-                  setPolishOpen(false);
-                  setPolishError('');
-                  setPolishResult(null);
-                }}
-              >
-                <X className="h-4 w-4" strokeWidth={1.8} />
-              </button>
-            </div>
-          </div>
-
-          {polishError ? <p className="mt-2 text-xs text-[var(--pq-danger)]">{polishError}</p> : null}
-          {polishResult?.notice ? <p className="mt-2 text-xs text-[var(--pq-text-muted)]">{polishResult.notice}</p> : null}
-          {polishResult ? (
-            <div className="mt-3 border-t border-[var(--pq-border)] pt-3">
-              <div className="max-h-48 overflow-y-auto whitespace-pre-wrap text-sm leading-6 text-[var(--pq-text)]">
-                {polishResult.text}
-              </div>
-              {polishResult.citations.length > 0 ? (
-                <div className="mt-2 text-xs text-[var(--pq-text-muted)]">
-                  已附 {polishResult.citations.length} 条可跳转文献引用。
-                </div>
-              ) : null}
-              <div className="mt-3 flex items-center justify-end gap-2">
-                <button
-                  type="button"
-                  className="pq-button h-8 px-3 text-xs"
-                  onClick={applyPolish}
-                >
-                  {polishSelectionRef.current ? '替换选区' : '插入到笔记末尾'}
-                </button>
-              </div>
-            </div>
-          ) : null}
-        </section>
-      ) : null}
 
       <div
         ref={editorBodyRef}

@@ -207,7 +207,6 @@ export const DEFAULT_SETTINGS: ReaderSettings = {
   selectionTranslationModelPresetId: 'default',
   summaryModelPresetId: 'default',
   reviewModelPresetId: 'default',
-  agentModelPresetId: 'default',
   embeddingBaseUrl: 'https://api.openai.com',
   embeddingModel: 'text-embedding-3-small',
   embeddingDimensions: null,
@@ -371,7 +370,6 @@ export function normalizeModelRuntimeConfigs(
     selectionTranslation: normalizeModelRuntimeConfig(rawConfigs.selectionTranslation),
     summary: normalizeModelRuntimeConfig(rawConfigs.summary),
     review: normalizeModelRuntimeConfig(rawConfigs.review),
-    agent: normalizeModelRuntimeConfig(rawConfigs.agent),
     qa: normalizeModelRuntimeConfig(rawConfigs.qa),
   };
 }
@@ -780,7 +778,7 @@ function normalizeRagSourceMode(value: unknown): RagSourceMode {
  * 旧配置可能仍带这些键；读取时忽略，写回前剥离，保证升级后的配置文件
  * 不再产生已退役字段，且重复执行无副作用。
  */
-const RETIRED_READER_SETTING_KEYS = ['parseProvider', 'paddleOcrApiBaseUrl'] as const;
+const RETIRED_READER_SETTING_KEYS = ['parseProvider', 'paddleOcrApiBaseUrl', 'agentModelPresetId'] as const;
 const RETIRED_READER_SECRET_KEYS = ['paddleOcrApiToken'] as const;
 
 export function stripRetiredReaderFields(
@@ -789,6 +787,12 @@ export function stripRetiredReaderFields(
 ): void {
   for (const key of RETIRED_READER_SETTING_KEYS) {
     delete (settings as Record<string, unknown>)[key];
+  }
+
+  // 独立 Agent 的运行时角色配置一并移除；保留其它角色的温度/推理档位设置。
+  const runtimeConfigs = (settings as Record<string, unknown>).modelRuntimeConfigs;
+  if (runtimeConfigs && typeof runtimeConfigs === 'object') {
+    delete (runtimeConfigs as Record<string, unknown>).agent;
   }
 
   if (!secrets) return;
@@ -833,7 +837,6 @@ export function normalizeReaderSettings(value?: Partial<ReaderSettings> | null):
     reviewModelPresetId:
       merged.reviewModelPresetId?.trim() ||
       merged.summaryModelPresetId?.trim() ||
-      merged.agentModelPresetId?.trim() ||
       DEFAULT_SETTINGS.reviewModelPresetId,
     summaryOutputLanguage: merged.summaryOutputLanguage?.trim() || 'follow-ui',
     translationDisplayMode:

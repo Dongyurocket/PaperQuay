@@ -456,18 +456,6 @@ async function collectBackupSources(context, {
   const graphPath = path.join(context.appPaths.dataDir, 'paperquay-knowledge-graph-relations.json');
   await addPathEntry('knowledge-graph', graphPath, 'data/knowledge-graph-relations.json', {}, 'deflate-raw');
 
-  const memoryRoot = context.appPaths.agentMemoryDir;
-  const memoryFiles = await walkFiles(memoryRoot, { warnings, kind: 'agent-memory', startedAt, signal });
-  for (const file of memoryFiles) {
-    const relative = path.relative(memoryRoot, file.path).split(path.sep).join('/');
-    if (!safeRelativePath(relative)) {
-      pushWarning(warnings, { code: 'UNSAFE_SOURCE_PATH', kind: 'agent-memory', originalName: safeSegment(path.basename(file.path)) });
-      continue;
-    }
-    const entry = await addPathEntry('agent-memory', file.path, `data/agent-memory/${relative}`);
-    if (entry) counts.agentMemoryFiles += 1;
-  }
-
   const attachmentSeen = new Set();
   if (options.includePdfs) {
     for (const paper of Array.isArray(library?.papers) ? library.papers : []) {

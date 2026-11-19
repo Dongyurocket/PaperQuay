@@ -1,5 +1,4 @@
 const { createAiCommands } = require('./backend/aiCommands.cjs');
-const { createAgentMemoryStore } = require('./backend/agentMemoryStore.cjs');
 const { createBackupCommands } = require('./backend/backupCommands.cjs');
 const { cleanupLegacyBackupSettings } = require('./backend/legacyBackupCleanup.cjs');
 const { createAppPaths, createLibraryStore } = require('./backend/libraryStore.cjs');
@@ -12,6 +11,7 @@ const { createMineruCacheCommands } = require('./backend/mineruCacheCommands.cjs
 const { createNoteCommands } = require('./backend/noteCommands.cjs');
 const { createNoteStore } = require('./backend/noteStore.cjs');
 const { createNoteVault } = require('./backend/noteVault.cjs');
+const { cleanupRetiredAgentData } = require('./backend/agentRetiredCleanup.cjs');
 const { createUpdateCommands } = require('./backend/updateCommands.cjs');
 const { externalWriteRevisions, readExternalWriteMarker } = require('./backend/externalWriteMarker.cjs');
 const { perfMark, perfMeasure } = require('./perfTrace.cjs');
@@ -103,10 +103,20 @@ function createBackend({ app }) {
   perfMeasure('backend:init library-store', 'backend:init-start');
   const noteStore = createNoteStore(appPaths);
   perfMeasure('backend:init note-store', 'backend:init-start');
-  const agentMemoryStore = createAgentMemoryStore(appPaths);
-  perfMeasure('backend:init agent-memory-store', 'backend:init-start');
   const ragStore = createRagStoreSafely(appPaths);
   perfMeasure('backend:init rag-store', 'backend:init-start');
+  try {
+    const agentCleanup = cleanupRetiredAgentData(appPaths, { ragStore });
+    if (!agentCleanup.alreadyDone) {
+      console.info('[paperquay] Retired agent data cleaned.', {
+        memoryFilesRemoved: agentCleanup.memoryFilesRemoved,
+        runsRemoved: agentCleanup.runsRemoved,
+        eventsRemoved: agentCleanup.eventsRemoved,
+      });
+    }
+  } catch (error) {
+    console.warn('[paperquay] Retired agent data cleanup failed; it will retry on next launch.', error);
+  }
   const legacyRagIndexes = store.loadLegacyRagIndexes();
 
   if (ragStore.available && Object.keys(legacyRagIndexes).length > 0) {
@@ -128,7 +138,6 @@ function createBackend({ app }) {
   const context = {
     app,
     appPaths,
-    agentMemoryStore,
     noteStore,
     approvedWritePaths: new Set(),
     ragStore,

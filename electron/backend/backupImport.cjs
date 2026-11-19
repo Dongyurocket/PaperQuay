@@ -371,6 +371,10 @@ function stripRetiredParserSettings(config, rendererState) {
   if (isRecord(config?.settings)) {
     delete config.settings.parseProvider;
     delete config.settings.paddleOcrApiBaseUrl;
+    delete config.settings.agentModelPresetId;
+    if (isRecord(config.settings.modelRuntimeConfigs)) {
+      delete config.settings.modelRuntimeConfigs.agent;
+    }
   }
 
   if (isRecord(config?.secrets)) {
@@ -390,11 +394,15 @@ function stripRetiredParserSettings(config, rendererState) {
       if (!isRecord(parsed)) continue;
       delete parsed.parseProvider;
       delete parsed.paddleOcrApiBaseUrl;
+      delete parsed.agentModelPresetId;
+      if (isRecord(parsed.modelRuntimeConfigs)) delete parsed.modelRuntimeConfigs.agent;
       rendererState[key] = JSON.stringify(parsed);
     } catch {
       // 保留无法解析的旧值，由渲染端加载时兜底。
     }
   }
+
+  delete rendererState['paperquay-agent-history-v1'];
 
   const secrets = rendererState['paper-reader-secrets-v1'];
 
@@ -824,6 +832,7 @@ async function stageBackupImport(context, input, dependencies) {
       packagePath,
       password,
       resolveDestination: async (entry) => {
+        if (entry.kind === 'agent-memory') return { skip: true };
         const destination = entryOutput(entry, { stagingDataDir, stagingAssetsDir });
         validateEntryRelative(destination.relativePath);
         return destination;

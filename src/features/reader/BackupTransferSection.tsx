@@ -110,7 +110,6 @@ const COUNT_LABELS: Record<string, [string, string]> = {
   ragIndexes: ['RAG 索引', 'RAG indexes'],
   ragDocuments: ['RAG 文档', 'RAG documents'],
   ragChunks: ['RAG 分块', 'RAG chunks'],
-  agentMemoryFiles: ['Agent 记忆文件', 'Agent memory files'],
   localStorageKeys: ['浏览器状态键', 'Browser state keys'],
 };
 

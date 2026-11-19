@@ -1,26 +1,5 @@
 import type { JSONContent } from '@tiptap/core';
-import type { NoteAnchor, NotePolishCitation, NotePolishScope } from '../../types/notes';
 import { paragraphNode } from './noteEditorUtils.ts';
-
-export function normalizeNotePolishScope(value: unknown): NotePolishScope {
-  return value === 'linked-papers' || value === 'library' ? value : 'none';
-}
-
-export function buildNotePolishAnchor(citation: NotePolishCitation): NoteAnchor {
-  const pageLabel = typeof citation.pageIndex === 'number' ? `P${citation.pageIndex + 1}` : '引用';
-
-  return {
-    id: `note-polish:${citation.paperId}:${citation.chunkId}`,
-    paperId: citation.paperId,
-    label: pageLabel,
-    sourceTitle: citation.paperTitle,
-    excerpt: citation.excerpt,
-    source: 'blocks',
-    blockId: citation.blockId,
-    pageIndex: citation.pageIndex,
-    createdAt: Date.now(),
-  };
-}
 
 function textNode(text: string): JSONContent {
   return { type: 'text', text };
@@ -77,31 +56,4 @@ export function notePolishTextToNodes(text: string): JSONContent[] {
 
   flushList();
   return nodes.length > 0 ? nodes : [paragraphNode(text.trim())];
-}
-
-function notePolishAnchorBlock(anchor: NoteAnchor): JSONContent {
-  return {
-    type: 'noteAnchorBlock',
-    attrs: {
-      anchorId: anchor.id,
-      label: anchor.label,
-      sourceLabel: '正文摘录',
-      sourceTitle: anchor.sourceTitle || '文献',
-      excerpt: anchor.excerpt,
-    },
-  };
-}
-
-export function buildNotePolishNodes(text: string, citations: NotePolishCitation[]): {
-  anchors: NoteAnchor[];
-  content: JSONContent[];
-} {
-  const anchors = citations.map(buildNotePolishAnchor);
-  const content = notePolishTextToNodes(text);
-
-  for (const anchor of anchors) {
-    content.push(notePolishAnchorBlock(anchor), paragraphNode());
-  }
-
-  return { anchors, content };
 }

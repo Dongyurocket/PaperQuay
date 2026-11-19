@@ -21,7 +21,6 @@ import {
   Quote,
   Redo2,
   Sigma,
-  Sparkles,
   Strikethrough,
   Table2,
   Undo2,
@@ -135,9 +134,6 @@ const EMPTY_TOOLBAR_STATE: ToolbarEditorState = {
 
 export function NoteEditorToolbar({
   editor,
-  onPolish,
-  polishActive = false,
-  polishDisabled = false,
   papers = [],
   citationStyle = 'gbt7714',
   onCitationStyleChange,
@@ -146,9 +142,6 @@ export function NoteEditorToolbar({
   onReferencePickerClose,
 }: {
   editor: Editor | null;
-  onPolish?: () => void;
-  polishActive?: boolean;
-  polishDisabled?: boolean;
   papers?: LiteraturePaper[];
   citationStyle?: NoteCitationStyle;
   onCitationStyleChange?: (style: NoteCitationStyle) => void;
@@ -557,19 +550,6 @@ export function NoteEditorToolbar({
       <ToolbarButton title="Image" onClick={() => openInputMenu('image')}>
         <ImageIcon className="h-3.5 w-3.5" strokeWidth={1.8} />
       </ToolbarButton>
-      {onPolish ? (
-        <>
-          <Divider />
-          <ToolbarButton
-            title="AI polish note"
-            active={polishActive}
-            disabled={polishDisabled}
-            onClick={onPolish}
-          >
-            <Sparkles className="h-3.5 w-3.5" strokeWidth={1.8} />
-          </ToolbarButton>
-        </>
-      ) : null}
       <input
         ref={imageInputRef}
         type="file"

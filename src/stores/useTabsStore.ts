@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-export type AppTabType = 'library' | 'reader' | 'agent' | 'notes' | 'note' | 'graph';
+export type AppTabType = 'library' | 'reader' | 'notes' | 'note' | 'graph';
 
 export interface BaseAppTab {
   id: string;
@@ -16,11 +16,6 @@ export interface LibraryTab extends BaseAppTab {
 export interface ReaderTab extends BaseAppTab {
   type: 'reader';
   documentId: string;
-}
-
-export interface AgentTab extends BaseAppTab {
-  id: 'agent';
-  type: 'agent';
 }
 
 export interface NotesTab extends BaseAppTab {
@@ -39,13 +34,12 @@ export interface NoteTab extends BaseAppTab {
   externalUpdate?: boolean;
 }
 
-export type AppTab = LibraryTab | ReaderTab | AgentTab | NotesTab | NoteTab | GraphTab;
+export type AppTab = LibraryTab | ReaderTab | NotesTab | NoteTab | GraphTab;
 
 interface TabsState {
   tabs: AppTab[];
   activeTabId: string;
   openTab: (documentId: string, title: string) => string;
-  openAgentTab: () => string;
   openNotesTab: () => string;
   openGraphTab: () => string;
   openNoteTab: (noteId: string, title: string) => string;
@@ -58,7 +52,6 @@ interface TabsState {
 }
 
 export const HOME_TAB_ID = 'home';
-export const AGENT_TAB_ID = 'agent';
 export const NOTES_TAB_ID = 'notes';
 export const GRAPH_TAB_ID = 'graph';
 
@@ -80,14 +73,6 @@ function createReaderTabId(documentId: string): string {
 
 function createNoteTabId(noteId: string): string {
   return `note:${noteId}`;
-}
-
-function createAgentTab(): AgentTab {
-  return {
-    id: AGENT_TAB_ID,
-    type: 'agent',
-    title: 'Agent',
-  };
 }
 
 function createNotesTab(): NotesTab {
@@ -124,23 +109,6 @@ export const useTabsStore = create<TabsState>()((set, get) => ({
       title,
       documentId,
     };
-
-    set((state) => ({
-      tabs: [...state.tabs, nextTab],
-      activeTabId: nextTab.id,
-    }));
-
-    return nextTab.id;
-  },
-  openAgentTab: () => {
-    const existingTab = get().tabs.find((tab) => tab.id === AGENT_TAB_ID);
-
-    if (existingTab) {
-      set({ activeTabId: existingTab.id });
-      return existingTab.id;
-    }
-
-    const nextTab = createAgentTab();
 
     set((state) => ({
       tabs: [...state.tabs, nextTab],

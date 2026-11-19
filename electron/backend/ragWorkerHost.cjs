@@ -3,6 +3,7 @@ const { Worker } = require('node:worker_threads');
 
 const RAG_WORKER_METHODS = [
   'appendAgentRunEvent',
+  'clearAgentHistory',
   'createAgentRun',
   'finalizeDocumentIndex',
   'finishAgentRun',

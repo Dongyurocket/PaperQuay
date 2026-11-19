@@ -1,6 +1,5 @@
 import { Component, useEffect, useMemo, useState, type ErrorInfo, type ReactNode } from 'react';
 import {
-  Bot,
   FilePlus2,
   GitBranch,
   Library,
@@ -14,7 +13,6 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import Reader from '../features/reader/Reader';
-import AgentWorkspace from '../features/agent/AgentWorkspace';
 import NotesWorkspace from '../features/notes/NotesWorkspace';
 import KnowledgeGraphWorkspace from '../features/graph/KnowledgeGraphWorkspace';
 import TabBar from '../components/tabs/TabBar';
@@ -23,7 +21,6 @@ import {
   emitOpenStandalonePdf,
   JUMP_TO_NOTE_ANCHOR_EVENT,
   OPEN_LIBRARY_PAPER_EVENT,
-  OPEN_AGENT_WITH_INSTRUCTION_EVENT,
   UI_LANGUAGE_CHANGED_EVENT,
 } from './appEvents';
 import { PAPERQUAY_ICON_URL } from './appIcon';
@@ -38,6 +35,7 @@ import { CommandPalette } from '../ui/commandPalette';
 import { registerCommands, useGlobalShortcuts } from '../ui/commands';
 import { useWorkspaceRestore, type AppWorkspaceKey } from './useWorkspaceRestore';
 import { startExternalWriteBridge } from '../services/externalWrite';
+import { cleanupRetiredAgentLocalState } from '../services/retiredAgentCleanup';
 
 type UiLanguage = 'zh-CN' | 'en-US';
 
@@ -52,7 +50,6 @@ const SETTINGS_STORAGE_KEY = 'paper-reader-settings-v3';
 
 const workspaces: AppWorkspaceItem[] = [
   { key: 'library', icon: Library, labelZh: '\u6587\u5e93', labelEn: 'Library' },
-  { key: 'agent', icon: Bot, labelZh: 'Agent', labelEn: 'Agent' },
   { key: 'graph', icon: GitBranch, labelZh: '图谱', labelEn: 'Graph' },
   { key: 'notes', icon: NotebookText, labelZh: '\u7b14\u8bb0', labelEn: 'Notes' },
 ];
@@ -139,7 +136,6 @@ function App() {
   const closeTab = useTabsStore((state) => state.closeTab);
   const reorderTab = useTabsStore((state) => state.reorderTab);
   const setActiveTab = useTabsStore((state) => state.setActiveTab);
-  const openAgentTab = useTabsStore((state) => state.openAgentTab);
   const openNotesTab = useTabsStore((state) => state.openNotesTab);
   const openGraphTab = useTabsStore((state) => state.openGraphTab);
   const [uiLanguage, setUiLanguage] = useState<UiLanguage>(loadUiLanguage);
@@ -151,28 +147,22 @@ function App() {
     [activeTabId, tabs],
   );
   const activeWorkspace: AppWorkspaceKey =
-    activeTab?.type === 'agent'
-      ? 'agent'
-      : activeTab?.type === 'graph'
-        ? 'graph'
+    activeTab?.type === 'graph'
+      ? 'graph'
       : activeTab?.type === 'notes' || activeTab?.type === 'note'
         ? 'notes'
         : 'library';
   const activeWorkspaceItem = workspaces.find((workspace) => workspace.key === activeWorkspace) ?? workspaces[0];
   const activeWorkspaceLabel = isEnglish ? activeWorkspaceItem.labelEn : activeWorkspaceItem.labelZh;
 
-  useWorkspaceRestore(activeWorkspace, openAgentTab, openNotesTab, openGraphTab);
+  useWorkspaceRestore(activeWorkspace, openNotesTab, openGraphTab);
 
   useEffect(() => {
-    const handleOpenAgent = () => {
-      openAgentTab();
-    };
-
-    window.addEventListener(OPEN_AGENT_WITH_INSTRUCTION_EVENT, handleOpenAgent);
-    return () => {
-      window.removeEventListener(OPEN_AGENT_WITH_INSTRUCTION_EVENT, handleOpenAgent);
-    };
-  }, [openAgentTab]);
+    const cleanup = cleanupRetiredAgentLocalState();
+    if (cleanup.removed) {
+      console.info('[paperquay] Removed the retired agent history from local storage.', cleanup.byteLength);
+    }
+  }, []);
 
   useEffect(() => startExternalWriteBridge(), []);
 
@@ -203,7 +193,7 @@ function App() {
         const { activeTabId: nextActiveTabId, tabs: nextTabs } = useTabsStore.getState();
         const nextActiveTab = nextTabs.find((tab) => tab.id === nextActiveTabId);
 
-        if (!nextActiveTab || nextActiveTab.type === 'agent' || nextActiveTab.type === 'notes' || nextActiveTab.type === 'note' || nextActiveTab.type === 'graph') {
+        if (!nextActiveTab || nextActiveTab.type === 'notes' || nextActiveTab.type === 'note' || nextActiveTab.type === 'graph') {
           setActiveTab(HOME_TAB_ID);
         }
       }, 0);
@@ -230,13 +220,6 @@ function App() {
         group: isEnglish ? 'Navigation' : '导航',
         keywords: ['library', 'papers', 'wenku'],
         run: () => setActiveTab(HOME_TAB_ID),
-      },
-      {
-        id: 'nav.agent',
-        title: isEnglish ? 'Go to Agent' : '切换到 Agent',
-        group: isEnglish ? 'Navigation' : '导航',
-        keywords: ['agent', 'chat', 'ask'],
-        run: () => openAgentTab(),
       },
       {
         id: 'nav.notes',
@@ -293,7 +276,6 @@ function App() {
     closeTab,
     handleOpenStandalonePdf,
     isEnglish,
-    openAgentTab,
     openGraphTab,
     openNotesTab,
     setActiveTab,
@@ -468,11 +450,6 @@ function App() {
                         return;
                       }
 
-                      if (workspace.key === 'agent') {
-                        openAgentTab();
-                        return;
-                      }
-
                       if (workspace.key === 'graph') {
                         openGraphTab();
                         return;
@@ -501,12 +478,6 @@ function App() {
             <div className="h-full min-h-0 overflow-hidden" hidden={activeWorkspace !== 'library'}>
               <WorkspaceErrorBoundary name="Library" resetKey={activeWorkspace}>
                 <Reader workspaceActive={activeWorkspace === 'library'} />
-              </WorkspaceErrorBoundary>
-            </div>
-
-            <div className="h-full min-h-0 overflow-hidden rounded-[var(--pq-radius-md)]" hidden={activeWorkspace !== 'agent'}>
-              <WorkspaceErrorBoundary name="Agent" resetKey={activeWorkspace}>
-                <AgentWorkspace />
               </WorkspaceErrorBoundary>
             </div>
 

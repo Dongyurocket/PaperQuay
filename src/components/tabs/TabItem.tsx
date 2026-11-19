@@ -39,11 +39,9 @@ function TabItem({
   const Icon =
     tab.type === 'library'
       ? Library
-      : tab.type === 'agent'
-        ? Bot
-        : tab.type === 'notes' || tab.type === 'note'
-          ? NotebookText
-          : FileText;
+      : tab.type === 'notes' || tab.type === 'note'
+        ? NotebookText
+        : FileText;
   const closable = tab.type !== 'library';
   const isHomeTab = tab.type === 'library';
 

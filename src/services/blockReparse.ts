@@ -1,8 +1,8 @@
 import { invoke } from '../platform/electron/core';
 import {
-  loadLibraryAgentAvailableModelPresets,
-  loadLibraryAgentModelPresetById,
-} from './libraryAgent';
+  loadAvailableModelPresets,
+  loadModelPresetById,
+} from './modelPresets';
 import type { QaModelPreset } from '../types/reader';
 import { sanitizeClientReparsedText } from '../utils/markdown';
 
@@ -35,7 +35,7 @@ function toErrorMessage(error: unknown, fallback: string): string {
 export async function reparseBlockWithAi(
   request: ReparseBlockRequest,
 ): Promise<ReparseBlockResult> {
-  const modelPreset = await loadLibraryAgentModelPresetById(request.preferredPresetId);
+  const modelPreset = await loadModelPresetById(request.preferredPresetId);
 
   if (!modelPreset?.apiKey?.trim() || !modelPreset.baseUrl?.trim() || !modelPreset.model?.trim()) {
     throw new Error('请先在设置中配置可用的 AI 模型（需要有效的 Base URL、API Key 与模型名称）。');
@@ -68,5 +68,5 @@ export async function reparseBlockWithAi(
 }
 
 export async function getAvailableReparseModelPresets(): Promise<QaModelPreset[]> {
-  return await loadLibraryAgentAvailableModelPresets();
+  return await loadAvailableModelPresets();
 }

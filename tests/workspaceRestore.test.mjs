@@ -32,16 +32,15 @@ const key = 'paperquay-active-workspace-v1';
 function Harness() {
   const tabs = useTabsStore((state) => state.tabs);
   const activeTabId = useTabsStore((state) => state.activeTabId);
-  const openAgent = useTabsStore((state) => state.openAgentTab);
   const openNotes = useTabsStore((state) => state.openNotesTab);
   const openGraph = useTabsStore((state) => state.openGraphTab);
   const active = tabs.find((tab) => tab.id === activeTabId);
-  const workspace = ['agent', 'notes', 'graph'].includes(active?.type) ? active.type : 'library';
-  useWorkspaceRestore(workspace, openAgent, openNotes, openGraph);
+  const workspace = ['notes', 'graph'].includes(active?.type) ? active.type : 'library';
+  useWorkspaceRestore(workspace, openNotes, openGraph);
   return React.createElement('div', null, workspace);
 }
 
-for (const [stored, expected] of [['agent', 'agent'], ['notes', 'notes'], ['graph', 'graph'], ['review', 'library'], ['unknown', 'library']]) {
+for (const [stored, expected] of [['agent', 'library'], ['notes', 'notes'], ['graph', 'graph'], ['review', 'library'], ['unknown', 'library']]) {
   test(`restores ${stored} as ${expected} in strict mode`, async () => {
     useTabsStore.setState(initialStore, true);
     window.localStorage.setItem(key, stored);

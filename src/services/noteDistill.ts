@@ -1,5 +1,5 @@
 import { invoke } from '../platform/electron/core';
-import { loadLibraryAgentModelPreset } from './libraryAgent';
+import { loadQaModelPreset } from './modelPresets';
 import { reparseBlockWithAi } from './blockReparse';
 
 export interface NoteDistillResult {
@@ -38,7 +38,7 @@ export async function distillExcerpt(request: {
   paperTitle?: string;
   pageLabel?: string;
 }): Promise<NoteDistillResult> {
-  const model = await loadLibraryAgentModelPreset();
+  const model = await loadQaModelPreset();
 
   if (!model?.apiKey?.trim() || !model.baseUrl?.trim() || !model.model?.trim()) {
     throw new Error('请先在模型设置中配置可用的问答或 Agent 模型。');

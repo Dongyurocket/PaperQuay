@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -254,6 +254,7 @@ test('real encrypted container and temporary SQLite round-trip stages, applies, 
         },
       }),
       'paper-reader-settings-v3': JSON.stringify({ mineruCacheDir: path.join(temp.userDataDir, 'old-cache'), remotePdfDownloadDir: '' }),
+      'paperquay-agent-history-v1': JSON.stringify([{ sessionId: 'retired-agent-session' }]),
     };
     const manifest = {
       manifestVersion: 1,
@@ -271,6 +272,7 @@ test('real encrypted container and temporary SQLite round-trip stages, applies, 
       { kind: 'config', encoding: 'utf8', sourceRoot: 'dataDir', relativePath: '.settings/paperquay.config.json', packagePath: 'config/paperquay.config.json', data: config },
       { kind: 'renderer-local-storage', encoding: 'utf8', sourceRoot: 'dataDir', relativePath: 'renderer-local-storage.json', packagePath: 'renderer/local-storage.json', data: Buffer.from(JSON.stringify(rendererState)) },
       { kind: 'library-pdf', paperId: 'paper-1', attachmentId: 'attachment-1', fileName: 'paper.pdf', expectedContentHash: '', sourceRoot: 'libraryStorageDir', relativePath: 'paper.pdf', packagePath: 'library/paper.pdf', data: newPdf },
+      { kind: 'agent-memory', encoding: 'utf8', sourceRoot: 'dataDir', relativePath: 'agent-memory/retired.json', packagePath: 'data/agent-memory/retired.json', data: Buffer.from('{"retired":true}') },
     ];
     await writeBackupPackage({
       outputPath: packagePath,
@@ -290,6 +292,8 @@ test('real encrypted container and temporary SQLite round-trip stages, applies, 
     const applied = await applyPendingBackupRestore(temp.appPaths);
     assert.equal(applied.restored, true);
     assert.equal((await readFile(pdfPath)).toString(), newPdf.toString());
+    assert.equal(applied.rendererRestorePayload.state['paperquay-agent-history-v1'], undefined);
+    assert.equal(existsSync(path.join(temp.dataDir, 'agent-memory')), false);
     const restoredHistory = JSON.parse(applied.rendererRestorePayload.state['paper-reader-paper-history-v1']);
     assert.equal(restoredHistory['workspace-1'].document.localPdfPath, pdfPath);
     assert.equal(restoredHistory['workspace-1'].workspaceNoteMarkdown, `keep prose ${pdfPath}`);

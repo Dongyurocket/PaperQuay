@@ -63,15 +63,19 @@ test("normalizeReaderSettings migrates review writing model preset from overview
   assert.equal(settings.reviewModelPresetId, "summary-model");
 });
 
-test("normalizeReaderSettings falls back to agent preset for older configs without overview preset", async () => {
+test("normalizeReaderSettings drops the retired agent preset instead of migrating it", async () => {
   const { normalizeReaderSettings } = await loadReaderShared();
   const settings = normalizeReaderSettings({
     reviewModelPresetId: "",
     summaryModelPresetId: "",
     agentModelPresetId: "agent-model",
-  });
+    modelRuntimeConfigs: { agent: { temperature: 0.3 }, summary: { temperature: 0.2 } },
+  } as any);
 
-  assert.equal(settings.reviewModelPresetId, "agent-model");
+  assert.equal(settings.reviewModelPresetId, "default");
+  assert.equal("agentModelPresetId" in settings, false);
+  assert.equal("agent" in settings.modelRuntimeConfigs, false);
+  assert.equal(settings.modelRuntimeConfigs.summary?.temperature, 0.2);
 });
 
 test("review writing runtime config is normalized independently", async () => {

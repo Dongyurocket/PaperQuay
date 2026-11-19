@@ -1904,6 +1904,17 @@ function createRagStore(appPaths, options = {}) {
     };
   }
 
+  /** 一次性清理已退役的独立 Agent 历史；表结构保留。 */
+  function clearAgentHistory() {
+    return withTransaction(db, () => {
+      const runs = Number(db.prepare('SELECT COUNT(*) AS count FROM agent_runs').get()?.count) || 0;
+      const events = Number(db.prepare('SELECT COUNT(*) AS count FROM agent_run_events').get()?.count) || 0;
+      db.prepare('DELETE FROM agent_run_events').run();
+      db.prepare('DELETE FROM agent_runs').run();
+      return { runs, events };
+    });
+  }
+
   function createAgentRun(request) {
     const runId = normalizeAgentRunId(request?.runId);
     const sessionId = normalizeAgentRunId(request?.sessionId, 'agent sessionId');
@@ -2228,6 +2239,7 @@ function createRagStore(appPaths, options = {}) {
 
   return {
     appendAgentRunEvent,
+    clearAgentHistory,
     close,
     createAgentRun,
     finalizeDocumentIndex,

@@ -130,7 +130,6 @@ type ModelPresetSettingKey =
   | 'translationModelPresetId'
   | 'selectionTranslationModelPresetId'
   | 'summaryModelPresetId'
-  | 'agentModelPresetId'
   | 'qaActivePresetId';
 
 interface ModelRoleBinding {
@@ -179,14 +178,6 @@ function buildModelRoleBindings(l: ReaderPreferencesLocalizer): ModelRoleBinding
       settingKey: 'summaryModelPresetId',
       title: l('论文概览', 'Paper Overview'),
       description: l('Paper overview, library preview overview, and batch overview generation.', 'Paper overview, library preview overview, and batch overview generation.',
-      ),
-    },
-    {
-      key: 'agent',
-      runtimeRole: 'agent',
-      settingKey: 'agentModelPresetId',
-      title: 'Agent 工具调用模型',
-      description: l('Used for tool selection, parameter generation, and batch library operations.', 'Used for tool selection, parameter generation, and batch library operations.',
       ),
     },
     {

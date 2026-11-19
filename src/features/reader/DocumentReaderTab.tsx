@@ -163,7 +163,7 @@ import {
 } from '../notes/noteDistillPreview';
 import { NoteDistillPreviewPanel } from '../notes/NoteDistillPreviewPanel';
 import { getPdfBlockCropDataUrl } from '../pdf/pdfBlockCrop';
-import { loadLibraryAgentModelPreset } from '../../services/libraryAgent';
+import { loadQaModelPreset } from '../../services/modelPresets';
 import {
   chunkItems,
   getModelRuntimeConfig,
@@ -2901,7 +2901,7 @@ function DocumentReaderTab({
     setDistillPreviewAppendTarget(appendTarget);
     setDistillPreview(createDistillPreviewState({ selectedExcerpt: excerpt, appendTarget }));
     try {
-      const model = await loadLibraryAgentModelPreset();
+      const model = await loadQaModelPreset();
       setDistillVisionAvailable(model?.supportsVision === true);
     } catch {
       setDistillVisionAvailable(false);
