@@ -246,7 +246,7 @@ const TOOLS = [
   {
     name: 'update_note',
     description:
-      'Update an existing note by noteId. Only the provided fields change: title, content (Markdown/plain text; at write time the shared Markdown parser rebuilds the stored rich-text JSON and clears the HTML cache, reconstructing wiki-links, tags, known anchor IDs and uniquely matched [n] references while unknown values stay plain text), tags (full replacement, leading # stripped), pageKind (pass an empty string to clear it), and/or folderId (pass an empty string to move the note to uncategorized). Do not replace the body of excerpt cards or other notes with anchor blocks: source anchors and snapshots cannot be rebuilt from plain Markdown. At least one field is required. Refused while the PaperQuay desktop app is running unless allowWhileAppRunning is true.',
+      'Update an existing note by noteId. Only the provided fields change: title, content (Markdown/plain text; the shared Markdown parser rebuilds the stored rich-text JSON and clears the HTML cache), tags (full replacement, leading # stripped), pageKind (pass an empty string to clear it), and/or folderId (pass an empty string to move the note to uncategorized). If the note already has anchors, a content update MUST keep every paperquay://anchor/<id> link; otherwise the write is rejected with NOTE_ANCHOR_MISSING and only metadata fields may change. Pass expectedUpdatedAt from get_note while PaperQuay is running; a mismatch returns NOTE_CONFLICT. At least one field is required.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -260,6 +260,10 @@ const TOOLS = [
           description: 'Structural page kind; pass an empty string to clear it.',
         },
         folderId: { type: 'string', description: 'Move the note into this folder (see list_note_folders); empty string moves it to uncategorized.' },
+        expectedUpdatedAt: {
+          type: 'number',
+          description: 'Note updatedAt from get_note. Required while PaperQuay is running; a mismatch returns NOTE_CONFLICT with the current updatedAt.',
+        },
         allowWhileAppRunning: ALLOW_WHILE_APP_RUNNING_SCHEMA,
       },
       required: ['noteId'],
@@ -273,6 +277,10 @@ const TOOLS = [
       type: 'object',
       properties: {
         noteId: { type: 'string', description: 'The unique ID of the note (see search_notes).' },
+        expectedUpdatedAt: {
+          type: 'number',
+          description: 'Note updatedAt from get_note. Required while PaperQuay is running.',
+        },
         allowWhileAppRunning: ALLOW_WHILE_APP_RUNNING_SCHEMA,
       },
       required: ['noteId'],
@@ -295,7 +303,7 @@ const TOOLS = [
   {
     name: 'list_note_folders',
     description:
-      'List the note folder tree (id, name, parentId, sortOrder). Read-only. Use it to discover folderId values before create_note/update_note/create_note_folder.',
+      'List the note folder tree (id, name, parentId, sortOrder, updatedAt). Read-only. Use it to discover folderId values and version snapshots before create_note/update_note/create_note_folder/rename_note_folder/delete_note_folder.',
     inputSchema: {
       type: 'object',
       properties: {},
@@ -318,12 +326,16 @@ const TOOLS = [
   {
     name: 'rename_note_folder',
     description:
-      'Rename a note folder by folderId. Refused while the PaperQuay desktop app is running unless allowWhileAppRunning is true.',
+      'Rename a note folder by folderId. Pass expectedUpdatedAt from list_note_folders; required while PaperQuay is running and a mismatch returns NOTE_CONFLICT.',
     inputSchema: {
       type: 'object',
       properties: {
         folderId: { type: 'string', description: 'The unique ID of the folder (see list_note_folders).' },
         name: { type: 'string', description: 'New folder name.' },
+        expectedUpdatedAt: {
+          type: 'number',
+          description: 'Folder updatedAt from list_note_folders. Required while PaperQuay is running.',
+        },
         allowWhileAppRunning: ALLOW_WHILE_APP_RUNNING_SCHEMA,
       },
       required: ['folderId', 'name'],
@@ -332,11 +344,19 @@ const TOOLS = [
   {
     name: 'delete_note_folder',
     description:
-      'Delete a note folder and all its subfolders; notes inside are moved to uncategorized (not deleted). Refused while the PaperQuay desktop app is running unless allowWhileAppRunning is true.',
+      'Delete a note folder and all its subfolders; notes inside are moved to uncategorized (not deleted). Returns deleted folder IDs, affected note IDs and their new updatedAt. While PaperQuay is running, pass expectedUpdatedAt and expectedFolderVersions; any changed version rejects the whole delete.',
     inputSchema: {
       type: 'object',
       properties: {
         folderId: { type: 'string', description: 'The unique ID of the folder (see list_note_folders).' },
+        expectedUpdatedAt: {
+          type: 'number',
+          description: 'Target folder updatedAt from list_note_folders. Required while PaperQuay is running.',
+        },
+        expectedFolderVersions: {
+          type: 'object',
+          description: 'Version snapshot { folderId: updatedAt } covering the target folder and every descendant. Any changed version rejects the whole delete.',
+        },
         allowWhileAppRunning: ALLOW_WHILE_APP_RUNNING_SCHEMA,
       },
       required: ['folderId'],

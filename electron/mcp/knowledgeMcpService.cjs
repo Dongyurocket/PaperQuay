@@ -42,25 +42,39 @@ function isVersionRequiredWrite(guard) {
  * 受检并行写：应用运行（或运行状态未知）时，客户端必须携带读取到的版本。
  * 版本不一致返回带 code 的冲突错误，由 MCP 层转成 PAPER_CONFLICT/CATEGORY_CONFLICT 提示。
  */
+function versionKindLabel(kind) {
+  if (kind === 'category') return 'Category';
+  if (kind === 'note') return 'Note';
+  if (kind === 'folder') return 'Folder';
+  return 'Paper';
+}
+
+function versionConflictCode(kind) {
+  if (kind === 'category') return 'CATEGORY_CONFLICT';
+  if (kind === 'note' || kind === 'folder') return 'NOTE_CONFLICT';
+  return 'PAPER_CONFLICT';
+}
+
 function assertRecordVersion(kind, idValue, expectedUpdatedAt, currentUpdatedAt, required) {
   const hasExpected = expectedUpdatedAt !== undefined && expectedUpdatedAt !== null;
   if (!hasExpected) {
     if (!required) return;
+    const label = versionKindLabel(kind);
     const error = new Error(
-      `${kind === 'category' ? 'Category' : 'Paper'} ${idValue} requires expectedUpdatedAt while PaperQuay is running. `
+      `${label} ${idValue} requires expectedUpdatedAt while PaperQuay is running. `
       + 'Re-read the record, then retry the write.',
     );
-    error.code = kind === 'category' ? 'CATEGORY_CONFLICT' : 'PAPER_CONFLICT';
+    error.code = versionConflictCode(kind);
     error.details = { kind, id: idValue, reason: 'missing-version', currentUpdatedAt: currentUpdatedAt ?? null, retry: 're-read' };
     throw error;
   }
 
   if (Number(expectedUpdatedAt) !== Number(currentUpdatedAt ?? 0)) {
     const error = new Error(
-      `${kind === 'category' ? 'Category' : 'Paper'} ${idValue} was modified outside this call `
+      `${versionKindLabel(kind)} ${idValue} was modified outside this call `
       + `(expected updatedAt ${expectedUpdatedAt}, current ${currentUpdatedAt ?? 0}). Re-read and retry.`,
     );
-    error.code = kind === 'category' ? 'CATEGORY_CONFLICT' : 'PAPER_CONFLICT';
+    error.code = versionConflictCode(kind);
     error.details = {
       kind,
       id: idValue,
@@ -190,6 +204,7 @@ function slimNote(note) {
     isFavorite: Boolean(note.isFavorite),
     isPinned: Boolean(note.isPinned),
     wordCount: note.wordCount ?? 0,
+    anchors: Array.isArray(note.anchors) ? note.anchors : [],
     createdAt: note.createdAt,
     updatedAt: note.updatedAt,
   };
@@ -1208,7 +1223,9 @@ class PaperQuayKnowledgeService {
       const links = rawLinks.slice(0, 100);
       const nextOffset = offset + limit < text.length ? offset + limit : null;
       return { note: { id: row.id, title: row.title, paperId: row.paper_id, pageKind: row.page_kind ?? null,
-        folderId: row.folder_id ?? null, tags, links, anchors, contentText: text.slice(offset, offset + limit),
+        folderId: row.folder_id ?? null, tags, links, anchors,
+        updatedAt: Number(row.updated_at) || 0,
+        contentText: text.slice(offset, offset + limit),
         offset, nextOffset, truncated: nextOffset !== null, totalCharacters: text.length,
         anchorsTruncated: Array.isArray(rawAnchors) && rawAnchors.length > anchors.length,
         linksTruncated: rawLinks.length > links.length } };
@@ -1843,7 +1860,7 @@ class PaperQuayKnowledgeService {
       require('../backend/noteEmbedding.cjs').enqueueExternalNote(this.appPaths, note);
     });
     try {
-      const result = mutator(store);
+      const result = mutator(store, guard);
       if (guard.warning && result && typeof result === 'object' && !Array.isArray(result)) {
         return { ...result, warning: guard.warning };
       }
@@ -1891,11 +1908,21 @@ class PaperQuayKnowledgeService {
         tags: cleanTags,
         folderId: cleanString(folderId) || null,
       });
-      return { note: slimNote(note), noteId: note.id };
+      this.markExternalWrite('notes');
+      return { note: slimNote(note), noteId: note.id, updatedAt: note.updatedAt };
     }, { allowWhileAppRunning });
   }
 
-  updateNote({ noteId = '', title, content, tags, pageKind, folderId, allowWhileAppRunning = false } = {}) {
+  updateNote({
+    noteId = '',
+    title,
+    content,
+    tags,
+    pageKind,
+    folderId,
+    expectedUpdatedAt,
+    allowWhileAppRunning = false,
+  } = {}) {
     const idValue = cleanString(noteId);
     if (!idValue) throw new Error('update_note requires noteId');
     const patch = {};
@@ -1922,28 +1949,67 @@ class PaperQuayKnowledgeService {
     if (Object.keys(patch).length === 0) {
       throw new Error('update_note requires at least one of title, content, tags, pageKind, folderId');
     }
-    return this.withWritableNoteStore((store) => {
+    return this.withWritableNoteStore((store, guard) => {
+      const existing = store.getNote({ id: idValue });
+      if (!existing) throw new Error(`Note does not exist: ${idValue}`);
+      assertRecordVersion('note', idValue, expectedUpdatedAt, existing.updatedAt, isVersionRequiredWrite(guard));
+
+      if (typeof content === 'string' && Array.isArray(existing.anchors) && existing.anchors.length > 0) {
+        // 锚点块和原文快照无法从 Markdown 重建：正文更新必须保留每个已有锚点链接。
+        const missingAnchorIds = existing.anchors
+          .map((anchor) => cleanString(anchor?.id))
+          .filter((anchorId) => anchorId && !content.includes(`paperquay://anchor/${anchorId}`));
+        if (missingAnchorIds.length > 0) {
+          const error = new Error(
+            `NOTE_ANCHOR_MISSING: content is missing anchors ${missingAnchorIds.join(', ')}. `
+            + 'Keep each anchor link (paperquay://anchor/<id>), or update only title/tags/folder/pageKind.',
+          );
+          error.code = 'NOTE_ANCHOR_MISSING';
+          error.details = { noteId: idValue, missingAnchorIds, retry: 'preserve-anchors' };
+          throw error;
+        }
+      }
+
       const library = createLibraryStore(this.appPaths).load();
       if (typeof content === 'string') {
         patch.contentJson = parseMarkdownToTiptap(content, {
           papers: Array.isArray(library?.papers) ? library.papers : [],
           notes: store.listNotes({ includeDeleted: false }),
-          anchors: store.getNote({ id: idValue })?.anchors ?? [],
+          anchors: existing.anchors ?? [],
         });
       }
-      const note = store.updateNote({ id: idValue, patch });
-      return { note: slimNote(note), noteId: note.id };
+      const note = store.updateNote({
+        id: idValue,
+        patch,
+        ...(expectedUpdatedAt !== undefined && expectedUpdatedAt !== null
+          ? { expectedUpdatedAt: Number(expectedUpdatedAt) }
+          : {}),
+      });
+      this.markExternalWrite('notes');
+      return { note: slimNote(note), noteId: note.id, updatedAt: note.updatedAt };
     }, { allowWhileAppRunning });
   }
 
-  deleteNote({ noteId = '', allowWhileAppRunning = false } = {}) {
+  deleteNote({ noteId = '', expectedUpdatedAt, allowWhileAppRunning = false } = {}) {
     const idValue = cleanString(noteId);
     if (!idValue) throw new Error('delete_note requires noteId');
-    return this.withWritableNoteStore((store) => {
+    return this.withWritableNoteStore((store, guard) => {
       const existing = store.getNote({ id: idValue });
       if (!existing) throw new Error(`Note does not exist: ${idValue}`);
-      store.deleteNote({ id: idValue });
-      return { deleted: true, noteId: idValue, title: existing.title };
+      assertRecordVersion('note', idValue, expectedUpdatedAt, existing.updatedAt, isVersionRequiredWrite(guard));
+      const result = store.deleteNote({
+        id: idValue,
+        ...(expectedUpdatedAt !== undefined && expectedUpdatedAt !== null
+          ? { expectedUpdatedAt: Number(expectedUpdatedAt) }
+          : {}),
+      });
+      this.markExternalWrite('notes');
+      return {
+        deleted: true,
+        noteId: idValue,
+        title: existing.title,
+        updatedAt: result?.deletedAt ?? Date.now(),
+      };
     }, { allowWhileAppRunning });
   }
 
@@ -1975,27 +2041,75 @@ class PaperQuayKnowledgeService {
     if (!cleanName) throw new Error('create_note_folder requires a non-empty name');
     return this.withWritableNoteStore((store) => {
       const folder = store.createFolder({ name: cleanName, parentId: cleanString(parentId) || null });
-      return { folder, folderId: folder.id };
+      this.markExternalWrite('notes');
+      return { folder, folderId: folder.id, updatedAt: folder.updatedAt };
     }, { allowWhileAppRunning });
   }
 
-  renameNoteFolder({ folderId = '', name = '', allowWhileAppRunning = false } = {}) {
+  renameNoteFolder({
+    folderId = '',
+    name = '',
+    expectedUpdatedAt,
+    allowWhileAppRunning = false,
+  } = {}) {
     const idValue = cleanString(folderId);
     const cleanName = cleanString(name);
     if (!idValue) throw new Error('rename_note_folder requires folderId');
     if (!cleanName) throw new Error('rename_note_folder requires a non-empty name');
-    return this.withWritableNoteStore((store) => {
-      const folder = store.renameFolder({ id: idValue, name: cleanName });
-      return { folder, folderId: folder.id };
+    return this.withWritableNoteStore((store, guard) => {
+      const existing = store.listFolders().find((folder) => folder.id === idValue);
+      if (!existing) throw new Error(`Folder does not exist: ${idValue}`);
+      assertRecordVersion('folder', idValue, expectedUpdatedAt, existing.updatedAt, isVersionRequiredWrite(guard));
+      const folder = store.renameFolder({
+        id: idValue,
+        name: cleanName,
+        ...(expectedUpdatedAt !== undefined && expectedUpdatedAt !== null
+          ? { expectedUpdatedAt: Number(expectedUpdatedAt) }
+          : {}),
+      });
+      this.markExternalWrite('notes');
+      return { folder, folderId: folder.id, updatedAt: folder.updatedAt };
     }, { allowWhileAppRunning });
   }
 
-  deleteNoteFolder({ folderId = '', allowWhileAppRunning = false } = {}) {
+  deleteNoteFolder({
+    folderId = '',
+    expectedUpdatedAt,
+    expectedFolderVersions,
+    allowWhileAppRunning = false,
+  } = {}) {
     const idValue = cleanString(folderId);
     if (!idValue) throw new Error('delete_note_folder requires folderId');
-    return this.withWritableNoteStore((store) => {
-      const result = store.deleteFolder({ id: idValue });
-      return { deleted: true, deletedFolderIds: result.deletedFolderIds };
+    return this.withWritableNoteStore((store, guard) => {
+      const folders = store.listFolders();
+      const existing = folders.find((folder) => folder.id === idValue);
+      if (!existing) throw new Error(`Folder does not exist: ${idValue}`);
+      assertRecordVersion('folder', idValue, expectedUpdatedAt, existing.updatedAt, isVersionRequiredWrite(guard));
+      if (isVersionRequiredWrite(guard) && !expectedFolderVersions) {
+        const error = new Error(
+          'delete_note_folder requires expectedFolderVersions while PaperQuay is running. '
+          + 'Read list_note_folders first and pass every affected folder version.',
+        );
+        error.code = 'NOTE_CONFLICT';
+        error.details = { folderId: idValue, reason: 'missing-version-snapshot', retry: 're-read' };
+        throw error;
+      }
+      const result = store.deleteFolder({
+        id: idValue,
+        ...(expectedUpdatedAt !== undefined && expectedUpdatedAt !== null
+          ? { expectedUpdatedAt: Number(expectedUpdatedAt) }
+          : {}),
+        ...(expectedFolderVersions && typeof expectedFolderVersions === 'object'
+          ? { expectedFolderVersions }
+          : {}),
+      });
+      this.markExternalWrite('notes');
+      return {
+        deleted: true,
+        deletedFolderIds: result.deletedFolderIds,
+        affectedNoteIds: result.affectedNoteIds ?? [],
+        notes: result.notes ?? [],
+      };
     }, { allowWhileAppRunning });
   }
 

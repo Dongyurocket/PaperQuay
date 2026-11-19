@@ -879,19 +879,23 @@ export function NotesWorkspace({ workspaceActive = true }: { workspaceActive?: b
     };
   }, []);
 
+  // Vault 同步只由用户触发：手动入口，或用户显式开启的定时自动同步。
+  // 打开笔记页不再隐式同步，避免挂载时的意外磁盘写入。
   useEffect(() => {
+    const settings = loadSettings();
+    if (!settings.notesVaultAutoSyncEnabled) return undefined;
+
     let cancelled = false;
     let timer: number | undefined;
 
-    const runVaultSync = async (force = false) => {
-      const settings = loadSettings();
+    const runVaultSync = async () => {
       try {
         const vault = await getNotesVaultSettings();
-        if (!vault.dir || (!force && !shouldRunVaultAutoSync({
+        if (!vault.dir || !shouldRunVaultAutoSync({
           now: Date.now(),
           lastRunAt: vaultAutoSyncLastRunRef.current,
           intervalMinutes: settings.notesVaultAutoSyncIntervalMinutes,
-        }))) return;
+        })) return;
         vaultAutoSyncLastRunRef.current = Date.now();
         await syncNotesVaultNow();
         if (!cancelled) {
@@ -903,14 +907,10 @@ export function NotesWorkspace({ workspaceActive = true }: { workspaceActive?: b
       }
     };
 
-    void runVaultSync(true);
-    const settings = loadSettings();
-    if (settings.notesVaultAutoSyncEnabled) {
-      timer = window.setInterval(
-        () => void runVaultSync(),
-        settings.notesVaultAutoSyncIntervalMinutes * 60_000,
-      );
-    }
+    timer = window.setInterval(
+      () => void runVaultSync(),
+      settings.notesVaultAutoSyncIntervalMinutes * 60_000,
+    );
     return () => {
       cancelled = true;
       if (timer !== undefined) window.clearInterval(timer);

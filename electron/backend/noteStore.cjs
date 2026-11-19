@@ -906,6 +906,13 @@ function getNoteById(db, noteId, options = {}) {
   return hydrateNotes(db, row ? [row] : [])[0] ?? null;
 }
 
+function noteConflictError(message) {
+  const error = new Error(`NOTE_CONFLICT: ${message}`);
+  error.code = 'NOTE_CONFLICT';
+  error.details = { retry: 're-read' };
+  return error;
+}
+
 function rowToFolder(row) {
   if (!row) return null;
   return {
@@ -1037,7 +1044,7 @@ function createNoteStore(appPaths) {
       if (!existing) throw new Error(`Note does not exist: ${noteId}`);
       if (request.expectedUpdatedAt !== undefined &&
         (existing.deletedAt || existing.updatedAt !== request.expectedUpdatedAt)) {
-        throw new Error('NOTE_CONFLICT: 笔记已被其他操作修改，请刷新或确认后重试。');
+        throw noteConflictError('笔记已被其他操作修改，请刷新或确认后重试。');
       }
 
       const note = normalizeNoteInput({ ...existing, ...(request.patch ?? {}), id: noteId }, existing);
@@ -1051,12 +1058,23 @@ function createNoteStore(appPaths) {
   function deleteNote(request) {
     const noteId = cleanString(request?.id);
     if (!noteId) throw new Error('note id is required');
-    const timestamp = now();
 
-    db.prepare('UPDATE notes SET deleted_at = ?, updated_at = MAX(?, updated_at + 1) WHERE id = ?')
-      .run(timestamp, timestamp, noteId);
-    deleteFtsRow(db, noteId);
-    notifyMutation({ id: noteId, deletedAt: timestamp });
+    const saved = withTransaction(db, () => {
+      const existing = getNoteById(db, noteId, { includeDeleted: true });
+      if (!existing) throw new Error(`Note does not exist: ${noteId}`);
+      if (request?.expectedUpdatedAt !== undefined &&
+        (existing.deletedAt || existing.updatedAt !== request.expectedUpdatedAt)) {
+        throw noteConflictError('笔记已被其他操作修改，请刷新或确认后重试。');
+      }
+
+      const timestamp = now();
+      db.prepare('UPDATE notes SET deleted_at = ?, updated_at = MAX(?, updated_at + 1) WHERE id = ?')
+        .run(timestamp, timestamp, noteId);
+      deleteFtsRow(db, noteId);
+      return { noteId, deletedAt: timestamp };
+    });
+    notifyMutation({ id: noteId, deletedAt: saved.deletedAt });
+    return saved;
   }
 
   function listFolders() {
@@ -1097,27 +1115,61 @@ function createNoteStore(appPaths) {
     if (!folderId) throw new Error('folder id is required');
     if (!name) throw new Error('folder name is required');
 
-    const result = db.prepare('UPDATE note_folders SET name = ?, updated_at = ? WHERE id = ?')
-      .run(name, now(), folderId);
-    if (result.changes === 0) throw new Error(`Folder does not exist: ${folderId}`);
-    return rowToFolder(db.prepare('SELECT * FROM note_folders WHERE id = ?').get(folderId));
+    return withTransaction(db, () => {
+      const existing = db.prepare('SELECT updated_at FROM note_folders WHERE id = ?').get(folderId);
+      if (!existing) throw new Error(`Folder does not exist: ${folderId}`);
+      if (request?.expectedUpdatedAt !== undefined &&
+        Number(existing.updated_at) !== Number(request.expectedUpdatedAt)) {
+        throw noteConflictError('文件夹已被其他操作修改，请刷新或确认后重试。');
+      }
+
+      const timestamp = Math.max(now(), (Number(existing.updated_at) || 0) + 1);
+      db.prepare('UPDATE note_folders SET name = ?, updated_at = ? WHERE id = ?')
+        .run(name, timestamp, folderId);
+      return rowToFolder(db.prepare('SELECT * FROM note_folders WHERE id = ?').get(folderId));
+    });
   }
 
   // 删除文件夹及其全部后代；其中的笔记归入未分类（folder_id 置 NULL）。
+  // expectedFolderVersions 为 { folderId: updatedAt } 快照，任一变化整批拒绝。
   function deleteFolder(request) {
     const folderId = cleanString(request?.id);
     if (!folderId) throw new Error('folder id is required');
 
-    const existing = db.prepare('SELECT id FROM note_folders WHERE id = ?').get(folderId);
-    if (!existing) throw new Error(`Folder does not exist: ${folderId}`);
-
     return withTransaction(db, () => {
+      const existing = db.prepare('SELECT id, updated_at FROM note_folders WHERE id = ?').get(folderId);
+      if (!existing) throw new Error(`Folder does not exist: ${folderId}`);
+
       const removedIds = [folderId, ...getFolderDescendantIds(db, folderId)];
       const placeholders = removedIds.map(() => '?').join(',');
+      const rows = db.prepare(`SELECT id, updated_at FROM note_folders WHERE id IN (${placeholders})`).all(...removedIds);
+      const expected = request?.expectedFolderVersions && typeof request.expectedFolderVersions === 'object'
+        ? request.expectedFolderVersions
+        : null;
+      if (request?.expectedUpdatedAt !== undefined && Number(existing.updated_at) !== Number(request.expectedUpdatedAt)) {
+        throw noteConflictError('文件夹已被其他操作修改，请刷新或确认后重试。');
+      }
+      if (expected) {
+        for (const row of rows) {
+          const wanted = expected[row.id];
+          if (wanted !== undefined && wanted !== null && Number(wanted) !== Number(row.updated_at)) {
+            throw noteConflictError(`文件夹 ${row.id} 已被其他操作修改，请刷新或确认后重试。`);
+          }
+        }
+      }
+
+      const affectedNoteIds = db.prepare(
+        `SELECT id FROM notes WHERE folder_id IN (${placeholders})`,
+      ).all(...removedIds).map((row) => row.id);
+      const timestamp = now();
       db.prepare(`UPDATE notes SET folder_id = NULL, updated_at = MAX(?, updated_at + 1) WHERE folder_id IN (${placeholders})`)
-        .run(now(), ...removedIds);
+        .run(timestamp, ...removedIds);
       db.prepare(`DELETE FROM note_folders WHERE id IN (${placeholders})`).run(...removedIds);
-      return { deletedFolderIds: removedIds };
+      const notes = affectedNoteIds.map((noteId) => {
+        const row = db.prepare('SELECT id, updated_at FROM notes WHERE id = ?').get(noteId);
+        return { id: noteId, updatedAt: Number(row?.updated_at) || 0 };
+      });
+      return { deletedFolderIds: removedIds, affectedNoteIds, notes };
     });
   }
 

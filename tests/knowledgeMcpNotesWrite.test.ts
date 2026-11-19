@@ -321,3 +321,151 @@ test('笔记写工具复用写护栏：运行时拒绝、可覆盖、PAPERQUAY_M
     cleanupDir(dir);
   }
 });
+
+test('runtime note writes require versions and reject stale updates', () => {
+  const { dir, service } = setup(() => true);
+  try {
+    const created = service.createNote({ title: 'Versioned', content: 'Body', allowWhileAppRunning: true });
+    const current = service.getNote({ noteId: created.noteId }).note;
+
+    assert.throws(
+      () => service.updateNote({ noteId: created.noteId, title: 'No version', allowWhileAppRunning: true }),
+      (error: any) => error.code === 'NOTE_CONFLICT' && /requires expectedUpdatedAt/.test(error.message),
+    );
+
+    const updated = service.updateNote({
+      noteId: created.noteId,
+      title: 'Versioned v2',
+      expectedUpdatedAt: current.updatedAt,
+      allowWhileAppRunning: true,
+    });
+    assert.ok(updated.updatedAt > current.updatedAt);
+
+    assert.throws(
+      () => service.updateNote({
+        noteId: created.noteId,
+        title: 'Stale',
+        expectedUpdatedAt: current.updatedAt,
+        allowWhileAppRunning: true,
+      }),
+      (error: any) => error.code === 'NOTE_CONFLICT' && error.details.currentUpdatedAt === updated.updatedAt,
+    );
+
+    assert.throws(
+      () => service.deleteNote({ noteId: created.noteId, allowWhileAppRunning: true }),
+      (error: any) => error.code === 'NOTE_CONFLICT',
+    );
+    const removed = service.deleteNote({
+      noteId: created.noteId,
+      expectedUpdatedAt: updated.updatedAt,
+      allowWhileAppRunning: true,
+    });
+    assert.equal(removed.deleted, true);
+  } finally {
+    cleanupDir(dir);
+  }
+});
+
+test('content updates must preserve every existing anchor link', () => {
+  const { dir, service } = setup();
+  try {
+    const { createNoteStore } = require('../electron/backend/noteStore.cjs');
+    const store = createNoteStore({ notesDatabasePath: path.join(dir, 'paperquay-notes.sqlite') });
+    const note = store.createNote({
+      paperId: 'paper-1',
+      type: 'highlight',
+      title: 'Anchored',
+      content: 'Original excerpt',
+      contentText: 'Original excerpt',
+      anchors: [{
+        id: 'anchor-1',
+        paperId: 'paper-1',
+        label: 'P1',
+        sourceTitle: 'Paper',
+        excerpt: 'quoted text',
+        source: 'pdf',
+        pageIndex: 0,
+        blockId: 'block-1',
+        createdAt: 1,
+      }],
+    });
+    store.close();
+
+    assert.throws(
+      () => service.updateNote({ noteId: note.id, content: 'Rewritten without anchors' }),
+      (error: any) => error.code === 'NOTE_ANCHOR_MISSING' && error.details.missingAnchorIds.includes('anchor-1'),
+    );
+
+    const updated = service.updateNote({
+      noteId: note.id,
+      content: 'Rewritten with anchor [P1](paperquay://anchor/anchor-1)',
+    });
+    assert.match(updated.note.content, /paperquay:\/\/anchor\/anchor-1/);
+    const reread = service.getNote({ noteId: note.id }).note;
+    assert.equal(reread.anchors.length, 1);
+  } finally {
+    cleanupDir(dir);
+  }
+});
+
+test('folder cascade delete validates all affected versions and returns affected notes', () => {
+  const { dir, service } = setup(() => true);
+  try {
+    const parent = service.createNoteFolder({ name: 'Parent', allowWhileAppRunning: true }).folderId;
+    const child = service.createNoteFolder({ name: 'Child', parentId: parent, allowWhileAppRunning: true }).folderId;
+    const note = service.createNote({ title: 'In child', content: 'Body', folderId: child, allowWhileAppRunning: true });
+
+    const before = service.listNoteFolders().folders;
+    const parentVersion = before.find((folder: any) => folder.id === parent).updatedAt;
+    const staleChildVersion = before.find((folder: any) => folder.id === child).updatedAt;
+    service.renameNoteFolder({
+      folderId: child,
+      name: 'Child renamed',
+      expectedUpdatedAt: staleChildVersion,
+      allowWhileAppRunning: true,
+    });
+
+    assert.throws(
+      () => service.deleteNoteFolder({
+        folderId: parent,
+        expectedUpdatedAt: parentVersion,
+        expectedFolderVersions: { [parent]: parentVersion, [child]: staleChildVersion },
+        allowWhileAppRunning: true,
+      }),
+      (error: any) => error.code === 'NOTE_CONFLICT',
+    );
+    assert.ok(service.listNoteFolders().folders.some((folder: any) => folder.id === child));
+
+    const fresh = service.listNoteFolders().folders;
+    const versions = Object.fromEntries(fresh.map((folder: any) => [folder.id, folder.updatedAt]));
+    const removed = service.deleteNoteFolder({
+      folderId: parent,
+      expectedUpdatedAt: versions[parent],
+      expectedFolderVersions: { [parent]: versions[parent], [child]: versions[child] },
+      allowWhileAppRunning: true,
+    });
+    assert.deepEqual(removed.deletedFolderIds.sort(), [parent, child].sort());
+    assert.deepEqual(removed.affectedNoteIds, [note.noteId]);
+    assert.ok(removed.notes[0].updatedAt > 0);
+    assert.equal(service.getNote({ noteId: note.noteId }).note.folderId, null);
+  } finally {
+    cleanupDir(dir);
+  }
+});
+
+test('note writes advance the external notes revision marker', () => {
+  const { dir, service } = setup();
+  try {
+    const { readExternalWriteMarker } = require('../electron/backend/externalWriteMarker.cjs');
+    const before = readExternalWriteMarker(dir).state.notes.revision;
+    const note = service.createNote({ title: 'Marker', content: 'Body' });
+    const afterCreate = readExternalWriteMarker(dir).state.notes.revision;
+    assert.equal(afterCreate, before + 1);
+
+    const current = service.getNote({ noteId: note.noteId }).note;
+    service.updateNote({ noteId: note.noteId, title: 'Marker 2', expectedUpdatedAt: current.updatedAt });
+    assert.equal(readExternalWriteMarker(dir).state.notes.revision, afterCreate + 1);
+  } finally {
+    cleanupDir(dir);
+  }
+});

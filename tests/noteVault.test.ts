@@ -431,3 +431,28 @@ test('vault 仅文件侧修改导入，旧 manifest 字符串格式仍兼容，D
     cleanupDir(dir);
   }
 });
+
+test('MCP note writes export to the vault and vault edits import back', () => {
+  const { dir, vaultDir, noteStore, vault } = setup();
+  try {
+    const { PaperQuayKnowledgeService } = require('../electron/mcp/knowledgeMcpService.cjs');
+    const service = new PaperQuayKnowledgeService({ dataDir: dir, isAppRunning: () => false });
+    const created = service.createNote({ title: 'MCP 同步笔记', content: '由 MCP 写入' });
+
+    const exported = vault.syncNow();
+    assert.equal(exported.exported, 1);
+    const filePath = path.join(vaultDir, 'MCP 同步笔记.md');
+    assert.ok(existsSync(filePath));
+
+    writeFileSync(filePath, readFileSync(filePath, 'utf8').replace('由 MCP 写入', '在 Vault 中编辑'));
+    const future = new Date(Date.now() + 60_000);
+    utimesSync(filePath, future, future);
+
+    const imported = vault.syncNow();
+    assert.equal(imported.updated, 1);
+    assert.match(noteStore.getNote({ id: created.noteId }).contentText, /在 Vault 中编辑/);
+  } finally {
+    noteStore.close();
+    cleanupDir(dir);
+  }
+});
