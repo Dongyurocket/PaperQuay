@@ -29,6 +29,7 @@ import { emitOpenLibraryPaper } from '../../app/appEvents';
 import { useAppLocale, useLocaleText } from '../../i18n/uiLanguage';
 import {
   createKnowledgeGraphRelation,
+  updateKnowledgeGraphRelation,
   deleteKnowledgeGraphRelation,
   getKnowledgeGraph,
 } from '../../services/knowledgeGraph';
@@ -74,7 +75,6 @@ const EDGE_COLORS: Record<KnowledgeGraphEdgeType, string> = {
   paper_reference: '#64748b',
   co_author: '#06b6d4',
   custom_relation: '#14b8a6',
-  ai_suggested: '#ec4899',
 };
 
 const nodeTypes: Array<{
@@ -105,7 +105,6 @@ const edgeTypes: Array<{
   { type: 'paper_cites_paper', zh: '文献互引', en: 'Paper Citations' },
   { type: 'paper_reference', zh: '外部参考文献', en: 'External References' },
   { type: 'custom_relation', zh: '自定义关系', en: 'Custom Relations' },
-  { type: 'ai_suggested', zh: 'AI 关系', en: 'AI Relations' },
 ];
 
 const visibleNodeTypes = nodeTypes.filter((item) => item.type !== 'reference');
@@ -253,7 +252,6 @@ const graphStyles = [
   { selector: 'edge[type = "paper_reference"]', style: { 'line-color': EDGE_COLORS.paper_reference, 'line-style': 'dotted', 'target-arrow-shape': 'triangle' } },
   { selector: 'edge[type = "co_author"]', style: { 'line-color': EDGE_COLORS.co_author, 'line-style': 'dashed' } },
   { selector: 'edge[type = "custom_relation"]', style: { 'line-color': EDGE_COLORS.custom_relation, 'target-arrow-shape': 'triangle' } },
-  { selector: 'edge[type = "ai_suggested"]', style: { 'line-color': EDGE_COLORS.ai_suggested, 'target-arrow-shape': 'triangle' } },
   {
     selector: '.faded',
     style: {
@@ -318,7 +316,6 @@ function perspectiveEdgeTypes(perspective: GraphPerspective): Record<KnowledgeGr
     paper_reference: true,
     co_author: false,
     custom_relation: true,
-    ai_suggested: true,
   };
 
   if (perspective === 'paper') {
@@ -330,7 +327,6 @@ function perspectiveEdgeTypes(perspective: GraphPerspective): Record<KnowledgeGr
       paper_reference: false,
       co_author: false,
       custom_relation: true,
-      ai_suggested: true,
     };
   }
 
@@ -357,7 +353,6 @@ function perspectiveEdgeTypes(perspective: GraphPerspective): Record<KnowledgeGr
       paper_category: false,
       co_author: false,
       custom_relation: false,
-      ai_suggested: false,
     };
   }
 
@@ -373,7 +368,6 @@ function perspectiveEdgeTypes(perspective: GraphPerspective): Record<KnowledgeGr
       paper_reference: false,
       co_author: false,
       custom_relation: false,
-      ai_suggested: false,
     };
   }
 
@@ -389,7 +383,6 @@ function perspectiveEdgeTypes(perspective: GraphPerspective): Record<KnowledgeGr
       paper_reference: false,
       co_author: false,
       custom_relation: true,
-      ai_suggested: true,
     };
   }
 
@@ -537,7 +530,14 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
   const [snapshot, setSnapshot] = useState<KnowledgeGraphSnapshot | null>(null);
   const [selectedNode, setSelectedNode] = useState<KnowledgeGraphNode | null>(null);
   const [selectedEdge, setSelectedEdge] = useState<KnowledgeGraphEdge | null>(null);
+  const [edgeEdit, setEdgeEdit] = useState<{
+    label: string;
+    description: string;
+    weight: number;
+    working: boolean;
+  } | null>(null);
   const [relationSourceNode, setRelationSourceNode] = useState<KnowledgeGraphNode | null>(null);
+  const [relationTargetNode, setRelationTargetNode] = useState<KnowledgeGraphNode | null>(null);
   const [quickRelationSourceNode, setQuickRelationSourceNode] = useState<KnowledgeGraphNode | null>(null);
   const [contextMenu, setContextMenu] = useState<GraphContextMenuState>(null);
   const [search, setSearch] = useState('');
@@ -630,7 +630,7 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
   const selectedCustomEdges = useMemo(() => {
     if (!snapshot || !selectedNode) return [];
     return snapshot.edges.filter((edge) =>
-      (edge.type === 'custom_relation' || edge.type === 'ai_suggested') &&
+      edge.type === 'custom_relation' &&
       (edge.source === selectedNode.id || edge.target === selectedNode.id),
     );
   }, [selectedNode, snapshot]);
@@ -723,7 +723,7 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
           includeEmbeddingEdges: enabledEdgeTypes.related_by_embedding,
           includeReferences: enabledEdgeTypes.paper_cites_paper,
           includeCoAuthors: enabledEdgeTypes.co_author,
-          includeCustomRelations: enabledEdgeTypes.custom_relation || enabledEdgeTypes.ai_suggested,
+          includeCustomRelations: enabledEdgeTypes.custom_relation,
           embeddingMinSimilarity,
           embeddingEdgeLimit: 120,
         });
@@ -757,7 +757,6 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
     workspaceActive,
     debouncedSearch,
     embeddingMinSimilarity,
-    enabledEdgeTypes.ai_suggested,
     enabledEdgeTypes.custom_relation,
     enabledEdgeTypes.co_author,
     enabledEdgeTypes.paper_cites_paper,
@@ -984,7 +983,7 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
         label: relation.label,
         description: relation.description,
         confidence: relation.confidence,
-        weight: relation.weight ?? (relation.type === 'ai_suggested' ? 0.66 : 0.58),
+        weight: relation.weight ?? 0.58,
         createdAt: relation.createdAt,
         updatedAt: relation.updatedAt,
       };
@@ -1025,6 +1024,46 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
       setError(deleteError instanceof Error ? deleteError.message : String(deleteError));
     } finally {
       setRelationWorking(false);
+    }
+  };
+
+  useEffect(() => {
+    if (selectedEdge?.type !== 'custom_relation') {
+      setEdgeEdit(null);
+      return;
+    }
+    setEdgeEdit({
+      label: selectedEdge.label ?? '',
+      description: selectedEdge.description ?? '',
+      weight: Number(selectedEdge.weight) || 0.58,
+      working: false,
+    });
+  }, [selectedEdge?.id]);
+
+  const saveEdgeEdit = async () => {
+    if (!selectedEdge || !edgeEdit || selectedEdge.type !== 'custom_relation') return;
+    setEdgeEdit((current) => (current ? { ...current, working: true } : current));
+    setError('');
+    try {
+      const updated = await updateKnowledgeGraphRelation(selectedEdge.id, {
+        label: edgeEdit.label,
+        description: edgeEdit.description,
+        weight: edgeEdit.weight,
+      });
+      const nextEdge: KnowledgeGraphEdge = { ...selectedEdge, ...updated };
+      setSnapshot((current) => current
+        ? { ...current, edges: current.edges.map((edge) => (edge.id === nextEdge.id ? nextEdge : edge)) }
+        : current);
+      setSelectedEdge(nextEdge);
+      setEdgeEdit({
+        label: nextEdge.label,
+        description: nextEdge.description ?? '',
+        weight: Number(nextEdge.weight) || 0.58,
+        working: false,
+      });
+    } catch (updateError) {
+      setError(updateError instanceof Error ? updateError.message : String(updateError));
+      setEdgeEdit((current) => (current ? { ...current, working: false } : current));
     }
   };
 
@@ -1184,7 +1223,7 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
     Boolean(selectedNode?.type === 'note' && selectedNode.noteId);
   const selectedEdgeSource = selectedEdge ? nodeById.get(selectedEdge.source) : null;
   const selectedEdgeTarget = selectedEdge ? nodeById.get(selectedEdge.target) : null;
-  const canDeleteSelectedEdge = selectedEdge?.type === 'custom_relation' || selectedEdge?.type === 'ai_suggested';
+  const canDeleteSelectedEdge = selectedEdge?.type === 'custom_relation';
   const normalizedRelationTargetSearch = relationTargetSearch.trim().toLowerCase();
   const relationTargetOptions = (filteredSnapshot?.nodes ?? [])
     .filter((node) =>
@@ -1395,7 +1434,11 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
               <button
                 type="button"
                 disabled={!selectedNode}
-                onClick={() => selectedNode && setRelationSourceNode(selectedNode)}
+                onClick={() => {
+                  if (!selectedNode) return;
+                  setRelationSourceNode(selectedNode);
+                  setRelationTargetNode((current) => (current?.id === selectedNode.id ? null : current));
+                }}
                 className="pq-button h-8 w-full justify-center px-2 text-xs disabled:opacity-40"
               >
                 {relationSourceNode
@@ -1417,7 +1460,7 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
                       onClick={() => {
                         selectGraphNode(node);
                         if (relationSourceNode && relationSourceNode.id !== node.id) {
-                          void createRelation(relationSourceNode, node);
+                          setRelationTargetNode(node);
                         }
                       }}
                       className={cn(
@@ -1449,11 +1492,21 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
               />
               <button
                 type="button"
-                disabled={relationWorking || !relationSourceNode || !selectedNode || relationSourceNode.id === selectedNode.id}
-                onClick={() => void createRelation(relationSourceNode, selectedNode)}
+                disabled={relationWorking || !relationSourceNode || !relationTargetNode
+                  || relationSourceNode.id === relationTargetNode.id}
+                onClick={() => {
+                  void createRelation(relationSourceNode, relationTargetNode).then(() => {
+                    setRelationTargetNode(null);
+                    setRelationSourceNode(null);
+                  });
+                }}
                 className="pq-button h-8 w-full justify-center px-2 text-xs disabled:opacity-40"
               >
-                {relationWorking ? l('保存中...', 'Saving...') : l('添加关系', 'Add Relation')}
+                {relationWorking
+                  ? l('保存中...', 'Saving...')
+                  : relationTargetNode
+                    ? l(`添加关系：${relationTargetNode.label}`, `Add relation to ${relationTargetNode.label}`)
+                    : l('先选择终点节点', 'Choose a target node first')}
               </button>
             </div>
           </CollapsiblePanel>
@@ -1798,7 +1851,45 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
                 <span className="min-w-0 truncate text-[var(--pq-text)]">{selectedEdgeTarget?.label ?? selectedEdge.target}</span>
               </div>
             </div>
-            {selectedEdge.description ? (
+            {edgeEdit ? (
+              <div className="mt-3 space-y-2">
+                <input
+                  value={edgeEdit.label}
+                  maxLength={80}
+                  onChange={(event) => setEdgeEdit({ ...edgeEdit, label: event.target.value })}
+                  placeholder={l('关系名（最多 80 字）', 'Relation label (max 80 chars)')}
+                  className="h-8 w-full rounded-[var(--pq-radius-sm)] border border-[var(--pq-border)] bg-[var(--pq-surface)] px-2 text-xs text-[var(--pq-text)] outline-none"
+                />
+                <textarea
+                  value={edgeEdit.description}
+                  maxLength={2000}
+                  onChange={(event) => setEdgeEdit({ ...edgeEdit, description: event.target.value })}
+                  placeholder={l('说明（最多 2000 字）', 'Description (max 2000 chars)')}
+                  className="min-h-14 w-full resize-none rounded-[var(--pq-radius-sm)] border border-[var(--pq-border)] bg-[var(--pq-surface)] px-2 py-2 text-xs leading-5 text-[var(--pq-text)] outline-none"
+                />
+                <label className="flex items-center gap-2 text-xs text-[var(--pq-text-muted)]">
+                  {l('权重', 'Weight')}
+                  <input
+                    type="range"
+                    min={0.1}
+                    max={1}
+                    step={0.01}
+                    value={edgeEdit.weight}
+                    onChange={(event) => setEdgeEdit({ ...edgeEdit, weight: Number(event.target.value) })}
+                    className="flex-1 accent-[var(--pq-accent)]"
+                  />
+                  <span className="w-10 text-right tabular-nums text-[var(--pq-text)]">{edgeEdit.weight.toFixed(2)}</span>
+                </label>
+                <button
+                  type="button"
+                  disabled={edgeEdit.working || !edgeEdit.label.trim()}
+                  onClick={() => void saveEdgeEdit()}
+                  className="pq-button h-8 w-full justify-center px-3 text-xs disabled:opacity-40"
+                >
+                  {edgeEdit.working ? l('保存中...', 'Saving...') : l('保存关系修改', 'Save relation changes')}
+                </button>
+              </div>
+            ) : selectedEdge.description ? (
               <p className="mt-3 line-clamp-4 rounded-[var(--pq-radius-sm)] bg-[var(--pq-bg-secondary)] px-2 py-2 text-xs leading-5 text-[var(--pq-text-muted)]">
                 {selectedEdge.description}
               </p>

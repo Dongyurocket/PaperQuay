@@ -10,8 +10,7 @@ export type KnowledgeGraphEdgeType =
   | 'paper_cites_paper'
   | 'paper_reference'
   | 'co_author'
-  | 'custom_relation'
-  | 'ai_suggested';
+  | 'custom_relation';
 
 export interface KnowledgeGraphNode {
   id: string;
@@ -67,13 +66,19 @@ export interface KnowledgeGraphRelation {
   id: string;
   source: string;
   target: string;
-  type: 'custom_relation' | 'ai_suggested';
+  type: 'custom_relation';
   label: string;
   description?: string;
   confidence?: number;
   weight?: number;
   createdAt?: number;
   updatedAt?: number;
+}
+
+export interface KnowledgeGraphRelationUpdateRequest {
+  label?: string;
+  description?: string;
+  weight?: number;
 }
 
 export interface KnowledgeGraphRelationCreateRequest {

@@ -95,7 +95,17 @@ function relationStorePath(appPaths) {
   return path.join(appPaths.dataDir, RELATION_STORE_FILE);
 }
 
+let retiredAiRelationMigrationInFlight = false;
+
 function readRelationStore(appPaths) {
+  if (!retiredAiRelationMigrationInFlight) {
+    retiredAiRelationMigrationInFlight = true;
+    try {
+      migrateRetiredAiRelations(appPaths);
+    } finally {
+      retiredAiRelationMigrationInFlight = false;
+    }
+  }
   try {
     const raw = JSON.parse(fs.readFileSync(relationStorePath(appPaths), 'utf8'));
     return {
@@ -114,37 +124,88 @@ function writeRelationStore(appPaths, store) {
   });
 }
 
+const MAX_RELATION_LABEL_LENGTH = 80;
+const MAX_RELATION_DESCRIPTION_LENGTH = 2000;
+
 function normalizeCustomRelation(input = {}) {
   const source = cleanString(input.source || input.sourceId);
   const target = cleanString(input.target || input.targetId);
   const label = cleanString(input.label) || 'related';
-  const type = input.type === 'ai_suggested' ? 'ai_suggested' : 'custom_relation';
 
   if (!source || !target || source === target) {
     return null;
   }
 
+  if (label.length > MAX_RELATION_LABEL_LENGTH) {
+    throw new Error(`Relation label must be at most ${MAX_RELATION_LABEL_LENGTH} characters.`);
+  }
+
+  const description = cleanString(input.description);
+  if (description.length > MAX_RELATION_DESCRIPTION_LENGTH) {
+    throw new Error(`Relation description must be at most ${MAX_RELATION_DESCRIPTION_LENGTH} characters.`);
+  }
+
   const createdAt = Number(input.createdAt) || Date.now();
   return {
-    id: cleanString(input.id) || id(type === 'ai_suggested' ? 'kgai' : 'kgrel'),
+    id: cleanString(input.id) || id('kgrel'),
     source,
     target,
-    type,
+    type: 'custom_relation',
     label,
-    description: cleanString(input.description),
-    confidence: Number.isFinite(Number(input.confidence))
-      ? Math.max(0, Math.min(1, Number(input.confidence)))
-      : type === 'ai_suggested'
-        ? 0.7
-        : undefined,
+    description,
     weight: Number.isFinite(Number(input.weight))
       ? Math.max(0.1, Math.min(1, Number(input.weight)))
-      : type === 'ai_suggested'
-        ? 0.66
-        : 0.58,
+      : 0.58,
     createdAt,
     updatedAt: Number(input.updatedAt) || createdAt,
   };
+}
+
+/**
+ * 一次性清理已退役的 AI 关系（ai_suggested）。
+ *
+ * 先备份原 JSON，再过滤并写回；重复执行不会误删人工关系，也不会重复备份。
+ * 仅处理 type === 'ai_suggested' 的条目，保留 custom_relation 与系统边。
+ */
+function migrateRetiredAiRelations(appPaths) {
+  const filePath = relationStorePath(appPaths);
+  let rawText;
+
+  try {
+    rawText = fs.readFileSync(filePath, 'utf8');
+  } catch {
+    return { cleaned: 0, backupPath: null };
+  }
+
+  let raw;
+  try {
+    raw = JSON.parse(rawText);
+  } catch {
+    return { cleaned: 0, backupPath: null };
+  }
+
+  const relations = Array.isArray(raw?.relations) ? raw.relations : [];
+  const retired = relations.filter((relation) => cleanString(relation?.type) === 'ai_suggested');
+  if (retired.length === 0) {
+    return { cleaned: 0, backupPath: null };
+  }
+
+  const backupPath = `${filePath}.ai-suggested-backup-${Date.now()}.json`;
+  try {
+    fs.copyFileSync(filePath, backupPath);
+  } catch (error) {
+    console.warn('[paperquay] Failed to back up the retired AI relations; cleanup skipped.', error);
+    return { cleaned: 0, backupPath: null };
+  }
+
+  const kept = relations
+    .filter((relation) => cleanString(relation?.type) !== 'ai_suggested')
+    .map((relation) => normalizeCustomRelation(relation))
+    .filter(Boolean);
+
+  writeRelationStore(appPaths, { version: 1, relations: kept });
+  console.info(`[paperquay] Removed ${retired.length} retired AI relation(s). Backup: ${backupPath}`);
+  return { cleaned: retired.length, backupPath };
 }
 
 function listCustomRelations(appPaths) {
@@ -780,12 +841,67 @@ function createKnowledgeGraphCommands(context) {
       }
 
       const store = readRelationStore(context.appPaths);
+      const duplicate = store.relations.find((item) =>
+        cleanString(item.id) !== relation.id
+        && cleanString(item.source) === relation.source
+        && cleanString(item.target) === relation.target);
+      if (duplicate) {
+        throw new Error('A custom relation already exists between these two nodes.');
+      }
+
       const nextRelations = [
         ...store.relations.filter((item) => cleanString(item.id) !== relation.id),
         relation,
       ];
       writeRelationStore(context.appPaths, { version: 1, relations: nextRelations });
       return relation;
+    },
+    knowledge_graph_update_relation({ relationId = '', request = {} }) {
+      const targetId = cleanString(relationId);
+      if (!targetId) throw new Error('relationId is required');
+
+      const store = readRelationStore(context.appPaths);
+      const existing = store.relations.find((item) => cleanString(item.id) === targetId);
+      if (!existing) throw new Error(`Relation does not exist: ${targetId}`);
+      if (cleanString(existing.type) === 'ai_suggested') {
+        throw new Error('AI relations are retired and cannot be edited.');
+      }
+
+      const label = request.label === undefined ? cleanString(existing.label) : cleanString(request.label);
+      if (!label) throw new Error('Relation label cannot be empty.');
+      if (label.length > MAX_RELATION_LABEL_LENGTH) {
+        throw new Error(`Relation label must be at most ${MAX_RELATION_LABEL_LENGTH} characters.`);
+      }
+      const description = request.description === undefined
+        ? cleanString(existing.description)
+        : cleanString(request.description);
+      if (description.length > MAX_RELATION_DESCRIPTION_LENGTH) {
+        throw new Error(`Relation description must be at most ${MAX_RELATION_DESCRIPTION_LENGTH} characters.`);
+      }
+      const weight = request.weight === undefined
+        ? Number(existing.weight) || 0.58
+        : Number(request.weight);
+      if (!Number.isFinite(weight)) throw new Error('Relation weight must be a number between 0.1 and 1.');
+
+      const updatedAt = Math.max(Date.now(), (Number(existing.updatedAt) || 0) + 1);
+      const nextRelation = {
+        ...existing,
+        // 端点固定：首版只允许改标签、说明与权重。
+        source: existing.source,
+        target: existing.target,
+        type: 'custom_relation',
+        label,
+        description,
+        weight: Math.max(0.1, Math.min(1, weight)),
+        updatedAt,
+      };
+
+      writeRelationStore(context.appPaths, {
+        version: 1,
+        relations: store.relations.map((item) =>
+          cleanString(item.id) === targetId ? nextRelation : item),
+      });
+      return nextRelation;
     },
     knowledge_graph_delete_relation({ relationId }) {
       const targetId = cleanString(relationId);
@@ -798,7 +914,10 @@ function createKnowledgeGraphCommands(context) {
 }
 
 module.exports = {
+  MAX_RELATION_DESCRIPTION_LENGTH,
+  MAX_RELATION_LABEL_LENGTH,
   createKnowledgeGraphCommands,
   createKnowledgeGraphSnapshot,
   extractPaperReferenceCandidates,
+  migrateRetiredAiRelations,
 };

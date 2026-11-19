@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -177,12 +177,13 @@ test('knowledge graph builds citation edges from cached paper references', async
   assert.equal(externalReferenceEdge, undefined);
 });
 
-test('knowledge graph includes persisted custom and AI-approved relations', async () => {
+test('retired AI relations are backed up, removed once, and manual relations survive', async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'paperquay-graph-'));
 
   try {
+    const relationPath = path.join(dir, 'paperquay-knowledge-graph-relations.json');
     await writeFile(
-      path.join(dir, 'paperquay-knowledge-graph-relations.json'),
+      relationPath,
       JSON.stringify({
         version: 1,
         relations: [
@@ -208,18 +209,70 @@ test('knowledge graph includes persisted custom and AI-approved relations', asyn
     );
 
     const snapshot = await createKnowledgeGraphSnapshot(createContext({ dataDir: dir }));
-    const customEdge = snapshot.edges.find((edge) => edge.id === 'rel-1');
-    const aiEdge = snapshot.edges.find((edge) => edge.id === 'rel-2');
+    assert.equal(snapshot.edges.some((edge) => edge.id === 'rel-1'), true);
+    assert.equal(snapshot.edges.some((edge) => edge.id === 'rel-2'), false);
 
-    assert.equal(customEdge?.type, 'custom_relation');
-    assert.equal(customEdge?.label, 'explains');
-    assert.equal(aiEdge?.type, 'ai_suggested');
-    assert.equal(aiEdge?.confidence, 0.82);
+    const persisted = JSON.parse(await readFile(relationPath, 'utf8'));
+    assert.deepEqual(persisted.relations.map((relation) => relation.id), ['rel-1']);
+    const backups = (await readdir(dir)).filter((name) => name.includes('ai-suggested-backup-'));
+    assert.equal(backups.length, 1);
+    const backup = JSON.parse(await readFile(path.join(dir, backups[0]), 'utf8'));
+    assert.equal(backup.relations.some((relation) => relation.id === 'rel-2'), true);
+
+    // Second load: no new backup and manual relation untouched.
+    await createKnowledgeGraphSnapshot(createContext({ dataDir: dir }));
+    assert.deepEqual(
+      (await readdir(dir)).filter((name) => name.includes('ai-suggested-backup-')).length,
+      1,
+    );
+
     const hidden = await createKnowledgeGraphSnapshot(createContext({ dataDir: dir }), { includeCustomRelations: false });
-    assert.equal(hidden.edges.some((edge) => edge.id === 'rel-1' || edge.id === 'rel-2'), false);
+    assert.equal(hidden.edges.some((edge) => edge.id === 'rel-1'), false);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('manual relations can be updated without changing endpoints and reject invalid fields', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'paperquay-graph-'));
+  try {
     const commands = createKnowledgeGraphCommands(createContext({ dataDir: dir }));
-    assert.deepEqual(commands.knowledge_graph_delete_relation({ relationId: 'rel-2' }), { deleted: true });
-    assert.equal(commands.knowledge_graph_list_relations().some((relation) => relation.id === 'rel-2'), false);
+    const relation = commands.knowledge_graph_create_relation({ request: {
+      source: 'paper:paper-1', target: 'note:note-1', label: 'explains',
+    } });
+    assert.throws(
+      () => commands.knowledge_graph_create_relation({ request: {
+        source: 'paper:paper-1', target: 'note:note-1', label: 'duplicate',
+      } }),
+      /already exists/,
+    );
+
+    const updated = commands.knowledge_graph_update_relation({
+      relationId: relation.id,
+      request: { label: 'explains better', description: 'New description', weight: 0.7 },
+    });
+    assert.equal(updated.source, relation.source);
+    assert.equal(updated.target, relation.target);
+    assert.equal(updated.label, 'explains better');
+    assert.equal(updated.weight, 0.7);
+    assert.ok(updated.updatedAt > relation.updatedAt);
+
+    assert.throws(
+      () => commands.knowledge_graph_update_relation({ relationId: relation.id, request: { label: 'x'.repeat(81) } }),
+      /at most 80/,
+    );
+    assert.throws(
+      () => commands.knowledge_graph_update_relation({ relationId: relation.id, request: { description: 'x'.repeat(2001) } }),
+      /at most 2000/,
+    );
+    assert.throws(
+      () => commands.knowledge_graph_update_relation({ relationId: 'missing', request: { label: 'x' } }),
+      /does not exist/,
+    );
+
+    const reloaded = commands.knowledge_graph_list_relations().find((item) => item.id === relation.id);
+    assert.equal(reloaded.label, 'explains better');
+    assert.equal(reloaded.description, 'New description');
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

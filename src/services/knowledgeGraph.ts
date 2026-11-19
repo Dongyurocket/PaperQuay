@@ -2,6 +2,7 @@ import { invoke } from '../platform/electron/core.ts';
 import type {
   KnowledgeGraphRelation,
   KnowledgeGraphRelationCreateRequest,
+  KnowledgeGraphRelationUpdateRequest,
   KnowledgeGraphRequest,
   KnowledgeGraphSnapshot,
 } from '../types/knowledgeGraph';
@@ -46,6 +47,17 @@ export async function createKnowledgeGraphRelation(
     return await invoke<KnowledgeGraphRelation>('knowledge_graph_create_relation', { request });
   } catch (error) {
     throw new Error(toErrorMessage(error, '创建知识图谱关系失败'));
+  }
+}
+
+export async function updateKnowledgeGraphRelation(
+  relationId: string,
+  request: KnowledgeGraphRelationUpdateRequest,
+): Promise<KnowledgeGraphRelation> {
+  try {
+    return await invoke<KnowledgeGraphRelation>('knowledge_graph_update_relation', { relationId, request });
+  } catch (error) {
+    throw new Error(toErrorMessage(error, '更新知识图谱关系失败'));
   }
 }
 
