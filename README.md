@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.4.30-2563eb?style=flat-square" alt="Version v0.4.30">
+  <img src="https://img.shields.io/badge/version-v0.4.35-2563eb?style=flat-square" alt="Version v0.4.35">
   <img src="https://img.shields.io/badge/maintained-Windows%20x64-4b5563?style=flat-square" alt="Maintained: Windows x64">
   <img src="https://img.shields.io/badge/built%20with-Electron-47848f?style=flat-square" alt="Electron">
   <img src="https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-0f766e?style=flat-square" alt="React TypeScript">
@@ -57,13 +57,13 @@ PaperQuay 是本地优先、开源免费的桌面端 AI 论文工作台，面向
 
 ## 近期更新
 
+- **v0.4.35**：全文翻译的译文缓存写入更稳：应用数据目录和已批准的缓存目录直接放行，遇到 `EPERM` / `EBUSY` 等瞬时错误自动重试并退化为覆盖写入，译文已完整落盘时不再把任务误判为失败。
+- **v0.4.34**：批量 MinerU 解析遇到抽取器签名变化的旧索引只跳过该篇，不再一次扫描就把整库排进重嵌入队列；重建留给打开文献、问答懒建或手动重建。
+- **v0.4.33**：设置页文案对齐实际行为：Vault 同步只在手动操作或定时任务时执行，模型角色不再提 Agent，备份范围不再包含 Agent 记忆与历史。
+- **v0.4.32**：只保留外部 Agent 接入，移除应用内独立 Agent 工作区、Agent 记忆和笔记 AI 润色；退役 PaddleOCR-VL，MinerU 的 OCR 重试成为唯一解析降级入口；MCP 写入改为带版本的记录级写入，新增 `preview_delete_papers` 与 `read_paper_figure`；阅读器问答支持当前文献 / 选定文献 / 全库三档范围。
+- **v0.4.31**：移除综述写作工作区与图谱 AI 关系候选，跨文献归纳交由外部 Agent 的证据检索和 `synthesis` 笔记完成；阅读器问答可停止生成，MCP 新增只读 `get_note`。
 - **v0.4.30**：阅读器顶栏压缩为一行，PDF 工具行改为单行并支持页码跳转和溢出菜单；新增沉浸阅读（`Ctrl+Shift+F`）；移除「收起状态栏」、底栏和新手引导；中文界面下 AI 概览小标题改为中文。
 - **v0.4.29**：论文概览页重做，解析、翻译和生成概览收进「处理」菜单；概览分节显示，文件卡列出原始 PDF、译版 PDF 和 MinerU 结果。
-- **v0.4.28**：文献新增「论文语言」「引用键」，作者新增单位和 ORCID；详情面板与元数据编辑重做，「按 DOI 重新识别」先预览差异；MCP `update_paper` 支持新字段。
-- **v0.4.27**：文库顶栏改为单行，新增可组合筛选（阅读状态、年份、类型、标签、文件状态等）和「最近阅读」排序；阅读进度写回文库。
-- **v0.4.26**：打开论文时直接显示缓存概览；右键菜单新增「打开所在位置」。
-- **v0.4.25**：译版 PDF 支持设置、修改和批量设置语言。
-- **v0.4.24**：自此仅发布、维护和测试 Windows x64。
 
 完整记录见 [CHANGELOG.md](./CHANGELOG.md)，安装包见 [Releases](https://github.com/Dongyurocket/PaperQuay/releases)。
 
@@ -80,10 +80,10 @@ PaperQuay 是本地优先、开源免费的桌面端 AI 论文工作台，面向
 | 阅读器 | PDF 与结构块视图联动、批注、阅读热力与阅读时间图、长文档窗口化渲染、沉浸模式；排版清洗（连字、伪上标、首字下沉、术语表）；BBox 原始切片兜底与单块 AI 重析 |
 | 翻译 | 全文翻译与块级缓存、划词翻译、批量翻译标题；中文文献跳过翻译；译版 PDF 附加与语言设置 |
 | 论文概览 | 背景、问题、方法、实验、发现、结论、局限分节保存，打开即读缓存 |
+| 阅读器问答 | 基于本地 RAG 证据回答，检索范围可选当前文献 / 选定文献 / 全库；引用带文献、页码与证据类型；可停止生成并存为笔记 |
 | 笔记 | Tiptap 富文本；8 种页面类型与 11 个模板；`[[双链]]`、`#标签`、`@paper` 文献引用并跳回原文；摘录卡；GB/T 7714 / APA 7 / IEEE 引用样式；笔记图谱与体检；Obsidian 兼容的 Markdown vault 双向同步。规范见 [notes-charter.md](./docs/notes-charter.md) |
 | 本地 RAG | 向量 KNN + FTS5 BM25 + RRF 混合检索；索引管理面板（统计、批量建立、暂停 / 继续 / 取消）；文献列表状态角标；单篇可移出知识库 |
 | 知识图谱 | 文献、笔记、标签、分类和引用节点；语义相似、参考文献、共同作者与自定义关系；PNG / JSON 导出 |
-| 综述写作 | 大纲、分段并发写作、RAG 上下文、取消后继续、交付质量检查、Word 导出 |
 | Zotero | 读取 `zotero.sqlite` 的临时副本，不改原库；全量导入，或按分类和条件检索、预检后选择性同步 |
 | 备份 | 密码保护的 `.pqbackup` 单文件导出与导入，导入后重启替换并保留回滚点 |
 | 其他 | 浅色 / 深色主题；命令面板（`Ctrl+K`）；应用内检查更新与 Windows 安装包自动更新 |
@@ -176,7 +176,7 @@ npm run electron:build   # 构建桌面安装包
 
 PaperQuay 本地优先。文献库、笔记和 RAG 索引存放在本地 SQLite 数据库中，PDF 存放在你配置的文献存储目录中。AI 与 Embedding 请求发往你自己配置的接口。
 
-`.pqbackup` 完整迁移包包含配置与 API Key、三个数据库、文献库引用的 PDF、综述草稿、知识图谱关系、阅读状态与批注、笔记 vault 和 MinerU / 翻译 / 摘要缓存；日常备份不含 RAG 数据库和 MinerU 缓存，体积更小。忘记密码后无法恢复。新版不读取旧 WebDAV 备份，需要时先用 0.4.18 或更早版本恢复到本机再升级。
+`.pqbackup` 完整迁移包包含配置与 API Key、三个数据库、文献库引用的 PDF、知识图谱关系、阅读状态与批注、笔记 vault 和 MinerU / 翻译 / 摘要缓存；日常备份不含 RAG 数据库和 MinerU 缓存，体积更小。忘记密码后无法恢复。新版不读取旧 WebDAV 备份，需要时先用 0.4.18 或更早版本恢复到本机再升级。
 
 不要把本地数据、API Key、PDF、解析结果、数据库或备份包提交到代码仓库。安全问题请按 [SECURITY.md](./SECURITY.md) 报告。
 

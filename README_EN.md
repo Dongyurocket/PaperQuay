@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.4.30-2563eb?style=flat-square" alt="Version v0.4.30">
+  <img src="https://img.shields.io/badge/version-v0.4.35-2563eb?style=flat-square" alt="Version v0.4.35">
   <img src="https://img.shields.io/badge/maintained-Windows%20x64-4b5563?style=flat-square" alt="Maintained: Windows x64">
   <img src="https://img.shields.io/badge/built%20with-Electron-47848f?style=flat-square" alt="Electron">
   <img src="https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-0f766e?style=flat-square" alt="React TypeScript">
@@ -57,13 +57,13 @@ PaperQuay is a local-first, free and open-source desktop AI paper workspace for 
 
 ## Recent Updates
 
+- **v0.4.35**: full-document translation persists its cache more reliably: app-data and approved cache directories are trusted directly, transient `EPERM` / `EBUSY` failures are retried and fall back to an overwrite, and a task is no longer marked failed when every translation is already on disk.
+- **v0.4.34**: batch MinerU parsing skips only the papers whose cached index carries an older extractor signature instead of queueing the whole library for re-embedding; rebuilding is left to opening a paper, lazy Q&A indexing, or a manual rebuild.
+- **v0.4.33**: settings copy matches actual behavior: Vault sync runs only on manual or scheduled sync, model roles no longer mention the Agent, and backup scope no longer claims Agent memory or history.
+- **v0.4.32**: external agents are the only agent path: the in-app standalone agent workspace, agent memory, and note AI polish are removed; PaddleOCR-VL is retired and MinerU OCR retry is the only parsing fallback; MCP writes become versioned per-record writes with new `preview_delete_papers` and `read_paper_figure`; reader Q&A supports current paper / selected papers / whole library scopes.
+- **v0.4.31**: the survey-writing workspace and AI graph relation suggestions are removed, leaving cross-paper synthesis to external-agent evidence search and `synthesis` notes; reader Q&A can stop generation, and MCP adds read-only `get_note`.
 - **v0.4.30**: the reader top bar is a single row; the PDF toolbar is a single row with page jump and an overflow menu; new immersive reading mode (`Ctrl+Shift+F`); the "collapse status bar" option, the bottom bar, and the onboarding guide are removed; AI overview headings are shown in Chinese when the UI is Chinese.
 - **v0.4.29**: redesigned paper overview. Parsing, translation, and overview generation move into a "Process" menu; the overview is split into section tabs, and a files card lists the original PDF, translated PDF, and MinerU result.
-- **v0.4.28**: papers gain "paper language" and "citation key" fields, and authors gain affiliation and ORCID; the details panel and metadata editor are redesigned; "re-identify by DOI" previews the diff first; MCP `update_paper` supports the new fields.
-- **v0.4.27**: the library top bar is a single row with composable filters (reading status, year, type, tags, file status, and more) and a "recently read" sort; reading progress is written back to the library.
-- **v0.4.26**: cached overviews show as soon as a paper opens; the context menu adds "Open file location".
-- **v0.4.25**: translated PDFs support setting, changing, and batch-setting their language.
-- **v0.4.24**: from this version on, only Windows x64 is released, maintained, and tested.
 
 See [CHANGELOG.md](./CHANGELOG.md) for the full history and [Releases](https://github.com/Dongyurocket/PaperQuay/releases) for installers.
 
@@ -80,10 +80,10 @@ See [CHANGELOG.md](./CHANGELOG.md) for the full history and [Releases](https://g
 | Reader | Linked PDF and block views, annotations, reading heatmap and reading-time chart, windowed rendering for long documents, immersive mode; typography cleanup (ligatures, fake superscripts, drop caps, glossaries); BBox raw-slice fallback and per-block AI re-parsing |
 | Translation | Full-text translation with block-level cache, selection translation, batch title translation; Chinese papers skip translation; attach translated PDFs and set their language |
 | Paper overview | Background, problem, method, experiments, findings, conclusions, and limitations saved by section; cached overviews open instantly |
+| Reader Q&A | Evidence-grounded answers from the local RAG index, scoped to the current paper, selected papers, or the whole library; citations carry paper, page, and evidence type; generation can be stopped and the answer saved as a note |
 | Notes | Tiptap rich text; 8 page kinds and 11 templates; `[[wiki links]]`, `#tags`, and `@paper` references that jump back to the source; excerpt cards; GB/T 7714 / APA 7 / IEEE citation styles; note graph and health check; two-way sync with an Obsidian-compatible Markdown vault. Conventions: [notes-charter.md](./docs/notes-charter.md) |
 | Local RAG | Hybrid vector KNN + FTS5 BM25 + RRF retrieval; index management panel (stats, batch build, pause / resume / cancel); status badges in the paper list; individual papers can be removed from the knowledge base |
 | Knowledge graph | Paper, note, tag, category, and citation nodes; semantic-similarity, reference, co-author, and custom relations; PNG / JSON export |
-| Survey writing | Outline, concurrent section drafting, RAG context, resume after cancel, delivery quality checks, Word export |
 | Zotero | Reads a temporary copy of `zotero.sqlite` and never modifies the original; full import, or browse by collection and filter, preview, then sync selectively |
 | Backup | Password-protected single-file `.pqbackup` export and import; import replaces data after a restart and keeps a rollback point |
 | Other | Light / dark themes; command palette (`Ctrl+K`); in-app update check and automatic updates for the Windows installer |
@@ -176,7 +176,7 @@ Upstream sync, release flow, and documentation conventions are in the [Developme
 
 PaperQuay is local-first. The library, notes, and RAG indexes are stored in local SQLite databases, and PDFs are stored in the paper storage folder you configure. AI and embedding requests go to the endpoints you configure.
 
-The full `.pqbackup` migration archive contains configuration and API keys, the three databases, PDFs referenced by the library, survey drafts, knowledge-graph relations, reading state and annotations, the notes vault, and MinerU / translation / summary caches; the smaller daily backup leaves out the RAG database and MinerU caches. A forgotten password cannot be recovered. New versions cannot read old WebDAV backups; to keep that data, restore it locally with 0.4.18 or earlier before upgrading.
+The full `.pqbackup` migration archive contains configuration and API keys, the three databases, PDFs referenced by the library, knowledge-graph relations, reading state and annotations, the notes vault, and MinerU / translation / summary caches; the smaller daily backup leaves out the RAG database and MinerU caches. A forgotten password cannot be recovered. New versions cannot read old WebDAV backups; to keep that data, restore it locally with 0.4.18 or earlier before upgrading.
 
 Do not commit local data, API keys, PDFs, parser output, databases, or backup archives to the repository. Report security issues as described in [SECURITY.md](./SECURITY.md).
 
