@@ -183,6 +183,7 @@ function fnv1aHex(value) {
 
 function flattenContentListBlocks(parsed) {
   const output = [];
+  const pageCounters = new Map();
   if (!Array.isArray(parsed)) return output;
 
   parsed.forEach((entry, outerIndex) => {
@@ -200,11 +201,10 @@ function flattenContentListBlocks(parsed) {
     }
     if (entry && typeof entry === 'object') {
       const blockPage = Number(entry.page_idx);
-      output.push({
-        block: entry,
-        pageIndex: Number.isFinite(blockPage) && blockPage >= 0 ? blockPage : outerIndex,
-        blockIndex: 0,
-      });
+      const pageIndex = Number.isFinite(blockPage) && blockPage >= 0 ? blockPage : outerIndex;
+      const blockIndex = pageCounters.get(pageIndex) ?? 0;
+      pageCounters.set(pageIndex, blockIndex + 1);
+      output.push({ block: entry, pageIndex, blockIndex });
     }
   });
 
