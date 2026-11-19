@@ -2,18 +2,20 @@
 
 ## Fixes
 
-- Batch MinerU parsing that reuses an existing cache no longer triggers a whole-library RAG re-embedding when the extractor signature changes (`mineru-chunks-v2`). The batch scan skips old-signature indexes; rebuilding stays on demand when a paper is opened, when reader Q&A lazily builds an index, or when the user runs a manual rebuild.
-- Prevents an automatic/batch parse scan from queueing every paper for indexing at once, reducing unnecessary embedding calls and task-list noise.
+- Full-document translation no longer reports "translation cache could not be written, the result is only available in the current window" and marks the task as failed when the translations were already generated.
+- Translation cache writes no longer consult the library database for path validation. App-data and approved cache directories are trusted directly, so a busy library database (MCP writes, backup, import) cannot block cache persistence.
+- Transient `EPERM` / `EBUSY` / `EACCES` cache write failures are retried, clear a read-only target, and fall back to a direct overwrite. If the configured cache directory is unavailable and the cache is incomplete, the default cache directory is used.
+- After a failed write, the existing cache is read back. If it already contains every translation, the write is treated as successful instead of failing the task or duplicating the cache. Reads compare the primary and fallback caches and keep the more complete one.
+- A later successful progress or final write clears earlier cache-write errors, so a transient failure no longer leaves the task marked as failed after the result has been saved.
 
 ## Note
 
-- Old-signature indexes remain readable. This is a one-time signature change from the table-extraction upgrade, not a parse re-run.
-- Indexing tasks already started by an older build stop when the app closes and do not resume after restart.
+- Only cache persistence and task status changed. Translation models, prompts, and existing translated content are unchanged; the normal translation and cache-read paths behave as before.
 
 ## Verification
 
-- Production build passed; 793 tests ran with 792 passing, 1 optional benchmark skipped, 0 failed.
-- Added a focused test: an automatic batch index call with a ready but older signature returns skipped and never calls `rag_index_document`.
+- `npx tsc --noEmit` and `npm run build` passed; 803 tests ran with 802 passing, 1 optional benchmark skipped, 0 failed.
+- Added focused tests: cache directories remain writable when the library database is unavailable, read-only targets recover, an unavailable primary root falls back to the default root, a complete existing cache is treated as saved when a rewrite fails, and reads keep the more complete cache.
 
 ## Windows Release
 
@@ -23,18 +25,20 @@ Only Windows x64 installers are published and maintained. Download the `.exe` fr
 
 ## 修复内容
 
-- 批量 MinerU 解析复用已有缓存时，不再因抽取器签名升级（`mineru-chunks-v2`）对整库触发 RAG 重嵌入。批量扫描会跳过旧签名索引，重建留给打开文献、问答懒建或手动重建。
-- 避免自动/批量解析一次扫描把全部文献同时排入索引队列，减少无谓的 embedding 调用和任务列表噪声。
+- 修复全文翻译完成后偶发「译文缓存写入失败，本次结果仅保留在当前窗口」并把任务误判为失败的问题。
+- 译文缓存写入不再为校验路径读取文库数据库：应用数据目录和已批准缓存目录直接放行，MCP 写入、备份或导入占用文库时也不会阻塞译文缓存落盘。
+- 缓存写入遇到 `EPERM` / `EBUSY` / `EACCES` 等瞬时错误时自动重试、清除只读属性，并退化为直接覆盖；配置的缓存目录不可用且缓存不完整时，改用默认缓存目录。
+- 写入失败后读回现有缓存；如果已经包含本次全部译文，按成功处理，不重复重写、不再复制一份到备用目录。读取时比较主缓存与备用缓存，保留更完整的一份。
+- 进度写入或最终写入成功后清空之前的缓存错误，避免瞬时失败在结果已经保存后仍把任务标成失败。
 
 ## 说明
 
-- 旧索引仍可读取。这是表格抽取升级带来的一次性索引签名变化，不是重新解析。
-- 旧版本已经启动的索引任务会在关闭应用后停止，重启后不会续跑。
+- 只影响译文缓存的持久化与任务状态，不改变翻译模型、提示词或已有译文内容；正常的翻译与缓存读取路径保持不变。
 
 ## 验证
 
-- 生产构建通过；793 项测试中 792 通过、1 项可选基准跳过、0 失败。
-- 新增定向测试：自动批处理遇到 ready 但签名不同的旧索引时返回 skipped，且不调用 `rag_index_document`。
+- `npx tsc --noEmit`、`npm run build` 通过；803 项测试中 802 通过、1 项可选基准跳过、0 失败。
+- 新增定向测试：文库数据库不可用时缓存目录仍可写入、只读文件可恢复写入、主目录不可用回退默认目录、已有完整缓存时重写失败按成功处理、读取时保留更完整的缓存。
 
 ## Windows 发布范围
 
