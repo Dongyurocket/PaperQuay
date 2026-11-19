@@ -606,7 +606,7 @@ export function ReaderPreferencesModelsSection({
 
       <SettingsField
         label={l('功能角色绑定', 'Feature Role Binding')}
-        description={l('选择翻译、选区翻译、论文概览、问答和 Agent 的默认模型。', 'Choose default presets for document translation, selection translation, overview, QA, and Agent tool use.',
+        description={l('选择翻译、选区翻译、论文概览和问答的默认模型。', 'Choose default presets for document translation, selection translation, overview, and QA.',
         )}
       >
         <div className="space-y-3">

@@ -374,8 +374,8 @@ export function ReaderPreferencesContent({
           <SettingsField
             label={l('笔记与 Vault', 'Notes & Vault')}
             description={l(
-              '启动笔记工作区时静默同步已配置的 Markdown vault；定时同步默认关闭。',
-              'Silently sync the configured Markdown vault when Notes opens. Scheduled sync is off by default.',
+              '同步只由手动触发；开启后每 15–60 分钟自动检查并同步一次，不使用操作系统文件监听。',
+              'Sync runs only when triggered manually; when enabled, it checks every 15–60 minutes without OS file watching.',
             )}
           >
             <ToggleRow

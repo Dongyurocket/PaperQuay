@@ -279,8 +279,8 @@ export const MODEL_REASONING_OPTIONS: Array<{
     value: 'high',
     labelZh: '高',
     labelEn: 'High',
-    descriptionZh: '更适合复杂推理、Agent 工具选择和长上下文分析。',
-    descriptionEn: 'Better for complex reasoning, Agent tool choice, and long-context analysis.',
+    descriptionZh: '更适合复杂推理和长上下文分析。',
+    descriptionEn: 'Better for complex reasoning and long-context analysis.',
   },
   {
     value: 'xhigh',

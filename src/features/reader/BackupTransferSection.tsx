@@ -633,8 +633,8 @@ export function BackupTransferSection({ active, l }: BackupTransferSectionProps)
       <SettingsField
         label={l('加密备份包', 'Encrypted Backup Package')}
         description={l(
-          '单个 .pqbackup 文件，使用密码加密；可包含配置与密钥、文献与笔记、阅读状态和 Agent 记忆。密码无法找回。',
-          'A single .pqbackup file encrypted with your password. It can include settings and secrets, papers and notes, reader state, and Agent memory. The password cannot be recovered.',
+          '单个 .pqbackup 文件，使用密码加密；可包含配置与密钥、文献与笔记、阅读状态和 Vault。密码无法找回。',
+          'A single .pqbackup file encrypted with your password. It can include settings and secrets, papers and notes, reader state, and the vault. The password cannot be recovered.',
         )}
       >
         <div className="flex items-start gap-3 rounded-lg border border-[color-mix(in_srgb,var(--pq-warning)_28%,transparent)] bg-[var(--pq-warning-bg)] px-3 py-2.5 text-xs leading-5 text-[var(--pq-warning)]">
@@ -691,7 +691,7 @@ export function BackupTransferSection({ active, l }: BackupTransferSectionProps)
             {options.preset === 'migration'
               ? l('完整迁移包含 RAG 数据库、解析缓存与 Vault，适合换机或重装系统。', 'Includes the RAG database, parse caches, and vault for moving to a new computer or reinstalling.')
               : options.preset === 'daily'
-                ? l('日常备份保留数据库、PDF、阅读状态与 Vault；不含 RAG 运行记录和解析缓存。', 'Keeps databases, PDFs, reader state, and vault; excludes RAG run history and parse caches.')
+                ? l('日常备份保留数据库、PDF、阅读状态与 Vault；不含 RAG 数据库和解析缓存。', 'Keeps databases, PDFs, reader state, and vault; excludes the RAG database and parse caches.')
                 : l('自定义范围可单独选择大型数据项、浏览器状态和压缩方式。', 'Choose large data components, browser state, and compression individually.')}
           </div>
         </div>
@@ -705,7 +705,7 @@ export function BackupTransferSection({ active, l }: BackupTransferSectionProps)
             <div className="grid gap-2 md:grid-cols-2">
               <ToggleRow
                 title={l('包含 RAG 数据库', 'Include RAG Database')}
-                description={l('包含向量索引与 Agent 运行记录，可能显著增加包体积。', 'Includes vector indexes and Agent run history; may substantially increase package size.')}
+                description={l('包含向量索引，可能显著增加包体积。', 'Includes vector indexes and may substantially increase package size.')}
                 checked={options.includeRag}
                 onChange={(checked) => updateOption('includeRag', checked)}
               />
@@ -729,7 +729,7 @@ export function BackupTransferSection({ active, l }: BackupTransferSectionProps)
               />
               <ToggleRow
                 title={l('包含阅读器状态', 'Include Reader State')}
-                description={l('导出全部 localStorage 键，包括批注、阅读位置和 Agent 历史。', 'Exports every localStorage key, including annotations, reading positions, and Agent history.')}
+                description={l('导出全部 localStorage 键，包括批注、阅读位置等浏览器状态。', 'Exports every localStorage key, including annotations and reading positions.')}
                 checked={options.includeRendererState}
                 onChange={(checked) => updateOption('includeRendererState', checked)}
               />
