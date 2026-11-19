@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <strong>开源 AI 论文工作台，覆盖 PDF 阅读、全文翻译、结构化概览、内联笔记、Zotero 导入、Agent 工作流和本地 RAG。</strong>
+  <strong>开源 AI 论文工作台，覆盖 PDF 阅读、全文翻译、结构化概览、内联笔记、Zotero 导入、外部 Agent 接入和本地 RAG。</strong>
 </p>
 
 <p align="center">
@@ -47,7 +47,7 @@ PaperQuay 是本地优先、开源免费的桌面端 AI 论文工作台，面向
 | 笔记脱离上下文 | 笔记在独立应用里，丢失 PDF 位置 | 笔记、标签、双链和文献引用存入本地文献库，可跳回原文 |
 | 大批量速读费时 | 反复上传 PDF 给大模型 | 在文献库中生成并保存结构化概览 |
 | 模型选择受限 | 只能用内置模型 | 支持任意 OpenAI 兼容接口、模型和参数 |
-| 文献库难维护 | 重命名、打标签、分类靠手动 | Agent 批量重命名、补全元数据、打标签和分类，写操作先审批 |
+| 文献库难维护 | 重命名、打标签、分类靠手动 | 外部 Agent 经 MCP 批量补全元数据、打标签和分类，写操作可预览、可回读 |
 
 <p align="center">
   <img src="./docs/assets/show.gif" alt="PaperQuay workflow demo" width="1200">
@@ -81,7 +81,6 @@ PaperQuay 是本地优先、开源免费的桌面端 AI 论文工作台，面向
 | 翻译 | 全文翻译与块级缓存、划词翻译、批量翻译标题；中文文献跳过翻译；译版 PDF 附加与语言设置 |
 | 论文概览 | 背景、问题、方法、实验、发现、结论、局限分节保存，打开即读缓存 |
 | 笔记 | Tiptap 富文本；8 种页面类型与 11 个模板；`[[双链]]`、`#标签`、`@paper` 文献引用并跳回原文；摘录卡；GB/T 7714 / APA 7 / IEEE 引用样式；笔记图谱与体检；Obsidian 兼容的 Markdown vault 双向同步。规范见 [notes-charter.md](./docs/notes-charter.md) |
-| Agent 工作区 | 文库整理（重命名、元数据、标签、分类、总结）；回答与片段级参考文献同序编号；可选「检查内容」；能力路由；文库和笔记写操作先审批 |
 | 本地 RAG | 向量 KNN + FTS5 BM25 + RRF 混合检索；索引管理面板（统计、批量建立、暂停 / 继续 / 取消）；文献列表状态角标；单篇可移出知识库 |
 | 知识图谱 | 文献、笔记、标签、分类和引用节点；语义相似、参考文献、共同作者与自定义关系；PNG / JSON 导出 |
 | 综述写作 | 大纲、分段并发写作、RAG 上下文、取消后继续、交付质量检查、Word 导出 |
@@ -95,10 +94,6 @@ PaperQuay 是本地优先、开源免费的桌面端 AI 论文工作台，面向
   <img src="./docs/assets/main.png" alt="PaperQuay literature library workspace" width="1200">
 </p>
 
-<p align="center">
-  <img src="./docs/assets/agent.png" alt="PaperQuay agent workspace" width="1200">
-</p>
-
 ---
 
 ## 下载与安装
@@ -109,7 +104,7 @@ PaperQuay 是本地优先、开源免费的桌面端 AI 论文工作台，面向
 
 ## 快速开始
 
-1. 在「设置」中配置 OpenAI 兼容接口（Base URL、API Key、模型）。翻译、概览、问答和 Agent 都需要它。
+1. 在「设置」中配置 OpenAI 兼容接口（Base URL、API Key、模型）。翻译、概览和问答都需要它。
 2. 设置文献存储目录和导入模式。
 3. 填写 MinerU API Token，用于结构化解析；需要本地 RAG 时再配置 Embedding。
 4. 拖入 PDF，确认元数据后入库，然后建分类、打标签、打开阅读。
@@ -117,20 +112,20 @@ PaperQuay 是本地优先、开源免费的桌面端 AI 论文工作台，面向
 
 完整的配置顺序和每项设置的作用见[用户手册 1.2 节](./docs/USER_MANUAL.zh-CN.md#12-首次启动建议按顺序配置)。
 
-可选外部服务：MinerU（结构解析）、OpenAI 兼容 API（概览、翻译、问答、Agent）、Embedding API（RAG 与笔记语义检索）、OpenAlex / Crossref（元数据，需联网；可选配置 OpenAlex API Key 与 `mailto`）。
+可选外部服务：MinerU（结构解析）、OpenAI 兼容 API（概览、翻译、问答）、Embedding API（RAG 与笔记语义检索）、OpenAlex / Crossref（元数据，需联网；可选配置 OpenAlex API Key 与 `mailto`）。
 
 ---
 
 ## MCP 与外部 Agent
 
-PaperQuay 内置标准 MCP stdio 服务，外部 Agent 可直接读取本地 SQLite，共 25 个工具：
+PaperQuay 内置标准 MCP stdio 服务，外部 Agent 可直接读取本地 SQLite，共 28 个工具：
 
-- **只读检索**：`search_papers`、`get_paper_details`、`search_knowledge_base`（`auto` / `hybrid` / `keyword` 三种模式）、`read_paper_content`、`search_notes`
+- **只读检索**：`search_papers`、`get_paper_details`、`search_knowledge_base`（`auto` / `hybrid` / `keyword` 三种模式）、`read_paper_content`、`read_paper_figure`、`search_notes`、`get_note`、`list_note_tags`、`list_note_folders`、`list_categories`、`preview_delete_papers`
 - **Zotero 同步**：`zotero_list_collections`、`zotero_search_items`、`zotero_preview_sync`、`paperquay_sync_from_zotero`
-- **文库写入**：`import_pdfs`、`list_categories`、`manage_category`、`set_paper_categories`、`update_paper`、`delete_papers`、`attach_translated_pdf`、`remove_translated_pdf`
-- **笔记维护**：`list_note_tags`、`list_note_folders`、`create_note`、`update_note`、`delete_note`、`create_note_folder`、`rename_note_folder`、`delete_note_folder`
+- **文库写入**：`import_pdfs`、`manage_category`、`set_paper_categories`、`update_paper`、`delete_papers`、`attach_translated_pdf`、`remove_translated_pdf`
+- **笔记维护**：`create_note`、`update_note`、`delete_note`、`create_note_folder`、`rename_note_folder`、`delete_note_folder`
 
-写工具在检测到桌面端运行时默认拒绝写入，可传 `allowWhileAppRunning: true` 覆盖；设置 `PAPERQUAY_MCP_WRITE=off` 可全局只读，`PAPERQUAY_MCP_EMBEDDING=off` 可禁用向量检索的网络请求。
+写工具在检测到桌面端运行时默认拒绝写入；传 `allowWhileAppRunning: true` 表示受检并行写，必须携带读取到的版本，冲突会拒绝而不是静默覆盖；设置 `PAPERQUAY_MCP_WRITE=off` 可全局只读，`PAPERQUAY_MCP_EMBEDDING=off` 可禁用向量检索的网络请求。
 
 **接入方式**：安装版在「设置 → MCP 服务」复制 Proma / Claude / Codex 配置片段即可。安装版用 `PaperQuay.exe` 加 `ELECTRON_RUN_AS_NODE=1` 运行 `resources/paperquay-mcp/server.cjs`，不需要另装 Node.js；开发模式用 `node bin/paperquay-mcp.cjs`。
 
@@ -150,7 +145,6 @@ Electron 主进程负责文件系统、IPC、SQLite 持久化、Zotero 导入、
 | `src/features/reader/` | 阅读器、联动阅读、概览与 AI 阅读操作 |
 | `src/features/pdf/` | PDF 渲染、覆盖层与批注 |
 | `src/features/blocks/` | MinerU 结构块渲染 |
-| `src/features/agent/` | Agent 对话、执行轨迹与工具卡片 |
 | `src/features/notes/` | Tiptap 笔记工作区与扩展 |
 | `src/services/`、`src/platform/electron/` | 渲染进程到 Electron IPC 的封装 |
 | `electron/` | 主进程、preload 与后端命令（`electron/backend/`） |
@@ -182,7 +176,7 @@ npm run electron:build   # 构建桌面安装包
 
 PaperQuay 本地优先。文献库、笔记和 RAG 索引存放在本地 SQLite 数据库中，PDF 存放在你配置的文献存储目录中。AI 与 Embedding 请求发往你自己配置的接口。
 
-`.pqbackup` 完整迁移包包含配置与 API Key、三个数据库、文献库引用的 PDF、Agent 记忆与会话、综述草稿、知识图谱关系、阅读状态与批注、笔记 vault 和 MinerU / 翻译 / 摘要缓存；日常备份不含 RAG 数据库和 MinerU 缓存，体积更小。忘记密码后无法恢复。新版不读取旧 WebDAV 备份，需要时先用 0.4.18 或更早版本恢复到本机再升级。
+`.pqbackup` 完整迁移包包含配置与 API Key、三个数据库、文献库引用的 PDF、综述草稿、知识图谱关系、阅读状态与批注、笔记 vault 和 MinerU / 翻译 / 摘要缓存；日常备份不含 RAG 数据库和 MinerU 缓存，体积更小。忘记密码后无法恢复。新版不读取旧 WebDAV 备份，需要时先用 0.4.18 或更早版本恢复到本机再升级。
 
 不要把本地数据、API Key、PDF、解析结果、数据库或备份包提交到代码仓库。安全问题请按 [SECURITY.md](./SECURITY.md) 报告。
 

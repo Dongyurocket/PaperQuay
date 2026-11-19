@@ -496,6 +496,23 @@ const TOOLS = [
     },
   },
   {
+    name: 'read_paper_figure',
+    description:
+      'Read one MinerU figure or table block by paperId + blockId (blockId like page-3-block-2 from read_paper_content / search_knowledge_base; pageIndex is a fallback). Returns caption, page, blockId, block type and, for image blocks within the size limit, one MCP image content block with base64 data. Tables return structured table text; oversized or missing images return metadata plus a limitation note.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        paperId: { type: 'string', description: 'The paper ID in PaperQuay.' },
+        blockId: { type: 'string', description: 'MinerU block ID, e.g. page-3-block-2.' },
+        pageIndex: {
+          type: 'integer',
+          description: '0-based page fallback: return the first figure/table on this page when blockId is omitted.',
+        },
+      },
+      required: ['paperId'],
+    },
+  },
+  {
     name: 'list_categories',
     description:
       'List all PaperQuay library categories (system and user) with parent/child structure and paper counts. Read-only. Use it to discover categoryId values for import_pdfs, manage_category, set_paper_categories, and the search_papers categoryId filter.',
@@ -758,6 +775,8 @@ async function handleToolCall(name, args) {
       return service.searchKnowledgeBase(args || {});
     case 'read_paper_content':
       return service.readPaperContent(args || {});
+    case 'read_paper_figure':
+      return service.readPaperFigure(args || {});
     case 'search_notes':
       return service.searchNotes(args || {});
     case 'get_note':
@@ -860,15 +879,26 @@ async function handleMessage(message) {
 
         try {
           const data = await handleToolCall(name, toolArgs || {});
-          sendResult(id, {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify(data, null, 2),
-              },
-            ],
-            isError: false,
-          });
+          if (name === 'read_paper_figure' && data && typeof data === 'object' && data.base64) {
+            const { base64, mimeType, ...metadata } = data;
+            sendResult(id, {
+              content: [
+                { type: 'text', text: JSON.stringify(metadata, null, 2) },
+                { type: 'image', data: base64, mimeType: mimeType || 'image/jpeg' },
+              ],
+              isError: false,
+            });
+          } else {
+            sendResult(id, {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(data, null, 2),
+                },
+              ],
+              isError: false,
+            });
+          }
         } catch (toolError) {
           const rawMessage = String(toolError?.message ?? '');
           const codePrefix = toolError?.code && !rawMessage.startsWith(`${toolError.code}:`)

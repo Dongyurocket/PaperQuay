@@ -169,6 +169,107 @@ function isRealManagedFilePathSync(filePath, settings = {}) {
   return false;
 }
 
+
+const MAX_FIGURE_IMAGE_BYTES = 8 * 1024 * 1024;
+
+function fnv1aHex(value) {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0');
+}
+
+function flattenContentListBlocks(parsed) {
+  const output = [];
+  if (!Array.isArray(parsed)) return output;
+
+  parsed.forEach((entry, outerIndex) => {
+    if (Array.isArray(entry)) {
+      entry.forEach((block, blockIndex) => {
+        output.push({ block, pageIndex: outerIndex, blockIndex });
+      });
+      return;
+    }
+    if (entry && typeof entry === 'object' && !('type' in entry)) {
+      Object.values(entry).forEach((block, blockIndex) => {
+        if (block && typeof block === 'object') output.push({ block, pageIndex: outerIndex, blockIndex });
+      });
+      return;
+    }
+    if (entry && typeof entry === 'object') {
+      const blockPage = Number(entry.page_idx);
+      output.push({
+        block: entry,
+        pageIndex: Number.isFinite(blockPage) && blockPage >= 0 ? blockPage : outerIndex,
+        blockIndex: 0,
+      });
+    }
+  });
+
+  return output;
+}
+
+function blockCaptionText(block) {
+  const content = block?.content && typeof block.content === 'object' ? block.content : {};
+  for (const key of ['image_caption', 'chart_caption', 'table_caption', 'caption']) {
+    const value = content[key] ?? block?.[key];
+    if (Array.isArray(value)) {
+      const text = value
+        .map((item) => (typeof item === 'string' ? item : item?.content))
+        .map((item) => (typeof item === 'string' ? item.trim() : ''))
+        .filter(Boolean)
+        .join(' ');
+      if (text) return text;
+    } else if (typeof value === 'string' && value.trim()) {
+      return value.trim();
+    }
+  }
+  return '';
+}
+
+function stripHtmlText(value) {
+  return String(value || '')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function blockAssetPath(block) {
+  const content = block?.content && typeof block.content === 'object' ? block.content : {};
+  const candidates = [
+    content.image_source?.path,
+    content.img_path,
+    content.image_path,
+    content.path,
+    block?.image_source?.path,
+    block?.img_path,
+    block?.image_path,
+    block?.path,
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.trim()) return candidate.trim();
+  }
+  return '';
+}
+
+function imageMimeType(filePath) {
+  const extension = path.extname(filePath).toLowerCase();
+  if (extension === '.png') return 'image/png';
+  if (extension === '.webp') return 'image/webp';
+  if (extension === '.gif') return 'image/gif';
+  if (extension === '.bmp') return 'image/bmp';
+  if (extension === '.tif' || extension === '.tiff') return 'image/tiff';
+  return 'image/jpeg';
+}
+
 function citationKeyFromZoteroExtra(extra) {
   const line = cleanString(extra)
     .split(/\r?\n/)
@@ -2011,6 +2112,164 @@ class PaperQuayKnowledgeService {
         updatedAt: result?.deletedAt ?? Date.now(),
       };
     }, { allowWhileAppRunning });
+  }
+
+
+  resolveMineruCacheDir() {
+    try {
+      const raw = JSON.parse(fs.readFileSync(this.appPaths.configPath, 'utf8'));
+      const configured = cleanString(raw?.settings?.mineruCacheDir);
+      if (configured) return configured;
+    } catch {}
+    return path.join(this.appPaths.dataDir, '.mineru-cache');
+  }
+
+  /** 按 paperId + blockId 读取 MinerU 图表资产；pageIndex 仅作回退定位。 */
+  readPaperFigure({ paperId = '', blockId = '', pageIndex = null } = {}) {
+    const targetId = cleanString(paperId);
+    if (!targetId) throw new Error('paperId is required');
+    const wantedBlockId = cleanString(blockId);
+    const hasPageIndex = pageIndex !== null && pageIndex !== undefined && pageIndex !== '';
+    const wantedPage = hasPageIndex && Number.isInteger(Number(pageIndex)) && Number(pageIndex) >= 0
+      ? Number(pageIndex)
+      : null;
+    if (!wantedBlockId && wantedPage === null) {
+      throw new Error('read_paper_figure requires blockId or pageIndex');
+    }
+
+    const details = this.getPaperDetails({ paperId: targetId });
+    if (!details) throw new Error(`Paper does not exist: ${targetId}`);
+
+    const cacheRoot = this.resolveMineruCacheDir();
+    const paperHash = fnv1aHex(targetId);
+    const candidateDirs = [];
+
+    try {
+      const entries = fs.readdirSync(cacheRoot, { withFileTypes: true });
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        const lowerName = entry.name.toLowerCase();
+        if (lowerName === `document-${paperHash}` || lowerName.endsWith(`-${paperHash}`)) {
+          candidateDirs.push(path.join(cacheRoot, entry.name));
+        }
+      }
+    } catch {
+      // 未配置缓存目录时继续返回元数据与限制说明。
+    }
+
+    candidateDirs.sort((left, right) => Number(right.includes(`document-${paperHash}`)) - Number(left.includes(`document-${paperHash}`)));
+
+    let located = null;
+    let cacheDir = '';
+    for (const dir of candidateDirs) {
+      const jsonPath = path.join(dir, 'content_list_v2.json');
+      let parsed;
+      try {
+        parsed = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
+      } catch {
+        continue;
+      }
+      const blocks = flattenContentListBlocks(parsed);
+      const match = blocks.find((entry) => {
+        const computedId = `page-${entry.pageIndex + 1}-block-${entry.blockIndex + 1}`;
+        if (wantedBlockId) return computedId === wantedBlockId;
+        return entry.pageIndex === wantedPage
+          && (entry.block.type === 'image' || entry.block.type === 'table');
+      });
+      if (match) {
+        located = match;
+        cacheDir = dir;
+        break;
+      }
+    }
+
+    if (!located) {
+      return {
+        paperId: targetId,
+        blockId: wantedBlockId || null,
+        pageIndex: wantedPage,
+        found: false,
+        reason: 'No matching MinerU block was found in the cached content list.',
+        title: details.title,
+      };
+    }
+
+    const type = cleanString(located.block.type) || 'text';
+    const evidenceKind = type === 'table' ? 'table' : type === 'image' || type === 'chart' ? 'image' : 'text';
+    const computedBlockId = `page-${located.pageIndex + 1}-block-${located.blockIndex + 1}`;
+    const caption = blockCaptionText(located.block);
+    const base = {
+      paperId: targetId,
+      paperTitle: details.title,
+      blockId: computedBlockId,
+      pageIndex: located.pageIndex,
+      type,
+      evidenceKind,
+      caption,
+      found: true,
+    };
+
+    if (type === 'table') {
+      const content = located.block.content && typeof located.block.content === 'object' ? located.block.content : {};
+      const tableText = stripHtmlText(content.html ?? content.table_body ?? '');
+      return {
+        ...base,
+        imageAvailable: false,
+        tableText: tableText.slice(0, 20_000),
+        note: 'Table evidence is returned as structured text; no image binary is attached.',
+      };
+    }
+
+    const assetPath = blockAssetPath(located.block);
+    if (!assetPath) {
+      return {
+        ...base,
+        imageAvailable: false,
+        note: 'This block has no MinerU image asset; only the caption and metadata are available.',
+      };
+    }
+
+    const absolutePath = path.isAbsolute(assetPath)
+      ? assetPath
+      : path.join(cacheDir, assetPath);
+    let stat;
+    try {
+      stat = fs.statSync(absolutePath);
+    } catch {
+      return {
+        ...base,
+        imageAvailable: false,
+        note: 'The cached MinerU image file is missing; only the caption and metadata are available.',
+      };
+    }
+
+    if (!stat.isFile() || stat.size <= 0) {
+      return { ...base, imageAvailable: false, note: 'The cached MinerU image file is empty or invalid.' };
+    }
+
+    if (stat.size > MAX_FIGURE_IMAGE_BYTES) {
+      return {
+        ...base,
+        imageAvailable: false,
+        imageBytes: stat.size,
+        note: `Image exceeds the ${MAX_FIGURE_IMAGE_BYTES} byte transfer limit; only metadata and caption are returned.`,
+      };
+    }
+
+    let base64;
+    try {
+      base64 = fs.readFileSync(absolutePath).toString('base64');
+    } catch {
+      return { ...base, imageAvailable: false, note: 'Failed to read the cached MinerU image file.' };
+    }
+
+    return {
+      ...base,
+      imageAvailable: true,
+      mimeType: imageMimeType(absolutePath),
+      imageBytes: stat.size,
+      base64,
+    };
   }
 
   listNoteTags({ paperId = '' } = {}) {

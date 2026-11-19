@@ -1,6 +1,6 @@
 # PaperQuay 笔记宪章（Notes Charter）
 
-> 规定笔记的页面类型、命名与链接规范、摘录卡的证据红线。内置 Agent、外部 agent（经 MCP）和用户共同遵守。修改本文件需写明理由，并同步更新编辑器模板（`src/features/notes/noteEditorUtils.ts` 的 `NOTE_TEMPLATES`）。
+> 规定笔记的页面类型、命名与链接规范、摘录卡的证据红线。外部 Agent（经 MCP）和用户共同遵守。修改本文件需写明理由，并同步更新编辑器模板（`src/features/notes/noteEditorUtils.ts` 的 `NOTE_TEMPLATES`）。
 
 ## 0. 三条根本原则
 
@@ -12,7 +12,7 @@
 
 每篇笔记最多属于一种页面类型，存于 `notes.page_kind`。类型决定模板与最低内容要求，不决定文件夹归属。
 
-`notes.type` 是来源语义（`highlight`、`area`、`standalone`、`ai-chat`），`page_kind` 是结构语义（下表 8 值），两者不可互相替代。旧数据打开时自动回填（`highlight → excerpt`、`ai-chat → qa`），其余历史笔记可为 `null`。编辑器模板、笔记检索的 `pageKind` 过滤、内置 Agent 和 MCP 写入都按 `page_kind` 校验，非法值直接拒绝。
+`notes.type` 是来源语义（`highlight`、`area`、`standalone`、`ai-chat`），`page_kind` 是结构语义（下表 8 值），两者不可互相替代。旧数据打开时自动回填（`highlight → excerpt`、`ai-chat → qa`），其余历史笔记可为 `null`。编辑器模板、笔记检索的 `pageKind` 过滤和 MCP 写入都按 `page_kind` 校验，非法值直接拒绝。
 
 | 类型 | 标识 | 用途 | 最低要求 |
 |------|------|------|----------|
@@ -23,7 +23,7 @@
 | 摘录卡 | `excerpt` | 对一段原文的提炼式摘录 | 必须有来源锚点；见 §3 红线 |
 | 索引页 | `index` | 一个主题或项目的入口与目录 | 主要由 [[双链]] 组成，少写正文 |
 | 日志页 | `log` | 按时间推进的研究日志 | 条目倒序（最新在上），每条带日期 |
-| 总览页 | `overview` | 全局学习、研究状态的总览 | 每周手工或由 agent 刷新一次 |
+| 总览页 | `overview` | 全局学习、研究状态的总览 | 每周手工或由外部 Agent 刷新一次 |
 
 ## 2. 命名与链接规范
 
@@ -43,10 +43,11 @@
 3. **提炼正文自由**：正文可以重写、重排版、重识别（入库后）。
 4. **不得无中生有**：提炼不得引入原文没有的主张；拿不准的推断标注为「我的推断」。
 
-## 4. Agent 行为准则
+## 4. 外部 Agent 与 MCP 写入边界
 
-- 内置 Agent 增删改笔记一律走 `write_notes` 工具，生成审批卡，用户确认后才落库；删除只在用户明确同意时提出。
-- 外部 agent 经 MCP 写入时走同一条笔记存储写路径：标题与正文不能同时为空，`type` 与 `pageKind` 只接受白名单值，标签最多保留前 30 个。
+- 应用内不再提供独立的 Agent 工作区或笔记 AI 润色；写作入口只保留手工编辑和阅读器问答/摘录。外部 Agent 一律经 MCP 写入同一条笔记存储路径。
+- MCP 写入要求：标题与正文不能同时为空，`type` 与 `pageKind` 只接受白名单值，标签最多保留前 30 个。桌面应用运行时写入必须携带 `expectedUpdatedAt`；冲突返回 `NOTE_CONFLICT`，不静默覆盖。
+- 含锚点的笔记更新正文时，必须保留每个 `paperquay://anchor/<id>` 链接；缺失锚点返回 `NOTE_ANCHOR_MISSING`，只允许改标题、标签、文件夹与页面类型。
 - Agent 新建页面时优先使用对应页面类型的模板（编辑器工具栏的模板菜单或 `/` 菜单）。
 - Agent 不得修改锚点与原文快照，不得把摘录卡的提炼正文当作原文引用回文献。
 

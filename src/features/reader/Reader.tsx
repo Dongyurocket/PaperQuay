@@ -1046,6 +1046,8 @@ function Reader({ workspaceActive = true }: ReaderProps) {
                         : null
                     }
                     translationTargetLanguageLabel={translationTargetLanguageLabel}
+                    notePaperCandidates={notePaperCandidates}
+                    loadLibraryPreviewBlocks={loadLibraryPreviewBlocks}
                     translationSnapshot={libraryTranslationSnapshots[item.workspaceId] ?? null}
                     libraryPreviewSummary={libraryPreviewStates[item.workspaceId]?.summary ?? null}
                     overviewPaper={item.source === 'native-library' ? allLibraryPapers.find((paper) => paper.id === item.itemKey) : undefined}

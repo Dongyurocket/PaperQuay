@@ -579,6 +579,9 @@ function DocumentReaderTab({
   );
   const qaScopeSessionIdRef = useRef(activeQaSession?.id ?? '');
   const qaScopeDocumentsRef = useRef(new Map<string, ScopedRagDocument>());
+  useEffect(() => {
+    qaScopeDocumentsRef.current.clear();
+  }, [currentDocument.workspaceId]);
 
   useEffect(() => {
     if (!activeQaSession || qaScopeSessionIdRef.current === activeQaSession.id) return;

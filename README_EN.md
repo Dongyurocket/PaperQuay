@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <strong>An open-source AI paper workspace for PDF reading, full-text translation, structured overviews, inline notes, Zotero import, Agent workflows, and local RAG.</strong>
+  <strong>An open-source AI paper workspace for PDF reading, full-text translation, structured overviews, inline notes, Zotero import, external agent access, and local RAG.</strong>
 </p>
 
 <p align="center">
@@ -47,7 +47,7 @@ PaperQuay is a local-first, free and open-source desktop AI paper workspace for 
 | Notes lose context | Notes live in another app without PDF positions | Notes, tags, wiki links, and paper references live in the local library and jump back to the source |
 | Screening many papers is slow | Upload PDFs to an LLM again and again | Generate and save structured overviews inside the library |
 | Limited model choice | Only built-in models | Any OpenAI-compatible endpoint, model, and parameters |
-| Library upkeep is manual | Rename, tag, and categorize by hand | The Agent batch-renames, fills metadata, tags, and categorizes; writes require approval first |
+| Library upkeep is manual | Rename, tag, and categorize by hand | External agents batch-fill metadata, tags, and categories through MCP with previews and read-back |
 
 <p align="center">
   <img src="./docs/assets/show.gif" alt="PaperQuay workflow demo" width="1200">
@@ -81,7 +81,6 @@ See [CHANGELOG.md](./CHANGELOG.md) for the full history and [Releases](https://g
 | Translation | Full-text translation with block-level cache, selection translation, batch title translation; Chinese papers skip translation; attach translated PDFs and set their language |
 | Paper overview | Background, problem, method, experiments, findings, conclusions, and limitations saved by section; cached overviews open instantly |
 | Notes | Tiptap rich text; 8 page kinds and 11 templates; `[[wiki links]]`, `#tags`, and `@paper` references that jump back to the source; excerpt cards; GB/T 7714 / APA 7 / IEEE citation styles; note graph and health check; two-way sync with an Obsidian-compatible Markdown vault. Conventions: [notes-charter.md](./docs/notes-charter.md) |
-| Agent workspace | Library organization (rename, metadata, tags, categories, summaries); answers number fragment-level references in order; optional "check content"; capability routing; library and note writes require approval first |
 | Local RAG | Hybrid vector KNN + FTS5 BM25 + RRF retrieval; index management panel (stats, batch build, pause / resume / cancel); status badges in the paper list; individual papers can be removed from the knowledge base |
 | Knowledge graph | Paper, note, tag, category, and citation nodes; semantic-similarity, reference, co-author, and custom relations; PNG / JSON export |
 | Survey writing | Outline, concurrent section drafting, RAG context, resume after cancel, delivery quality checks, Word export |
@@ -95,10 +94,6 @@ The [User Manual](./docs/USER_MANUAL.zh-CN.md) (Chinese) explains each feature.
   <img src="./docs/assets/main.png" alt="PaperQuay literature library workspace" width="1200">
 </p>
 
-<p align="center">
-  <img src="./docs/assets/agent.png" alt="PaperQuay agent workspace" width="1200">
-</p>
-
 ---
 
 ## Download and Install
@@ -109,7 +104,7 @@ Since 0.4.24 only Windows x64 is released, maintained, and tested. macOS, Linux,
 
 ## Quick Start
 
-1. In Settings, configure an OpenAI-compatible endpoint (Base URL, API key, model). Translation, overviews, Q&A, and the Agent need it.
+1. In Settings, configure an OpenAI-compatible endpoint (Base URL, API key, model). Translation, overviews, and Q&A need it.
 2. Set the paper storage folder and import mode.
 3. Enter a MinerU API token for structured parsing; configure an embedding endpoint if you want local RAG.
 4. Drop in PDFs, confirm metadata, then create categories, add tags, and start reading.
@@ -117,20 +112,20 @@ Since 0.4.24 only Windows x64 is released, maintained, and tested. macOS, Linux,
 
 The recommended setup order and what each setting does are in [User Manual section 1.2](./docs/USER_MANUAL.zh-CN.md#12-首次启动建议按顺序配置) (Chinese).
 
-Optional external services: MinerU (structure parsing), an OpenAI-compatible API (overviews, translation, Q&A, Agent), an embedding API (RAG and semantic note search), and OpenAlex / Crossref (metadata, needs internet; an OpenAlex API key and `mailto` address are optional).
+Optional external services: MinerU (structure parsing), an OpenAI-compatible API (overviews, translation, Q&A), an embedding API (RAG and semantic note search), and OpenAlex / Crossref (metadata, needs internet; an OpenAlex API key and `mailto` address are optional).
 
 ---
 
 ## MCP and External Agents
 
-PaperQuay ships a standard MCP stdio server that lets external agents read the local SQLite data directly. It exposes 25 tools:
+PaperQuay ships a standard MCP stdio server that lets external agents read the local SQLite data directly. It exposes 28 tools:
 
-- **Read-only search**: `search_papers`, `get_paper_details`, `search_knowledge_base` (`auto` / `hybrid` / `keyword` modes), `read_paper_content`, `search_notes`
+- **Read-only search**: `search_papers`, `get_paper_details`, `search_knowledge_base` (`auto` / `hybrid` / `keyword` modes), `read_paper_content`, `read_paper_figure`, `search_notes`, `get_note`, `list_note_tags`, `list_note_folders`, `list_categories`, `preview_delete_papers`
 - **Zotero sync**: `zotero_list_collections`, `zotero_search_items`, `zotero_preview_sync`, `paperquay_sync_from_zotero`
-- **Library writes**: `import_pdfs`, `list_categories`, `manage_category`, `set_paper_categories`, `update_paper`, `delete_papers`, `attach_translated_pdf`, `remove_translated_pdf`
-- **Note maintenance**: `list_note_tags`, `list_note_folders`, `create_note`, `update_note`, `delete_note`, `create_note_folder`, `rename_note_folder`, `delete_note_folder`
+- **Library writes**: `import_pdfs`, `manage_category`, `set_paper_categories`, `update_paper`, `delete_papers`, `attach_translated_pdf`, `remove_translated_pdf`
+- **Note maintenance**: `create_note`, `update_note`, `delete_note`, `create_note_folder`, `rename_note_folder`, `delete_note_folder`
 
-Write tools refuse to write by default while the desktop app is running; pass `allowWhileAppRunning: true` to override. Set `PAPERQUAY_MCP_WRITE=off` to make the server read-only, and `PAPERQUAY_MCP_EMBEDDING=off` to disable network requests for vector search.
+Write tools refuse to write by default while the desktop app is running; pass `allowWhileAppRunning: true` for checked parallel writes with read versions; stale versions are rejected instead of silently overwritten. Set `PAPERQUAY_MCP_WRITE=off` to make the server read-only, and `PAPERQUAY_MCP_EMBEDDING=off` to disable network requests for vector search.
 
 **Setup**: in the installed app, copy the Proma / Claude / Codex config snippet from **Settings → MCP Service**. The installed build runs `resources/paperquay-mcp/server.cjs` with `PaperQuay.exe` and `ELECTRON_RUN_AS_NODE=1`, so no separate Node.js install is needed. In development, use `node bin/paperquay-mcp.cjs`.
 
@@ -150,7 +145,6 @@ The Electron main process handles the filesystem, IPC, SQLite persistence, Zoter
 | `src/features/reader/` | Reader, linked reading, overview, and AI reading actions |
 | `src/features/pdf/` | PDF rendering, overlays, and annotations |
 | `src/features/blocks/` | MinerU block rendering |
-| `src/features/agent/` | Agent chat, execution traces, and tool cards |
 | `src/features/notes/` | Tiptap notes workspace and extensions |
 | `src/services/`, `src/platform/electron/` | Renderer wrappers around Electron IPC |
 | `electron/` | Main process, preload, and backend commands (`electron/backend/`) |
@@ -182,7 +176,7 @@ Upstream sync, release flow, and documentation conventions are in the [Developme
 
 PaperQuay is local-first. The library, notes, and RAG indexes are stored in local SQLite databases, and PDFs are stored in the paper storage folder you configure. AI and embedding requests go to the endpoints you configure.
 
-The full `.pqbackup` migration archive contains configuration and API keys, the three databases, PDFs referenced by the library, Agent memory and conversations, survey drafts, knowledge-graph relations, reading state and annotations, the notes vault, and MinerU / translation / summary caches; the smaller daily backup leaves out the RAG database and MinerU caches. A forgotten password cannot be recovered. New versions cannot read old WebDAV backups; to keep that data, restore it locally with 0.4.18 or earlier before upgrading.
+The full `.pqbackup` migration archive contains configuration and API keys, the three databases, PDFs referenced by the library, survey drafts, knowledge-graph relations, reading state and annotations, the notes vault, and MinerU / translation / summary caches; the smaller daily backup leaves out the RAG database and MinerU caches. A forgotten password cannot be recovered. New versions cannot read old WebDAV backups; to keep that data, restore it locally with 0.4.18 or earlier before upgrading.
 
 Do not commit local data, API keys, PDFs, parser output, databases, or backup archives to the repository. Report security issues as described in [SECURITY.md](./SECURITY.md).
 

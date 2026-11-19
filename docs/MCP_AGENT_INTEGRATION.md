@@ -13,7 +13,7 @@ PaperQuay 提供基于 **Model Context Protocol (MCP)** 的 stdio 服务（`pape
 
 ## 工具一览
 
-共 26 个工具：12 个只读，14 个写入。写入工具都接受 `allowWhileAppRunning`（默认 `false`）。
+共 28 个工具：14 个只读，14 个写入。写入工具都接受 `allowWhileAppRunning`（默认 `false`）。
 
 ### 只读：文献、知识库与笔记检索
 
@@ -24,10 +24,11 @@ PaperQuay 提供基于 **Model Context Protocol (MCP)** 的 stdio 服务（`pape
 | `list_categories` | 读取文库分类树 | 无 | 系统与用户分类、`parentId`、`sortOrder`、`paperCount`（含后代） |
 | `search_knowledge_base` | 检索知识库证据 | `query`（必填）、`paperId`、`limit`（默认 8，上限 30）、`mode` | 证据切片：`paperId`、`paperTitle`、`pageNumber`、`blockId`、`snippet`、`score`、`channels`；另含 `retrievalMode`、`warning` |
 | `read_paper_content` | 读取文献正文分块 | `paperId`（必填）、`pageIndex`（从 0 开始）、`limit`（默认 20，上限 100） | 按页或顺序排列的结构化正文 |
+| `read_paper_figure` | 读取单个图表块 | `paperId`（必填）、`blockId`（如 `page-3-block-2`）、`pageIndex`（回退定位） | 图注、页码、块 ID、块类型；图片块在 8 MB 内返回一个 MCP image content block，超限或缺失时只返回元数据与说明；表格返回结构化表格文本 |
 | `search_notes` | 检索笔记 | `query`、`paperId`、`pageKind`、`limit`（默认 10）、`mode` | 笔记、`retrievalMode`、每条 `channels`、降级 `warning` |
 | `get_note` | 只读获取笔记正文及来源元数据 | `noteId`、`offset`、`limit`（最多 20000 字符） | 正文片段、标签、文件夹、双链、锚点和 `nextOffset`；锚点最多 100 条 |
 | `list_note_tags` | 列出笔记标签与使用次数 | `paperId`（可选） | `tag`、`count` |
-| `list_note_folders` | 读取笔记文件夹树 | 无 | `id`、`name`、`parentId`、`sortOrder` |
+| `list_note_folders` | 读取笔记文件夹树与版本 | 无 | `id`、`name`、`parentId`、`sortOrder`、`updatedAt`（写入前传给 `expectedUpdatedAt` / `expectedFolderVersions`） |
 
 已移出本地知识库（`ragEnabled: false`）的文献不会出现在 `search_knowledge_base` 结果中，`read_paper_content` 对其返回空。
 
@@ -45,9 +46,9 @@ PaperQuay 提供基于 **Model Context Protocol (MCP)** 的 stdio 服务（`pape
 | :--- | :--- | :--- | :--- |
 | `paperquay_sync_from_zotero` | 从 Zotero 导入选定条目或分类 | `itemKeys`、`collectionKey`、`targetCategoryId`、`createCollectionCategory`（默认 `true`）、`dataDir` | 导入、重复与新建分类统计 |
 | `import_pdfs` | 批量导入本地 PDF | `paths`（必填，绝对路径）、`metadata`（按源路径键控）、`targetCategoryId` 或 `categoryName`（二选一，名称不存在时创建根分类）、`importMode`（`copy`/`move`/`keep`，默认取文库设置） | `imported`/`duplicates`/`errors`。按内容哈希查重，提供元数据时也按 DOI/标题查重；不抓取 Crossref 参考文献 |
-| `manage_category` | 创建、重命名、移动、删除分类 | `action`（必填）、`categoryId`、`name`、`parentId`、`sortOrder` | `delete` 级联删除子分类，只解绑文献，不删文献；系统分类不可修改 |
-| `set_paper_categories` | 调整文献分类 | `paperIds`（必填）、`add`/`remove`，或 `replace`（与前两者互斥） | 每篇的 `categoryIds`；任一 ID 不存在则整体不写入 |
-| `update_paper` | 更新元数据（白名单） | `paperId`（必填）＋可更新字段，见下文 | 更新后的文献摘要；未知字段报错 |
+| `manage_category` | 创建、重命名、移动、删除分类 | `action`（必填）、`categoryId`、`name`、`parentId`、`sortOrder`、`expectedUpdatedAt`、`expectedCategoryVersions` | 重命名/移动/级联删除校验版本；`delete` 级联删除子分类，只解绑文献，返回受影响分类与文献数；系统分类不可修改 |
+| `set_paper_categories` | 调整文献分类 | `paperIds`（必填）、`add`/`remove`，或 `replace`（与前两者互斥）、`expectedUpdatedAt`（数字或 `{paperId: updatedAt}`） | 每篇的 `categoryIds` 与 `updatedAt`；任一版本冲突则整批不写入 |
+| `update_paper` | 更新元数据（白名单） | `paperId`（必填）、`expectedUpdatedAt`＋可更新字段，见下文 | 更新后的文献摘要与 `updatedAt`；未知字段报错；版本冲突返回 `PAPER_CONFLICT` |
 | `preview_delete_papers` | 删除前预览（只读） | `paperIds`（必填）、`deleteFiles`、`deleteFilePaperIds` | 每篇 `updatedAt`、附件状态、将删除文件、共享文件、非受管路径；返回 `previewVersion` |
 | `delete_papers` | 批量删除文献 | `paperIds`（必填）、`deleteFiles`（默认 `false`）、`deleteFilePaperIds`、`previewVersion`（应用运行时必填） | `deleted`、`deletedFileCount`、`fileErrors`、`partialFailure`；先提交数据库再删受管且未被共用的文件 |
 | `attach_translated_pdf` | 附加翻译版 PDF | `paperId`、`sourcePath`（均必填） | 复制到翻译版 PDF 目录（默认存储目录下的 `translated-pdfs`），替换已有翻译版；返回 `attachmentId`、`storedPath`、`relativePath`、`replaced`。页数与原版不同时返回 `pageCountMismatch`，不拒绝附加 |
@@ -66,13 +67,15 @@ PaperQuay 提供基于 **Model Context Protocol (MCP)** 的 stdio 服务（`pape
 | 工具 | 说明 | 主要参数 |
 | :--- | :--- | :--- |
 | `create_note` | 新建笔记 | `title`、`content`（至少一个非空；正文为 Markdown/纯文本）、`tags`（去掉 `#`，最多 30 个）、`paperId`（缺省为全局笔记）、`type`（`standalone`/`highlight`/`area`/`ai-chat`，默认 `standalone`）、`pageKind`、`folderId` |
-| `update_note` | 局部更新 | `noteId`（必填）＋ `title`/`content`/`tags`/`pageKind`/`folderId` 至少一项；`tags` 整体替换；`pageKind` 传空串清除，`folderId` 传空串移到未分类 |
-| `delete_note` | 软删除，并移出全文索引 | `noteId`（必填） |
+| `update_note` | 局部更新（需版本） | `noteId`（必填）、`expectedUpdatedAt`＋ `title`/`content`/`tags`/`pageKind`/`folderId` 至少一项；`tags` 整体替换；`pageKind` 传空串清除，`folderId` 传空串移到未分类 |
+| `delete_note` | 软删除，并移出全文索引 | `noteId`（必填）、`expectedUpdatedAt` |
 | `create_note_folder` | 新建文件夹（可嵌套） | `name`（必填）、`parentId` |
-| `rename_note_folder` | 重命名文件夹 | `folderId`、`name`（均必填） |
-| `delete_note_folder` | 删除文件夹及子文件夹，其中笔记移到未分类 | `folderId`（必填） |
+| `rename_note_folder` | 重命名文件夹 | `folderId`、`name`（均必填）、`expectedUpdatedAt` |
+| `delete_note_folder` | 删除文件夹及子文件夹，其中笔记移到未分类；返回受影响笔记 ID 与新版本 | `folderId`（必填）、`expectedUpdatedAt`、`expectedFolderVersions` |
 
 `pageKind` 取值：`paper-card`、`concept`、`synthesis`、`qa`、`excerpt`、`index`、`log`、`overview`。
+
+笔记版本：`get_note` 返回 `updatedAt`；`update_note`、`delete_note`、`rename_note_folder` 传 `expectedUpdatedAt`。`delete_note_folder` 需目标版本与 `expectedFolderVersions`（所有受影响父子文件夹的 `updatedAt` 快照），任一变化整批拒绝并返回 `NOTE_CONFLICT`。含锚点的笔记更新正文时，新 Markdown 必须保留每个 `paperquay://anchor/<id>` 链接，否则返回 `NOTE_ANCHOR_MISSING`。
 
 笔记写入约定：
 
@@ -83,7 +86,7 @@ PaperQuay 提供基于 **Model Context Protocol (MCP)** 的 stdio 服务（`pape
 
 ## 写入安全护栏
 
-桌面应用运行时把文库保存在内存中，每次保存都会全量重写文库数据库，外部写入会被覆盖。笔记库按条写入，不会被整体覆盖，但应用内已加载的笔记列表和编辑器不会自动刷新。因此所有写入工具（含 Zotero 同步和笔记工具）遵循同一套规则：
+桌面应用与 MCP 可能同时持有同一份数据：应用内的详情表单或笔记编辑器仍有旧快照，外部写入也可能与用户正在进行的编辑冲突。因此所有写入工具（含 Zotero 同步和笔记工具）遵循同一套规则：
 
 1. 写入前先读桌面应用运行标记（开发模式同样写入），标记不存在时再检测进程：Windows 用 `tasklist` 查 `PaperQuay.exe`，其他平台用 `pgrep -x PaperQuay`。检测会排除 MCP 自身进程和命令行含 `paperquay-mcp` 的进程，所以用 `PaperQuay.exe` + `ELECTRON_RUN_AS_NODE=1` 启动 MCP 不会误判。
 2. 默认检测到应用运行时拒绝写入，数据库不变，错误提示要求先关闭应用或改为受检并行写。

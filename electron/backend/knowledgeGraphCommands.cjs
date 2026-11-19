@@ -198,10 +198,8 @@ function migrateRetiredAiRelations(appPaths) {
     return { cleaned: 0, backupPath: null };
   }
 
-  const kept = relations
-    .filter((relation) => cleanString(relation?.type) !== 'ai_suggested')
-    .map((relation) => normalizeCustomRelation(relation))
-    .filter(Boolean);
+  // 人工关系原样保留（不重新规范化，避免旧标签/说明触发长度校验丢数据）。
+  const kept = relations.filter((relation) => cleanString(relation?.type) !== 'ai_suggested');
 
   writeRelationStore(appPaths, { version: 1, relations: kept });
   console.info(`[paperquay] Removed ${retired.length} retired AI relation(s). Backup: ${backupPath}`);
