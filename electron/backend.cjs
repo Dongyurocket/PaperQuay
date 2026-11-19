@@ -12,7 +12,6 @@ const { createMineruCacheCommands } = require('./backend/mineruCacheCommands.cjs
 const { createNoteCommands } = require('./backend/noteCommands.cjs');
 const { createNoteStore } = require('./backend/noteStore.cjs');
 const { createNoteVault } = require('./backend/noteVault.cjs');
-const { createPaddleOcrCommands } = require('./backend/paddleOcrCommands.cjs');
 const { createUpdateCommands } = require('./backend/updateCommands.cjs');
 const { perfMark, perfMeasure } = require('./perfTrace.cjs');
 const {
@@ -148,7 +147,6 @@ function createBackend({ app }) {
   const commands = {
     ...fileCommands,
     ...createMineruCacheCommands(context),
-    ...createPaddleOcrCommands(context),
     ...createLibraryCommands(context),
     ...createNoteCommands(context),
     ...createAiCommands(context),

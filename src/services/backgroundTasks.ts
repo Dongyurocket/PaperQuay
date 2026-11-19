@@ -5,7 +5,7 @@ import {
 
 /**
  * 跨标签页的轻量任务表，供翻译与 RAG 索引使用。
- * 解析任务仍走 documentParseTasks，由 TaskCenter 合并展示。
+ * 解析进度由阅读器/文献库的文献级状态展示，不进入全局任务中心。
  * 不写 localStorage，进程退出后不保留。
  */
 

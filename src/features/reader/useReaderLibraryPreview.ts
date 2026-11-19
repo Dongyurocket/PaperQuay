@@ -9,8 +9,6 @@ import {
 } from 'react';
 
 import { updateLibraryPaper } from '../../services/library';
-import { getDocumentParseTask, subscribeDocumentParseTasks } from '../../services/documentParseTasks';
-import { shouldShowParseTask, toPaperParseTaskState } from './documentParseTaskState';
 import {
   summarizeDocumentOpenAICompatible,
 } from '../../services/summary';
@@ -155,49 +153,6 @@ export function useReaderLibraryPreview({
   const [libraryTranslationSnapshots, setLibraryTranslationSnapshots] = useState<
     Record<string, ReaderDocumentTranslationSnapshot>
   >({});
-
-  const [parseTaskRevision, setParseTaskRevision] = useState(0);
-  useEffect(() => subscribeDocumentParseTasks(() => setParseTaskRevision((value) => value + 1)), []);
-  const effectivePreviewStates = useMemo(() => {
-    const next = { ...libraryPreviewStates };
-    for (const item of allKnownItems) {
-      const task = getDocumentParseTask(item.workspaceId);
-      const previous = next[item.workspaceId] ?? EMPTY_LIBRARY_PREVIEW_STATE;
-      if (!shouldShowParseTask(task, previous.operation)) continue;
-      const operation = toPaperParseTaskState(task, settings.uiLanguage);
-      next[item.workspaceId] = { ...previous, operation,
-        loading: task.status === 'running', error: task.error ?? '', statusMessage: operation.message,
-        ...(task.status === 'success' ? { hasBlocks: true, blockCount: task.blockCount ?? previous.blockCount } : {}),
-      };
-    }
-    return next;
-  }, [allKnownItems, libraryPreviewStates, parseTaskRevision, settings.uiLanguage]);
-
-  const effectiveItemParseStatusMap = useMemo(() => {
-    const next = { ...itemParseStatusMap };
-    for (const item of allKnownItems) {
-      const task = getDocumentParseTask(item.workspaceId);
-      if (task?.status === 'success' && shouldShowParseTask(task, libraryPreviewStates[item.workspaceId]?.operation)) {
-        next[item.workspaceId] = true;
-      }
-    }
-    return next;
-  }, [allKnownItems, itemParseStatusMap, libraryPreviewStates, parseTaskRevision]);
-
-  const announcedParseTasksRef = useRef(new Set<string>());
-  useEffect(() => {
-    for (const item of allKnownItems) {
-      const task = getDocumentParseTask(item.workspaceId);
-      if (item.source !== 'native-library' || task?.status !== 'success'
-        || !shouldShowParseTask(task, libraryPreviewStates[item.workspaceId]?.operation)) continue;
-      const key = `${task.documentKey}::${task.taskId}`;
-      if (announcedParseTasksRef.current.has(key)) continue;
-      announcedParseTasksRef.current.add(key);
-      window.dispatchEvent(new CustomEvent('paperquay:native-mineru-status-updated', {
-        detail: { paperId: item.itemKey, mineruParsed: true },
-      }));
-    }
-  }, [allKnownItems, libraryPreviewStates, parseTaskRevision]);
 
   const notLoadedText = l('未加载', 'Not Loaded');
   const noPdfLoadedText = l('未加载 PDF', 'No PDF Loaded');
@@ -978,8 +933,8 @@ export function useReaderLibraryPreview({
     findExistingMineruJson,
     generateLibraryPreview,
     handleLibraryPreviewSync,
-    itemParseStatusMap: effectiveItemParseStatusMap,
-    libraryPreviewStates: effectivePreviewStates,
+    itemParseStatusMap,
+    libraryPreviewStates,
     libraryTranslationSnapshots,
     loadLibraryPreviewBlocks,
     saveLibraryMineruParseCache,

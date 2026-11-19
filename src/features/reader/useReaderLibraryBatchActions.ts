@@ -1,7 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { getDocumentParseTask } from '../../services/documentParseTasks';
-import { parseMineruPages, flattenMineruPages } from '../../services/mineru';
 import { runDocumentParseWithFallback } from './mineruOcrFallback';
 import { resolveSummaryOutputLanguage } from '../../services/summarySource';
 import { buildMineruCachePaths } from '../../utils/mineruCache';
@@ -27,7 +25,6 @@ interface UseReaderLibraryBatchActionsOptions
     | 'itemParseStatusMap'
     | 'l'
     | 'mineruApiToken'
-    | 'paddleOcrApiToken'
     | 'saveLibraryMineruParseCache'
     | 'setError'
     | 'setPreferencesOpen'
@@ -61,7 +58,6 @@ export function useReaderLibraryBatchActions({
   itemParseStatusMap,
   l,
   mineruApiToken,
-  paddleOcrApiToken,
   saveLibraryMineruParseCache,
   setError,
   setPreferencesOpen,
@@ -247,27 +243,13 @@ export function useReaderLibraryBatchActions({
                 : null;
               const { result, jsonText } = await runDocumentParseWithFallback({
                 documentKey: item.workspaceId,
-                provider: settings.parseProvider,
                 pdfPath,
                 extractDir: cachePaths?.directory,
                 mineruApiToken,
                 mineruApiBaseUrl: settings.mineruApiBaseUrl,
-                paddleOcrApiToken,
-                paddleOcrApiBaseUrl: settings.paddleOcrApiBaseUrl,
                 timeoutSecs: 900,
                 pollIntervalSecs: 5,
               });
-
-              if (settings.parseProvider === 'paddleocr-vl') {
-                if (getDocumentParseTask(item.workspaceId)?.taskId === result.taskId) {
-                  void indexLibraryPaperMineruSource({ item, settings, embeddingApiKey,
-                    blocks: flattenMineruPages(parseMineruPages(jsonText)),
-                    mineruPath: result.contentJsonPath ?? '', markdownText: result.markdownText, l }).catch(() => {});
-                }
-                parsedCount += 1;
-                successCount += 1;
-                continue;
-              }
 
               if (!jsonText?.trim()) {
                 throw new Error(
@@ -389,7 +371,6 @@ export function useReaderLibraryBatchActions({
       findExistingMineruJson,
       l,
       mineruApiToken,
-      paddleOcrApiToken,
       saveLibraryMineruParseCache,
       setError,
       setPreferencesOpen,
@@ -403,8 +384,6 @@ export function useReaderLibraryBatchActions({
       settings.localRagEnabled,
       settings.mineruCacheDir,
       settings.mineruApiBaseUrl,
-      settings.paddleOcrApiBaseUrl,
-      settings.parseProvider,
       settings.ragSourceMode,
       syncLibraryParsedState,
     ],
@@ -759,10 +738,7 @@ export function useReaderLibraryBatchActions({
     autoMineruAttemptedRef.current.clear();
   }, [
     mineruApiToken,
-    paddleOcrApiToken,
     settings.mineruApiBaseUrl,
-    settings.paddleOcrApiBaseUrl,
-    settings.parseProvider,
     settings.autoLoadSiblingJson,
     settings.autoMineruParse,
     settings.mineruCacheDir,

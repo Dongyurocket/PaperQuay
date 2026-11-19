@@ -1,12 +1,9 @@
 import {
   runMineruCloudParse,
-  runPaddleOcrCloudParse,
   type MineruCloudParseOptions,
   type MineruCloudParseResult,
-  type PaddleOcrCloudParseOptions,
 } from '../../services/desktop';
 import { parseMineruPages } from '../../services/mineru';
-import type { DocumentParseProvider } from '../../types/reader';
 
 export interface MineruParseWithFallbackResult {
   result: MineruCloudParseResult;
@@ -15,37 +12,24 @@ export interface MineruParseWithFallbackResult {
   usedOcr: boolean;
 }
 
-/**
- * 一次结构识别请求。两个引擎共用该结构，差异只体现在凭据与 base URL，
- * 调用方（阅读器 / 文献库 / 批量任务）不需要区分 provider。
- */
-export interface DocumentParseRequest {
+/** 当前唯一的结构识别引擎标签。缓存契约统一为 MinerU。 */
+export const PARSE_ENGINE_LABEL = 'MinerU';
+
+/** 缺少 MinerU 凭据时返回提示文案，否则返回 null。 */
+export function getMissingMineruCredentialMessage(mineruApiToken: string): string | null {
+  return mineruApiToken.trim() ? null : '缺少 MinerU API Token';
+}
+
+/** 阅读器、文献库与批量任务共用的 MinerU 云端请求参数。 */
+export interface MineruParseRequest {
   reparse?: boolean;
   documentKey?: string;
-  provider: DocumentParseProvider;
   pdfPath: string;
   extractDir?: string;
   mineruApiToken: string;
   mineruApiBaseUrl?: string;
-  paddleOcrApiToken: string;
-  paddleOcrApiBaseUrl?: string;
   timeoutSecs?: number;
   pollIntervalSecs?: number;
-}
-
-export function getParseProviderLabel(provider: DocumentParseProvider): string {
-  return provider === 'paddleocr-vl' ? 'PaddleOCR-VL' : 'MinerU';
-}
-
-/** 当前 provider 缺少必填凭据时返回提示文案，否则返回 null。 */
-export function getMissingParseCredentialMessage(
-  request: Pick<DocumentParseRequest, 'provider' | 'mineruApiToken' | 'paddleOcrApiToken'>,
-): string | null {
-  if (request.provider === 'paddleocr-vl') {
-    return request.paddleOcrApiToken.trim() ? null : '缺少 PaddleOCR-VL API Token';
-  }
-
-  return request.mineruApiToken.trim() ? null : '缺少 MinerU API Token';
 }
 
 function getMineruJsonText(result: MineruCloudParseResult): string {
@@ -117,43 +101,14 @@ export async function runMineruCloudParseWithOcrFallback(
 }
 
 /**
- * 按 provider 分发一次结构识别。
+ * 按统一 MinerU 参数执行一次结构识别。
  *
- * PaddleOCR-VL 没有 MinerU 的 isOcr 二次重试语义（云端本身就是 OCR/VL 链路），
- * 因此只在 MinerU 分支保留「空结果 → 切 OCR 重试」的兜底。
+ * 保留「空结果 / 结构不可用 → 切 OCR 重试」的兜底，这是唯一的解析与 OCR 降级入口。
  */
 export async function runDocumentParseWithFallback(
-  request: DocumentParseRequest,
+  request: MineruParseRequest,
   onRetry?: () => void,
 ): Promise<MineruParseWithFallbackResult> {
-  if (request.provider === 'paddleocr-vl') {
-    const options: PaddleOcrCloudParseOptions = {
-      documentKey: request.documentKey,
-      reparse: request.reparse,
-      apiToken: request.paddleOcrApiToken.trim(),
-      apiBaseUrl: request.paddleOcrApiBaseUrl,
-      pdfPath: request.pdfPath,
-      extractDir: request.extractDir,
-      timeoutSecs: request.timeoutSecs,
-      pollIntervalSecs: request.pollIntervalSecs,
-    };
-
-    const result = await runPaddleOcrCloudParse(options);
-    const jsonText = getMineruJsonText(result);
-
-    if (!jsonText.trim()) {
-      throw createEmptyResultError();
-    }
-
-    const blockCount = countParsedBlocks(jsonText);
-
-    if (blockCount <= 0) {
-      throw createEmptyResultError();
-    }
-
-    return { result, jsonText, blockCount, usedOcr: false };
-  }
-
   return runMineruCloudParseWithOcrFallback(
     {
       apiToken: request.mineruApiToken.trim(),

@@ -19,7 +19,6 @@ import {
   type ProgressPublishGate,
 } from '../src/services/backgroundTasks.ts';
 import { buildTaskCenterEntries } from '../src/ui/taskCenterEntries.ts';
-import type { DocumentParseTask } from '../src/services/documentParseTasks.ts';
 
 describe('background tasks', { concurrency: 1 }, () => {
   beforeEach(() => {
@@ -233,26 +232,10 @@ describe('background tasks', { concurrency: 1 }, () => {
     assert.deepEqual(listBackgroundTasks().map((task) => task.id), ['translate:live']);
   });
 
-  test('task center merges both sources by updatedAt and hides success', () => {
-    const parseTask: DocumentParseTask = {
-      taskId: 'parse-1',
-      documentKey: 'doc-1',
-      revision: 1,
-      startedAt: 10,
-      updatedAt: 50,
-      status: 'running',
-      stage: 'recognizing',
-      completed: 1,
-      total: 2,
-    };
+  test('task center lists running background tasks by updatedAt and hides success', () => {
     const entries = buildTaskCenterEntries({
       now: 1_000,
       english: false,
-      parseTasks: [
-        parseTask,
-        { ...parseTask, documentKey: 'old-error', status: 'error', updatedAt: 1_000 - 60_000, error: 'old' },
-        { ...parseTask, documentKey: 'done', status: 'success', updatedAt: 900 },
-      ],
       backgroundTasks: [
         {
           id: 'translate:doc-2',
@@ -289,9 +272,8 @@ describe('background tasks', { concurrency: 1 }, () => {
 
     assert.deepEqual(entries.map((entry) => `${entry.kind}:${entry.percent}:${entry.kindLabel}`), [
       'translate:50:翻译',
-      'parse:50:解析',
       'rag:null:索引',
     ]);
-    assert.equal(entries[2]?.detail, 'Indexed paper');
+    assert.equal(entries[1]?.detail, 'Indexed paper');
   });
 });

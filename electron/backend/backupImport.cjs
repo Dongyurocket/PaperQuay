@@ -361,6 +361,48 @@ function finalizeRendererPayload(payload, reboundPaths) {
   };
 }
 
+
+/**
+ * PaddleOCR-VL 已退役：旧备份的解析引擎配置统一归一到 MinerU。
+ *
+ * 只规范化暂存副本，原始 .pqbackup 文件保持原样；重复执行无副作用。
+ */
+function stripRetiredParserSettings(config, rendererState) {
+  if (isRecord(config?.settings)) {
+    delete config.settings.parseProvider;
+    delete config.settings.paddleOcrApiBaseUrl;
+  }
+
+  if (isRecord(config?.secrets)) {
+    delete config.secrets.paddleOcrApiToken;
+  }
+
+  if (!isRecord(rendererState)) return;
+
+  for (const key of ['paper-reader-settings-v3']) {
+    const raw = rendererState[key];
+
+    if (typeof raw !== 'string' || !raw.trim()) continue;
+
+    try {
+      const parsed = JSON.parse(raw);
+
+      if (!isRecord(parsed)) continue;
+      delete parsed.parseProvider;
+      delete parsed.paddleOcrApiBaseUrl;
+      rendererState[key] = JSON.stringify(parsed);
+    } catch {
+      // 保留无法解析的旧值，由渲染端加载时兜底。
+    }
+  }
+
+  const secrets = rendererState['paper-reader-secrets-v1'];
+
+  if (isRecord(secrets)) {
+    delete secrets.paddleOcrApiToken;
+  }
+}
+
 function buildRendererExactPathMap(state, rootMap, existingPathMap = {}) {
   const pathMap = {};
   const history = readJsonValue(state?.['paper-reader-paper-history-v1']);
@@ -816,6 +858,7 @@ async function stageBackupImport(context, input, dependencies) {
       hasMineruCache: manifest.entries.some((entry) => entry.kind === 'mineru'),
     });
     warnings.push(...remapped.warnings);
+    stripRetiredParserSettings(null, remapped.state);
     if (fs.existsSync(packageRendererPath)) await writeJsonAtomic(packageRendererPath, remapped.state);
     config.version = Number(config.version) || 1;
     config.zoteroLocalDataDir = '';
@@ -827,6 +870,7 @@ async function stageBackupImport(context, input, dependencies) {
       autoGenerateSummary: false,
       notesVaultAutoSyncEnabled: false,
     };
+    stripRetiredParserSettings(config, remapped.state);
     if (fs.existsSync(settingsPath)) await writeJsonAtomic(settingsPath, config);
     const dataStat = await fsp.stat(stagingDataDir);
     const oldDataBytes = spaceEstimate.oldDataBytes;
@@ -1524,5 +1568,6 @@ module.exports = {
   prepareRollback,
   repairRestoredBackupPaths,
   stageBackupImport,
+  stripRetiredParserSettings,
   validPending,
 };

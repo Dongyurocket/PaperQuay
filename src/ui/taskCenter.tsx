@@ -8,18 +8,14 @@ import {
   subscribeBackgroundTasks,
   type BackgroundTask,
 } from '../services/backgroundTasks';
-import {
-  listDocumentParseTasks,
-  subscribeDocumentParseTasks,
-} from '../services/documentParseTasks';
 import { toast } from './toast';
 import { buildTaskCenterEntries } from './taskCenterEntries';
 
 /**
  * 全局长任务条。
  *
- * 解析走 documentParseTasks。翻译与 RAG 走 backgroundTasks。
- * 两者都与阅读标签页解耦，切到文库或笔记后仍能看到。
+ * 翻译与 RAG 走 backgroundTasks，与阅读标签页解耦，切到文库或笔记后仍能看到。
+ * 解析进度由阅读器与文献库的文献级状态展示，不再进入全局任务中心。
  * 位置在左下角，避免挡住右下角 toast。
  *
  * 只展示运行中和 60 秒内的失败。成功不占位，由这里各报一次 toast。
@@ -49,8 +45,6 @@ export function TaskCenter() {
   const english = l(false, true);
   const [revision, setRevision] = useState(0);
   const [collapsed, setCollapsed] = useState(false);
-
-  useEffect(() => subscribeDocumentParseTasks(() => setRevision((value) => value + 1)), []);
 
   useEffect(() => {
     const announced = new Set<string>();
@@ -99,7 +93,6 @@ export function TaskCenter() {
     void revision;
 
     return buildTaskCenterEntries({
-      parseTasks: listDocumentParseTasks(),
       backgroundTasks: listBackgroundTasks(),
       now: Date.now(),
       english,

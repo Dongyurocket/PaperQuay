@@ -20,7 +20,7 @@ const path = require('node:path');
 /** 可作为图片资源引用的文件扩展名。 */
 const IMAGE_FILE_PATTERN = /\.(?:jpe?g|jpe|png|webp|bmp|gif|tiff?)$/i;
 
-/** 承载资源路径的字段名（MinerU v1 / v2 及 PaddleOCR 适配层统一口径）。 */
+/** 承载资源路径的字段名（MinerU v1 / v2 统一口径）。 */
 const ASSET_PATH_KEYS = new Set(['img_path', 'image_path', 'path', 'image_source']);
 
 /**

@@ -193,9 +193,7 @@ export const DEFAULT_SETTINGS: ReaderSettings = {
   showBlockMeta: true,
   hidePageDecorationsInBlockView: false,
   softPageShadow: true,
-  parseProvider: 'mineru',
   mineruApiBaseUrl: '',
-  paddleOcrApiBaseUrl: '',
   mineruCacheDir: '',
   remotePdfDownloadDir: '',
   translationBatchSize: 10,
@@ -242,7 +240,6 @@ export const DEFAULT_QA_PRESET: QaModelPreset = {
 
 export const DEFAULT_SECRETS: ReaderSecrets = {
   mineruApiToken: '',
-  paddleOcrApiToken: '',
   translationApiKey: '',
   summaryApiKey: '',
   embeddingApiKey: '',
@@ -777,13 +774,37 @@ function normalizeRagSourceMode(value: unknown): RagSourceMode {
     : DEFAULT_SETTINGS.ragSourceMode;
 }
 
+/**
+ * 已退役的解析引擎字段（PaddleOCR-VL）。
+ *
+ * 旧配置可能仍带这些键；读取时忽略，写回前剥离，保证升级后的配置文件
+ * 不再产生已退役字段，且重复执行无副作用。
+ */
+const RETIRED_READER_SETTING_KEYS = ['parseProvider', 'paddleOcrApiBaseUrl'] as const;
+const RETIRED_READER_SECRET_KEYS = ['paddleOcrApiToken'] as const;
+
+export function stripRetiredReaderFields(
+  settings: Partial<ReaderSettings> | ReaderSettings,
+  secrets?: Partial<ReaderSecrets> | ReaderSecrets | null,
+): void {
+  for (const key of RETIRED_READER_SETTING_KEYS) {
+    delete (settings as Record<string, unknown>)[key];
+  }
+
+  if (!secrets) return;
+
+  for (const key of RETIRED_READER_SECRET_KEYS) {
+    delete (secrets as Record<string, unknown>)[key];
+  }
+}
+
 export function normalizeReaderSettings(value?: Partial<ReaderSettings> | null): ReaderSettings {
   const merged = {
     ...DEFAULT_SETTINGS,
     ...(value ?? {}),
   };
 
-  return {
+  const normalized: ReaderSettings = {
     ...merged,
     uiLanguage: merged.uiLanguage === 'en-US' ? 'en-US' : 'zh-CN',
     localRagEnabled: merged.localRagEnabled !== false,
@@ -795,9 +816,7 @@ export function normalizeReaderSettings(value?: Partial<ReaderSettings> | null):
     enableSelectionTranslation: merged.enableSelectionTranslation !== false,
     highlightSelectionTranslation: merged.highlightSelectionTranslation !== false,
     enablePdfParagraphTranslationPopover: merged.enablePdfParagraphTranslationPopover !== false,
-    parseProvider: merged.parseProvider === 'paddleocr-vl' ? 'paddleocr-vl' : 'mineru',
     mineruApiBaseUrl: merged.mineruApiBaseUrl?.trim() ?? '',
-    paddleOcrApiBaseUrl: merged.paddleOcrApiBaseUrl?.trim() ?? '',
     translationBatchSize: clampTranslationBatchSize(merged.translationBatchSize),
     translationConcurrency: clampTranslationConcurrency(merged.translationConcurrency),
     translationRequestsPerMinute: clampTranslationRequestsPerMinute(
@@ -831,6 +850,8 @@ export function normalizeReaderSettings(value?: Partial<ReaderSettings> | null):
       Math.max(15, Math.trunc(Number(merged.notesVaultAutoSyncIntervalMinutes)) || 30),
     ),
   };
+  stripRetiredReaderFields(normalized);
+  return normalized;
 }
 
 export function loadSettings(): ReaderSettings {
@@ -853,14 +874,17 @@ export function loadSecrets(): ReaderSecrets {
       return DEFAULT_SECRETS;
     }
 
-    const parsed = JSON.parse(storedSecrets) as Partial<ReaderSecrets>;
+    const parsed = JSON.parse(storedSecrets) as Partial<ReaderSecrets> &
+      Record<string, unknown>;
 
-    return {
+    const nextSecrets = {
       ...DEFAULT_SECRETS,
       ...parsed,
       embeddingApiKey: parsed.embeddingApiKey?.trim() ?? '',
       qaModelPresets: normalizeQaModelPresets(parsed.qaModelPresets),
-    };
+    } as ReaderSecrets;
+    stripRetiredReaderFields({}, nextSecrets);
+    return nextSecrets;
   } catch {
     return DEFAULT_SECRETS;
   }
@@ -885,6 +909,7 @@ export function mergeReaderConfigWithDefaults(
       value?.secrets?.qaModelPresets ?? fallbackSecrets.qaModelPresets,
     ),
   };
+  stripRetiredReaderFields(nextSettings, nextSecrets);
 
   if (
     (!nextSettings.embeddingBaseUrl.trim() ||

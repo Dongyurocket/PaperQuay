@@ -1,5 +1,3 @@
-import { getDocumentParseTask } from '../../services/documentParseTasks';
-import { parseMineruPages, flattenMineruPages } from '../../services/mineru';
 import {
   useCallback,
   useEffect,
@@ -64,8 +62,8 @@ import {
   writeLibraryTranslationCache,
 } from './readerLibraryPreview';
 import {
-  getMissingParseCredentialMessage,
-  getParseProviderLabel,
+  getMissingMineruCredentialMessage,
+  PARSE_ENGINE_LABEL,
   runDocumentParseWithFallback,
 } from './mineruOcrFallback';
 import {
@@ -129,7 +127,6 @@ export function useReaderLibraryActions({
   libraryTranslationSnapshots,
   loadLibraryPreviewBlocks,
   mineruApiToken,
-  paddleOcrApiToken,
   settings,
   setError,
   setLibraryPreviewStates,
@@ -265,12 +262,9 @@ export function useReaderLibraryActions({
 
   const runLibraryItemMineruParse = useCallback(
     async (item: WorkspaceItem, options?: { force?: boolean }) => {
-      const initialParseTask = getDocumentParseTask(item.workspaceId);
-      if (initialParseTask?.status === 'running') return;
       const force = options?.force === true;
       const pdfPath = item.localPdfPath?.trim() ?? '';
-      const provider = settings.parseProvider;
-      const providerLabel = getParseProviderLabel(provider);
+      const providerLabel = PARSE_ENGINE_LABEL;
 
       if (!pdfPath) {
         const message = l('这篇文献缺少可解析的 PDF 文件', 'This paper has no PDF file to parse');
@@ -352,11 +346,7 @@ export function useReaderLibraryActions({
           return;
         }
 
-        const missingCredential = getMissingParseCredentialMessage({
-          provider,
-          mineruApiToken,
-          paddleOcrApiToken,
-        });
+        const missingCredential = getMissingMineruCredentialMessage(mineruApiToken);
 
         if (missingCredential) {
           setPreferredPreferencesSection('mineru');
@@ -370,7 +360,7 @@ export function useReaderLibraryActions({
 
         // 重新识别前先隔离旧产物：译文按 blockId 索引，顺序变化后会静默错配。
         let reparsePrepared = false;
-        if (provider !== 'paddleocr-vl' && force && cachePaths) {
+        if (force && cachePaths) {
           await prepareMineruReparse(cachePaths.directory);
           reparsePrepared = true;
         }
@@ -400,13 +390,10 @@ export function useReaderLibraryActions({
         const parseResult = await runDocumentParseWithFallback({
           documentKey: item.workspaceId,
           reparse: force,
-          provider,
           pdfPath,
           extractDir: cachePaths?.directory,
           mineruApiToken,
           mineruApiBaseUrl: settings.mineruApiBaseUrl,
-          paddleOcrApiToken,
-          paddleOcrApiBaseUrl: settings.paddleOcrApiBaseUrl,
           timeoutSecs: 900,
           pollIntervalSecs: 5,
         }, () => {
@@ -426,14 +413,6 @@ export function useReaderLibraryActions({
             },
           );
         });
-        if (provider === 'paddleocr-vl') {
-          if (getDocumentParseTask(item.workspaceId)?.taskId === parseResult.result.taskId) {
-            const pages = parseMineruPages(parseResult.jsonText);
-            scheduleLibraryItemRagIndexing(item, { blocks: flattenMineruPages(pages) },
-              parseResult.result.contentJsonPath ?? '', parseResult.result.markdownText);
-          }
-          return;
-        }
         const { result, jsonText, usedOcr } = parseResult;
 
         if (!jsonText?.trim()) {
@@ -513,9 +492,6 @@ export function useReaderLibraryActions({
           reparsePrepared = false;
         }
       } catch (nextError) {
-        const latestParseTask = getDocumentParseTask(item.workspaceId);
-        if (provider === 'paddleocr-vl'
-          && (latestParseTask?.status === 'running' || latestParseTask !== initialParseTask)) return;
         const message =
           nextError instanceof Error
             ? nextError.message
@@ -539,7 +515,6 @@ export function useReaderLibraryActions({
       findExistingMineruJson,
       l,
       mineruApiToken,
-      paddleOcrApiToken,
       saveLibraryMineruParseCache,
       scheduleLibraryItemRagIndexing,
       setError,
@@ -549,8 +524,6 @@ export function useReaderLibraryActions({
       setStatusMessage,
       settings.mineruCacheDir,
       settings.mineruApiBaseUrl,
-      settings.paddleOcrApiBaseUrl,
-      settings.parseProvider,
       syncLibraryParsedState,
       updateLibraryPreviewOperation,
     ],
@@ -884,7 +857,6 @@ export function useReaderLibraryActions({
     itemParseStatusMap,
     l,
     mineruApiToken,
-    paddleOcrApiToken,
     saveLibraryMineruParseCache,
     setError,
     setPreferencesOpen,

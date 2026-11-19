@@ -188,7 +188,6 @@ function Reader({ workspaceActive = true }: ReaderProps) {
 
   const {
     mineruApiToken,
-    paddleOcrApiToken,
     translationApiKey,
     summaryApiKey,
     embeddingApiKey,
@@ -465,7 +464,6 @@ function Reader({ workspaceActive = true }: ReaderProps) {
     loadLibraryPreviewBlocks,
     libraryTranslationSnapshots,
     mineruApiToken,
-    paddleOcrApiToken,
     settings,
     setError,
     setLibraryPreviewStates,
@@ -1100,7 +1098,6 @@ function Reader({ workspaceActive = true }: ReaderProps) {
           librarySettings={librarySettings}
           zoteroLocalDataDir={zoteroLocalDataDir}
           mineruApiToken={mineruApiToken}
-          paddleOcrApiToken={paddleOcrApiToken}
           translationApiKey={translationApiKey}
           summaryApiKey={summaryApiKey}
           embeddingApiKey={embeddingApiKey}
@@ -1116,7 +1113,6 @@ function Reader({ workspaceActive = true }: ReaderProps) {
           onSelectTranslatedPdfStorageDir={() => void handleSelectTranslatedPdfStorageDir()}
           onZoteroLocalDataDirChange={setZoteroLocalDataDir}
           onMineruApiTokenChange={(value) => updateReaderSecret('mineruApiToken', value)}
-          onPaddleOcrApiTokenChange={(value) => updateReaderSecret('paddleOcrApiToken', value)}
           onRepairMineruCacheImages={() => void handleRepairMineruCacheImages()}
           onTranslationApiKeyChange={(value) => updateReaderSecret('translationApiKey', value)}
           onSummaryApiKeyChange={(value) => updateReaderSecret('summaryApiKey', value)}

@@ -76,7 +76,7 @@ See [CHANGELOG.md](./CHANGELOG.md) for the full history and [Releases](https://g
 | Local library | SQLite stores papers, authors, categories, tags, attachments, notes, annotations, and settings; import PDFs by drag and drop or file picker and confirm metadata first; copy / move / keep-in-place import modes and naming rules; multi-select batch actions; composable filters and sorting |
 | Metadata | Lookup by DOI or title, OpenAlex first with Crossref fallback; an LLM extracts metadata from the first page of Chinese papers that are not found; paper language, citation key, author affiliation and ORCID; BibTeX export |
 | Categories and tags | Nested categories, drag-and-drop ordering, tags, favorites |
-| Document parsing | MinerU cloud parsing (multi-key rotation and failover; very long documents are split and merged automatically); switchable PaddleOCR-VL 1.6; forced re-parsing; self-healing image references in the parse cache |
+| Document parsing | MinerU cloud parsing (multi-key rotation and failover; very long documents are split and merged automatically; automatic OCR retry when non-OCR parsing returns no usable structure); forced re-parsing; self-healing image references in the parse cache |
 | Reader | Linked PDF and block views, annotations, reading heatmap and reading-time chart, windowed rendering for long documents, immersive mode; typography cleanup (ligatures, fake superscripts, drop caps, glossaries); BBox raw-slice fallback and per-block AI re-parsing |
 | Translation | Full-text translation with block-level cache, selection translation, batch title translation; Chinese papers skip translation; attach translated PDFs and set their language |
 | Paper overview | Background, problem, method, experiments, findings, conclusions, and limitations saved by section; cached overviews open instantly |
@@ -117,7 +117,7 @@ Since 0.4.24 only Windows x64 is released, maintained, and tested. macOS, Linux,
 
 The recommended setup order and what each setting does are in [User Manual section 1.2](./docs/USER_MANUAL.zh-CN.md#12-首次启动建议按顺序配置) (Chinese).
 
-Optional external services: MinerU or PaddleOCR-VL (structure parsing), an OpenAI-compatible API (overviews, translation, Q&A, Agent), an embedding API (RAG and semantic note search), and OpenAlex / Crossref (metadata, needs internet; an OpenAlex API key and `mailto` address are optional).
+Optional external services: MinerU (structure parsing), an OpenAI-compatible API (overviews, translation, Q&A, Agent), an embedding API (RAG and semantic note search), and OpenAlex / Crossref (metadata, needs internet; an OpenAlex API key and `mailto` address are optional).
 
 ---
 

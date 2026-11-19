@@ -65,7 +65,6 @@ export interface UseReaderLibraryActionsOptions {
   librarySettings: LibrarySettings | null;
   loadLibraryPreviewBlocks: (item: WorkspaceItem) => Promise<LibraryPreviewLoadResult>;
   mineruApiToken: string;
-  paddleOcrApiToken: string;
   settings: ReaderSettings;
   setError: (value: string) => void;
   setLibraryPreviewStates: Dispatch<

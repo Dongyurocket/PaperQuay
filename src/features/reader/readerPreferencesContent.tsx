@@ -58,7 +58,6 @@ interface ReaderPreferencesContentProps
     | 'librarySettings'
     | 'zoteroLocalDataDir'
     | 'mineruApiToken'
-    | 'paddleOcrApiToken'
     | 'embeddingApiKey'
     | 'qaModelPresets'
     | 'zoteroApiKey'
@@ -71,7 +70,6 @@ interface ReaderPreferencesContentProps
     | 'onSelectTranslatedPdfStorageDir'
     | 'onZoteroLocalDataDirChange'
     | 'onMineruApiTokenChange'
-    | 'onPaddleOcrApiTokenChange'
     | 'onRepairMineruCacheImages'
     | 'onEmbeddingApiKeyChange'
     | 'onZoteroApiKeyChange'
@@ -231,7 +229,6 @@ export function ReaderPreferencesContent({
   librarySettings,
   zoteroLocalDataDir,
   mineruApiToken,
-  paddleOcrApiToken,
   embeddingApiKey,
   qaModelPresets,
   zoteroApiKey,
@@ -244,7 +241,6 @@ export function ReaderPreferencesContent({
   onSelectTranslatedPdfStorageDir,
   onZoteroLocalDataDirChange,
   onMineruApiTokenChange,
-  onPaddleOcrApiTokenChange,
   onRepairMineruCacheImages,
   onEmbeddingApiKeyChange,
   onZoteroApiKeyChange,
@@ -800,70 +796,6 @@ export function ReaderPreferencesContent({
 
       {activeSection === 'mineru' ? (
         <>
-          <SettingsField
-            label={l('结构识别引擎', 'Structure Recognition Engine')}
-            description={l(
-              '选择把 PDF 解析成结构块的云端引擎。两者产出同一套缓存格式，阅读器、翻译与知识库行为一致；切换后对未解析文献立即生效。',
-              'Choose the cloud engine that turns PDFs into structured blocks. Both produce the same cache format, so the reader, translation, and knowledge base behave identically. The change applies to not-yet-parsed papers.',
-            )}
-          >
-            <SettingsSelect
-              value={settings.parseProvider}
-              onChange={(event) =>
-                onSettingChange('parseProvider', event.target.value === 'paddleocr-vl' ? 'paddleocr-vl' : 'mineru')
-              }
-            >
-              <option value="mineru">MinerU（content_list_v2，支持多 Key 轮换）</option>
-              <option value="paddleocr-vl">PaddleOCR-VL 1.6（云端异步 Jobs API）</option>
-            </SettingsSelect>
-          </SettingsField>
-
-          {settings.parseProvider === 'paddleocr-vl' ? (
-            <>
-              <SettingsField
-                label="PaddleOCR-VL API Token"
-                description={
-                  <span>
-                    {l(
-                      '用于 PaddleOCR-VL 云端异步解析。PDF 会以 multipart 上传到该服务，请确认数据外发范围可接受。可前往 ',
-                      'Used for PaddleOCR-VL cloud async parsing. The PDF is uploaded to this service via multipart; confirm the data-egress scope is acceptable. Visit ',
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => void openExternalUrl('https://aistudio.baidu.com/paddleocr/task')}
-                      className="font-semibold text-[var(--pq-info)] underline decoration-[color-mix(in_srgb,var(--pq-info)_55%,transparent)] underline-offset-2 transition hover:text-[var(--pq-info)] "
-                    >
-                      https://aistudio.baidu.com/paddleocr/task
-                    </button>
-                    {l(' 获取 Token。', ' to get a token.')}
-                  </span>
-                }
-              >
-                <SettingsInput
-                  type="password"
-                  value={paddleOcrApiToken}
-                  onChange={(event) => onPaddleOcrApiTokenChange(event.target.value)}
-                  placeholder="PaddleOCR-VL access token"
-                  className="font-mono text-xs"
-                />
-              </SettingsField>
-
-              <SettingsField
-                label={l('PaddleOCR-VL API Base URL', 'PaddleOCR-VL API Base URL')}
-                description={l(
-                  '留空时使用官方地址 https://paddleocr.aistudio-app.com。',
-                  'Leave empty to use the official https://paddleocr.aistudio-app.com endpoint.',
-                )}
-              >
-                <SettingsInput
-                  value={settings.paddleOcrApiBaseUrl}
-                  onChange={(event) => onSettingChange('paddleOcrApiBaseUrl', event.target.value)}
-                  placeholder="https://paddleocr.aistudio-app.com"
-                />
-              </SettingsField>
-            </>
-          ) : null}
-
           <SettingsField
             label="MinerU API Token"
             description={

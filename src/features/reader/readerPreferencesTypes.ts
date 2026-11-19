@@ -32,7 +32,6 @@ export interface ReaderPreferencesWindowProps {
   librarySettings: LibrarySettings | null;
   zoteroLocalDataDir: string;
   mineruApiToken: string;
-  paddleOcrApiToken: string;
   translationApiKey: string;
   summaryApiKey: string;
   embeddingApiKey: string;
@@ -48,7 +47,6 @@ export interface ReaderPreferencesWindowProps {
   onSelectTranslatedPdfStorageDir: () => void;
   onZoteroLocalDataDirChange: (value: string) => void;
   onMineruApiTokenChange: (value: string) => void;
-  onPaddleOcrApiTokenChange: (value: string) => void;
   onRepairMineruCacheImages?: (() => void) | null;
   onTranslationApiKeyChange: (value: string) => void;
   onSummaryApiKeyChange: (value: string) => void;

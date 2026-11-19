@@ -4,8 +4,6 @@ import ReaderWorkspace from './ReaderWorkspace';
 import { shouldReadOverviewCache } from './overview/overviewTaskState';
 import { createOverviewCacheWriter } from './overview/overviewCacheWrites';
 import { useLibraryReadingTracking } from './useLibraryReadingTracking';
-import { getDocumentParseTask, subscribeDocumentParseTasks } from '../../services/documentParseTasks';
-import { shouldShowParseTask, toPaperParseTaskState } from './documentParseTaskState';
 import {
   captureSystemScreenshot,
   downloadRemoteFileToPath,
@@ -17,8 +15,6 @@ import {
   readLocalTextFile,
   readLocalTextFileIfExists,
   repairMineruCacheImages,
-  runMineruCloudParse,
-  runPaddleOcrCloudParse,
   selectChatAttachmentPaths,
   selectLocalMineruJsonPath,
 } from '../../services/desktop';
@@ -41,8 +37,8 @@ import { parseMineruPagesOffThread } from './mineruParseWorker';
 import { extractMineruOutlineIndex, type MineruOutlineIndexItem } from './mineruSegments.ts';
 import { askDocumentOpenAICompatibleStream } from '../../services/qa';
 import {
-  getMissingParseCredentialMessage,
-  getParseProviderLabel,
+  getMissingMineruCredentialMessage,
+  PARSE_ENGINE_LABEL,
   runDocumentParseWithFallback,
 } from './mineruOcrFallback';
 import { resolveLocalRag } from '../../services/localRag';
@@ -309,7 +305,6 @@ function DocumentReaderTab({
   const {
     embeddingApiKey,
     mineruApiToken,
-    paddleOcrApiToken,
     translationApiKey,
     summaryApiKey,
     qaModelPresets,
@@ -1047,65 +1042,6 @@ function DocumentReaderTab({
     [onLibraryPreviewSync],
   );
 
-  const parseViewRef = useRef({ libraryOperation, mineruPath, currentDocument, locale: settings.uiLanguage });
-  parseViewRef.current = { libraryOperation, mineruPath, currentDocument, locale: settings.uiLanguage };
-  const consumedParseTasksRef = useRef(new Map<string, ReturnType<typeof getDocumentParseTask>>());
-  const activeParseTaskIdRef = useRef('');
-  useEffect(() => {
-    let disposed = false;
-    let loadedTaskId = '';
-    const refresh = () => {
-      const task = getDocumentParseTask(currentDocument.workspaceId);
-      if (!task || consumedParseTasksRef.current.get(task.documentKey) === task) return;
-      consumedParseTasksRef.current.set(task.documentKey, task);
-      const view = parseViewRef.current;
-      if (!shouldShowParseTask(task, view.libraryOperation)) return;
-      // A cached terminal snapshot must not replace a manually loaded/newer result.
-      if (task.status === 'success' && activeParseTaskIdRef.current !== task.taskId && view.mineruPath && view.mineruPath !== task.contentJsonPath) return;
-      if (task.status === 'running') activeParseTaskIdRef.current = task.taskId;
-      setLibraryOperation(toPaperParseTaskState(task, parseViewRef.current.locale));
-      setLoading(task.status === 'running');
-      setStatusMessage(toPaperParseTaskState(task, parseViewRef.current.locale).message);
-      if (task.status === 'error') setError(task.error ?? 'PaddleOCR-VL 解析失败');
-      if (task.status === 'success' && task.contentJsonPath && loadedTaskId !== task.taskId) {
-        loadedTaskId = task.taskId;
-        const jsonPath = task.contentJsonPath;
-        void readLocalTextFile(jsonPath).then(async (text) => {
-          if (disposed || getDocumentParseTask(currentDocument.workspaceId)?.taskId !== task.taskId
-            || parseViewRef.current.mineruPath !== view.mineruPath
-            || !shouldShowParseTask(task, parseViewRef.current.libraryOperation)) return;
-          const pages = await parseMineruPagesOffThread(text, {
-            sourcePath: jsonPath,
-            onOutlineIndex: (outline) => {
-              if (!disposed) setMineruOutlineIndex(outline);
-            },
-            onSegment: (_, { allPagesSoFar, segmentIndex }) => {
-              if (!disposed && segmentIndex === 0 && allPagesSoFar.length > 0) {
-                setMineruPages(allPagesSoFar);
-                setFlatBlocks(flattenMineruPages(allPagesSoFar));
-                setMineruPath(jsonPath);
-              }
-            },
-          });
-          applyMineruPages(pages, jsonPath, { item: parseViewRef.current.currentDocument,
-            statusMessage: toPaperParseTaskState(task, parseViewRef.current.locale).message });
-        }).catch((error) => {
-          if (!disposed && getDocumentParseTask(task.documentKey)?.taskId === task.taskId
-            && parseViewRef.current.mineruPath === view.mineruPath
-            && shouldShowParseTask(task, parseViewRef.current.libraryOperation)) {
-            setError(error instanceof Error ? error.message : '读取解析结果失败');
-          }
-        });
-      }
-    };
-    const unsubscribe = subscribeDocumentParseTasks(refresh);
-    refresh();
-    return () => {
-      disposed = true;
-      consumedParseTasksRef.current.delete(currentDocument.workspaceId);
-      unsubscribe();
-    };
-  }, [currentDocument.workspaceId, applyMineruPages]);
 
   const saveMineruParseCache = useCallback(
     async ({
@@ -1809,7 +1745,7 @@ function DocumentReaderTab({
    * 再重新调用云端；成功后清理备份代，失败则保留备份以便回退。
    */
   const runDocumentParse = useCallback(async ({ force }: { force: boolean }) => {
-    if (getDocumentParseTask(currentDocument.workspaceId)?.status === 'running' || isPaperTaskRunning(libraryOperation, 'mineru')) {
+    if (isPaperTaskRunning(libraryOperation, 'mineru')) {
       return;
     }
 
@@ -1820,14 +1756,8 @@ function DocumentReaderTab({
       return;
     }
 
-    const provider = settings.parseProvider;
-    const providerLabel = getParseProviderLabel(provider);
-
-    const missingCredential = getMissingParseCredentialMessage({
-      provider,
-      mineruApiToken,
-      paddleOcrApiToken,
-    });
+    const providerLabel = PARSE_ENGINE_LABEL;
+    const missingCredential = getMissingMineruCredentialMessage(mineruApiToken);
 
     if (missingCredential) {
       onOpenPreferences();
@@ -1863,7 +1793,7 @@ function DocumentReaderTab({
     let reparsePrepared = false;
 
     try {
-      if (provider !== 'paddleocr-vl' && force && cachePaths) {
+      if (force && cachePaths) {
         await prepareMineruReparse(cachePaths.directory);
         reparsePrepared = true;
       }
@@ -1871,18 +1801,13 @@ function DocumentReaderTab({
       const { result, jsonText } = await runDocumentParseWithFallback({
         documentKey: currentDocument.workspaceId,
         reparse: force,
-        provider,
         pdfPath,
         extractDir: cachePaths?.directory,
         mineruApiToken,
         mineruApiBaseUrl: settings.mineruApiBaseUrl,
-        paddleOcrApiToken,
-        paddleOcrApiBaseUrl: settings.paddleOcrApiBaseUrl,
         timeoutSecs: 900,
         pollIntervalSecs: 5,
       });
-
-      if (provider === 'paddleocr-vl') return;
 
       if (!jsonText) {
         throw new Error(
@@ -1952,14 +1877,13 @@ function DocumentReaderTab({
         reparsePrepared = false;
       }
     } catch (nextError) {
-      if (provider === 'paddleocr-vl') return;
       const message =
         nextError instanceof Error ? nextError.message : lRef.current('云端解析失败', 'Cloud parsing failed');
       setError(message);
       setStatusMessage(lRef.current('云端解析失败', 'Cloud parsing failed'));
       updateLibraryOperation('mineru', 'error', message, 100, 100);
     } finally {
-      if (provider !== 'paddleocr-vl') setLoading(false);
+      setLoading(false);
     }
   }, [
     applyMineruPages,
@@ -1967,13 +1891,10 @@ function DocumentReaderTab({
     libraryOperation,
     mineruApiToken,
     onOpenPreferences,
-    paddleOcrApiToken,
     pdfPath,
     saveMineruParseCache,
     settings.mineruCacheDir,
     settings.mineruApiBaseUrl,
-    settings.paddleOcrApiBaseUrl,
-    settings.parseProvider,
     updateLibraryOperation,
   ]);
 
