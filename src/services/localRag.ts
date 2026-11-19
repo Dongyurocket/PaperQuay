@@ -897,6 +897,7 @@ export async function resolveScopedLocalRag(input: {
   const statuses = await ragListIndexStatuses();
   const readyKeys = [...new Set(statuses
     .filter((status) => status.status === 'ready'
+      && (status.sourceType === 'mineru-markdown' || status.sourceType === 'pdf-text')
       && status.embeddingModelKey === embeddingModelKey
       && !excluded.has(status.documentKey)
       && !excluded.has(normalizeRagKey(status.documentKey)))
