@@ -184,12 +184,12 @@ Do not commit local data, API keys, PDFs, parser output, databases, or backup ar
 
 ## Roadmap
 
-- More reliable metadata extraction from the first page of a PDF.
-- Enrichment sources beyond DOI, such as arXiv and Semantic Scholar.
-- Deeper two-way binding between PDF regions, annotations, and standalone notes.
-- Folder watching and an automatic import queue.
-- LaTeX draft export and more research-writing features.
-- Optional cloud sync once the local-first model is stable.
+- **Metadata enrichment**: add arXiv and Semantic Scholar alongside OpenAlex / Crossref, with lookup by arXiv ID or title and a merge prompt when a preprint and its published version both match.
+- **Cover pages without a text layer**: first-page extraction depends on the PDF text layer, so scanned covers currently yield nothing; add OCR for those pages and surface the evidence when candidates conflict.
+- **Two-way annotation and note navigation**: notes already jump to PDF anchors, but the reverse lookup is missing. Let an annotation list the notes that reference it, and let excerpt cards target a specific annotation rather than only a page.
+- **Import automation**: watch a folder, import new PDFs automatically, and keep failed items in a retryable queue with their reasons.
+- **Writing hand-off**: export Markdown / LaTeX drafts with citation keys and BibTeX, then finish the manuscript in an external agent or a local LaTeX toolchain instead of rebuilding a survey-writing workspace in the app.
+- **Optional cloud sync**: revisit opt-in end-to-end encrypted sync once the local-first model is stable; local-only stays the default.
 
 ---
 
