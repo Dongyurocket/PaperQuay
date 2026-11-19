@@ -26,6 +26,8 @@ export interface LocalRagResolutionSuccess {
   retrievedChunkCount: number;
   citations: DocumentChatCitation[];
   retrievals: RagRetrievalResult[];
+  /** 证据段因预算被截去的数量。 */
+  budgetSkippedCount?: number;
   indexedChunkCount?: number;
   totalChunkCount?: number;
   ftsStatuses?: RagFtsStatus[];
@@ -87,6 +89,7 @@ function toQaContextState(kind: LocalRagResolution['kind']): DocumentChatQaConte
 export function buildQaContext(options: {
   origin: DocumentChatQaContextOrigin;
   rag?: LocalRagResolution | null;
+  skippedPaperTitles?: string[];
 }): DocumentChatQaContext {
   if (!options.rag) {
     return {
@@ -115,6 +118,8 @@ export function buildQaContext(options: {
     ftsStatuses: 'ftsStatuses' in options.rag ? options.rag.ftsStatuses : undefined,
     ftsHitCount: 'ftsHitCount' in options.rag ? options.rag.ftsHitCount : undefined,
     partialSources: 'partialSources' in options.rag ? options.rag.partialSources : undefined,
+    budgetSkippedCount: options.rag.kind === 'retrieved' ? options.rag.budgetSkippedCount : undefined,
+    skippedPaperTitles: options.skippedPaperTitles?.length ? options.skippedPaperTitles : undefined,
   };
 }
 

@@ -416,6 +416,10 @@ export type DocumentChatQaContextState =
   | "excluded";
 
 export interface DocumentChatQaContext {
+  /** 因预算或索引未就绪被跳过的文献标题。 */
+  skippedPaperTitles?: string[];
+  /** 证据段因上下文预算被截去的数量。 */
+  budgetSkippedCount?: number;
   origin: DocumentChatQaContextOrigin;
   retrievalState: DocumentChatQaContextState;
   retrievedChunkCount?: number;
@@ -427,6 +431,8 @@ export interface DocumentChatQaContext {
   partialSources?: boolean;
 }
 
+export type DocumentChatEvidenceKind = "text" | "image" | "table";
+
 export interface DocumentChatCitation {
   id: string;
   label: string;
@@ -436,6 +442,13 @@ export interface DocumentChatCitation {
   /** 锚点切片 ID，供「查看上下文」邻接查询使用。 */
   chunkId?: string | null;
   previewText?: string;
+  /** 证据所属文献；旧会话可能没有该字段。 */
+  paperId?: string;
+  paperTitle?: string;
+  /** 证据形态：文字块、图片块或表格块。旧引用不回填，按文字处理。 */
+  evidenceKind?: DocumentChatEvidenceKind;
+  /** 检索相关度（越大越差，与 RAG distance 同向），用于预算装箱。 */
+  score?: number;
 }
 
 export type DocumentChatRenderMode = "markdown" | "html";
@@ -453,12 +466,18 @@ export interface DocumentChatMessage {
   attachments?: DocumentChatAttachment[];
 }
 
+export type ReaderQaScopeMode = "current" | "selected" | "library";
+
 export interface DocumentChatSession {
   id: string;
   title: string;
   createdAt: number;
   updatedAt: number;
   messages: DocumentChatMessage[];
+  /** 该会话使用的检索范围；旧会话缺省为当前文献。 */
+  ragScopeMode?: ReaderQaScopeMode;
+  /** selected 范围下选中的文献 ID。 */
+  ragScopePaperIds?: string[];
 }
 
 export type AssistantPanelKey =

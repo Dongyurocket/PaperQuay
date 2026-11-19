@@ -434,7 +434,10 @@ function createAiCommands(context) {
     const htmlMode = options.answerRenderMode === 'html';
     const systemPrompt = htmlMode
       ? buildHtmlVisualQaPrompt(options)
-      : `Answer questions about the paper. Respond in ${options.responseLanguage || 'the user language'}.`;
+      : `Answer questions about the paper. Respond in ${options.responseLanguage || 'the user language'}.`
+        + ' When the context contains numbered sources ("# Source [n]"), cite the supporting evidence at the end of each paragraph with [n].'
+        + ' Use only source numbers that exist in the context; if a paragraph has no supporting evidence, do not add a citation.'
+        + ' Never guess a source for a paragraph.';
 
     return [
       { role: 'system', content: systemPrompt },

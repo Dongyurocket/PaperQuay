@@ -58,3 +58,24 @@ test('QA citation anchors survive SQLite storage and resolve to their source loc
     rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   }
 });
+
+test('QA note anchors use the citation paper instead of the current paper', () => {
+  const result = buildQaNoteContent({
+    content: '## Question\n\nQ\n\n## Answer\n\nCross-paper evidence [1]',
+    paperId: 'current-paper', paperTitle: 'Current Paper', messageId: 'message-cross', createdAt: 20,
+    citations: [{
+      id: 'citation-1',
+      label: '1',
+      sourceType: 'mineru-markdown',
+      pageIndex: 2,
+      blockId: 'block-3',
+      previewText: 'Evidence from another paper',
+      paperId: 'other-paper',
+      paperTitle: 'Other Paper',
+      evidenceKind: 'table',
+    }],
+  });
+  assert.equal(result.anchors.length, 1);
+  assert.equal(result.anchors[0].paperId, 'other-paper');
+  assert.equal(result.anchors[0].sourceTitle, 'Other Paper');
+});

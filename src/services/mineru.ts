@@ -1134,10 +1134,12 @@ export function resolveMineruBlockContentSource(
 
 export function extractTextFromMineruBlock(block: PositionedMineruBlock): string {
   if (block.type === 'table') {
+    // 图注和表格正文都要进入索引：只有图注时表格正文无法被检索到。
     const caption = extractCaptionFromMineruBlock(block);
     const tableHtml = extractTableHtmlFromMineruBlock(block);
+    const tableText = tableHtml ? stripHtml(tableHtml) : '';
 
-    return caption || (tableHtml ? stripHtml(tableHtml) : '');
+    return [caption, tableText].map((value) => value.trim()).filter(Boolean).join('\n\n');
   }
 
   if (block.type === 'image') {

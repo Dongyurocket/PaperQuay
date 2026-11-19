@@ -39,6 +39,7 @@ import type {
   PdfSource,
   PositionedMineruBlock,
   QaModelPreset,
+  ReaderQaScopeMode,
   ReaderViewMode,
   SelectedExcerpt,
   TextSelectionPayload,
@@ -151,6 +152,9 @@ interface ReaderWorkspaceProps {
   qaModelPresets: QaModelPreset[];
   selectedQaPresetId: string;
   qaRagEnabled: boolean;
+  qaScopeMode: ReaderQaScopeMode;
+  qaScopePaperIds: string[];
+  qaScopePaperOptions: Array<{ id: string; title: string }>;
   qaAnswerRenderMode: DocumentChatRenderMode;
   qaReasoningEffort: ModelReasoningEffort;
   screenshotLoading: boolean;
@@ -160,6 +164,7 @@ interface ReaderWorkspaceProps {
   onQaStop?: () => void;
   onQaPresetChange: (presetId: string) => void;
   onQaRagEnabledChange: (value: boolean) => void;
+  onQaScopeChange: (mode: ReaderQaScopeMode, paperIds: string[]) => void;
   onQaAnswerRenderModeChange: (mode: DocumentChatRenderMode) => void;
   onQaReasoningEffortChange: (reasoningEffort: ModelReasoningEffort) => void;
   onQaSessionCreate: () => void;
@@ -690,6 +695,9 @@ function ReaderWorkspace(props: ReaderWorkspaceProps) {
     qaModelPresets: props.qaModelPresets,
     selectedQaPresetId: props.selectedQaPresetId,
     qaRagEnabled: props.qaRagEnabled,
+    qaScopeMode: props.qaScopeMode,
+    qaScopePaperIds: props.qaScopePaperIds,
+    qaScopePaperOptions: props.qaScopePaperOptions,
     qaAnswerRenderMode: props.qaAnswerRenderMode,
     qaReasoningEffort: props.qaReasoningEffort,
     screenshotLoading: props.screenshotLoading,
@@ -699,6 +707,7 @@ function ReaderWorkspace(props: ReaderWorkspaceProps) {
     onStop: props.onQaStop,
     onQaPresetChange: props.onQaPresetChange,
     onQaRagEnabledChange: props.onQaRagEnabledChange,
+    onQaScopeChange: props.onQaScopeChange,
     onQaAnswerRenderModeChange: props.onQaAnswerRenderModeChange,
     onQaReasoningEffortChange: props.onQaReasoningEffortChange,
     onSessionCreate: props.onQaSessionCreate,

@@ -225,3 +225,77 @@ test('MinerU chunks keep the current heading and do not cross into the next sect
   assert.equal(method?.sectionId, 'h2');
   assert.deepEqual(method?.sectionPath, ['Methods']);
 });
+
+test('table extraction indexes both the caption and the table body', async () => {
+  const { extractTextFromMineruBlock } = await import('../src/services/mineru.ts');
+  const block = {
+    type: 'table',
+    blockId: 'table-1',
+    pageIndex: 0,
+    blockIndex: 0,
+    content: {
+      table_caption: [{ content: 'Table 1: Rotor noise levels' }],
+      table_body: '<table><tr><td>Baseline</td><td>82 dB</td></tr></table>',
+    },
+  } as any;
+  const text = extractTextFromMineruBlock(block);
+  assert.match(text, /Rotor noise levels/);
+  assert.match(text, /Baseline/);
+  assert.match(text, /82 dB/);
+});
+
+test('citations carry paper identity, evidence kind and relevance', () => {
+  const context = buildRagContextText({
+    results: [makeHit({ chunkId: 'chunk-1', blockId: 'table-9', pageIndex: 4, text: 'table body' })],
+    topK: 1,
+    mineruBlocks: [{
+      type: 'table', blockId: 'table-9', pageIndex: 4, blockIndex: 0,
+      content: { table_caption: [{ content: 'Captions' }], html: '<table><tr><td>1</td></tr></table>' },
+    } as any],
+    preparedSources: makePreparedSource([makeChunk({ chunkId: 'chunk-1', chunkIndex: 0, blockId: 'table-9', pageIndex: 4, text: 'table body' })]),
+    paperId: 'paper-a',
+    paperTitle: 'Paper A',
+  });
+  assert.equal(context.citations[0]?.paperId, 'paper-a');
+  assert.equal(context.citations[0]?.paperTitle, 'Paper A');
+  assert.equal(context.citations[0]?.evidenceKind, 'table');
+  assert.equal(context.citations[0]?.score, 0.1);
+});
+
+test('MinerU source signature carries the extractor version', async () => {
+  const { prepareReaderRagDocument, MINERU_RAG_EXTRACTOR_VERSION } = await import('../src/features/reader/readerRag.ts');
+  const prepared = prepareReaderRagDocument({
+    item: { itemKey: 'p', workspaceId: 'p', title: 'P' } as any,
+    settings: { ragSourceMode: 'mineru-markdown' },
+    mineruBlocks: [{
+      type: 'paragraph', blockId: 'b1', pageIndex: 0, blockIndex: 0,
+      content: { paragraph_content: [{ type: 'text', content: 'Body text' }] },
+    } as any],
+    mineruDocumentText: 'Body text',
+    pdfDocumentText: '',
+  });
+  assert.equal(prepared.sources.length, 1);
+  assert.ok(MINERU_RAG_EXTRACTOR_VERSION.includes('v2'));
+});
+
+test('token budget drops the least relevant sections and reports the count', () => {
+  const chunks = [
+    makeChunk({ chunkId: 'c1', chunkIndex: 0, blockId: 'b1', text: BODY_SEED_TEXT }),
+    makeChunk({ chunkId: 'c2', chunkIndex: 1, blockId: 'b2', text: BODY_SEED_TEXT }),
+    makeChunk({ chunkId: 'c3', chunkIndex: 2, blockId: 'b3', text: BODY_SEED_TEXT.repeat(2) }),
+    makeChunk({ chunkId: 'c4', chunkIndex: 3, blockId: 'b4', text: BODY_SEED_TEXT }),
+  ];
+  const context = buildRagContextText({
+    results: [
+      makeHit({ chunkId: 'c1', blockId: 'b1', text: BODY_SEED_TEXT }),
+      makeHit({ chunkId: 'c3', blockId: 'b3', text: BODY_SEED_TEXT.repeat(2), score: 0.2 }),
+    ],
+    topK: 2,
+    mineruBlocks: [],
+    preparedSources: makePreparedSource(chunks),
+    tokenBudget: 10,
+  });
+  assert.equal(context.sectionCount, 1);
+  assert.equal(context.citations.length, 1);
+  assert.equal(context.budgetSkippedCount, 1);
+});

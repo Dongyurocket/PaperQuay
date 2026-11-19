@@ -35,6 +35,9 @@ export interface BuildReaderAssistantSidebarInput {
   qaModelPresets: AssistantSidebarCoreProps['qaModelPresets'];
   selectedQaPresetId: AssistantSidebarCoreProps['selectedQaPresetId'];
   qaRagEnabled: AssistantSidebarCoreProps['qaRagEnabled'];
+  qaScopeMode: AssistantSidebarCoreProps['qaScopeMode'];
+  qaScopePaperIds: AssistantSidebarCoreProps['qaScopePaperIds'];
+  qaScopePaperOptions: AssistantSidebarCoreProps['qaScopePaperOptions'];
   qaAnswerRenderMode: AssistantSidebarCoreProps['qaAnswerRenderMode'];
   qaReasoningEffort: AssistantSidebarCoreProps['qaReasoningEffort'];
   qaLoading: AssistantSidebarCoreProps['qaLoading'];
@@ -46,6 +49,7 @@ export interface BuildReaderAssistantSidebarInput {
   onQaStop?: AssistantSidebarCoreProps['onQaStop'];
   onQaPresetChange: AssistantSidebarCoreProps['onQaPresetChange'];
   onQaRagEnabledChange: AssistantSidebarCoreProps['onQaRagEnabledChange'];
+  onQaScopeChange: AssistantSidebarCoreProps['onQaScopeChange'];
   onQaAnswerRenderModeChange: AssistantSidebarCoreProps['onQaAnswerRenderModeChange'];
   onQaReasoningEffortChange: AssistantSidebarCoreProps['onQaReasoningEffortChange'];
   onQaSessionCreate: AssistantSidebarCoreProps['onQaSessionCreate'];
@@ -110,6 +114,9 @@ export function buildReaderAssistantSidebarProps(
     qaModelPresets: input.qaModelPresets,
     selectedQaPresetId: input.selectedQaPresetId,
     qaRagEnabled: input.qaRagEnabled,
+    qaScopeMode: input.qaScopeMode,
+    qaScopePaperIds: input.qaScopePaperIds,
+    qaScopePaperOptions: input.qaScopePaperOptions,
     qaAnswerRenderMode: input.qaAnswerRenderMode,
     qaReasoningEffort: input.qaReasoningEffort,
     qaLoading: input.qaLoading,
@@ -121,6 +128,7 @@ export function buildReaderAssistantSidebarProps(
     onQaStop: input.onQaStop,
     onQaPresetChange: input.onQaPresetChange,
     onQaRagEnabledChange: input.onQaRagEnabledChange,
+    onQaScopeChange: input.onQaScopeChange,
     onQaAnswerRenderModeChange: input.onQaAnswerRenderModeChange,
     onQaReasoningEffortChange: input.onQaReasoningEffortChange,
     onQaSessionCreate: input.onQaSessionCreate,

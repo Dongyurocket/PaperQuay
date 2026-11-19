@@ -26,6 +26,7 @@ import {
   updateNote as updateStoredNote,
 } from '../../services/notes';
 import type { LocalDirectoryFileEntry } from '../../services/desktop';
+import { estimateRagTokens } from './readerRag';
 import {
   extractTextFromMineruBlock,
   extractTranslatableMarkdownFromMineruBlock,
@@ -41,7 +42,11 @@ import {
   PARSE_ENGINE_LABEL,
   runDocumentParseWithFallback,
 } from './mineruOcrFallback';
-import { resolveLocalRag } from '../../services/localRag';
+import {
+  resolveLocalRag,
+  resolveScopedLocalRag,
+  type ScopedRagDocument,
+} from '../../services/localRag';
 import { summarizeDocumentOpenAICompatible } from '../../services/summary';
 import {
   emitJumpToNoteAnchor,
@@ -91,6 +96,7 @@ import type {
   PdfSource,
   PositionedMineruBlock,
   QaModelPreset,
+  ReaderQaScopeMode,
   RagChunkContextSlice,
   ReaderViewMode,
   ReaderSecrets,
@@ -267,6 +273,23 @@ function requestDeferredReaderStartupWork(callback: () => void) {
   return () => window.clearTimeout(handle);
 }
 
+function workspaceItemFromLiteraturePaper(paper: LiteraturePaper): WorkspaceItem {
+  const pdf = paper.attachments?.find((attachment) => attachment.kind === 'pdf' && !attachment.missing);
+  return {
+    itemKey: paper.id,
+    workspaceId: paper.id,
+    source: 'native-library',
+    groupKey: '',
+    title: paper.title,
+    creators: paper.authors.map((author) => author.name).join(', '),
+    year: paper.year ?? '',
+    itemType: paper.itemType ?? 'journalArticle',
+    language: paper.language ?? undefined,
+    localPdfPath: pdf?.storedPath,
+    ragEnabled: paper.ragEnabled,
+  } as WorkspaceItem;
+}
+
 interface DocumentReaderTabProps {
   tabId: string;
   document: WorkspaceItem;
@@ -277,6 +300,7 @@ interface DocumentReaderTabProps {
   readerCallbacks: DocumentReaderTabCallbacks;
   translationTargetLanguageLabel: string;
   notePaperCandidates?: LiteraturePaper[];
+  loadLibraryPreviewBlocks?: (item: WorkspaceItem) => Promise<{ blocks: PositionedMineruBlock[] }>;
   pendingNoteAnchorJump?: JumpToNoteAnchorEventDetail | null;
   translationSnapshot?: ReaderDocumentTranslationSnapshot | null;
   /** 文库侧已加载的同一文档概览；阅读器尚无概览时先行显示。 */
@@ -296,6 +320,7 @@ function DocumentReaderTab({
   readerCallbacks,
   translationTargetLanguageLabel,
   notePaperCandidates = [],
+  loadLibraryPreviewBlocks,
   pendingNoteAnchorJump = null,
   translationSnapshot = null,
   libraryPreviewSummary = null,
@@ -545,6 +570,41 @@ function DocumentReaderTab({
     [qaSessions, selectedQaSessionId],
   );
   const qaMessages = activeQaSession?.messages ?? [];
+
+  const [qaScopeMode, setQaScopeMode] = useState<ReaderQaScopeMode>(
+    activeQaSession?.ragScopeMode ?? 'current',
+  );
+  const [qaScopePaperIds, setQaScopePaperIds] = useState<string[]>(
+    activeQaSession?.ragScopePaperIds ?? [],
+  );
+  const qaScopeSessionIdRef = useRef(activeQaSession?.id ?? '');
+  const qaScopeDocumentsRef = useRef(new Map<string, ScopedRagDocument>());
+
+  useEffect(() => {
+    if (!activeQaSession || qaScopeSessionIdRef.current === activeQaSession.id) return;
+    qaScopeSessionIdRef.current = activeQaSession.id;
+    setQaScopeMode(activeQaSession.ragScopeMode ?? 'current');
+    setQaScopePaperIds(activeQaSession.ragScopePaperIds ?? []);
+  }, [activeQaSession]);
+
+  const updateQaScope = useCallback((mode: ReaderQaScopeMode, paperIds: string[]) => {
+    setQaScopeMode(mode);
+    setQaScopePaperIds(paperIds);
+    const sessionId = qaScopeSessionIdRef.current;
+    if (!sessionId) return;
+    setQaSessions((current) => current.map((session) => (
+      session.id === sessionId
+        ? { ...session, ragScopeMode: mode, ragScopePaperIds: paperIds }
+        : session
+    )));
+  }, [setQaSessions]);
+
+  const qaScopePaperOptions = useMemo(
+    () => notePaperCandidates
+      .filter((paper) => paper.ragEnabled !== false)
+      .map((paper) => ({ id: paper.id, title: paper.title })),
+    [notePaperCandidates],
+  );
   const selectedQaSessionLoading = Boolean(
     activeQaSession && qaRunningSessionIds.includes(activeQaSession.id),
   );
@@ -1995,7 +2055,7 @@ function DocumentReaderTab({
     summaryBlockInputs,
   ]);
 
-  const resolveQaRequest = useCallback(async (question: string) => {
+  const resolveQaRequest = useCallback(async (question: string, options?: { tokenBudget?: number }) => {
     let pdfDocumentText = '';
     let mineruDocumentText = '';
 
@@ -2039,6 +2099,7 @@ function DocumentReaderTab({
     const ragEnabledForQa =
       qaRagEnabled && settings.localRagEnabled && settings.ragSourceMode !== 'off';
 
+    let skippedPaperTitles: string[] = [];
     let ragResolution: LocalRagResolution =
       ragEnabledForQa
         ? {
@@ -2081,9 +2142,25 @@ function DocumentReaderTab({
           qaContext: buildQaContext({
             origin: 'local-rag',
             rag: ragResolution,
+            skippedPaperTitles,
           }),
           citations: ragResolution.citations,
         };
+      }
+
+      // 显式选择多文献/全库范围时，没有可用证据就停止调用模型，避免拿当前文献冒充范围答案。
+      if (qaScopeMode !== 'current') {
+        const reason = ragResolution.kind === 'indexing'
+          ? lRef.current(
+              '所选范围内的文献索引尚未就绪；请先在文献库中完成索引，或缩小检索范围。',
+              'The selected scope has no ready index yet. Index the papers first, or narrow the scope.',
+            )
+          : ragResolution.kind === 'failed'
+            ? lRef.current('所选范围的本地索引不可用，请检查嵌入模型配置后重试。', 'Local retrieval failed for the selected scope. Check the embedding configuration and retry.')
+            : ragResolution.kind === 'excluded'
+              ? lRef.current('所选文献都已移出本地知识库。', 'Every selected paper is excluded from the local knowledge base.')
+              : lRef.current('所选范围没有检索到可用的正文证据。', 'No usable evidence was found in the selected scope.');
+        throw new Error(reason);
       }
     }
 
@@ -3371,11 +3448,21 @@ function DocumentReaderTab({
         ),
       );
     },
-    [activateBlock, flatBlocks],
+    [activateBlock, currentDocument.itemKey, flatBlocks],
   );
 
   const handleSelectQaCitation = useCallback(
     (citation: DocumentChatCitation) => {
+      if (citation.paperId && citation.paperId !== currentDocument.itemKey) {
+        const pageLabel = citation.pageIndex !== null && citation.pageIndex !== undefined
+          ? `P${citation.pageIndex + 1}`
+          : lRef.current('页码未知', 'page unknown');
+        setStatusMessage(lRef.current(
+          `引用来自《${citation.paperTitle ?? citation.paperId}》${pageLabel}${citation.blockId ? ` · ${citation.blockId}` : ''}；跨文献引用只展示来源，不切换阅读器。`,
+          `Citation from "${citation.paperTitle ?? citation.paperId}" ${pageLabel}${citation.blockId ? ` · ${citation.blockId}` : ''}. Cross-paper citations show their source without switching the reader.`,
+        ));
+        return;
+      }
       const samePageBlocks =
         citation.pageIndex !== null && citation.pageIndex !== undefined
           ? flatBlocks.filter((block) => block.pageIndex === citation.pageIndex)
@@ -3556,7 +3643,27 @@ function DocumentReaderTab({
     let streamedAnswer = '';
 
     try {
-      const qaRequest = await awaitQaRequest(resolveQaRequest(question), controller.signal);
+      // 模型上下文预算：仅在填写 contextWindow 时装箱；未填写时交由服务端处理。
+      const contextWindow = Number(activeQaPreset.contextWindow) || 0;
+      let tokenBudget: number | undefined;
+      if (contextWindow > 0) {
+        const outputTokens = Number(activeQaPreset.maxOutputTokens) || 0;
+        const historyTokens = estimateRagTokens(
+          nextMessages.slice(-12).map((message) => message.content).join('\n'),
+        );
+        const promptOverhead = estimateRagTokens(question) + 800;
+        tokenBudget = contextWindow - outputTokens - historyTokens - promptOverhead;
+        if (tokenBudget <= 0) {
+          throw new Error(lRef.current(
+            '提示、历史消息和输出预算已占满模型上下文窗口，请缩短问题或降低最大输出长度。',
+            'The prompt, history, and output budget already fill the model context window. Shorten the question or lower the max output tokens.',
+          ));
+        }
+      }
+      const qaRequest = await awaitQaRequest(
+        resolveQaRequest(question, { tokenBudget }),
+        controller.signal,
+      );
       if (!isRequestCurrent()) return;
 
       if (qaRequest.documentText === '__never__') {
@@ -3623,7 +3730,18 @@ function DocumentReaderTab({
       }
 
       if (isRequestCurrent()) {
-        setStatusMessage(formatQaContextStatus(qaRequest.qaContext, lRef.current));
+        const baseStatus = formatQaContextStatus(qaRequest.qaContext, lRef.current);
+        const skippedTitles = qaRequest.qaContext?.skippedPaperTitles ?? [];
+        const budgetSkipped = qaRequest.qaContext?.budgetSkippedCount ?? 0;
+        const extras = [
+          ...(skippedTitles.length > 0
+            ? [lRef.current(`已跳过：${skippedTitles.join('、')}`, `Skipped: ${skippedTitles.join(', ')}`)]
+            : []),
+          ...(budgetSkipped > 0
+            ? [lRef.current(`预算截去 ${budgetSkipped} 条证据`, `${budgetSkipped} evidence section(s) dropped by budget`)]
+            : []),
+        ];
+        setStatusMessage(extras.length > 0 ? `${baseStatus} · ${extras.join(' · ')}` : baseStatus);
       }
     } catch (nextError) {
       if (controller.signal.aborted) {
@@ -4038,6 +4156,9 @@ function DocumentReaderTab({
         qaModelPresets,
         selectedQaPresetId,
         qaRagEnabled,
+        qaScopeMode,
+        qaScopePaperIds,
+        qaScopePaperOptions,
         qaAnswerRenderMode,
         qaReasoningEffort,
         qaLoading: selectedQaSessionLoading,
@@ -4049,6 +4170,7 @@ function DocumentReaderTab({
         onQaStop: handleStopQa,
         onQaPresetChange: handleQaPresetChange,
         onQaRagEnabledChange: setQaRagEnabled,
+        onQaScopeChange: updateQaScope,
         onQaAnswerRenderModeChange: setQaAnswerRenderMode,
         onQaReasoningEffortChange: setQaReasoningEffort,
         onQaSessionCreate: handleCreateQaSession,
@@ -4494,6 +4616,9 @@ function DocumentReaderTab({
         qaModelPresets={qaModelPresets}
         selectedQaPresetId={selectedQaPresetId}
         qaRagEnabled={qaRagEnabled}
+        qaScopeMode={qaScopeMode}
+        qaScopePaperIds={qaScopePaperIds}
+        qaScopePaperOptions={qaScopePaperOptions}
         qaAnswerRenderMode={qaAnswerRenderMode}
         qaReasoningEffort={qaReasoningEffort}
         screenshotLoading={screenshotBusy}
@@ -4502,6 +4627,7 @@ function DocumentReaderTab({
         onQaStop={handleStopQa}
         onQaPresetChange={handleQaPresetChange}
         onQaRagEnabledChange={setQaRagEnabled}
+        onQaScopeChange={updateQaScope}
         onQaAnswerRenderModeChange={setQaAnswerRenderMode}
         onQaReasoningEffortChange={setQaReasoningEffort}
         onQaSessionCreate={handleCreateQaSession}

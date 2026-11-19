@@ -24,9 +24,9 @@ export function buildQaNoteContent(input: {
     }
     anchors.push({
       id: `qa:${input.messageId}:${index}`,
-      paperId: input.paperId,
+      paperId: citation.paperId?.trim() || input.paperId,
       label: pageIndex === null ? citation.label : `P${pageIndex + 1}`,
-      sourceTitle: input.paperTitle,
+      sourceTitle: citation.paperTitle?.trim() || input.paperTitle,
       excerpt: citation.previewText ?? '',
       source: citation.sourceType === 'pdf-text' ? 'pdf' : 'blocks',
       pageIndex,

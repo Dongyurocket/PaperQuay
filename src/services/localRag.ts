@@ -1,10 +1,17 @@
-import type { PositionedMineruBlock, ReaderSettings, WorkspaceItem } from '../types/reader';
+import type {
+  DocumentChatCitation,
+  PositionedMineruBlock,
+  RagRetrievalResult,
+  ReaderQaScopeMode,
+  ReaderSettings,
+  WorkspaceItem,
+} from '../types/reader';
 import {
   buildRagContextText,
   buildRagRetrievalQuery,
   prepareReaderRagDocument,
 } from '../features/reader/readerRag';
-import type { LocalRagResolution } from '../features/reader/readerQaContext';
+import type { LocalRagResolution, LocalRagResolutionSuccess } from '../features/reader/readerQaContext';
 import { summarizeRagIndexStatuses } from '../features/reader/readerQaContext';
 import {
   buildRagEmbeddingModelKey,
@@ -13,6 +20,7 @@ import {
   ragFinalizeDocumentIndex,
   ragGetDocumentIndexStatus,
   ragIndexDocument,
+  ragListIndexStatuses,
   ragListIndexedChunkIds,
   ragReportDocumentIndexFailure,
   ragRetrieveDocumentChunks,
@@ -380,6 +388,8 @@ export async function resolveLocalRag(input: {
   signal?: AbortSignal;
   /** 为 false 时不阻塞当前检索调用，未就绪的来源在后台异步调度索引。缺省为 true。 */
   syncIndexing?: boolean;
+  /** 当前文献证据的 token 预算；未提供时不主动截取。 */
+  tokenBudget?: number;
 }): Promise<LocalRagResolution> {
   if (input.signal?.aborted) {
     const error = new Error('RAG resolution aborted');
@@ -578,6 +588,9 @@ export async function resolveLocalRag(input: {
     topK: input.settings.localRagTopK,
     mineruBlocks: input.mineruBlocks,
     preparedSources: preparedDocument.sources,
+    paperId: input.item.itemKey,
+    paperTitle: input.item.title,
+    tokenBudget: input.tokenBudget,
   });
 
   if (!contextDocument.documentText.trim()) {
@@ -624,4 +637,369 @@ export async function resolveLibraryPaperRagContext(input: {
     mineruDocumentText: input.mineruDocumentText ?? '',
     pdfDocumentText: input.pdfDocumentText,
   });
+}
+
+
+export interface ReaderQaScope {
+  mode: ReaderQaScopeMode;
+  /** selected 范围下用户勾选的文献 ID。 */
+  paperIds?: string[];
+}
+
+export interface ScopedRagDocument {
+  item: WorkspaceItem;
+  mineruBlocks: PositionedMineruBlock[];
+  mineruDocumentText: string;
+  pdfDocumentText: string;
+}
+
+export interface ScopedRagSkippedDocument {
+  paperId: string;
+  title: string;
+  reason:
+    | 'indexing'
+    | 'failed'
+    | 'empty'
+    | 'no-sources'
+    | 'excluded'
+    | 'disabled'
+    | 'missing-embedding-config'
+    | 'budget'
+    | 'not-ready'
+    | 'missing';
+}
+
+export interface ScopedLocalRagResult {
+  resolution: LocalRagResolution;
+  skippedDocuments: ScopedRagSkippedDocument[];
+  consideredPaperIds: string[];
+}
+
+function normalizeRagKey(value: string): string {
+  return value.trim().replace(/^native-library:/, '');
+}
+
+function skippedReasonFromResolution(resolution: LocalRagResolution): ScopedRagSkippedDocument['reason'] {
+  switch (resolution.kind) {
+    case 'indexing':
+      return 'indexing';
+    case 'failed':
+      return 'failed';
+    case 'empty':
+      return 'empty';
+    case 'no-sources':
+      return 'no-sources';
+    case 'excluded':
+      return 'excluded';
+    case 'disabled':
+      return 'disabled';
+    case 'missing-embedding-config':
+      return 'missing-embedding-config';
+    default:
+      return 'empty';
+  }
+}
+
+function mergeRetrievedResolutions(
+  retrieved: Array<{ item: WorkspaceItem; resolution: LocalRagResolutionSuccess }>,
+): { resolution: LocalRagResolutionSuccess; skippedDocuments: ScopedRagSkippedDocument[] } {
+  const skippedDocuments: ScopedRagSkippedDocument[] = [];
+  let documentText = '';
+  const citations: DocumentChatCitation[] = [];
+  const retrievals: RagRetrievalResult[] = [];
+  let indexedChunkCount = 0;
+  let totalChunkCount = 0;
+  let ftsHitCount = 0;
+  const ftsStatuses = new Set<string>();
+  const embeddedPapers: Array<{ resolution: LocalRagResolutionSuccess }> = [];
+
+  for (const entry of retrieved) {
+    if (!entry.resolution.documentText.trim()) {
+      skippedDocuments.push({ paperId: entry.item.itemKey, title: entry.item.title, reason: 'empty' });
+      continue;
+    }
+    documentText += `${documentText ? '\n\n' : ''}${entry.resolution.documentText}`;
+    citations.push(...entry.resolution.citations);
+    retrievals.push(...entry.resolution.retrievals);
+    indexedChunkCount += Number(entry.resolution.indexedChunkCount) || 0;
+    totalChunkCount += Number(entry.resolution.totalChunkCount) || 0;
+    ftsHitCount += Number(entry.resolution.ftsHitCount) || 0;
+    for (const status of entry.resolution.ftsStatuses ?? []) ftsStatuses.add(status);
+    embeddedPapers.push({ resolution: entry.resolution });
+  }
+
+  return {
+    resolution: {
+      kind: 'retrieved',
+      documentText: documentText.trim(),
+      retrievedChunkCount: embeddedPapers.reduce((sum, entry) => sum + entry.resolution.retrievedChunkCount, 0),
+      citations,
+      retrievals,
+      indexedChunkCount,
+      totalChunkCount,
+      ftsStatuses: [...ftsStatuses] as LocalRagResolutionSuccess['ftsStatuses'],
+      ftsHitCount,
+      partialSources: skippedDocuments.length > 0,
+    },
+    skippedDocuments,
+  };
+}
+
+/**
+ * 阅读器问答的多文献范围检索。
+ *
+ * - current：沿用单文献完整路径（含懒建索引）。
+ * - selected：逐篇检索，每篇最多 localRagTopK；未就绪索引先尝试懒建，失败后列入跳过清单。
+ * - library：只使用已就绪索引，用一个全局 localRagTopK 检索；不触发整库建索引。
+ */
+export async function resolveScopedLocalRag(input: {
+  scope: ReaderQaScope;
+  documents: ScopedRagDocument[];
+  libraryItems: WorkspaceItem[];
+  settings: Pick<
+    ReaderSettings,
+    'localRagEnabled' | 'localRagTopK' | 'ragSourceMode' | 'embeddingBatchSize'
+  >;
+  embedding: RagEmbeddingOptions;
+  question: string;
+  excerptText?: string | null;
+  tokenBudget?: number;
+  signal?: AbortSignal;
+}): Promise<ScopedLocalRagResult> {
+  const consideredPaperIds: string[] = [];
+  const scopePaperIds = Array.isArray(input.scope.paperIds) ? input.scope.paperIds : [];
+  const documents = input.scope.mode === 'selected'
+    ? input.documents.filter((document) => scopePaperIds.includes(document.item.itemKey))
+    : input.documents.slice(0, 1);
+
+  if (input.scope.mode === 'current') {
+    const document = documents[0];
+    if (!document) {
+      return {
+        resolution: { kind: 'no-sources' },
+        skippedDocuments: [],
+        consideredPaperIds: [],
+      };
+    }
+    const resolution = await resolveLocalRag({
+      item: document.item,
+      settings: input.settings,
+      embedding: input.embedding,
+      question: input.question,
+      excerptText: input.excerptText,
+      mineruBlocks: document.mineruBlocks,
+      mineruDocumentText: document.mineruDocumentText,
+      pdfDocumentText: document.pdfDocumentText,
+      signal: input.signal,
+      tokenBudget: input.tokenBudget,
+    });
+    return {
+      resolution,
+      skippedDocuments: resolution.kind === 'retrieved'
+        ? []
+        : [{ paperId: document.item.itemKey, title: document.item.title, reason: skippedReasonFromResolution(resolution) }],
+      consideredPaperIds: [document.item.itemKey],
+    };
+  }
+
+  if (input.scope.mode === 'selected') {
+    // 每篇文献至少分到一条证据的空间；预算不足时按文献依次保留（调用方已按相关性排序）。
+    const perDocumentBudget = typeof input.tokenBudget === 'number' && input.tokenBudget > 0
+      ? Math.max(300, Math.floor(input.tokenBudget / Math.max(1, documents.length)))
+      : undefined;
+    const retrieved: Array<{ item: WorkspaceItem; resolution: LocalRagResolutionSuccess }> = [];
+    const skippedDocuments: ScopedRagSkippedDocument[] = [];
+    let citationOffset = 0;
+
+    for (const document of documents) {
+      if (input.signal?.aborted) {
+        const error = new Error('RAG resolution aborted');
+        error.name = 'AbortError';
+        throw error;
+      }
+      consideredPaperIds.push(document.item.itemKey);
+      const resolution = await resolveLocalRag({
+        item: document.item,
+        settings: input.settings,
+        embedding: input.embedding,
+        question: input.question,
+        excerptText: input.excerptText,
+        mineruBlocks: document.mineruBlocks,
+        mineruDocumentText: document.mineruDocumentText,
+        pdfDocumentText: document.pdfDocumentText,
+        signal: input.signal,
+        tokenBudget: perDocumentBudget,
+      });
+
+      if (resolution.kind !== 'retrieved' || !resolution.documentText.trim()) {
+        skippedDocuments.push({
+          paperId: document.item.itemKey,
+          title: document.item.title,
+          reason: skippedReasonFromResolution(resolution),
+        });
+        continue;
+      }
+
+      const citations = resolution.citations.map((citation, index) => {
+        const label = String(citationOffset + index + 1);
+        return { ...citation, id: `cite:${label}`, label };
+      });
+      const offset = citationOffset;
+      const renumberedText = resolution.documentText.replace(
+        /^# Source \[(\d+)\]$/gm,
+        (_match, number: string) => `# Source [${Number(number) + offset}]`,
+      );
+      citationOffset += resolution.citations.length;
+      retrieved.push({
+        item: document.item,
+        resolution: { ...resolution, documentText: renumberedText, citations },
+      });
+    }
+
+    if (retrieved.length === 0) {
+      const firstReason = skippedDocuments[0]?.reason ?? 'empty';
+      const allIndexing = skippedDocuments.every((entry) => entry.reason === 'indexing');
+      const allExcluded = skippedDocuments.every((entry) => entry.reason === 'excluded');
+      return {
+        resolution: allExcluded
+          ? { kind: 'excluded' }
+          : allIndexing
+            ? { kind: 'indexing' }
+            : firstReason === 'failed'
+              ? { kind: 'failed', errorMessage: '所选文献的本地索引不可用' }
+              : firstReason === 'disabled'
+                ? { kind: 'disabled' }
+                : firstReason === 'missing-embedding-config'
+                  ? { kind: 'missing-embedding-config' }
+                  : { kind: 'empty' },
+        skippedDocuments,
+        consideredPaperIds,
+      };
+    }
+
+    const merged = mergeRetrievedResolutions(retrieved);
+    return {
+      resolution: merged.resolution,
+      skippedDocuments: [...skippedDocuments, ...merged.skippedDocuments],
+      consideredPaperIds,
+    };
+  }
+
+  // library：只读已就绪索引，不触发整库建索引。
+  const excluded = new Set<string>();
+  for (const item of input.libraryItems) {
+    if (item.ragEnabled === false) {
+      excluded.add(normalizeRagKey(item.itemKey));
+      excluded.add(item.itemKey);
+    }
+  }
+  const embeddingModelKey = buildRagEmbeddingModelKey(input.embedding);
+  const statuses = await ragListIndexStatuses();
+  const readyKeys = [...new Set(statuses
+    .filter((status) => status.status === 'ready'
+      && status.embeddingModelKey === embeddingModelKey
+      && !excluded.has(status.documentKey)
+      && !excluded.has(normalizeRagKey(status.documentKey)))
+    .map((status) => status.documentKey)
+    .filter(Boolean))];
+
+  if (readyKeys.length === 0) {
+    return {
+      resolution: { kind: 'indexing' },
+      skippedDocuments: [],
+      consideredPaperIds,
+    };
+  }
+
+  const queryText = buildRagRetrievalQuery(input.question, input.excerptText);
+  let queryEmbedding: number[];
+  try {
+    queryEmbedding = await embedRagText(queryText, input.embedding);
+  } catch (error) {
+    return {
+      resolution: {
+        kind: 'failed',
+        errorMessage: error instanceof Error ? error.message : String(error),
+      },
+      skippedDocuments: [],
+      consideredPaperIds: readyKeys,
+    };
+  }
+
+  if (queryEmbedding.length === 0) {
+    return { resolution: { kind: 'empty' }, skippedDocuments: [], consideredPaperIds: readyKeys };
+  }
+
+  const diagnostics = await ragRetrieveDocumentChunksWithDiagnostics({
+    documentKeys: readyKeys,
+    embeddingModelKey,
+    queryEmbedding,
+    queryText,
+    topK: input.settings.localRagTopK,
+  });
+  const merged = filterRelevantRetrievals(
+    diagnostics.results.slice().sort((left, right) => left.score - right.score),
+    input.settings.localRagTopK,
+  );
+
+  if (merged.length === 0) {
+    return {
+      resolution: {
+        kind: 'empty',
+        ftsStatuses: [diagnostics.ftsStatus],
+        ftsHitCount: diagnostics.ftsHitCount,
+      },
+      skippedDocuments: [],
+      consideredPaperIds: readyKeys,
+    };
+  }
+
+  const paperByKey = new Map<string, { paperId: string; paperTitle: string }>();
+  for (const item of input.libraryItems) {
+    paperByKey.set(item.itemKey, { paperId: item.itemKey, paperTitle: item.title });
+    paperByKey.set(item.workspaceId, { paperId: item.itemKey, paperTitle: item.title });
+    paperByKey.set(`native-library:${item.itemKey}`, { paperId: item.itemKey, paperTitle: item.title });
+  }
+
+  const contextDocument = buildRagContextText({
+    results: merged,
+    topK: input.settings.localRagTopK,
+    mineruBlocks: [],
+    preparedSources: [],
+    paperLookup: (result) => {
+      const key = result.documentKey ?? '';
+      return paperByKey.get(key) ?? paperByKey.get(normalizeRagKey(key)) ?? null;
+    },
+    tokenBudget: input.tokenBudget,
+  });
+
+  if (!contextDocument.documentText.trim()) {
+    return {
+      resolution: {
+        kind: 'empty',
+        ftsStatuses: [diagnostics.ftsStatus],
+        ftsHitCount: diagnostics.ftsHitCount,
+      },
+      skippedDocuments: [],
+      consideredPaperIds: readyKeys,
+    };
+  }
+
+  return {
+    resolution: {
+      kind: 'retrieved',
+      documentText: contextDocument.documentText,
+      retrievedChunkCount: contextDocument.sectionCount,
+      citations: contextDocument.citations,
+      retrievals: contextDocument.retrievals,
+      budgetSkippedCount: contextDocument.budgetSkippedCount,
+      indexedChunkCount: merged.length,
+      totalChunkCount: merged.length,
+      ftsStatuses: [diagnostics.ftsStatus],
+      ftsHitCount: diagnostics.ftsHitCount,
+      partialSources: readyKeys.length < input.libraryItems.length,
+    },
+    skippedDocuments: [],
+    consideredPaperIds: readyKeys,
+  };
 }

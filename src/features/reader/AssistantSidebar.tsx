@@ -25,6 +25,7 @@ import type {
   DocumentChatSession,
   ModelReasoningEffort,
   QaModelPreset,
+  ReaderQaScopeMode,
   SelectedExcerpt,
 } from '../../types/reader';
 import { cn } from '../../utils/cn';
@@ -68,6 +69,9 @@ export interface AssistantSidebarCoreProps {
   qaModelPresets: QaModelPreset[];
   selectedQaPresetId: string;
   qaRagEnabled: boolean;
+  qaScopeMode: ReaderQaScopeMode;
+  qaScopePaperIds: string[];
+  qaScopePaperOptions: Array<{ id: string; title: string }>;
   qaAnswerRenderMode: DocumentChatRenderMode;
   qaReasoningEffort: ModelReasoningEffort;
   qaLoading: boolean;
@@ -80,6 +84,7 @@ export interface AssistantSidebarCoreProps {
   onQaStop?: () => void;
   onQaPresetChange: (presetId: string) => void;
   onQaRagEnabledChange: (value: boolean) => void;
+  onQaScopeChange: (mode: ReaderQaScopeMode, paperIds: string[]) => void;
   onQaAnswerRenderModeChange: (mode: DocumentChatRenderMode) => void;
   onQaReasoningEffortChange: (reasoningEffort: ModelReasoningEffort) => void;
   onQaSessionCreate: () => void;
@@ -154,6 +159,9 @@ function AssistantSidebar({
   qaModelPresets,
   selectedQaPresetId,
   qaRagEnabled,
+  qaScopeMode,
+  qaScopePaperIds,
+  qaScopePaperOptions,
   qaAnswerRenderMode,
   qaReasoningEffort,
   qaLoading,
@@ -166,6 +174,7 @@ function AssistantSidebar({
   onQaStop,
   onQaPresetChange,
   onQaRagEnabledChange,
+  onQaScopeChange,
   onQaAnswerRenderModeChange,
   onQaReasoningEffortChange,
   onQaSessionCreate,
@@ -255,6 +264,9 @@ function AssistantSidebar({
                 qaModelPresets={qaModelPresets}
                 selectedQaPresetId={selectedQaPresetId}
                 qaRagEnabled={qaRagEnabled}
+                qaScopeMode={qaScopeMode}
+                qaScopePaperIds={qaScopePaperIds}
+                qaScopePaperOptions={qaScopePaperOptions}
                 qaAnswerRenderMode={qaAnswerRenderMode}
                 qaReasoningEffort={qaReasoningEffort}
                 screenshotLoading={screenshotLoading}
@@ -265,6 +277,7 @@ function AssistantSidebar({
                 onStop={onQaStop}
                 onQaPresetChange={onQaPresetChange}
                 onQaRagEnabledChange={onQaRagEnabledChange}
+                onQaScopeChange={onQaScopeChange}
                 onQaAnswerRenderModeChange={onQaAnswerRenderModeChange}
                 onQaReasoningEffortChange={onQaReasoningEffortChange}
                 onSessionCreate={onQaSessionCreate}

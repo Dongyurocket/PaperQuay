@@ -27,6 +27,8 @@ export interface ReaderRagContextDocument {
   sectionCount: number;
   citations: DocumentChatCitation[];
   retrievals: RagRetrievalResult[];
+  /** 超出预算被截去的证据段数量（按相关性从低到高丢弃）。 */
+  budgetSkippedCount?: number;
 }
 
 const DEFAULT_CHUNK_SIZE = 900;
@@ -43,7 +45,7 @@ const CONTEXT_QUESTION_TOKEN_BUDGET = 6_000;
  * 无 tokenizer 时的保守 token 估算（方案 §5.5-5）：
  * CJK/假名/谚文字符约 1 token，其余约每 3 字符 1 token。
  */
-function estimateTokens(text: string): number {
+export function estimateRagTokens(text: string): number {
   const wideCount = (text.match(/[㐀-鿿豈-﫿぀-ヿ가-힯]/g) ?? []).length;
   return Math.ceil(wideCount + (text.length - wideCount) / 3);
 }
@@ -283,6 +285,9 @@ function uniqueChunks(chunks: RagChunkInput[]): RagChunkInput[] {
   });
 }
 
+/** MinerU 分块抽取器版本：表格正文/图注规则变化时递增，让旧索引按懒建流程重建。 */
+export const MINERU_RAG_EXTRACTOR_VERSION = 'mineru-chunks-v2';
+
 export function prepareReaderRagDocument(input: {
   item: WorkspaceItem;
   settings: Pick<ReaderSettings, 'ragSourceMode'>;
@@ -306,7 +311,7 @@ export function prepareReaderRagDocument(input: {
     if (mineruSourceText && mineruChunks.length > 0) {
       sources.push({
         sourceType: 'mineru-markdown',
-        sourceSignature: textSignature(mineruSourceText),
+        sourceSignature: textSignature(`${MINERU_RAG_EXTRACTOR_VERSION}\n${mineruSourceText}`),
         chunks: mineruChunks,
       });
     }
@@ -527,7 +532,7 @@ function buildNeighborContext(input: {
       continue;
     }
 
-    const tokens = estimateTokens(pick.chunk.text);
+    const tokens = estimateRagTokens(pick.chunk.text);
 
     if (usedTokens + tokens > input.tokenBudget) {
       continue;
@@ -632,18 +637,34 @@ function selectCitationAnchor(
   return nonDecoration ?? directHits[0] ?? results[0] ?? null;
 }
 
+function evidenceKindFor(
+  blockId: string | null | undefined,
+  blockById: Map<string, PositionedMineruBlock>,
+): DocumentChatCitation['evidenceKind'] {
+  if (!blockId) return 'text';
+  const block = blockById.get(blockId);
+  if (!block) return 'text';
+  if (block.type === 'table') return 'table';
+  if (block.type === 'image' || block.type === 'chart') return 'image';
+  return 'text';
+}
+
 function buildCitation(
   anchor: RagRetrievalResult | null,
   results: RagRetrievalResult[],
   index: number,
+  meta: { paperId?: string; paperTitle?: string; indexOffset?: number },
+  blockById: Map<string, PositionedMineruBlock>,
 ): DocumentChatCitation | null {
   if (!anchor) {
     return null;
   }
 
+  const displayIndex = index + 1 + (meta.indexOffset ?? 0);
+
   return {
-    id: `cite:${index + 1}`,
-    label: String(index + 1),
+    id: `cite:${displayIndex}`,
+    label: String(displayIndex),
     sourceType: anchor.sourceType,
     pageIndex: anchor.pageIndex,
     blockId: anchor.blockId,
@@ -653,6 +674,10 @@ function buildCitation(
       .filter(Boolean)
       .join('\n\n')
       .slice(0, 480),
+    ...(meta.paperId ? { paperId: meta.paperId } : {}),
+    ...(meta.paperTitle ? { paperTitle: meta.paperTitle } : {}),
+    evidenceKind: evidenceKindFor(anchor.blockId, blockById),
+    score: anchor.score,
   };
 }
 
@@ -661,6 +686,14 @@ export function buildRagContextText(input: {
   topK: number;
   mineruBlocks: PositionedMineruBlock[];
   preparedSources: ReaderRagPreparedSource[];
+  paperId?: string;
+  paperTitle?: string;
+  /** 多文献合并时把引用编号整体后移，避免 [n] 冲突。 */
+  citationIndexOffset?: number;
+  /** 多文献合并时按检索结果补齐文献身份（documentKey → paper）。 */
+  paperLookup?: (result: RagRetrievalResult) => { paperId?: string; paperTitle?: string } | null;
+  /** 当前文献可用的证据 token 预算；未提供时不主动截取。 */
+  tokenBudget?: number;
 }): ReaderRagContextDocument {
   const pdfChunks = input.preparedSources.find((source) => source.sourceType === 'pdf-text')?.chunks ?? [];
   const results = input.results.slice(0, input.topK).map((result) => {
@@ -755,7 +788,7 @@ export function buildRagContextText(input: {
     )) {
       // 普通正文命中：前后邻接扩展，单目标窗口与整次问答双层预算约束（方案 §5.5）。
       const targetBudget = Math.min(
-        Math.max(0, CONTEXT_TARGET_TOKEN_BUDGET - estimateTokens(seed.text)),
+        Math.max(0, CONTEXT_TARGET_TOKEN_BUDGET - estimateRagTokens(seed.text)),
         questionContextTokenBudget,
       );
       const neighbor = buildNeighborContext({
@@ -787,17 +820,41 @@ export function buildRagContextText(input: {
     }
 
     sections.push(buildContextSection(sectionResults, sectionIndex, anchor));
-    const citation = buildCitation(anchor, sectionResults, sectionIndex);
+    const lookup = input.paperLookup?.(anchor);
+    const citation = buildCitation(
+      anchor,
+      sectionResults,
+      sectionIndex,
+      {
+        paperId: lookup?.paperId ?? input.paperId,
+        paperTitle: lookup?.paperTitle ?? input.paperTitle,
+        indexOffset: input.citationIndexOffset,
+      },
+      blockById,
+    );
 
     if (citation) {
       citations.push(citation);
     }
   });
 
+  // 超出预算时按相关性从低到高丢弃证据段；结果本身已按相关度排序，保留靠前的段落。
+  let keptSections = sections;
+  let keptCitations = citations;
+  let budgetSkippedCount = 0;
+  if (typeof input.tokenBudget === 'number' && Number.isFinite(input.tokenBudget) && input.tokenBudget > 0) {
+    while (keptSections.length > 1 && estimateRagTokens(keptSections.join('\n\n')) > input.tokenBudget) {
+      keptSections = keptSections.slice(0, -1);
+      keptCitations = keptCitations.slice(0, -1);
+      budgetSkippedCount += 1;
+    }
+  }
+
   return {
-    documentText: sections.join('\n\n').trim(),
-    sectionCount: sections.length,
-    citations,
+    documentText: keptSections.join('\n\n').trim(),
+    sectionCount: keptSections.length,
+    citations: keptCitations,
     retrievals: [...results, ...contextSupplements],
+    ...(budgetSkippedCount > 0 ? { budgetSkippedCount } : {}),
   };
 }

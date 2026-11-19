@@ -36,6 +36,7 @@ import type {
   DocumentChatSession,
   ModelReasoningEffort,
   QaModelPreset,
+  ReaderQaScopeMode,
   SelectedExcerpt,
 } from '../../types/reader';
 import { cn } from '../../utils/cn';
@@ -680,6 +681,9 @@ export interface ChatWorkspacePanelProps {
   qaModelPresets: QaModelPreset[];
   selectedQaPresetId: string;
   qaRagEnabled: boolean;
+  qaScopeMode: ReaderQaScopeMode;
+  qaScopePaperIds: string[];
+  qaScopePaperOptions: Array<{ id: string; title: string }>;
   qaAnswerRenderMode: DocumentChatRenderMode;
   qaReasoningEffort: ModelReasoningEffort;
   screenshotLoading: boolean;
@@ -691,6 +695,7 @@ export interface ChatWorkspacePanelProps {
   onStop?: () => void;
   onQaPresetChange: (presetId: string) => void;
   onQaRagEnabledChange: (value: boolean) => void;
+  onQaScopeChange: (mode: ReaderQaScopeMode, paperIds: string[]) => void;
   onQaAnswerRenderModeChange: (mode: DocumentChatRenderMode) => void;
   onQaReasoningEffortChange: (reasoningEffort: ModelReasoningEffort) => void;
   onSessionCreate: () => void;
@@ -722,6 +727,9 @@ export function ChatWorkspacePanel({
   qaModelPresets,
   selectedQaPresetId,
   qaRagEnabled,
+  qaScopeMode,
+  qaScopePaperIds,
+  qaScopePaperOptions,
   qaAnswerRenderMode,
   qaReasoningEffort,
   screenshotLoading,
@@ -733,6 +741,7 @@ export function ChatWorkspacePanel({
   onStop,
   onQaPresetChange,
   onQaRagEnabledChange,
+  onQaScopeChange,
   onQaAnswerRenderModeChange,
   onQaReasoningEffortChange,
   onSessionCreate,
@@ -1718,6 +1727,58 @@ export function ChatWorkspacePanel({
               </button>
             </div>
           </div>
+
+          {qaRagEnabled ? (
+            <div className="mt-2 flex flex-wrap items-center gap-1 px-1 text-[11px] text-[var(--pq-text-faint)]">
+              <span className="mr-1">{l('检索范围', 'Scope')}
+              </span>
+              {([
+                ['current', l('当前文献', 'Current paper')],
+                ['selected', l('选定文献', 'Selected papers')],
+                ['library', l('全库', 'Whole library')],
+              ] as const).map(([mode, label]) => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => onQaScopeChange(mode, qaScopePaperIds)}
+                  className={cn(
+                    'rounded-full border px-2 py-0.5 transition',
+                    qaScopeMode === mode
+                      ? 'border-[var(--pq-accent)] bg-[var(--pq-accent-soft)] text-[var(--pq-accent)]'
+                      : 'border-[var(--pq-border)] text-[var(--pq-text-muted)] hover:text-[var(--pq-text)]',
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+              {qaScopeMode === 'selected' ? (
+                <details className="relative">
+                  <summary className="cursor-pointer rounded-full border border-[var(--pq-border)] px-2 py-0.5 text-[var(--pq-text-muted)]">
+                    {l(`已选 ${qaScopePaperIds.length} 篇`, `${qaScopePaperIds.length} selected`)}
+                  </summary>
+                  <div className="absolute bottom-6 left-0 z-20 max-h-56 w-64 overflow-y-auto rounded-[var(--pq-radius-sm)] border border-[var(--pq-border)] bg-[var(--pq-surface)] p-2 shadow-[var(--pq-shadow-float)]">
+                    {qaScopePaperOptions.length === 0 ? (
+                      <div className="px-1 py-1 text-[var(--pq-text-faint)]">{l('文库里还没有可检索的文献', 'No searchable papers in the library yet')}</div>
+                    ) : qaScopePaperOptions.map((paper) => (
+                      <label key={paper.id} className="flex cursor-pointer items-start gap-1.5 rounded px-1 py-1 hover:bg-[var(--pq-hover)]">
+                        <input
+                          type="checkbox"
+                          checked={qaScopePaperIds.includes(paper.id)}
+                          onChange={(event) => {
+                            const next = event.target.checked
+                              ? [...qaScopePaperIds, paper.id]
+                              : qaScopePaperIds.filter((id) => id !== paper.id);
+                            onQaScopeChange('selected', next);
+                          }}
+                        />
+                        <span className="min-w-0 flex-1 truncate" title={paper.title}>{paper.title}</span>
+                      </label>
+                    ))}
+                  </div>
+                </details>
+              ) : null}
+            </div>
+          ) : null}
 
           <div className="mt-2 flex flex-wrap items-center justify-between gap-2 px-1 text-[11px] text-[var(--pq-text-faint)]">
             <span>
