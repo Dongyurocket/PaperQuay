@@ -188,6 +188,8 @@ interface ReaderWorkspaceProps {
   onTranslateSelectedExcerpt: () => void;
   onClearSelectedExcerpt: () => void;
   onPdfAnnotationSaveSuccess: (path: string) => void;
+  /** 阅读器内生成翻译版 PDF（仅 native-library 文档提供） */
+  onGenerateTranslatedPdf?: () => void;
   /** 阅读器内附加翻译版 PDF（仅 native-library 文档提供） */
   onAttachTranslatedPdf?: () => void;
   attachTranslatedPdfBusy?: boolean;
@@ -586,6 +588,7 @@ export function ReadingStage(props: ReaderWorkspaceProps & { immersiveReading: b
                     onSyncEnabledChange={setPdfCompareSyncEnabled}
                     onPageChange={handleTranslatedPdfPageChange}
                     onPageSyncApplied={handleTranslatedPdfPageSyncApplied}
+                    onGenerateTranslatedPdf={props.onGenerateTranslatedPdf}
                     onAttachTranslatedPdf={props.onAttachTranslatedPdf}
                     attaching={props.attachTranslatedPdfBusy ?? false}
                     active={active}

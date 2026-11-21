@@ -8,6 +8,7 @@ import {
   subscribeBackgroundTasks,
   type BackgroundTask,
 } from '../services/backgroundTasks';
+import { bindRetainPdfBackgroundTasks } from '../services/retainPdf';
 import { toast } from './toast';
 import { buildTaskCenterEntries } from './taskCenterEntries';
 
@@ -82,10 +83,12 @@ export function TaskCenter() {
     };
     const unsubscribe = subscribeBackgroundTasks(onBackground);
     const unbindRag = bindRagIndexBackgroundTasks();
+    const unbindRetainPdf = bindRetainPdfBackgroundTasks();
 
     return () => {
       unsubscribe();
       unbindRag();
+      unbindRetainPdf();
     };
   }, [english]);
 

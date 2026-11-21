@@ -1,21 +1,22 @@
 # PaperQuay v{{VERSION}}
 
-## Fixes
+## What's New
 
-- Full-document translation no longer reports "translation cache could not be written, the result is only available in the current window" and marks the task as failed when the translations were already generated.
-- Translation cache writes no longer consult the library database for path validation. App-data and approved cache directories are trusted directly, so a busy library database (MCP writes, backup, import) cannot block cache persistence.
-- Transient `EPERM` / `EBUSY` / `EACCES` cache write failures are retried, clear a read-only target, and fall back to a direct overwrite. If the configured cache directory is unavailable and the cache is incomplete, the default cache directory is used.
-- After a failed write, the existing cache is read back. If it already contains every translation, the write is treated as successful instead of failing the task or duplicating the cache. Reads compare the primary and fallback caches and keep the more complete one.
-- A later successful progress or final write clears earlier cache-write errors, so a transient failure no longer leaves the task marked as failed after the result has been saved.
+- The translated-PDF menu in paper details and the empty translated-PDF pane in the reader now provide "Generate with RetainPDF". PaperQuay calls the locally installed RetainPDF desktop app to translate the complete PDF, then downloads and attaches the translated PDF automatically.
+- PaperQuay discovers the live RetainPDF port from `runtime-ports.json`, starts RetainPDF when needed, and reuses RetainPDF's own OCR provider, Paddle/MinerU token, translation model, endpoint, and API key. PaperQuay does not persist those credentials.
+- Translation progress appears in the global task bar. The library and any open reader refresh when the attachment is ready. Job state is persisted in `.retainpdf-jobs.json`, so polling or attachment resumes after an app restart.
 
-## Note
+## Notes
 
-- Only cache persistence and task status changed. Translation models, prompts, and existing translated content are unchanged; the normal translation and cache-read paths behave as before.
+- Windows only. RetainPDF must be installed and configured with a working OCR token and translation model.
+- RetainPDF currently translates into Simplified Chinese, so the attached PDF language is recorded as `zh-CN`.
+- One RetainPDF translation job is allowed per paper. A cancel command exists, but the paper menu has no cancel entry yet. No new MCP tool was added in this release.
 
 ## Verification
 
-- `npx tsc --noEmit` and `npm run build` passed; 803 tests ran with 802 passing, 1 optional benchmark skipped, 0 failed.
-- Added focused tests: cache directories remain writable when the library database is unavailable, read-only targets recover, an unavailable primary root falls back to the default root, a complete existing cache is treated as saved when a rewrite fails, and reads keep the more complete cache.
+- `npm run build` passed, and `npm test` ran 808 tests with 807 passing, 1 optional benchmark skipped, and 0 failed. Build and tests used a repository-local temporary directory to avoid the local `%TEMP%` lock.
+- Added 5 tests covering Paddle/MinerU config mapping, missing-credential messages, job stage/failure extraction, loopback-only API bases, and a complete upload -> create job -> poll -> download -> attach flow against a local stub server.
+- The installed RetainPDF was verified through its executable path, `41000` health check, and current Paddle / translation-model configuration. No real full-document translation was run to avoid consuming quota. Per-page click-through of the installed PaperQuay build was not performed before release.
 
 ## Windows Release
 
@@ -23,22 +24,23 @@ Only Windows x64 installers are published and maintained. Download the `.exe` fr
 
 ---
 
-## 修复内容
+## 新增内容
 
-- 修复全文翻译完成后偶发「译文缓存写入失败，本次结果仅保留在当前窗口」并把任务误判为失败的问题。
-- 译文缓存写入不再为校验路径读取文库数据库：应用数据目录和已批准缓存目录直接放行，MCP 写入、备份或导入占用文库时也不会阻塞译文缓存落盘。
-- 缓存写入遇到 `EPERM` / `EBUSY` / `EACCES` 等瞬时错误时自动重试、清除只读属性，并退化为直接覆盖；配置的缓存目录不可用且缓存不完整时，改用默认缓存目录。
-- 写入失败后读回现有缓存；如果已经包含本次全部译文，按成功处理，不重复重写、不再复制一份到备用目录。读取时比较主缓存与备用缓存，保留更完整的一份。
-- 进度写入或最终写入成功后清空之前的缓存错误，避免瞬时失败在结果已经保存后仍把任务标成失败。
+- 文献详情「译版 PDF」菜单和阅读器未附加译版的空状态新增「用 RetainPDF 生成译版」。PaperQuay 调用本机已安装的 RetainPDF 桌面端完成整本 PDF 翻译，随后自动下载并附加译版 PDF。
+- PaperQuay 从 `runtime-ports.json` 发现 RetainPDF 实际端口，未运行时自动启动，并复用 RetainPDF 自己的 OCR Provider、Paddle/MinerU Token、翻译模型、接口地址与 API Key；这些凭据不会由 PaperQuay 落盘保存。
+- 翻译进度显示在全局任务条。附加完成后文献库和已打开阅读器即时刷新；任务状态持久化到 `.retainpdf-jobs.json`，应用重启后会继续轮询或续做附加。
 
 ## 说明
 
-- 只影响译文缓存的持久化与任务状态，不改变翻译模型、提示词或已有译文内容；正常的翻译与缓存读取路径保持不变。
+- 仅支持 Windows。需要本机安装 RetainPDF，并配置可用的 OCR Token 与翻译模型。
+- RetainPDF 当前输出简体中文，自动附加的附件语言记为 `zh-CN`。
+- 同一文献同时只允许一个 RetainPDF 翻译任务。取消命令已提供，但菜单暂未增加取消入口；本版本未新增 MCP 工具。
 
 ## 验证
 
-- `npx tsc --noEmit`、`npm run build` 通过；803 项测试中 802 通过、1 项可选基准跳过、0 失败。
-- 新增定向测试：文库数据库不可用时缓存目录仍可写入、只读文件可恢复写入、主目录不可用回退默认目录、已有完整缓存时重写失败按成功处理、读取时保留更完整的缓存。
+- `npm run build` 通过；`npm test` 808 项中 807 通过、1 项可选基准跳过、0 失败。构建与测试使用仓库内临时目录，规避本机 `%TEMP%` 锁。
+- 新增 5 项测试：Paddle / MinerU 配置映射、缺失凭据提示、任务阶段与失败信息提取、loopback 地址限制，以及本地桩服务下的上传、建任务、轮询、下载、自动附加完整链路。
+- 已验证本机 RetainPDF 的可执行文件路径、`41000` 健康检查与当前 Paddle / 翻译模型配置可用。未执行真实整本翻译以避免消耗额度；发布前未执行安装版逐页界面点击验收。
 
 ## Windows 发布范围
 

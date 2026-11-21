@@ -50,6 +50,7 @@ interface LiteraturePaperDetailsProps {
   onRunMineruParse?: (paper: LiteraturePaper) => void;
   onTranslatePaper?: (paper: LiteraturePaper) => void;
   onTranslatePaperTitle?: (paper: LiteraturePaper) => Promise<string | null>;
+  onGenerateTranslatedPdf?: (paper: LiteraturePaper) => void;
   onAttachTranslatedPdf?: (paper: LiteraturePaper) => void;
   onRemoveTranslatedPdf?: (paper: LiteraturePaper) => void;
   onUpdateTranslatedPdfLanguage?: (paper: LiteraturePaper, attachmentId: string, language: string | null) => Promise<void>;
@@ -140,6 +141,7 @@ export default function LiteraturePaperDetails({
   onRunMineruParse,
   onTranslatePaper,
   onTranslatePaperTitle,
+  onGenerateTranslatedPdf,
   onAttachTranslatedPdf,
   onRemoveTranslatedPdf,
   onUpdateTranslatedPdfLanguage,
@@ -491,6 +493,7 @@ export default function LiteraturePaperDetails({
             onGenerateSummary={onGenerateSummary}
             onSetRagMembership={onSetRagMembership}
             onIndexPaperRag={onIndexPaperRag}
+            onGenerateTranslatedPdf={onGenerateTranslatedPdf}
             onAttachTranslatedPdf={onAttachTranslatedPdf}
             onRemoveTranslatedPdf={onRemoveTranslatedPdf}
             onSetTranslatedPdfLanguage={() => setLanguageDialogOpen(true)}

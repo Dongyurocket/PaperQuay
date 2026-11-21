@@ -227,7 +227,7 @@ const translatedPaneBundlePromise = build({
     const fixtures: Record<string, string> = {
       PdfViewer: 'export default function PdfViewer() {}',
       uiLanguage: 'export const useLocaleText = () => (zh) => zh;',
-      'lucide-react': 'export function BookCopy() {} export function FilePlus2() {} export function Link2() {} export function Unlink2() {}',
+      'lucide-react': 'export function BookCopy() {} export function FilePlus2() {} export function Link2() {} export function Sparkles() {} export function Unlink2() {}',
     };
     builder.onResolve({ filter: /.*/ }, (args) => {
       const name = args.path.replace(/\.(?:tsx?|jsx?)$/, '').split('/').at(-1)!;

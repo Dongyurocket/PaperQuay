@@ -144,6 +144,7 @@ import { confirmAction } from '../../ui/confirmHost';
 import { useLibraryFilters } from './useLibraryFilters';
 import { useLibraryQueryRefresh } from './useLibraryQueryRefresh';
 import { EXTERNAL_LIBRARY_WRITE_EVENT } from '../../services/externalWrite';
+import { startRetainPdfTranslation } from '../../services/retainPdf';
 import { useSelectionFilterGuard } from './useSelectionFilterGuard';
 import { Dialog } from '../../ui/dialog';
 import { Menu, type MenuEntry } from '../../ui/menu';
@@ -2237,6 +2238,33 @@ export default function LiteratureLibraryView({
     }
   };
 
+  const handleGenerateTranslatedPdf = async (paper: LiteraturePaper) => {
+    if (demoMode) {
+      showDemoLockedMessage();
+      return;
+    }
+
+    setError('');
+    try {
+      await startRetainPdfTranslation(paper.id);
+      const message = l(`已提交 RetainPDF 翻译：${paper.title}`, `RetainPDF translation started: ${paper.title}`);
+      setStatusMessage(message);
+      toast.info(message, {
+        description: l(
+          '任务在后台执行，完成后会自动下载并附加译版 PDF。',
+          'The task runs in the background. The translated PDF will be attached automatically when ready.',
+        ),
+      });
+    } catch (nextError) {
+      const message = nextError instanceof Error
+        ? nextError.message
+        : l('启动 RetainPDF 翻译失败', 'Failed to start RetainPDF translation');
+      setError(message);
+      setStatusMessage(message);
+      toast.error(message);
+    }
+  };
+
   const handleConfirmTranslatedPdfAttach = async (language: string | null) => {
     if (!translatedPdfAttachDraft) return;
     const { paper, sourcePath } = translatedPdfAttachDraft;
@@ -3380,6 +3408,7 @@ export default function LiteratureLibraryView({
             onRunMineruParse={onRunMineruParse}
             onTranslatePaper={onTranslatePaper}
             onTranslatePaperTitle={onTranslatePaperTitle}
+            onGenerateTranslatedPdf={(paper) => void handleGenerateTranslatedPdf(paper)}
             onAttachTranslatedPdf={(paper) => void handleAttachTranslatedPdf(paper)}
             onRemoveTranslatedPdf={handleRemoveTranslatedPdf}
             onUpdateTranslatedPdfLanguage={handleUpdateTranslatedPdfLanguage}

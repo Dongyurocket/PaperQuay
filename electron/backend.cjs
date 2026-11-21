@@ -11,6 +11,7 @@ const { createMineruCacheCommands } = require('./backend/mineruCacheCommands.cjs
 const { createNoteCommands } = require('./backend/noteCommands.cjs');
 const { createNoteStore } = require('./backend/noteStore.cjs');
 const { createNoteVault } = require('./backend/noteVault.cjs');
+const { createRetainPdfIntegration } = require('./backend/retainPdfIntegration.cjs');
 const { cleanupRetiredAgentData } = require('./backend/agentRetiredCleanup.cjs');
 const { createUpdateCommands } = require('./backend/updateCommands.cjs');
 const { externalWriteRevisions, readExternalWriteMarker } = require('./backend/externalWriteMarker.cjs');
@@ -165,6 +166,7 @@ function createBackend({ app }) {
     ...createIntegrationCommands(context),
     ...createUpdateCommands(context),
     ...createMcpClientConfigCommands(context),
+    ...createRetainPdfIntegration(context),
   };
   guardRagIndexCommands(commands, {
     store,

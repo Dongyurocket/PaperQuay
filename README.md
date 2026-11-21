@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.4.35-2563eb?style=flat-square" alt="Version v0.4.35">
+  <img src="https://img.shields.io/badge/version-v0.4.36-2563eb?style=flat-square" alt="Version v0.4.36">
   <img src="https://img.shields.io/badge/maintained-Windows%20x64-4b5563?style=flat-square" alt="Maintained: Windows x64">
   <img src="https://img.shields.io/badge/built%20with-Electron-47848f?style=flat-square" alt="Electron">
   <img src="https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-0f766e?style=flat-square" alt="React TypeScript">
@@ -57,6 +57,7 @@ PaperQuay 是本地优先、开源免费的桌面端 AI 论文工作台，面向
 
 ## 近期更新
 
+- **v0.4.36**：文献库「译版 PDF」菜单和阅读器空状态新增「用 RetainPDF 生成译版」：调用本机 RetainPDF 完成整本翻译，自动下载并附加译版 PDF；进度进入全局任务条，重启后可续跑。
 - **v0.4.35**：全文翻译的译文缓存写入更稳：应用数据目录和已批准的缓存目录直接放行，遇到 `EPERM` / `EBUSY` 等瞬时错误自动重试并退化为覆盖写入，译文已完整落盘时不再把任务误判为失败。
 - **v0.4.34**：批量 MinerU 解析遇到抽取器签名变化的旧索引只跳过该篇，不再一次扫描就把整库排进重嵌入队列；重建留给打开文献、问答懒建或手动重建。
 - **v0.4.33**：设置页文案对齐实际行为：Vault 同步只在手动操作或定时任务时执行，模型角色不再提 Agent，备份范围不再包含 Agent 记忆与历史。

@@ -48,6 +48,7 @@ import {
   type ScopedRagDocument,
 } from '../../services/localRag';
 import { summarizeDocumentOpenAICompatible } from '../../services/summary';
+import { startRetainPdfTranslation } from '../../services/retainPdf';
 import {
   emitJumpToNoteAnchor,
   NOTE_CHANGED_EVENT,
@@ -497,6 +498,29 @@ function DocumentReaderTab({
       setAttachTranslatedPdfBusy(false);
     }
   }, [onAttachTranslatedPdf, currentDocument]);
+
+  const handleGenerateTranslatedPdf = useCallback(async () => {
+    if (currentDocument.source !== 'native-library') {
+      return;
+    }
+
+    setError('');
+    try {
+      await startRetainPdfTranslation(currentDocument.itemKey);
+      const message = l(
+        `已提交 RetainPDF 翻译：${currentDocument.title}`,
+        `RetainPDF translation started: ${currentDocument.title}`,
+      );
+      setStatusMessage(message);
+    } catch (nextError) {
+      const message = nextError instanceof Error
+        ? nextError.message
+        : l('启动 RetainPDF 翻译失败', 'Failed to start RetainPDF translation');
+      setError(message);
+      setStatusMessage(message);
+    }
+  }, [currentDocument, l, setError, setStatusMessage]);
+
   const [capturingScreenshot, setCapturingScreenshot] = useState(false);
   const [selectedExcerpt, setSelectedExcerpt] = useState<SelectedExcerpt | null>(null);
   const [selectionDistilling, setSelectionDistilling] = useState(false);
@@ -4588,6 +4612,7 @@ function DocumentReaderTab({
         onTranslationDisplayModeChange={onTranslationDisplayModeChange}
         onTextSelect={handleTextSelect}
         onOpenStandalonePdf={onOpenStandalonePdf}
+        onGenerateTranslatedPdf={currentDocument.source === 'native-library' ? () => void handleGenerateTranslatedPdf() : undefined}
         onAttachTranslatedPdf={onAttachTranslatedPdf ? () => void handleAttachTranslatedPdf() : undefined}
         attachTranslatedPdfBusy={attachTranslatedPdfBusy}
         onOpenMineruJson={() => void handleOpenMineruJson()}

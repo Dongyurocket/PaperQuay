@@ -21,6 +21,7 @@ interface PaperDetailsStatusBarProps {
   onGenerateSummary?: (paper: LiteraturePaper) => void;
   onSetRagMembership?: (paper: LiteraturePaper, enabled: boolean) => void;
   onIndexPaperRag?: (paper: LiteraturePaper) => void;
+  onGenerateTranslatedPdf?: (paper: LiteraturePaper) => void;
   onAttachTranslatedPdf?: (paper: LiteraturePaper) => void;
   onRemoveTranslatedPdf?: (paper: LiteraturePaper) => void;
   onSetTranslatedPdfLanguage?: () => void;
@@ -85,6 +86,7 @@ export default function PaperDetailsStatusBar({
   onGenerateSummary,
   onSetRagMembership,
   onIndexPaperRag,
+  onGenerateTranslatedPdf,
   onAttachTranslatedPdf,
   onRemoveTranslatedPdf,
   onSetTranslatedPdfLanguage,
@@ -140,6 +142,15 @@ export default function PaperDetailsStatusBar({
   ];
 
   const translatedEntries: MenuEntry[] = [
+    {
+      id: 'generate-translated-pdf',
+      label: translatedPdf
+        ? l('用 RetainPDF 重新生成译版', 'Regenerate with RetainPDF')
+        : l('用 RetainPDF 生成译版', 'Generate with RetainPDF'),
+      icon: <Sparkles className="h-4 w-4" />,
+      disabled: !onGenerateTranslatedPdf || anyTaskRunning,
+      onSelect: () => onGenerateTranslatedPdf?.(paper),
+    },
     {
       id: 'attach-translated-pdf',
       label: translatedPdf ? l('替换译版 PDF', 'Replace Translated PDF') : l('附加译版 PDF', 'Attach Translated PDF'),

@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
-import { BookCopy, FilePlus2, Link2, Unlink2 } from 'lucide-react';
+import { BookCopy, FilePlus2, Link2, Sparkles, Unlink2 } from 'lucide-react';
 import PdfViewer from '../pdf/PdfViewer';
 import { useLocaleText } from '../../i18n/uiLanguage';
 import type {
@@ -20,6 +20,7 @@ interface TranslatedPdfPaneProps {
   onPageChange?: (page: number) => void;
   /** 来自原版栏的同步信号已实际应用 */
   onPageSyncApplied?: (page: number, token: number) => void;
+  onGenerateTranslatedPdf?: () => void;
   onAttachTranslatedPdf?: () => void;
   attaching?: boolean;
   active: boolean;
@@ -44,6 +45,7 @@ export default function TranslatedPdfPane({
   onSyncEnabledChange,
   onPageChange,
   onPageSyncApplied,
+  onGenerateTranslatedPdf,
   onAttachTranslatedPdf,
   attaching = false,
   active,
@@ -83,19 +85,31 @@ export default function TranslatedPdfPane({
             )}
           </p>
         </div>
-        {onAttachTranslatedPdf ? (
-          <button
-            type="button"
-            onClick={onAttachTranslatedPdf}
-            disabled={attaching}
-            className="pq-button-primary h-9 px-4 text-sm"
-          >
-            <FilePlus2 className="mr-2 h-4 w-4" strokeWidth={1.9} />
-            {attaching
-              ? l('正在附加…', 'Attaching…')
-              : l('附加翻译版 PDF', 'Attach Translated PDF')}
-          </button>
-        ) : null}
+        <div className="flex flex-wrap items-center justify-center gap-2">
+          {onGenerateTranslatedPdf ? (
+            <button
+              type="button"
+              onClick={onGenerateTranslatedPdf}
+              className="pq-button h-9 px-4 text-sm"
+            >
+              <Sparkles className="mr-2 h-4 w-4" strokeWidth={1.9} />
+              {l('用 RetainPDF 生成', 'Generate with RetainPDF')}
+            </button>
+          ) : null}
+          {onAttachTranslatedPdf ? (
+            <button
+              type="button"
+              onClick={onAttachTranslatedPdf}
+              disabled={attaching}
+              className="pq-button-primary h-9 px-4 text-sm"
+            >
+              <FilePlus2 className="mr-2 h-4 w-4" strokeWidth={1.9} />
+              {attaching
+                ? l('正在附加…', 'Attaching…')
+                : l('附加翻译版 PDF', 'Attach Translated PDF')}
+            </button>
+          ) : null}
+        </div>
       </div>
     );
   }

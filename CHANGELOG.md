@@ -4,6 +4,26 @@
 
 Windows 安装包见 [GitHub Releases](https://github.com/Dongyurocket/PaperQuay/releases)。自 0.4.24 起仅发布、维护和测试 Windows x64；其他平台由用户自行打包，作者不承担维护和测试。
 
+## [0.4.36] - 2026-11-21
+
+### 新增
+
+- 文献详情「译版 PDF」菜单和阅读器未附加译版的空状态新增「用 RetainPDF 生成译版」。PaperQuay 直接调用本机已安装的 RetainPDF 桌面端完成整本 PDF 翻译，结束后自动下载并附加译版 PDF。
+- 自动从 RetainPDF 的 `runtime-ports.json` 发现实际端口，未运行时自动启动；复用 RetainPDF 自己的 OCR Provider、Paddle/MinerU Token、翻译模型与接口配置，PaperQuay 不保存这些凭据。
+- 翻译进度进入左下角全局任务条；完成后文献库和已打开阅读器即时刷新。任务状态持久化到 `.retainpdf-jobs.json`，应用重启后会继续轮询或续做附加。
+
+### 说明
+
+- 仅支持 Windows；需要本机安装并配置好 RetainPDF 的 OCR Token 与翻译模型。
+- RetainPDF 当前输出目标为简体中文，自动附加的附件语言记为 `zh-CN`。
+- 同一文献同时只允许一个 RetainPDF 翻译任务。取消命令已提供，但菜单暂未增加取消入口；MCP 本轮未新增工具。
+
+### 验证
+
+- `npm run build` 通过；`npm test` 808 项中 807 通过、1 项跳过、0 失败。构建与测试使用独立临时目录规避本机 `%TEMP%` 写入锁。
+- 新增 5 项测试：Paddle / MinerU 配置映射、缺失凭据提示、任务阶段与失败信息提取、loopback 地址限制，以及本地桩服务下的上传、建任务、轮询、下载、自动附加完整链路。
+- 已验证真实 RetainPDF 的安装路径、`41000` 健康检查与当前 Paddle / 翻译模型配置可用；未执行真实整本翻译以避免消耗额度，安装版逐页界面点击验收未在发布前执行。
+
 ## [0.4.35] - 2026-11-20
 
 ### 修复

@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.4.35-2563eb?style=flat-square" alt="Version v0.4.35">
+  <img src="https://img.shields.io/badge/version-v0.4.36-2563eb?style=flat-square" alt="Version v0.4.36">
   <img src="https://img.shields.io/badge/maintained-Windows%20x64-4b5563?style=flat-square" alt="Maintained: Windows x64">
   <img src="https://img.shields.io/badge/built%20with-Electron-47848f?style=flat-square" alt="Electron">
   <img src="https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-0f766e?style=flat-square" alt="React TypeScript">
@@ -57,6 +57,7 @@ PaperQuay is a local-first, free and open-source desktop AI paper workspace for 
 
 ## Recent Updates
 
+- **v0.4.36**: the translated-PDF menu and the reader's empty translated-PDF pane now offer "Generate with RetainPDF". PaperQuay invokes the local RetainPDF app for a full-document translation, then downloads and attaches the result automatically; progress appears in the global task bar and resumes after restart.
 - **v0.4.35**: full-document translation persists its cache more reliably: app-data and approved cache directories are trusted directly, transient `EPERM` / `EBUSY` failures are retried and fall back to an overwrite, and a task is no longer marked failed when every translation is already on disk.
 - **v0.4.34**: batch MinerU parsing skips only the papers whose cached index carries an older extractor signature instead of queueing the whole library for re-embedding; rebuilding is left to opening a paper, lazy Q&A indexing, or a manual rebuild.
 - **v0.4.33**: settings copy matches actual behavior: Vault sync runs only on manual or scheduled sync, model roles no longer mention the Agent, and backup scope no longer claims Agent memory or history.
