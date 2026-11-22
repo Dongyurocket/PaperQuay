@@ -8,6 +8,13 @@ import type {
   WorkspaceItem,
 } from '../../types/reader.ts';
 import { extractTextFromMineruBlock } from '../../services/mineru.ts';
+import {
+  chunkMatchesFormulaNumber,
+  chunkMatchesReferenceEntry,
+  extractFormulaNumbers,
+  extractReferenceNumbers,
+  hasSourceOriginIntent,
+} from '../../shared/ragQueryUtils.cjs';
 import { textSignature } from './readerShared.ts';
 
 export interface ReaderRagPreparedSource {
@@ -33,6 +40,9 @@ export interface ReaderRagContextDocument {
 
 const DEFAULT_CHUNK_SIZE = 900;
 const DEFAULT_CHUNK_OVERLAP = 120;
+const SOFT_MERGE_CHUNK_TARGET = 650;
+const MAX_LEAD_IN_MERGE_CHARS = 450;
+const MAX_NEIGHBOR_STEPS = 6;
 const MAX_HEADING_NEIGHBOR_BLOCKS = 3;
 const MAX_HEADING_SECTION_CHARS = 2_400;
 const MAX_HEADING_LENGTH = 140;
@@ -202,46 +212,191 @@ export function buildReaderRagDocumentKey(item: WorkspaceItem): string {
   return item.workspaceId;
 }
 
+function wrapEquationMarkdown(text: string): string {
+  const trimmed = normalizeChunkText(text);
+  if (!trimmed) {
+    return '';
+  }
+  if (/^\$\$[\s\S]*\$\$$/.test(trimmed) || /^\\\[[\s\S]*\\\]$/.test(trimmed)) {
+    return trimmed;
+  }
+  return `$$\n${trimmed}\n$$`;
+}
+
+function isVariableExplanationText(text: string): boolean {
+  const trimmed = text.trim();
+  return /^(?:where|in which|here,|with\b|式中|其中)/i.test(trimmed);
+}
+
+interface MineruChunkCandidate {
+  block: PositionedMineruBlock;
+  text: string;
+  pageIndex: number | null;
+  sectionId: string | null;
+  sectionPath: string[] | null;
+  kind: 'title' | 'table' | 'equation' | 'caption' | 'prose';
+}
+
 export function buildMineruRagChunks(
   blocks: PositionedMineruBlock[],
 ): RagChunkInput[] {
   const headingStack: Array<{ level: number; title: string }> = [];
   let sectionId: string | null = null;
 
-  return blocks
-    .filter((block) => !isPageDecorationBlock(block))
-    .flatMap((block) => {
-      const level = headingLevel(block);
-      if (level !== null) {
-        while (headingStack.length > 0 && headingStack[headingStack.length - 1].level >= level) {
-          headingStack.pop();
+  const entries: MineruChunkCandidate[] = [];
+
+  for (const block of blocks) {
+    if (isPageDecorationBlock(block)) {
+      continue;
+    }
+
+    const level = headingLevel(block);
+    if (level !== null) {
+      while (headingStack.length > 0 && headingStack[headingStack.length - 1].level >= level) {
+        headingStack.pop();
+      }
+      const title = normalizeChunkText(extractTextFromMineruBlock(block)) || block.blockId;
+      headingStack.push({ level, title });
+      sectionId = block.blockId;
+    }
+
+    const sectionPath = headingStack.length > 0 ? headingStack.map((entry) => entry.title) : null;
+    const pageIndex = Number.isFinite(block.pageIndex) ? block.pageIndex : null;
+    const rawText = extractTextFromMineruBlock(block);
+    const normalized = normalizeChunkText(rawText);
+
+    if (!normalized) {
+      continue;
+    }
+
+    const kind: MineruChunkCandidate['kind'] =
+      level !== null || block.type === 'title'
+        ? 'title'
+        : block.type === 'table'
+          ? 'table'
+          : block.type === 'equation'
+            ? 'equation'
+            : block.type === 'image' || block.type === 'caption'
+              ? 'caption'
+              : 'prose';
+
+    entries.push({
+      block,
+      text: kind === 'equation' ? wrapEquationMarkdown(normalized) : normalized,
+      pageIndex,
+      sectionId,
+      sectionPath,
+      kind,
+    });
+  }
+
+  const output: RagChunkInput[] = [];
+  let buffer: MineruChunkCandidate[] = [];
+
+  const flushBuffer = () => {
+    if (buffer.length === 0) {
+      return;
+    }
+
+    const first = buffer[0];
+    const hasEquation = buffer.some((item) => item.kind === 'equation');
+    const hasProse = buffer.some((item) => item.kind === 'prose');
+    const primaryEquation = buffer.find((item) => item.kind === 'equation');
+    const anchor = primaryEquation ?? first;
+    const sectionPrefix =
+      hasEquation && !hasProse && anchor.sectionPath && anchor.sectionPath.length > 0
+        ? `[Section: ${anchor.sectionPath[anchor.sectionPath.length - 1]}]\n`
+        : '';
+    const combinedText = `${sectionPrefix}${buffer.map((item) => item.text).join('\n\n')}`;
+    const prefix = `mineru:${anchor.block.blockId}`;
+
+    if (combinedText.length <= DEFAULT_CHUNK_SIZE) {
+      const chunk = buildBlockScopedChunk(prefix, combinedText, anchor.pageIndex, anchor.block.blockId);
+      if (chunk) {
+        output.push({ ...chunk, sectionId: anchor.sectionId, sectionPath: anchor.sectionPath });
+      }
+    } else {
+      splitTextIntoChunks(prefix, combinedText, anchor.pageIndex, anchor.block.blockId)
+        .forEach((chunk) => {
+          output.push({ ...chunk, sectionId: anchor.sectionId, sectionPath: anchor.sectionPath });
+        });
+    }
+
+    buffer = [];
+  };
+
+  for (const entry of entries) {
+    if (entry.kind === 'title' || entry.kind === 'table') {
+      flushBuffer();
+      const prefix = `mineru:${entry.block.blockId}`;
+      if (entry.text.length <= DEFAULT_CHUNK_SIZE) {
+        const chunk = buildBlockScopedChunk(prefix, entry.text, entry.pageIndex, entry.block.blockId);
+        if (chunk) {
+          output.push({ ...chunk, sectionId: entry.sectionId, sectionPath: entry.sectionPath });
         }
-        const title = normalizeChunkText(extractTextFromMineruBlock(block)) || block.blockId;
-        headingStack.push({ level, title });
-        sectionId = block.blockId;
+      } else {
+        splitTextIntoChunks(prefix, entry.text, entry.pageIndex, entry.block.blockId)
+          .forEach((chunk) => {
+            output.push({ ...chunk, sectionId: entry.sectionId, sectionPath: entry.sectionPath });
+          });
       }
-      const sectionPath = headingStack.length > 0 ? headingStack.map((entry) => entry.title) : null;
-      const prefix = `mineru:${block.blockId}`;
-      const pageIndex = Number.isFinite(block.pageIndex) ? block.pageIndex : null;
-      const text = extractTextFromMineruBlock(block);
-      const normalized = normalizeChunkText(text);
+      continue;
+    }
 
-      if (!normalized) {
-        return [];
+    if (buffer.length === 0) {
+      buffer.push(entry);
+      continue;
+    }
+
+    const prev = buffer[buffer.length - 1];
+    const sameSection = prev.sectionId === entry.sectionId;
+    let lastEquationIndex = -1;
+    for (let idx = buffer.length - 1; idx >= 0; idx -= 1) {
+      if (buffer[idx].kind === 'equation') {
+        lastEquationIndex = idx;
+        break;
       }
+    }
+    const bufferHasEquation = lastEquationIndex >= 0;
+    const hasTrailingProseAfterEq =
+      bufferHasEquation && buffer.slice(lastEquationIndex + 1).some((item) => item.kind === 'prose');
+    const bufferHasCaptionOnly = buffer.every((item) => item.kind === 'caption');
+    const currentLen = buffer.map((item) => item.text).join('\n\n').length;
+    const combinedLen = currentLen + 2 + entry.text.length;
 
-      if (normalized.length <= DEFAULT_CHUNK_SIZE) {
-        const chunk = buildBlockScopedChunk(prefix, normalized, pageIndex, block.blockId);
-        return chunk ? [{ ...chunk, sectionId, sectionPath }] : [];
+    let canMerge = false;
+    if (sameSection && combinedLen <= DEFAULT_CHUNK_SIZE) {
+      if (entry.kind === 'caption' && bufferHasCaptionOnly) {
+        canMerge = true;
+      } else if (entry.kind === 'equation' && !bufferHasCaptionOnly) {
+        canMerge = (bufferHasEquation && !hasTrailingProseAfterEq) || currentLen <= MAX_LEAD_IN_MERGE_CHARS;
+      } else if (entry.kind === 'prose') {
+        if (bufferHasEquation) {
+          canMerge =
+            !hasTrailingProseAfterEq &&
+            (isVariableExplanationText(entry.text) || entry.text.length <= MAX_LEAD_IN_MERGE_CHARS);
+        } else if (!bufferHasCaptionOnly) {
+          canMerge =
+            (currentLen < 260 || entry.text.length < 220) &&
+            combinedLen <= SOFT_MERGE_CHUNK_TARGET;
+        }
       }
+    }
 
-      return splitTextIntoChunks(prefix, normalized, pageIndex, block.blockId)
-        .map((chunk) => ({ ...chunk, sectionId, sectionPath }));
-    })
-    .map((chunk, index) => ({
-      ...chunk,
-      chunkIndex: index,
-    }));
+    if (canMerge) {
+      buffer.push(entry);
+    } else {
+      flushBuffer();
+      buffer.push(entry);
+    }
+  }
+
+  flushBuffer();
+
+  return output.map((chunk, index) => ({
+    ...chunk,
+    chunkIndex: index,
+  }));
 }
 
 export function buildPdfRagChunks(documentText: string): RagChunkInput[] {
@@ -285,8 +440,8 @@ function uniqueChunks(chunks: RagChunkInput[]): RagChunkInput[] {
   });
 }
 
-/** MinerU 分块抽取器版本：表格正文/图注规则变化时递增，让旧索引按懒建流程重建。 */
-export const MINERU_RAG_EXTRACTOR_VERSION = 'mineru-chunks-v2';
+/** MinerU 分块抽取器版本：上下文感知公式/短块合并与 LaTeX 清洗升级后递增，触发按需懒重建。 */
+export const MINERU_RAG_EXTRACTOR_VERSION = 'mineru-chunks-v3';
 
 export function prepareReaderRagDocument(input: {
   item: WorkspaceItem;
@@ -493,74 +648,184 @@ function buildExpandedHeadingSection(
   return additions;
 }
 
+function isCaptionOrImageChunk(
+  chunk: RagChunkInput,
+  blockById: Map<string, PositionedMineruBlock>,
+): boolean {
+  const block = chunk.blockId ? blockById.get(chunk.blockId) : undefined;
+  if (block && (block.type === 'image' || block.type === 'caption')) {
+    return true;
+  }
+  const trimmed = chunk.text.trim();
+  return trimmed.length < 120 && /^(?:\([a-z0-9]+\)|fig(?:ure)?\.?\s*\d)/i.test(trimmed);
+}
+
+function isEquationLikeChunk(
+  chunk: RagChunkInput | RagRetrievalResult,
+  blockById: Map<string, PositionedMineruBlock>,
+): boolean {
+  const block = chunk.blockId ? blockById.get(chunk.blockId) : undefined;
+  if (block?.type === 'equation') {
+    return true;
+  }
+  const trimmed = chunk.text.trim();
+  return /\\tag\{\s*\d+(?:\.\d+)?\s*\}/.test(trimmed) || /^\$\$[\s\S]*\$\$$/m.test(trimmed);
+}
+
+function isHeadingChunk(
+  chunk: RagChunkInput,
+  blockById: Map<string, PositionedMineruBlock>,
+): boolean {
+  const block = chunk.blockId ? blockById.get(chunk.blockId) : undefined;
+  if (block?.type === 'title') {
+    return true;
+  }
+  return false;
+}
+
 /**
- * 普通正文命中的前后邻接扩展（方案 §5.5）：默认前后各 1 片，按 chunkIndex 顺序取；
- * 受传入 token 预算约束，超预算的邻接片跳过。补充项标 retrievalRole=context +
- * expandedFrom，不冒充独立命中。
+ * 普通正文/公式命中的自适应邻接扩展：
+ * - 普通正文默认前后各 1 片，保持上下文紧致；
+ * - 遇到图注碎片、连续公式组或种子本身为公式时，在同章节及 token 预算内穿透碎片并打包完整公式组与释义段。
  */
 function buildNeighborContext(input: {
   seed: RagRetrievalResult;
   orderedChunks: RagChunkInput[];
   positionByChunkId: Map<string, number>;
+  blockById: Map<string, PositionedMineruBlock>;
   usedChunkIds: Set<string>;
   tokenBudget: number;
 }): { additions: RagRetrievalResult[]; before: RagRetrievalResult[]; usedTokens: number } {
-  const position = input.positionByChunkId.get(input.seed.chunkId);
+  let position = input.positionByChunkId.get(input.seed.chunkId);
+  if (typeof position !== 'number' && input.seed.blockId) {
+    const byBlock = input.orderedChunks.findIndex((chunk) => chunk.blockId === input.seed.blockId);
+    if (byBlock >= 0) {
+      position = byBlock;
+    }
+  }
 
   if (typeof position !== 'number') {
     return { additions: [], before: [], usedTokens: 0 };
   }
 
-  const picks: Array<{ chunk: RagChunkInput; side: 'before' | 'after' }> = [];
-  const beforeChunk = input.orderedChunks[position - 1];
-  const afterChunk = input.orderedChunks[position + 1];
+  const seedChunk = input.orderedChunks[position];
+  const seedIsEquation = isEquationLikeChunk(input.seed, input.blockById);
+  const canExtendPast = (candidate: RagChunkInput | undefined): candidate is RagChunkInput => {
+    if (!candidate) return false;
+    if (isHeadingChunk(candidate, input.blockById)) return false;
+    if (seedChunk?.sectionId && candidate.sectionId && candidate.sectionId !== seedChunk.sectionId) {
+      return false;
+    }
+    return true;
+  };
 
-  if (beforeChunk) {
-    picks.push({ chunk: beforeChunk, side: 'before' });
-  }
-
-  if (afterChunk) {
-    picks.push({ chunk: afterChunk, side: 'after' });
-  }
-
-  const additions: RagRetrievalResult[] = [];
-  const before: RagRetrievalResult[] = [];
+  const beforePicks: RagChunkInput[] = [];
+  const afterPicks: RagChunkInput[] = [];
   let usedTokens = 0;
 
-  for (const pick of picks) {
-    if (input.usedChunkIds.has(pick.chunk.chunkId)) {
-      continue;
+  const tryPick = (chunk: RagChunkInput): boolean => {
+    if (input.usedChunkIds.has(chunk.chunkId)) {
+      return false;
     }
-
-    const tokens = estimateRagTokens(pick.chunk.text);
-
+    const tokens = estimateRagTokens(chunk.text);
     if (usedTokens + tokens > input.tokenBudget) {
+      return false;
+    }
+    usedTokens += tokens;
+    input.usedChunkIds.add(chunk.chunkId);
+    return true;
+  };
+
+  // Backward scan: gather at least 1 non-caption, non-equation lead-in if seed is an equation or preceded by fragments.
+  let hasProseBefore = false;
+  for (let step = 1; step <= MAX_NEIGHBOR_STEPS; step += 1) {
+    const candidate = input.orderedChunks[position - step];
+    if (!canExtendPast(candidate)) {
+      break;
+    }
+    if (input.usedChunkIds.has(candidate.chunkId)) {
+      if (step === 1 && !seedIsEquation) break;
       continue;
     }
+    const picked = tryPick(candidate);
+    if (!picked) {
+      if (step === 1) break;
+      continue;
+    }
+    beforePicks.unshift(candidate);
 
-    usedTokens += tokens;
-    input.usedChunkIds.add(pick.chunk.chunkId);
-
-    const addition: RagRetrievalResult = {
-      chunkId: pick.chunk.chunkId,
-      sourceType: input.seed.sourceType,
-      pageIndex: pick.chunk.pageIndex,
-      blockId: pick.chunk.blockId,
-      text: pick.chunk.text,
-      // 上下文补充不参与排名；保留种子分仅为排序稳定，retrievalRole 是区分依据。
-      score: input.seed.score,
-      retrievalRole: 'context',
-      expandedFrom: input.seed.chunkId,
-    };
-
-    additions.push(addition);
-
-    if (pick.side === 'before') {
-      before.push(addition);
+    const isEq = isEquationLikeChunk(candidate, input.blockById);
+    const isFrag = isCaptionOrImageChunk(candidate, input.blockById);
+    if (!isEq && !isFrag) {
+      hasProseBefore = true;
+      break;
+    }
+    if (!seedIsEquation && step === 1 && hasProseBefore) {
+      break;
     }
   }
 
-  return { additions, before, usedTokens };
+  // Forward scan: bridge short caption fragments and keep contiguous equation groups + explanation together.
+  let hasSubstantiveProseAfter = false;
+  let sawEquationAfter = seedIsEquation;
+  for (let step = 1; step <= MAX_NEIGHBOR_STEPS; step += 1) {
+    const candidate = input.orderedChunks[position + step];
+    if (!canExtendPast(candidate)) {
+      break;
+    }
+    if (input.usedChunkIds.has(candidate.chunkId)) {
+      if (step === 1 && !seedIsEquation) break;
+      continue;
+    }
+
+    const isEq = isEquationLikeChunk(candidate, input.blockById);
+    const isFrag = isCaptionOrImageChunk(candidate, input.blockById);
+
+    // Once we already have a normal prose chunk after (and didn't touch equations unless we just got its explanation), stop.
+    if (hasSubstantiveProseAfter) {
+      break;
+    }
+    if (sawEquationAfter && !isEq && !isFrag && afterPicks.some((item) => !isCaptionOrImageChunk(item, input.blockById) && !isEquationLikeChunk(item, input.blockById))) {
+      break;
+    }
+
+    const picked = tryPick(candidate);
+    if (!picked) {
+      break;
+    }
+    afterPicks.push(candidate);
+
+    if (isEq) {
+      sawEquationAfter = true;
+      continue;
+    }
+    if (!isFrag) {
+      hasSubstantiveProseAfter = true;
+      if (!sawEquationAfter) {
+        break;
+      }
+    }
+  }
+
+  const toAddition = (chunk: RagChunkInput): RagRetrievalResult => ({
+    chunkId: chunk.chunkId,
+    sourceType: input.seed.sourceType,
+    pageIndex: chunk.pageIndex,
+    blockId: chunk.blockId,
+    text: chunk.text,
+    // 上下文补充不参与排名；保留种子分仅为排序稳定，retrievalRole 是区分依据。
+    score: input.seed.score,
+    retrievalRole: 'context',
+    expandedFrom: input.seed.chunkId,
+  });
+
+  const before = beforePicks.map(toAddition);
+  const after = afterPicks.map(toAddition);
+  return {
+    additions: [...before, ...after],
+    before,
+    usedTokens,
+  };
 }
 
 function buildOrderedChunksBySource(
@@ -578,21 +843,43 @@ function buildOrderedChunksBySource(
   return bySource;
 }
 
+function formatResultBodyForContext(
+  result: RagRetrievalResult,
+  blockById: Map<string, PositionedMineruBlock>,
+): string {
+  const trimmed = result.text.trim();
+  if (!trimmed) {
+    return '';
+  }
+  const block = result.blockId ? blockById.get(result.blockId) : undefined;
+  if (block?.type === 'equation' && !trimmed.includes('$$')) {
+    return wrapEquationMarkdown(trimmed);
+  }
+  return trimmed;
+}
+
 function buildContextSection(
   results: RagRetrievalResult[],
   index: number,
   anchor: RagRetrievalResult,
+  blockById: Map<string, PositionedMineruBlock>,
+  chunkSectionMap: Map<string, string[]>,
 ): string {
   const body = results
-    .map((result) => result.text.trim())
+    .map((result) => formatResultBodyForContext(result, blockById))
     .filter(Boolean)
     .join('\n\n')
     .trim();
 
-  const anchorHint =
+  const sectionPath = chunkSectionMap.get(`${anchor.sourceType}::${anchor.chunkId}`);
+  const sectionHint = sectionPath && sectionPath.length > 0 ? sectionPath[sectionPath.length - 1] : '';
+  const baseHint =
     anchor?.pageIndex !== null && anchor?.pageIndex !== undefined
       ? `Page ${anchor.pageIndex + 1}`
       : anchor?.sourceType ?? 'Context';
+  const anchorHint = sectionHint && !body.startsWith(sectionHint)
+    ? `${baseHint} · ${sectionHint}`
+    : baseHint;
 
   return `# Source [${index + 1}]\n${anchorHint}\n${body}`;
 }
@@ -646,7 +933,27 @@ function evidenceKindFor(
   if (!block) return 'text';
   if (block.type === 'table') return 'table';
   if (block.type === 'image' || block.type === 'chart') return 'image';
+  if (block.type === 'equation') return 'equation';
   return 'text';
+}
+
+function buildSafeCitationPreview(results: RagRetrievalResult[]): string {
+  const raw = results
+    .map((result) => normalizeChunkText(result.text))
+    .filter(Boolean)
+    .join('\n\n');
+  if (raw.length <= 480) {
+    return raw;
+  }
+  const clipped = raw.slice(0, 480);
+  const fenceCount = (clipped.match(/\$\$/g) ?? []).length;
+  if (fenceCount % 2 === 1) {
+    const lastOpen = clipped.lastIndexOf('$$');
+    if (lastOpen > 40) {
+      return clipped.slice(0, lastOpen).trimEnd();
+    }
+  }
+  return clipped;
 }
 
 function buildCitation(
@@ -669,16 +976,83 @@ function buildCitation(
     pageIndex: anchor.pageIndex,
     blockId: anchor.blockId,
     chunkId: anchor.chunkId,
-    previewText: results
-      .map((result) => normalizeChunkText(result.text))
-      .filter(Boolean)
-      .join('\n\n')
-      .slice(0, 480),
+    previewText: buildSafeCitationPreview(results),
     ...(meta.paperId ? { paperId: meta.paperId } : {}),
     ...(meta.paperTitle ? { paperTitle: meta.paperTitle } : {}),
     evidenceKind: evidenceKindFor(anchor.blockId, blockById),
     score: anchor.score,
   };
+}
+
+interface BuiltContextSectionEntry {
+  sectionResults: RagRetrievalResult[];
+  anchor: RagRetrievalResult;
+  hydrated?: boolean;
+}
+
+function findHydratedFormulaChunk(
+  formulaNum: string,
+  orderedChunksBySource: Map<string, RagChunkInput[]>,
+  blockById: Map<string, PositionedMineruBlock>,
+  usedChunkIds: Set<string>,
+): { sourceType: Exclude<RagSourceMode, 'off' | 'hybrid'>; chunk: RagChunkInput } | null {
+  const sourceOrder: Array<Exclude<RagSourceMode, 'off' | 'hybrid'>> = ['mineru-markdown', 'pdf-text'];
+  let fallbackMatch: { sourceType: Exclude<RagSourceMode, 'off' | 'hybrid'>; chunk: RagChunkInput } | null = null;
+
+  for (const sourceType of sourceOrder) {
+    const chunks = orderedChunksBySource.get(sourceType) ?? [];
+    for (const chunk of chunks) {
+      if (usedChunkIds.has(chunk.chunkId)) continue;
+      if (!chunkMatchesFormulaNumber(chunk.text, formulaNum)) continue;
+      const block = chunk.blockId ? blockById.get(chunk.blockId) : undefined;
+      if (block?.type === 'equation' || /\\tag\{/.test(chunk.text)) {
+        return { sourceType, chunk };
+      }
+      if (!fallbackMatch) {
+        fallbackMatch = { sourceType, chunk };
+      }
+    }
+  }
+
+  return fallbackMatch;
+}
+
+function findHydratedReferenceChunk(
+  refNum: string,
+  orderedChunksBySource: Map<string, RagChunkInput[]>,
+  usedChunkIds: Set<string>,
+): { sourceType: Exclude<RagSourceMode, 'off' | 'hybrid'>; chunk: RagChunkInput } | null {
+  const sourceOrder: Array<Exclude<RagSourceMode, 'off' | 'hybrid'>> = ['mineru-markdown', 'pdf-text'];
+
+  for (const sourceType of sourceOrder) {
+    const chunks = orderedChunksBySource.get(sourceType) ?? [];
+    if (chunks.length === 0) continue;
+    const tailStart = Math.floor(chunks.length * 0.6);
+
+    // 1. Prefer explicit References / Bibliography section or tail chunks.
+    for (let index = chunks.length - 1; index >= 0; index -= 1) {
+      const chunk = chunks[index];
+      if (usedChunkIds.has(chunk.chunkId)) continue;
+      const inReferenceSection = Boolean(
+        chunk.sectionPath?.some((heading) => /reference|bibliography|参考文献/i.test(heading)),
+      );
+      if (!inReferenceSection && index < tailStart) continue;
+      if (chunkMatchesReferenceEntry(chunk.text, refNum)) {
+        return { sourceType, chunk };
+      }
+    }
+
+    // 2. Fallback across full document in case heading hierarchy didn't mark References.
+    for (let index = chunks.length - 1; index >= 0; index -= 1) {
+      const chunk = chunks[index];
+      if (usedChunkIds.has(chunk.chunkId)) continue;
+      if (chunkMatchesReferenceEntry(chunk.text, refNum)) {
+        return { sourceType, chunk };
+      }
+    }
+  }
+
+  return null;
 }
 
 export function buildRagContextText(input: {
@@ -688,6 +1062,8 @@ export function buildRagContextText(input: {
   preparedSources: ReaderRagPreparedSource[];
   paperId?: string;
   paperTitle?: string;
+  /** 原始用户问题，用于交叉引用公式/文献编号的确定性补全。 */
+  question?: string;
   /** 多文献合并时把引用编号整体后移，避免 [n] 冲突。 */
   citationIndexOffset?: number;
   /** 多文献合并时按检索结果补齐文献身份（documentKey → paper）。 */
@@ -733,6 +1109,15 @@ export function buildRagContextText(input: {
   const blockOrder = new Map(orderedBlocks.map((block, index) => [block.blockId, index]));
   const chunksBySourceAndBlock = buildChunkLookup(input.preparedSources);
   const orderedChunksBySource = buildOrderedChunksBySource(input.preparedSources);
+  const chunkSectionMap = new Map<string, string[]>();
+  input.preparedSources.forEach((source) => {
+    source.chunks.forEach((chunk) => {
+      if (chunk.sectionPath && chunk.sectionPath.length > 0) {
+        chunkSectionMap.set(`${source.sourceType}::${chunk.chunkId}`, chunk.sectionPath);
+      }
+    });
+  });
+
   const positionMapsBySource = new Map<string, Map<string, number>>();
   const getPositionMap = (sourceType: string): Map<string, number> => {
     const cached = positionMapsBySource.get(sourceType);
@@ -749,9 +1134,8 @@ export function buildRagContextText(input: {
     return map;
   };
   const usedChunkIds = new Set<string>();
-  const sections: string[] = [];
-  const citations: DocumentChatCitation[] = [];
-  /** 上下文补充段（标题扩展 + 前后邻接），标记 retrievalRole=context 后随结果返回，便于各入口查看其位置。 */
+  const sectionEntries: BuiltContextSectionEntry[] = [];
+  /** 上下文补充段（标题扩展 + 前后邻接 + 交叉引用补全），标记 retrievalRole=context 后随结果返回。 */
   const contextSupplements: RagRetrievalResult[] = [];
   let questionContextTokenBudget = CONTEXT_QUESTION_TOKEN_BUDGET;
 
@@ -786,7 +1170,7 @@ export function buildRagContextText(input: {
       (orderedChunksBySource.get(seed.sourceType) ?? []).some((chunk) =>
         chunk.chunkId === seed.chunkId && chunk.text === seed.text)
     )) {
-      // 普通正文命中：前后邻接扩展，单目标窗口与整次问答双层预算约束（方案 §5.5）。
+      // 普通正文/公式命中：自适应邻接扩展，单目标窗口与整次问答双层预算约束。
       const targetBudget = Math.min(
         Math.max(0, CONTEXT_TARGET_TOKEN_BUDGET - estimateRagTokens(seed.text)),
         questionContextTokenBudget,
@@ -795,6 +1179,7 @@ export function buildRagContextText(input: {
         seed,
         orderedChunks: orderedChunksBySource.get(seed.sourceType) ?? [],
         positionByChunkId: getPositionMap(seed.sourceType),
+        blockById,
         usedChunkIds,
         tokenBudget: targetBudget,
       });
@@ -813,42 +1198,158 @@ export function buildRagContextText(input: {
     }
 
     const sectionResults = [...beforeAdditions, seed, ...afterAdditions];
-    const sectionIndex = sections.length;
     const anchor = selectCitationAnchor(sectionResults, blockById);
     if (!anchor) {
       return;
     }
 
-    sections.push(buildContextSection(sectionResults, sectionIndex, anchor));
-    const lookup = input.paperLookup?.(anchor);
-    const citation = buildCitation(
-      anchor,
-      sectionResults,
-      sectionIndex,
-      {
-        paperId: lookup?.paperId ?? input.paperId,
-        paperTitle: lookup?.paperTitle ?? input.paperTitle,
-        indexOffset: input.citationIndexOffset,
-      },
-      blockById,
-    );
-
-    if (citation) {
-      citations.push(citation);
-    }
+    sectionEntries.push({ sectionResults, anchor });
   });
 
-  // 超出预算时按相关性从低到高丢弃证据段；结果本身已按相关度排序，保留靠前的段落。
-  let keptSections = sections;
-  let keptCitations = citations;
+  // 交叉引用确定性补全：若问句或高相关正文引用了公式编号（如 Eqs. 5-7 / 公式(6)）或文献条目（如 [18]），
+  // 且对应公式块/文献条目尚未出现在已选上下文中，从本篇 preparedSources 直接补齐，解决跨页/被图表隔断导致的缺失。
+  const questionText = input.question?.trim() ?? '';
+  if (input.preparedSources.length > 0 && (questionText || seeds.length > 0)) {
+    const includedTexts = () =>
+      sectionEntries.flatMap((entry) => entry.sectionResults.map((item) => item.text));
+
+    const seedInspectionText = seeds.slice(0, 4).map((item) => item.text).join('\n');
+    const questionFormulaNumbers = extractFormulaNumbers(questionText, { includeStandaloneParens: true });
+    const seedFormulaNumbers = extractFormulaNumbers(seedInspectionText, { includeStandaloneParens: false });
+    const targetFormulaNumbers = [...new Set([...questionFormulaNumbers, ...seedFormulaNumbers])].slice(0, 6);
+
+    for (const formulaNum of targetFormulaNumbers) {
+      if (includedTexts().some((text) => chunkMatchesFormulaNumber(text, formulaNum))) {
+        continue;
+      }
+
+      const found = findHydratedFormulaChunk(
+        formulaNum,
+        orderedChunksBySource,
+        blockById,
+        usedChunkIds,
+      );
+      if (!found) continue;
+
+      const anchorSeed: RagRetrievalResult = {
+        chunkId: found.chunk.chunkId,
+        sourceType: found.sourceType,
+        pageIndex: found.chunk.pageIndex,
+        blockId: found.chunk.blockId,
+        text: found.chunk.text,
+        score: seeds[0].score,
+        retrievalRole: 'context',
+        expandedFrom: seeds[0].chunkId,
+      };
+      usedChunkIds.add(found.chunk.chunkId);
+      contextSupplements.push(anchorSeed);
+
+      const neighbor = buildNeighborContext({
+        seed: anchorSeed,
+        orderedChunks: orderedChunksBySource.get(found.sourceType) ?? [],
+        positionByChunkId: getPositionMap(found.sourceType),
+        blockById,
+        usedChunkIds,
+        tokenBudget: Math.min(800, Math.max(250, questionContextTokenBudget)),
+      });
+      questionContextTokenBudget = Math.max(0, questionContextTokenBudget - neighbor.usedTokens);
+
+      const beforeHydrated: RagRetrievalResult[] = [];
+      const afterHydrated: RagRetrievalResult[] = [];
+      neighbor.additions.forEach((result) => {
+        contextSupplements.push(result);
+        if (neighbor.before.includes(result)) {
+          beforeHydrated.push(result);
+        } else {
+          afterHydrated.push(result);
+        }
+      });
+
+      const sectionResults = [...beforeHydrated, anchorSeed, ...afterHydrated];
+      sectionEntries.push({
+        sectionResults,
+        anchor: anchorSeed,
+        hydrated: true,
+      });
+    }
+
+    const questionRefNumbers = extractReferenceNumbers(questionText);
+    const shouldHydrateSeedRefs =
+      hasSourceOriginIntent(questionText) || questionFormulaNumbers.length > 0;
+    const seedRefNumbers = shouldHydrateSeedRefs ? extractReferenceNumbers(seedInspectionText) : [];
+    const targetRefNumbers = [...new Set([...questionRefNumbers, ...seedRefNumbers])].slice(0, 3);
+
+    for (const refNum of targetRefNumbers) {
+      if (includedTexts().some((text) => chunkMatchesReferenceEntry(text, refNum))) {
+        continue;
+      }
+
+      const found = findHydratedReferenceChunk(refNum, orderedChunksBySource, usedChunkIds);
+      if (!found) continue;
+
+      const refSeed: RagRetrievalResult = {
+        chunkId: found.chunk.chunkId,
+        sourceType: found.sourceType,
+        pageIndex: found.chunk.pageIndex,
+        blockId: found.chunk.blockId,
+        text: found.chunk.text,
+        score: seeds[0].score,
+        retrievalRole: 'context',
+        expandedFrom: seeds[0].chunkId,
+      };
+      usedChunkIds.add(found.chunk.chunkId);
+      contextSupplements.push(refSeed);
+      sectionEntries.push({
+        sectionResults: [refSeed],
+        anchor: refSeed,
+        hydrated: true,
+      });
+    }
+  }
+
+  const renderSection = (entry: BuiltContextSectionEntry, index: number) =>
+    buildContextSection(entry.sectionResults, index, entry.anchor, blockById, chunkSectionMap);
+
+  // 超出预算时优先保留第一条直击与交叉引用补全的公式/文献条目，按相关性从低到高丢弃普通尾段。
+  const keptEntries = [...sectionEntries];
   let budgetSkippedCount = 0;
   if (typeof input.tokenBudget === 'number' && Number.isFinite(input.tokenBudget) && input.tokenBudget > 0) {
-    while (keptSections.length > 1 && estimateRagTokens(keptSections.join('\n\n')) > input.tokenBudget) {
-      keptSections = keptSections.slice(0, -1);
-      keptCitations = keptCitations.slice(0, -1);
+    while (
+      keptEntries.length > 1 &&
+      estimateRagTokens(keptEntries.map((entry, idx) => renderSection(entry, idx)).join('\n\n')) > input.tokenBudget
+    ) {
+      let dropIndex = -1;
+      for (let i = keptEntries.length - 1; i >= 1; i -= 1) {
+        if (!keptEntries[i].hydrated) {
+          dropIndex = i;
+          break;
+        }
+      }
+      if (dropIndex === -1) {
+        dropIndex = keptEntries.length - 1;
+      }
+      keptEntries.splice(dropIndex, 1);
       budgetSkippedCount += 1;
     }
   }
+
+  const keptSections = keptEntries.map((entry, idx) => renderSection(entry, idx));
+  const keptCitations = keptEntries
+    .map((entry, idx) => {
+      const lookup = input.paperLookup?.(entry.anchor);
+      return buildCitation(
+        entry.anchor,
+        entry.sectionResults,
+        idx,
+        {
+          paperId: lookup?.paperId ?? input.paperId,
+          paperTitle: lookup?.paperTitle ?? input.paperTitle,
+          indexOffset: input.citationIndexOffset,
+        },
+        blockById,
+      );
+    })
+    .filter((citation): citation is DocumentChatCitation => Boolean(citation));
 
   return {
     documentText: keptSections.join('\n\n').trim(),
@@ -857,4 +1358,121 @@ export function buildRagContextText(input: {
     retrievals: [...results, ...contextSupplements],
     ...(budgetSkippedCount > 0 ? { budgetSkippedCount } : {}),
   };
+}
+
+const RAG_RESULT_MIN_MARGIN = 0.12;
+const RAG_RESULT_MAX_MARGIN = 0.45;
+const RAG_RESULT_RELATIVE_MARGIN = 0.4;
+
+export function filterRelevantRetrievals(
+  results: RagRetrievalResult[],
+  topK: number,
+  options?: { isRrfScored?: boolean },
+): RagRetrievalResult[] {
+  if (results.length <= 1) {
+    return results.slice(0, topK);
+  }
+
+  const sorted = [...results].sort((left, right) => left.score - right.score);
+  if (options?.isRrfScored) {
+    return sorted.slice(0, topK);
+  }
+
+  const bestScore = sorted[0]?.score ?? 0;
+  const dynamicMargin = Math.max(
+    RAG_RESULT_MIN_MARGIN,
+    Math.min(RAG_RESULT_MAX_MARGIN, Math.abs(bestScore) * RAG_RESULT_RELATIVE_MARGIN),
+  );
+  const threshold = bestScore + dynamicMargin;
+  const filtered = sorted.filter(
+    (result, index) =>
+      index === 0 ||
+      result.channels?.includes('fts') ||
+      result.channels?.includes('exact') ||
+      result.score <= threshold,
+  );
+
+  return (filtered.length > 0 ? filtered : sorted).slice(0, topK);
+}
+
+/**
+ * 多来源（mineru-markdown + pdf-text）混合合并：
+ * - 先在各来源内完成阈值过滤，避免一个来源的 `1 - RRF` 分数与另一来源的 L2 distance 跨尺度比较；
+ * - 再按来源内排名转为统一打分，保留精确关键词/公式命中（fts/exact），优先使用结构更干净的 MinerU 块，
+ *   并对同页冗余的纯向量 pdf-text 分块去重以留出更多证据名额。
+ */
+export function mergeHybridSourceRetrievals(
+  perSourceLists: Array<{
+    sourceType: string;
+    ftsHitCount: number;
+    results: RagRetrievalResult[];
+  }>,
+  topK: number,
+): RagRetrievalResult[] {
+  const filteredLists = perSourceLists.map((entry) => ({
+    sourceType: entry.sourceType,
+    results: filterRelevantRetrievals(entry.results, topK, {
+      isRrfScored: entry.ftsHitCount > 0,
+    }),
+  }));
+
+  if (filteredLists.length <= 1) {
+    return (filteredLists[0]?.results ?? []).slice(0, topK);
+  }
+
+  const ranked = filteredLists
+    .flatMap((entry) =>
+      entry.results.map((result, rankIndex) => {
+        const hasKeywordHit = Boolean(
+          result.channels?.includes('fts') || result.channels?.includes('exact'),
+        );
+        const sourceBonus = result.sourceType === 'mineru-markdown' ? 0.002 : 0;
+        const keywordBonus = hasKeywordHit ? 0.025 : 0;
+        const unifiedPriority = 1 / (60 + rankIndex + 1) + sourceBonus + keywordBonus;
+        return {
+          result,
+          hasKeywordHit,
+          unifiedPriority,
+        };
+      }),
+    )
+    .sort((left, right) => right.unifiedPriority - left.unifiedPriority);
+
+  const mineruPages = new Set<number>();
+  for (const item of ranked) {
+    if (
+      item.result.sourceType === 'mineru-markdown' &&
+      typeof item.result.pageIndex === 'number'
+    ) {
+      mineruPages.add(item.result.pageIndex);
+    }
+  }
+
+  const picked: RagRetrievalResult[] = [];
+  const deferredPdfOverlaps: RagRetrievalResult[] = [];
+
+  for (const item of ranked) {
+    if (
+      item.result.sourceType === 'pdf-text' &&
+      !item.hasKeywordHit &&
+      typeof item.result.pageIndex === 'number' &&
+      mineruPages.has(item.result.pageIndex)
+    ) {
+      deferredPdfOverlaps.push(item.result);
+      continue;
+    }
+    picked.push(item.result);
+    if (picked.length >= topK) {
+      return picked;
+    }
+  }
+
+  for (const fallback of deferredPdfOverlaps) {
+    picked.push(fallback);
+    if (picked.length >= topK) {
+      break;
+    }
+  }
+
+  return picked;
 }

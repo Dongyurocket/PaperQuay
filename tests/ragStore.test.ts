@@ -9,6 +9,11 @@ const require = createRequire(import.meta.url);
 const { DatabaseSync } = require('../electron/backend/nodeSqlite.cjs');
 const sqliteVec = require('sqlite-vec');
 const { buildFtsMatchQuery, createRagStore, rrfFuse } = require('../electron/backend/ragStore.cjs');
+const {
+  chunkMatchesFormulaNumber,
+  chunkMatchesReferenceEntry,
+  scoreChunkByExactQuerySignals,
+} = require('../src/shared/ragQueryUtils.cjs');
 
 function createStore(options = {}) {
   const dataDir = mkdtempSync(path.join(tmpdir(), 'paperquay-rag-test-'));
@@ -1247,6 +1252,86 @@ test('removeDocumentIndex deletes paper index rows and keeps note indexes', () =
       db.close();
     }
   } finally {
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('RAG store retrieves equation and reference chunks for mixed Chinese-English formula queries', () => {
+  const { dataDir, store } = createStore();
+
+  try {
+    const ftsQuery = buildFtsMatchQuery('公式(6)，cm的计算公式是哪里来的');
+    assert.match(ftsQuery, /"tag\{6\}"/);
+    assert.match(ftsQuery, /"C _\{m\}"/);
+    assert.match(ftsQuery, /"cm"/);
+
+    store.indexDocument({
+      documentKey: 'doc-aam',
+      title: 'AAM Tiltrotor',
+      sourceType: 'mineru-markdown',
+      sourceSignature: 'sig-aam',
+      embeddingModelKey: 'embedding-test',
+      totalChunkCount: 3,
+      chunks: [
+        {
+          chunkId: 'mineru:p6-16:0',
+          chunkIndex: 0,
+          pageIndex: 5,
+          blockId: 'p6-16',
+          text: 'For high AOA regions, quasi-steady performance will be applied using Eqs. 5-7 [18].',
+          // Vector points squarely at the user query vector.
+          embedding: [1, 0, 0, 0],
+        },
+        {
+          chunkId: 'mineru:p7-6:0',
+          chunkIndex: 1,
+          pageIndex: 6,
+          blockId: 'p7-6',
+          text: 'C _{m} = - 0. 5 \\sin (\\alpha - \\alpha_{0}) + 0. 1 1 \\sin 2 (\\alpha - \\alpha_{0}),\\tag{6}',
+          // Orthogonal vector: vector-only search would rank this last.
+          embedding: [0, 1, 0, 0],
+        },
+        {
+          chunkId: 'mineru:p15-2:0',
+          chunkIndex: 2,
+          pageIndex: 14,
+          blockId: 'p15-2',
+          text: '18. Leishman JG (2000) Principles of Helicopter Aerodynamics. Cambridge University Press',
+          embedding: [0, 0, 1, 0],
+        },
+      ],
+    });
+
+    const formulaRes = store.retrieveDocumentChunks({
+      documentKey: 'doc-aam',
+      sourceType: 'mineru-markdown',
+      queryEmbedding: [1, 0, 0, 0],
+      queryText: '公式(6)，cm的计算公式是哪里来的',
+      topK: 2,
+      includeDiagnostics: true,
+    });
+    assert.equal(formulaRes.ftsStatus, 'searched');
+    assert.ok(formulaRes.ftsHitCount >= 1);
+    assert.ok(formulaRes.results.some((item: any) => item.chunkId === 'mineru:p7-6:0'));
+    const eqHit = formulaRes.results.find((item: any) => item.chunkId === 'mineru:p7-6:0');
+    assert.ok(eqHit?.channels?.includes('fts'));
+
+    const refRes = store.retrieveDocumentChunks({
+      documentKey: 'doc-aam',
+      sourceType: 'mineru-markdown',
+      queryEmbedding: [1, 0, 0, 0],
+      queryText: '参考文献第18条是什么',
+      topK: 3,
+      includeDiagnostics: true,
+    });
+    assert.ok(refRes.results.some((item: any) => item.chunkId === 'mineru:p15-2:0'));
+
+    assert.equal(chunkMatchesFormulaNumber('Using Eq. (6), we assume x = 1 for baseline.', '6'), false);
+    assert.equal(chunkMatchesFormulaNumber('C_m = -0.5 sin(a - a0) + 0.11 sin 2(a - a0), (6)', '6'), true);
+    assert.equal(chunkMatchesReferenceEntry('18. J. G. Leishman (2000) Principles of Helicopter Aerodynamics', '18'), true);
+    assert.ok(scoreChunkByExactQuerySignals('Performance follows Eqs. 5–7 [18].', '公式(6)') >= 4);
+  } finally {
+    store.close();
     rmSync(dataDir, { recursive: true, force: true });
   }
 });

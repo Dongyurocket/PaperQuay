@@ -275,7 +275,7 @@ test('MinerU source signature carries the extractor version', async () => {
     pdfDocumentText: '',
   });
   assert.equal(prepared.sources.length, 1);
-  assert.ok(MINERU_RAG_EXTRACTOR_VERSION.includes('v2'));
+  assert.ok(MINERU_RAG_EXTRACTOR_VERSION.includes('v3'));
 });
 
 test('token budget drops the least relevant sections and reports the count', () => {
@@ -298,4 +298,132 @@ test('token budget drops the least relevant sections and reports the count', () 
   assert.equal(context.sectionCount, 1);
   assert.equal(context.citations.length, 1);
   assert.equal(context.budgetSkippedCount, 1);
+});
+
+test('buildRagContextText bridges figure captions to equations and hydrates referenced bibliography', () => {
+  const mineruBlocks = [
+    { type: 'title', blockId: 'sec-22', pageIndex: 5, blockIndex: 0, content: { text: '2.2 Rotor Blade Planform Design Selection', text_level: 2 } },
+    { type: 'paragraph', blockId: 'p6-16', pageIndex: 5, blockIndex: 1, content: { text: 'For high AOA regions, quasi-steady airfoil performance is estimated using Eqs. 5–7 (Fig. 6) [18].' } },
+    { type: 'image', blockId: 'p7-1', pageIndex: 6, blockIndex: 0, content: { image_caption: [{ type: 'text', content: '(a) twin-tiltrotor' }] } },
+    { type: 'image', blockId: 'p7-2', pageIndex: 6, blockIndex: 1, content: { image_caption: [{ type: 'text', content: '(b) quad-tiltrotor' }] } },
+    { type: 'image', blockId: 'p7-3', pageIndex: 6, blockIndex: 2, content: { image_caption: [{ type: 'text', content: '(c) hexa-tiltrotor Fig. 3 Tiltrotor baseline configurations' }] } },
+    { type: 'equation', blockId: 'p7-5', pageIndex: 6, blockIndex: 3, content: { math_content: 'C _{l} = 1. 1 7 5 \\sin 2 (\\alpha - \\alpha_{0}),\\tag{5}' } },
+    { type: 'equation', blockId: 'p7-6', pageIndex: 6, blockIndex: 4, content: { math_content: 'C _{m} = - 0. 5 \\sin (\\alpha - \\alpha_{0}) + 0. 1 1 \\sin 2 (\\alpha - \\alpha_{0}),\\tag{6}' } },
+    { type: 'equation', blockId: 'p7-7', pageIndex: 6, blockIndex: 5, content: { math_content: 'C _{d} = 1. 1 3 5 - 1. 0 5 \\cos 2 (\\alpha - \\alpha_{0}).\\tag{7}' } },
+    { type: 'title', blockId: 'sec-refs', pageIndex: 14, blockIndex: 0, content: { text: 'References', text_level: 1 } },
+    { type: 'paragraph', blockId: 'p15-2', pageIndex: 14, blockIndex: 1, content: { text: '18. Leishman JG (2000) Principles of Helicopter Aerodynamics. Cambridge University Press' } },
+  ] as any;
+
+  // Simulate legacy 1-block-per-chunk v2 index where vector retrieval only hit p6-16.
+  const chunks = [
+    makeChunk({ chunkId: 'mineru:p6-16:0', chunkIndex: 0, pageIndex: 5, blockId: 'p6-16', sectionId: 'sec-22', text: 'For high AOA regions, quasi-steady airfoil performance is estimated using Eqs. 5–7 (Fig. 6) [18].' }),
+    makeChunk({ chunkId: 'mineru:p7-1:0', chunkIndex: 1, pageIndex: 6, blockId: 'p7-1', sectionId: 'sec-22', text: '(a) twin-tiltrotor' }),
+    makeChunk({ chunkId: 'mineru:p7-2:0', chunkIndex: 2, pageIndex: 6, blockId: 'p7-2', sectionId: 'sec-22', text: '(b) quad-tiltrotor' }),
+    makeChunk({ chunkId: 'mineru:p7-3:0', chunkIndex: 3, pageIndex: 6, blockId: 'p7-3', sectionId: 'sec-22', text: '(c) hexa-tiltrotor Fig. 3 Tiltrotor baseline configurations' }),
+    makeChunk({ chunkId: 'mineru:p7-5:0', chunkIndex: 4, pageIndex: 6, blockId: 'p7-5', sectionId: 'sec-22', text: 'C _{l} = 1. 1 7 5 \\sin 2 (\\alpha - \\alpha_{0}),\\tag{5}' }),
+    makeChunk({ chunkId: 'mineru:p7-6:0', chunkIndex: 5, pageIndex: 6, blockId: 'p7-6', sectionId: 'sec-22', text: 'C _{m} = - 0. 5 \\sin (\\alpha - \\alpha_{0}) + 0. 1 1 \\sin 2 (\\alpha - \\alpha_{0}),\\tag{6}' }),
+    makeChunk({ chunkId: 'mineru:p7-7:0', chunkIndex: 6, pageIndex: 6, blockId: 'p7-7', sectionId: 'sec-22', text: 'C _{d} = 1. 1 3 5 - 1. 0 5 \\cos 2 (\\alpha - \\alpha_{0}).\\tag{7}' }),
+    makeChunk({ chunkId: 'mineru:p15-2:0', chunkIndex: 7, pageIndex: 14, blockId: 'p15-2', sectionId: 'sec-refs', sectionPath: ['References'], text: '18. Leishman JG (2000) Principles of Helicopter Aerodynamics. Cambridge University Press' }),
+  ];
+
+  const context = buildRagContextText({
+    results: [makeHit({ chunkId: 'mineru:p6-16:0', pageIndex: 5, blockId: 'p6-16', text: chunks[0].text })],
+    topK: 1,
+    mineruBlocks,
+    preparedSources: makePreparedSource(chunks),
+    question: '公式(6)，cm的计算公式是哪里来的',
+  });
+
+  assert.match(context.documentText, /\\tag\{5\}/);
+  assert.match(context.documentText, /\\tag\{6\}/);
+  assert.match(context.documentText, /\\tag\{7\}/);
+  assert.match(context.documentText, /\$\$[\s\S]*\\tag\{6\}[\s\S]*\$\$/);
+  assert.match(context.documentText, /18\. Leishman JG/);
+});
+
+test('buildRagContextText hydrates missing formula block even when separated across sections or pages', () => {
+  const mineruBlocks = [
+    { type: 'paragraph', blockId: 'p2-1', pageIndex: 1, blockIndex: 0, content: { text: 'The pitching moment follows Eq. (6) [18], assuming x = 1.' } },
+    { type: 'equation', blockId: 'p7-6', pageIndex: 6, blockIndex: 0, content: { math_content: 'C_{m} = -0.5\\sin(\\alpha - \\alpha_{0}),\\tag{6}' } },
+  ] as any;
+  const chunks = [
+    makeChunk({ chunkId: 'mineru:p2-1:0', chunkIndex: 0, pageIndex: 1, blockId: 'p2-1', sectionId: 'sec-a', text: 'The pitching moment follows Eq. (6) [18], assuming x = 1.' }),
+    ...Array.from({ length: 8 }, (_, idx) => makeChunk({
+      chunkId: `mineru:filler-${idx}:0`,
+      chunkIndex: idx + 1,
+      pageIndex: 3,
+      blockId: `filler-${idx}`,
+      sectionId: 'sec-b',
+      text: `Intermediate filler paragraph ${idx} discussing unrelated structural trade-offs.`,
+    })),
+    makeChunk({ chunkId: 'mineru:p7-6:0', chunkIndex: 9, pageIndex: 6, blockId: 'p7-6', sectionId: 'sec-c', text: 'C_{m} = -0.5\\sin(\\alpha - \\alpha_{0}),\\tag{6}' }),
+  ];
+
+  const context = buildRagContextText({
+    results: [makeHit({ chunkId: 'mineru:p2-1:0', pageIndex: 1, blockId: 'p2-1', text: chunks[0].text })],
+    topK: 1,
+    mineruBlocks,
+    preparedSources: makePreparedSource(chunks),
+    question: '公式(6)是什么',
+  });
+
+  assert.match(context.documentText, /\\tag\{6\}/);
+  assert.equal(context.citations.some((cite) => cite.evidenceKind === 'equation' && cite.blockId === 'p7-6'), true);
+});
+
+test('buildMineruRagChunks merges equation groups with section context and definition paragraphs', () => {
+  const blocks = [
+    { type: 'title', blockId: 'h1', pageIndex: 5, blockIndex: 0, content: { text: '2.2 Rotor Design', text_level: 2 } },
+    { type: 'image', blockId: 'fig-a', pageIndex: 6, blockIndex: 0, content: { image_caption: [{ type: 'text', content: '(a) twin-tiltrotor' }] } },
+    { type: 'image', blockId: 'fig-b', pageIndex: 6, blockIndex: 1, content: { image_caption: [{ type: 'text', content: '(b) quad-tiltrotor Fig. 3 Baseline' }] } },
+    { type: 'equation', blockId: 'eq-5', pageIndex: 6, blockIndex: 2, content: { math_content: 'C _ {l} = 1. 1 7 5 \\sin 2 (\\alpha - \\alpha_ {0}),\\tag{5}' } },
+    { type: 'equation', blockId: 'eq-6', pageIndex: 6, blockIndex: 3, content: { math_content: 'C _ {m} = - 0. 5 \\sin (\\alpha - \\alpha_ {0}) + 0. 1 1 \\sin 2 (\\alpha - \\alpha_ {0}),\\tag{6}' } },
+    { type: 'paragraph', blockId: 'where-p', pageIndex: 6, blockIndex: 4, content: { text: 'where alpha is the angle of attack.' } },
+    { type: 'paragraph', blockId: 'next-topic', pageIndex: 6, blockIndex: 5, content: { text: 'Next we discuss blade structural constraints across hover and cruise segments.' } },
+  ] as any;
+
+  const chunks = buildMineruRagChunks(blocks);
+  // Title stays separate; captions merge into 1 chunk; eq-5 + eq-6 + where-p merge into 1 chunk; subsequent unrelated prose stays separate.
+  assert.equal(chunks.length, 4);
+  assert.equal(chunks[0]?.blockId, 'h1');
+  assert.match(chunks[1]?.text ?? '', /\(a\) twin-tiltrotor[\s\S]*\(b\) quad-tiltrotor/);
+  assert.equal(chunks[2]?.blockId, 'eq-5');
+  assert.match(chunks[2]?.text ?? '', /C_\{m\} = - 0\.5/);
+  assert.match(chunks[2]?.text ?? '', /1\.175/);
+  assert.match(chunks[2]?.text ?? '', /where alpha is the angle of attack/);
+  assert.equal(chunks[3]?.blockId, 'next-topic');
+});
+
+test('mergeHybridSourceRetrievals prevents RRF vs L2 distance scale mismatch from dropping FTS formula hits', async () => {
+  const { mergeHybridSourceRetrievals } = await import('../src/features/reader/readerRag.ts');
+  const merged = mergeHybridSourceRetrievals(
+    [
+      {
+        sourceType: 'mineru-markdown',
+        ftsHitCount: 0,
+        results: [
+          makeHit({ chunkId: 'm1', sourceType: 'mineru-markdown', pageIndex: 5, text: 'Prose mention Eqs. 5-7', score: 0.52 }),
+          makeHit({ chunkId: 'm2', sourceType: 'mineru-markdown', pageIndex: 1, text: 'Introduction prose', score: 0.58 }),
+        ],
+      },
+      {
+        sourceType: 'pdf-text',
+        ftsHitCount: 1,
+        results: [
+          makeHit({
+            chunkId: 'pdf:6:0',
+            sourceType: 'pdf-text',
+            pageIndex: 6,
+            text: 'Cm = -0.5 sin(alpha - alpha0) + 0.11 sin 2(alpha - alpha0), (6)',
+            score: 0.9672,
+            channels: ['vector', 'fts'],
+          }),
+        ],
+      },
+    ],
+    2,
+  );
+
+  assert.equal(merged.length, 2);
+  assert.ok(merged.some((item) => item.chunkId === 'pdf:6:0'), 'FTS-matched formula chunk must survive hybrid merge');
 });

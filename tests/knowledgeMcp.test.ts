@@ -813,3 +813,35 @@ test('PaperQuayKnowledgeService handles selective Zotero sync workflow', async (
     cleanupDir(zoteroDir);
   }
 });
+
+test('search_knowledge_base retrieves formula chunks for mixed Chinese-English queries and bridges captions', async () => {
+  const dataDir = setupTestEnvironment();
+  try {
+    const rag = new DatabaseSync(path.join(dataDir, 'paperquay-rag.sqlite'));
+    rag.exec(`
+      DELETE FROM rag_chunks WHERE document_key = 'paper-1';
+      INSERT INTO rag_chunks (document_key, source_type, chunk_id, chunk_index, page_index, block_id, text)
+      VALUES
+        ('paper-1', 'mineru-markdown', 'm-1', 0, 5, 'p6-16', 'Post-stall performance uses Eqs. 5-7 [18].'),
+        ('paper-1', 'mineru-markdown', 'm-2', 1, 6, 'p7-1', '(a) twin-tiltrotor'),
+        ('paper-1', 'mineru-markdown', 'm-3', 2, 6, 'p7-2', '(b) quad-tiltrotor'),
+        ('paper-1', 'mineru-markdown', 'm-4', 3, 6, 'p7-6', 'C _{m} = - 0. 5 \\sin (\\alpha - \\alpha_{0}) + 0. 1 1 \\sin 2 (\\alpha - \\alpha_{0}),\\tag{6}');
+    `);
+    rag.close();
+
+    const service = new PaperQuayKnowledgeService({ dataDir });
+    const res = await service.searchKnowledgeBase({
+      paperId: 'paper-1',
+      query: '公式(6)，cm的计算公式是哪里来的',
+      mode: 'keyword',
+    });
+
+    assert.ok(res.total > 0);
+    assert.ok(res.results.some((item: any) => item.blockId === 'p7-6'));
+    const eqHit = res.results.find((item: any) => item.blockId === 'p7-6');
+    assert.match(eqHit.snippet, /Eqs\. 5-7/);
+    assert.match(eqHit.snippet, /\\tag\{6\}/);
+  } finally {
+    cleanupDir(dataDir);
+  }
+});

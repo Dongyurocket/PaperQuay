@@ -57,6 +57,14 @@ function collectTextParts(input: unknown): string[] {
 
   if (typeof input === 'object') {
     const record = input as Record<string, unknown>;
+    const nodeType = typeof record.type === 'string' ? record.type.toLowerCase() : '';
+
+    if (nodeType === 'equation_inline' || nodeType.includes('equation')) {
+      const mathRaw = record.math_content ?? record.content ?? record.latex ?? record.text ?? record.value;
+      if (typeof mathRaw === 'string' && mathRaw.trim()) {
+        return [normalizeRawLatexExpression(mathRaw)];
+      }
+    }
 
     return Object.entries(record).flatMap(([key, value]) => {
       if (STRUCTURAL_CONTENT_KEYS.has(key)) {

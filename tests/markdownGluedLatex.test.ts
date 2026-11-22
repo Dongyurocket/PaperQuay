@@ -117,3 +117,15 @@ test('remarkFixGluedLatex 修复 math/inlineMath 节点且不动 code 节点', (
   assert.equal(tree.children[2].value, '\\pir'); // code 节点不碰
   assert.equal(tree.children[0].children[0].value, '前缀 $\\pir^2$ 后缀'); // text 节点不碰
 });
+
+test('normalizeRawLatexExpression 清理 MinerU OCR 下标和小数空格噪声且不误伤系数', () => {
+  assert.equal(
+    normalizeRawLatexExpression('C _ {m} = - 0. 5 \\sin (\\alpha - \\alpha_ {0}) + 0. 1 1 \\sin 2 (\\alpha - \\alpha_ {0}),\\tag{6}'),
+    'C_{m} = - 0.5 \\sin (\\alpha - \\alpha_{0}) + 0.11 \\sin 2 (\\alpha - \\alpha_{0}),\\tag{6}',
+  );
+  assert.equal(
+    normalizeRawLatexExpression('C _ {l} = 1. 1 7 5 \\sin 2 (\\alpha - \\alpha_ {0}),\\tag{5}'),
+    'C_{l} = 1.175 \\sin 2 (\\alpha - \\alpha_{0}),\\tag{5}',
+  );
+  assert.equal(normalizeRawLatexExpression('c _ { d o }'), 'c_{do}');
+});

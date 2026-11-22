@@ -9,8 +9,11 @@ import type {
 import {
   buildRagContextText,
   buildRagRetrievalQuery,
+  filterRelevantRetrievals,
+  mergeHybridSourceRetrievals,
   prepareReaderRagDocument,
 } from '../features/reader/readerRag';
+export { filterRelevantRetrievals, mergeHybridSourceRetrievals };
 import type { LocalRagResolution, LocalRagResolutionSuccess } from '../features/reader/readerQaContext';
 import { summarizeRagIndexStatuses } from '../features/reader/readerQaContext';
 import {
@@ -30,9 +33,6 @@ import {
 import { emitRagIndexStatusUpdated } from './ragIndexStatus.ts';
 
 const RAG_INDEX_FAILURE_COOLDOWN_MS = 60_000;
-const RAG_RESULT_MIN_MARGIN = 0.12;
-const RAG_RESULT_MAX_MARGIN = 0.45;
-const RAG_RESULT_RELATIVE_MARGIN = 0.4;
 
 const ragIndexFailureCache = new Map<string, { failedAt: number; message: string }>();
 
@@ -106,26 +106,6 @@ function chunkItems<T>(items: T[], size: number): T[][] {
 
 function shouldSkipFailedStatus(cooldownUntil?: number | null) {
   return typeof cooldownUntil === 'number' && Number.isFinite(cooldownUntil) && cooldownUntil > Date.now();
-}
-
-function filterRelevantRetrievals(
-  results: Awaited<ReturnType<typeof ragRetrieveDocumentChunks>>,
-  topK: number,
-) {
-  if (results.length <= 1) {
-    return results.slice(0, topK);
-  }
-
-  const sorted = [...results].sort((left, right) => left.score - right.score);
-  const bestScore = sorted[0]?.score ?? 0;
-  const dynamicMargin = Math.max(
-    RAG_RESULT_MIN_MARGIN,
-    Math.min(RAG_RESULT_MAX_MARGIN, Math.abs(bestScore) * RAG_RESULT_RELATIVE_MARGIN),
-  );
-  const threshold = bestScore + dynamicMargin;
-  const filtered = sorted.filter((result, index) => index === 0 || result.score <= threshold);
-
-  return (filtered.length > 0 ? filtered : sorted).slice(0, topK);
 }
 
 export interface RagIndexEnsureResult {
@@ -582,10 +562,12 @@ export async function resolveLocalRag(input: {
     ftsHitCount: retrievals.reduce((total, result) => total + result.ftsHitCount, 0),
     partialSources: readySources.length < preparedDocument.sources.length,
   };
-  const merged = filterRelevantRetrievals(
-    retrievals
-    .flatMap((result) => result.results)
-    .sort((left, right) => left.score - right.score),
+  const merged = mergeHybridSourceRetrievals(
+    retrievals.map((retrieval, index) => ({
+      sourceType: readySources[index]?.sourceType ?? 'mineru-markdown',
+      ftsHitCount: retrieval.ftsHitCount,
+      results: retrieval.results,
+    })),
     input.settings.localRagTopK,
   );
 
@@ -605,6 +587,7 @@ export async function resolveLocalRag(input: {
     preparedSources: preparedDocument.sources,
     paperId: input.item.itemKey,
     paperTitle: input.item.title,
+    question: input.question,
     tokenBudget: input.tokenBudget,
   });
 
@@ -988,6 +971,7 @@ export async function resolveScopedLocalRag(input: {
   const merged = filterRelevantRetrievals(
     diagnostics.results.slice().sort((left, right) => left.score - right.score),
     input.settings.localRagTopK,
+    { isRrfScored: diagnostics.ftsHitCount > 0 },
   );
 
   if (merged.length === 0) {
@@ -1014,6 +998,7 @@ export async function resolveScopedLocalRag(input: {
     topK: input.settings.localRagTopK,
     mineruBlocks: [],
     preparedSources: [],
+    question: input.question,
     paperLookup: (result) => {
       const key = result.documentKey ?? '';
       return paperByKey.get(key) ?? paperByKey.get(normalizeRagKey(key)) ?? null;

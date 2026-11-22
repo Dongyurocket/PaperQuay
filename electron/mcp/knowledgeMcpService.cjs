@@ -6,6 +6,14 @@ const { DatabaseSync } = require('../backend/nodeSqlite.cjs');
 const { embedTexts } = require('../backend/utils.cjs');
 const { rrfFuse } = require('../backend/ragStore.cjs');
 const {
+  buildFtsMatchQuery,
+  extractFormulaNumbers,
+  extractReferenceNumbers,
+  extractShortSymbolTokens,
+  scoreChunkByExactQuerySignals,
+  stripRagQueryTemplateNoise,
+} = require('../../src/shared/ragQueryUtils.cjs');
+const {
   detectLocalZoteroDataDir,
   listLocalCollections,
   listLocalCollectionItems,
@@ -425,16 +433,7 @@ function openReadOnlyDb(databasePath, { allowExtension = false } = {}) {
 }
 
 function escapeFtsQuery(query) {
-  const cleaned = cleanString(query);
-  if (!cleaned) return '';
-  const tokens = cleaned
-    .replace(/[^\p{L}\p{N}\s_]/gu, ' ')
-    .split(/\s+/)
-    .map((token) => token.trim())
-    .filter((token) => token.length > 0);
-
-  if (tokens.length === 0) return '';
-  return tokens.map((token) => `"${token.replace(/"/g, '""')}"`).join(' OR ');
+  return buildFtsMatchQuery(query);
 }
 
 function getTableColumns(db, tableName) {
@@ -445,7 +444,13 @@ function getTableColumns(db, tableName) {
   }
 }
 
-// 命中后补上同一代次、同一章节的前后各一片。没有新列的旧库仍只返回命中文本。
+function isBridgeableNeighborText(text) {
+  const trimmed = cleanString(text);
+  if (!trimmed) return false;
+  return trimmed.length < 120 || /\\tag\{|\$\$/.test(trimmed);
+}
+
+// 命中后补上同一代次、同一章节的前后邻接切片；遇到短图注/连续公式时适当跨步，避免被碎片挡断。
 function snippetWithNeighbors(ragDb, row) {
   const text = typeof row?.text === 'string' ? row.text : '';
   const columns = getTableColumns(ragDb, 'rag_chunks');
@@ -467,7 +472,8 @@ function snippetWithNeighbors(ragDb, row) {
     return text;
   }
 
-  const params = [row.paperId, row.sourceType, Number(current.chunkIndex) - 1, Number(current.chunkIndex) + 1];
+  const hitChunkIndex = Number(current.chunkIndex);
+  const params = [row.paperId, row.sourceType, hitChunkIndex - 3, hitChunkIndex + 4];
   let generationClause = '';
   let sectionClause = '';
   if (hasGeneration) {
@@ -480,7 +486,7 @@ function snippetWithNeighbors(ragDb, row) {
   }
 
   const neighbors = ragDb.prepare(`
-    SELECT text
+    SELECT chunk_index AS chunkIndex, text
     FROM rag_chunks
     WHERE document_key = ? AND source_type = ?
       AND chunk_index BETWEEN ? AND ?
@@ -488,7 +494,53 @@ function snippetWithNeighbors(ragDb, row) {
       ${sectionClause}
     ORDER BY chunk_index
   `).all(...params);
-  const combined = neighbors.map((item) => item.text).filter((item) => item).join('\n\n');
+
+  const hitPos = neighbors.findIndex((item) => Number(item.chunkIndex) === hitChunkIndex);
+  if (hitPos < 0) {
+    const combined = neighbors.map((item) => item.text).filter((item) => item).join('\n\n');
+    return combined || text;
+  }
+
+  const picked = [neighbors[hitPos]];
+  let totalChars = (neighbors[hitPos].text || '').length;
+
+  for (let i = hitPos - 1; i >= 0; i -= 1) {
+    const candidate = neighbors[i];
+    const dist = hitPos - i;
+    const prevAdded = picked[0];
+    if (dist > 1 && !isBridgeableNeighborText(prevAdded?.text) && !isBridgeableNeighborText(candidate.text)) {
+      break;
+    }
+    const nextLen = (candidate.text || '').length;
+    if (dist > 1 && totalChars + nextLen > 1600) {
+      break;
+    }
+    picked.unshift(candidate);
+    totalChars += nextLen;
+    if (dist === 1 && !isBridgeableNeighborText(candidate.text) && !isBridgeableNeighborText(neighbors[hitPos].text)) {
+      break;
+    }
+  }
+
+  for (let i = hitPos + 1; i < neighbors.length; i += 1) {
+    const candidate = neighbors[i];
+    const dist = i - hitPos;
+    const prevAdded = picked[picked.length - 1];
+    if (dist > 1 && !isBridgeableNeighborText(prevAdded?.text) && !isBridgeableNeighborText(candidate.text)) {
+      break;
+    }
+    const nextLen = (candidate.text || '').length;
+    if (dist > 1 && totalChars + nextLen > 1600) {
+      break;
+    }
+    picked.push(candidate);
+    totalChars += nextLen;
+    if (dist === 1 && !isBridgeableNeighborText(candidate.text) && !isBridgeableNeighborText(neighbors[hitPos].text)) {
+      break;
+    }
+  }
+
+  const combined = picked.map((item) => item.text).filter((item) => item).join('\n\n');
   return combined || text;
 }
 
@@ -1038,7 +1090,7 @@ class PaperQuayKnowledgeService {
         channels,
       });
 
-      // 1. FTS5 全文搜索（关键词通道）
+      // 1. FTS5 全文搜索（关键词通道）+ 单篇范围精确公式/文献信号补召回
       let ftsRows = [];
       if (ftsQuery) {
         try {
@@ -1085,6 +1137,43 @@ class PaperQuayKnowledgeService {
           }));
         } catch (ftsError) {
           // FTS5 失败时后续降级到 LIKE
+        }
+      }
+
+      if (targetPaperId && !excludedPaperIds.has(targetPaperId)) {
+        const { question, combined } = stripRagQueryTemplateNoise(cleanQuery);
+        const hasSignals =
+          extractFormulaNumbers(combined).length > 0 ||
+          extractReferenceNumbers(combined).length > 0 ||
+          extractShortSymbolTokens(question || combined).length > 0;
+        if (hasSignals) {
+          const exactConditions = ['c.document_key = ?', "c.source_type != 'note'"];
+          if (hasIndexStatus) exactConditions.push(readySource);
+          const candidateChunks = ragDb.prepare(`
+            SELECT
+              c.document_key AS paperId,
+              c.chunk_id AS chunkId,
+              c.source_type AS sourceType,
+              c.page_index AS pageIndex,
+              c.block_id AS blockId,
+              c.text
+            FROM rag_chunks c
+            WHERE ${exactConditions.join(' AND ')}
+          `).all(targetPaperId);
+          const exactMatches = candidateChunks
+            .map((row) => ({ ...row, exactScore: scoreChunkByExactQuerySignals(row.text, cleanQuery) }))
+            .filter((row) => row.exactScore > 0)
+            .sort((left, right) => right.exactScore - left.exactScore)
+            .slice(0, wantsHybrid ? candidateLimit : safeLimit)
+            .map(({ exactScore, ...row }) => ({ ...row, score: -100 - exactScore }));
+
+          if (exactMatches.length > 0) {
+            const seenKeys = new Set(exactMatches.map(ragResultKey));
+            ftsRows = [
+              ...exactMatches,
+              ...ftsRows.filter((row) => !seenKeys.has(ragResultKey(row))),
+            ].slice(0, wantsHybrid ? candidateLimit : safeLimit);
+          }
         }
       }
 

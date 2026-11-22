@@ -229,23 +229,45 @@ function looksLikeStandaloneFormulaLine(value: string) {
   return hasLatexCommand && hasMathStructure && symbolDensity >= 0.08;
 }
 
+function compactOcrMathSpaces(value: string) {
+  let next = value
+    .replace(/([A-Za-z0-9)\]}])\s+([_^])/g, '$1$2')
+    .replace(/([_^])\{([A-Za-z0-9](?:\s+[A-Za-z0-9])+)\}/g, (_match, op: string, body: string) => {
+      return `${op}{${body.replace(/\s+/g, '')}}`;
+    })
+    .replace(/([_^])\{(\d+(?:\s*\.\s*\d+(?:\s+\d+)*))\}/g, (_match, op: string, body: string) => {
+      return `${op}{${body.replace(/\s+/g, '')}}`;
+    })
+    .replace(/(\d)\.\s+(\d)/g, '$1.$2');
+
+  let prev: string;
+  do {
+    prev = next;
+    next = next.replace(/(\d\.\d+)\s+(?=\d\b)/g, '$1');
+  } while (next !== prev);
+
+  return next;
+}
+
 export function normalizeRawLatexExpression(value: string) {
   return normalizeGluedLatex(
-    stripTrailingLatexLabel(value)
-      .replace(/\\r(?=\s*(?:\\leq|\\geq|\\in|[<>=+\-*/),;]|$))/g, 'r')
-      .replace(/\r\n?/g, '\n')
-      .replace(/\\([A-Za-z]+)\s+\{/g, '\\$1{')
-      .replace(/([_^])\s+\{/g, '$1{')
-      .replace(/\s+([,.;:])/g, '$1')
-      .replace(/\{\s+/g, '{')
-      .replace(/\s+\}/g, '}')
-      .replace(/\\\s*end\{array\}/g, '\\end{array}')
-      .replace(/\\\\end\{array\}/g, '\\end{array}')
-      .replace(/\\\s+(?=\\(?:sum|boldsymbol|forall))/g, ' \\\ ')
-      .replace(/\\\s+(?=\\tag)/g, ' ')
-      .replace(/\\\s+(?=[A-Za-z])/g, ' \\\\ ')
-      .replace(/[ \t]{2,}/g, ' ')
-      .trim(),
+    compactOcrMathSpaces(
+      stripTrailingLatexLabel(value)
+        .replace(/\\r(?=\s*(?:\\leq|\\geq|\\in|[<>=+\-*/),;]|$))/g, 'r')
+        .replace(/\r\n?/g, '\n')
+        .replace(/\\([A-Za-z]+)\s+\{/g, '\\$1{')
+        .replace(/([_^])\s+\{/g, '$1{')
+        .replace(/\s+([,.;:])/g, '$1')
+        .replace(/\{\s+/g, '{')
+        .replace(/\s+\}/g, '}')
+        .replace(/\\\s*end\{array\}/g, '\\end{array}')
+        .replace(/\\\\end\{array\}/g, '\\end{array}')
+        .replace(/\\\s+(?=\\(?:sum|boldsymbol|forall))/g, ' \\\ ')
+        .replace(/\\\s+(?=\\tag)/g, ' ')
+        .replace(/\\\s+(?=[A-Za-z])/g, ' \\\\ ')
+        .replace(/[ \t]{2,}/g, ' ')
+        .trim(),
+    ),
   );
 }
 export function normalizeLatexExpression(value: string) {

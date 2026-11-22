@@ -4,6 +4,14 @@ const path = require('node:path');
 const sqliteVec = require('sqlite-vec');
 const { DatabaseSync, sqlStringLiteral, withTransaction } = require('./nodeSqlite.cjs');
 const { cleanString, toError } = require('./utils.cjs');
+const {
+  buildFtsMatchQuery,
+  extractFormulaNumbers,
+  extractReferenceNumbers,
+  extractShortSymbolTokens,
+  scoreChunkByExactQuerySignals,
+  stripRagQueryTemplateNoise,
+} = require('../../src/shared/ragQueryUtils.cjs');
 
 const RAG_SOURCE_TYPES = new Set(['mineru-markdown', 'pdf-text', 'note']);
 const MAX_VECTOR_DIMENSION = 32768;
@@ -1002,17 +1010,6 @@ function indexedSourceRows(db, documentKey, sourceType, dimension, modelKey, sou
   return db.prepare(sql).all(...args);
 }
 
-function buildFtsMatchQuery(value) {
-  const terms = String(value ?? '')
-    .trim()
-    .match(/[\p{L}\p{N}_]+/gu) ?? [];
-
-  return terms
-    .slice(0, 32)
-    .map((term) => `"${term.replace(/"/g, '""')}"`)
-    .join(' OR ');
-}
-
 function ragResultKey(row) {
   const doc = row.documentKey ? `${row.documentKey}::` : '';
   return `${doc}${row.sourceType}::${row.chunkId}`;
@@ -1573,15 +1570,128 @@ function createRagStore(appPaths, options = {}) {
     }
   }
 
+  function hasExactQuerySignals(queryText) {
+    const { question, combined } = stripRagQueryTemplateNoise(queryText);
+    return (
+      extractFormulaNumbers(combined).length > 0 ||
+      extractReferenceNumbers(combined).length > 0 ||
+      extractShortSymbolTokens(question || combined).length > 0
+    );
+  }
+
+  function searchScopedExactChunks({ documentKey, documentKeys, sourceType, queryText, dimension, limit, modelKey, sourceSignature, excludedDocumentKeys }) {
+    if (!hasExactQuerySignals(queryText)) {
+      return [];
+    }
+
+    const targetKeys = documentKey && (!documentKeys || documentKeys.length <= 1)
+      ? [documentKey]
+      : (Array.isArray(documentKeys) && documentKeys.length > 0 && documentKeys.length <= 20 ? documentKeys : null);
+
+    if (!targetKeys || targetKeys.length === 0) {
+      return [];
+    }
+
+    const clauses = [
+      "i.status = 'ready'",
+      'i.embedding_dimension = ?',
+      'c.document_key IN (SELECT value FROM json_each(?))',
+    ];
+    const params = [dimension, JSON.stringify(targetKeys)];
+
+    if (sourceType) {
+      clauses.push('c.source_type = ?');
+      params.push(sourceType);
+    } else {
+      clauses.push("c.source_type != 'note'");
+    }
+    if (modelKey) {
+      clauses.push('i.embedding_model_key = ?');
+      params.push(modelKey);
+    }
+    if (sourceSignature) {
+      clauses.push('i.source_signature = ?');
+      params.push(sourceSignature);
+    }
+    if (excludedDocumentKeys.size > 0) {
+      clauses.push("AND (c.source_type = 'note' OR c.document_key NOT IN (SELECT value FROM json_each(?)))".replace(/^AND\s+/, ''));
+      params.push(JSON.stringify([...excludedDocumentKeys]));
+    }
+
+    const rows = db.prepare(`
+      SELECT
+        c.document_key AS documentKey,
+        c.chunk_id,
+        c.source_type,
+        c.page_index,
+        c.block_id,
+        c.text
+      FROM rag_chunks c
+      JOIN rag_indexes i
+        ON i.document_key = c.document_key
+       AND i.source_type = c.source_type
+      WHERE ${clauses.join(' AND ')}
+    `).all(...params);
+
+    return rows
+      .map((chunk) => ({
+        documentKey: chunk.documentKey,
+        chunkId: chunk.chunk_id,
+        sourceType: chunk.source_type,
+        pageIndex: chunk.page_index ?? null,
+        blockId: chunk.block_id ?? null,
+        text: chunk.text,
+        exactScore: scoreChunkByExactQuerySignals(chunk.text, queryText),
+      }))
+      .filter((item) => item.exactScore > 0)
+      .sort((left, right) => right.exactScore - left.exactScore)
+      .slice(0, limit)
+      .map(({ exactScore, ...row }) => ({
+        ...row,
+        score: -100 - exactScore,
+      }));
+  }
+
+  function mergeFtsAndExactRows(ftsRows, exactRows, limit) {
+    if (exactRows.length === 0) {
+      return ftsRows;
+    }
+
+    const merged = new Map();
+    for (const row of exactRows) {
+      merged.set(ragResultKey(row), row);
+    }
+    for (const row of ftsRows) {
+      const key = ragResultKey(row);
+      if (!merged.has(key)) {
+        merged.set(key, row);
+      }
+    }
+    return [...merged.values()].slice(0, limit);
+  }
+
   function searchFts({ documentKey, documentKeys, sourceType, queryText, dimension, limit, modelKey, sourceSignature, excludedDocumentKeys }) {
     if (!ftsAvailable) {
       return { rows: [], status: 'unavailable' };
     }
 
     const matchQuery = buildFtsMatchQuery(queryText);
+    const exactRows = searchScopedExactChunks({
+      documentKey,
+      documentKeys,
+      sourceType,
+      queryText,
+      dimension,
+      limit,
+      modelKey,
+      sourceSignature,
+      excludedDocumentKeys,
+    });
 
     if (!matchQuery) {
-      return { rows: [], status: 'not-queried' };
+      return exactRows.length > 0
+        ? { status: 'searched', rows: exactRows }
+        : { rows: [], status: 'not-queried' };
     }
 
     if (documentKey && (!documentKeys || documentKeys.length <= 1)) {
@@ -1618,7 +1728,7 @@ function createRagStore(appPaths, options = {}) {
         `).all(dimension, matchQuery, documentKey, ...(sourceType ? [sourceType] : []),
           ...(modelKey ? [modelKey] : []), ...(sourceSignature ? [sourceSignature] : []), limit);
 
-        return { status: 'searched', rows: rows.map((chunk) => ({
+        const ftsRows = rows.map((chunk) => ({
           documentKey: chunk.documentKey || documentKey,
           chunkId: chunk.chunk_id,
           sourceType: chunk.source_type,
@@ -1626,7 +1736,8 @@ function createRagStore(appPaths, options = {}) {
           blockId: chunk.block_id ?? null,
           text: chunk.text,
           score: Number(chunk.rank) || 0,
-        })) };
+        }));
+        return { status: 'searched', rows: mergeFtsAndExactRows(ftsRows, exactRows, limit) };
       } catch (error) {
         console.warn('[paperquay] FTS retrieval failed; local RAG used vector retrieval only.', toError(error));
         return { rows: [], status: 'failed' };
@@ -1691,7 +1802,7 @@ function createRagStore(appPaths, options = {}) {
         LIMIT ?
       `).all(...params);
 
-      return { status: 'searched', rows: rows.map((chunk) => ({
+      const ftsRows = rows.map((chunk) => ({
         documentKey: chunk.documentKey,
         chunkId: chunk.chunk_id,
         sourceType: chunk.source_type,
@@ -1699,7 +1810,8 @@ function createRagStore(appPaths, options = {}) {
         blockId: chunk.block_id ?? null,
         text: chunk.text,
         score: Number(chunk.rank) || 0,
-      })) };
+      }));
+      return { status: 'searched', rows: mergeFtsAndExactRows(ftsRows, exactRows, limit) };
     } catch (error) {
       console.warn('[paperquay] Global FTS retrieval failed', toError(error));
       return { rows: [], status: 'failed' };
@@ -1746,9 +1858,18 @@ function createRagStore(appPaths, options = {}) {
       excludedDocumentKeys,
     });
 
-    const results = fts.rows.length === 0
+    const vectorKeys = new Set(vectorRows.map(ragResultKey));
+    const ftsKeys = new Set(fts.rows.map(ragResultKey));
+    const rawResults = fts.rows.length === 0
       ? vectorRows.slice(0, topK)
       : rrfFuse(vectorRows, fts.rows).slice(0, topK);
+    const results = rawResults.map((row) => {
+      const key = ragResultKey(row);
+      const channels = [];
+      if (vectorKeys.has(key)) channels.push('vector');
+      if (ftsKeys.has(key)) channels.push('fts');
+      return channels.length > 0 ? { ...row, channels } : row;
+    });
     if (request?.includeDiagnostics === true) {
       let indexCoverage;
       if (request?.includeIndexCoverage === true && documentKeys && sourceType !== 'note') {

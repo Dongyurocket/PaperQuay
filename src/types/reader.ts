@@ -251,6 +251,8 @@ export interface RagRetrievalResult {
   retrievalRole?: "hit" | "context";
   /** retrievalRole=context 时记录其补充的目标 chunkId。 */
   expandedFrom?: string;
+  /** 命中的检索通道标记。 */
+  channels?: Array<"vector" | "fts" | "exact">;
 }
 
 export type RagFtsStatus = "searched" | "not-queried" | "unavailable" | "failed";
@@ -431,7 +433,7 @@ export interface DocumentChatQaContext {
   partialSources?: boolean;
 }
 
-export type DocumentChatEvidenceKind = "text" | "image" | "table";
+export type DocumentChatEvidenceKind = "text" | "image" | "table" | "equation";
 
 export interface DocumentChatCitation {
   id: string;

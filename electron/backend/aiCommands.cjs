@@ -288,6 +288,7 @@ function buildHtmlVisualQaPrompt(options) {
     '',
     'Response quality:',
     '- Be clear, vivid, and well-structured.',
+    '- Carefully inspect any math blocks ($$...$$ or \\tag{n}) and reference entries in the provided context; quote or explain formulas directly when present rather than stating they are absent.',
     '- Start with the core conclusion, then explain the mechanism, evidence, and implications.',
     '- Use concrete academic language. Avoid vague praise, filler, and repeated restatement.',
     '- Use headings from ## when the answer has multiple parts.',
@@ -435,6 +436,7 @@ function createAiCommands(context) {
     const systemPrompt = htmlMode
       ? buildHtmlVisualQaPrompt(options)
       : `Answer questions about the paper. Respond in ${options.responseLanguage || 'the user language'}.`
+        + ' Carefully check all math blocks ($$...$$ or \\tag{n}) and reference list entries in the provided context; quote or explain equations directly when present, and distinguish clearly between missing equations and missing bibliography details.'
         + ' When the context contains numbered sources ("# Source [n]"), cite the supporting evidence at the end of each paragraph with [n].'
         + ' Use only source numbers that exist in the context; if a paragraph has no supporting evidence, do not add a citation.'
         + ' Never guess a source for a paragraph.';
