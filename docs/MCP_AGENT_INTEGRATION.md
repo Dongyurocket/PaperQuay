@@ -1,19 +1,21 @@
 # PaperQuay 知识库 MCP 接入指南
 
-PaperQuay 提供基于 **Model Context Protocol (MCP)** 的 stdio 服务（`paperquay-knowledge-mcp`）。Proma、Pi、Codex、Claude 等 Agent 可以用它检索本地文献库、知识库正文和笔记，并在写入护栏下维护文库与笔记。
+> 适用版本：v0.4.36。更新日期：2026-11-22。
 
-服务版本与应用版本一致。客户端应以 `initialize` 返回的 `serverInfo.version` 和 `tools/list` 为准，不要依赖本文的参数快照。
+PaperQuay 提供基于 **Model Context Protocol (MCP)** 的 stdio 服务（`paperquay-knowledge-mcp`）。Proma、Pi、Codex、Claude 等外部 Agent 可以检索文献库、知识库正文和笔记。写入操作受独立护栏约束。
+
+服务版本与应用版本一致。客户端以 `initialize` 返回的 `serverInfo.version` 和 `tools/list` 为准，不要把本文参数当作固定接口。
 
 ## 特性
 
-- **直连本地数据**：服务直接读写 `<数据目录>` 下的 SQLite 数据库，查询不需要桌面应用运行。
-- **可定位的证据**：`search_knowledge_base` 返回文献 ID、标题、页码和结构块 ID，便于生成 `(Paper Title, P.x)` 形式的引用。
-- **混合检索**：配置 Embedding API 后，知识库与笔记检索走向量 + FTS5 + RRF 融合；未配置或失败时降级为关键词检索，并返回 `warning`。
-- **写入护栏**：桌面应用运行时默认拒绝写入，详见[写入安全护栏](#写入安全护栏)。
+- **直连本地数据**：服务直接读写 `<数据目录>` 下的 SQLite，查询不需要桌面应用运行。
+- **可定位的证据**：`search_knowledge_base` 返回文献 ID、标题、页码和结构块 ID，可用于生成 `(Paper Title, P.x)` 引用。
+- **混合检索**：配置 Embedding 后，知识库和笔记检索使用向量 + FTS5 + RRF。未配置或调用失败时降级为关键词检索，并返回 `warning`。
+- **写入护栏**：桌面应用运行时默认拒绝写入，见[写入安全护栏](#写入安全护栏)。
 
 ## 工具一览
 
-共 28 个工具：14 个只读，14 个写入。写入工具都接受 `allowWhileAppRunning`（默认 `false`）。
+共 28 个工具：14 个只读，14 个写入。所有写入工具都接受 `allowWhileAppRunning`，默认 `false`。
 
 ### 只读：文献、知识库与笔记检索
 
@@ -58,7 +60,7 @@ PaperQuay 提供基于 **Model Context Protocol (MCP)** 的 stdio 服务（`pape
 
 - `authors` 是字符串数组；`authorDetails` 是对象数组，每项可含 `name`、`givenName`、`familyName`、`affiliation`、`orcid`。两者同时提供时以 `authorDetails` 为准。
 - `orcid` 须符合 `0000-0000-0000-000X` 格式并通过 MOD 11-2 校验位，否则报错。
-- `language` 为 BCP 47 标签（如 `en`、`zh-Hans`），无效时报错；传空串清除。它表示文献语言，与翻译版 PDF 无关。
+- `language` 为 BCP 47 标签（如 `en`、`zh-Hans`），无效时报错；传空串清除。`language` 表示文献语言，与翻译版 PDF 无关。
 - `citationKey` 须匹配 `^[A-Za-z0-9_:\-.]+$`；传空串清除。允许重复。
 - `authors`、`authorDetails`、`keywords`、`tags` 都是整体替换。
 
@@ -81,18 +83,20 @@ PaperQuay 提供基于 **Model Context Protocol (MCP)** 的 stdio 服务（`pape
 
 - 正文中的 `[[笔记标题]]` 在目标笔记已存在时解析为双链；`#标签` 合并进标签。
 - 写入 `content` 时，共享 Markdown → Tiptap 解析器重建富文本 JSON，并清除 HTML 缓存。标题、列表、内联格式、代码块、引用块、表格、公式、双链和标签可以重建；只有已知锚点 ID 和唯一匹配本地文献的 `[n]` 引用恢复为专用节点，其余保留为普通文本。
-- **不要用 MCP 覆盖含摘录卡锚点的笔记正文**：锚点块和原文快照无法从 Markdown 重建，覆盖后锚点引用丢失，编辑器再次保存时还会清理对应锚点数据。含文献引用或表格的笔记，覆盖时须保留 `[n]` + 文末参考文献列表和表格语法。这类笔记建议在应用内编辑，或只用 MCP 改标题、标签、文件夹。
+- **不要用 MCP 覆盖含摘录卡锚点的笔记正文**：锚点块和原文快照无法从 Markdown 重建。覆盖后锚点引用会丢失，编辑器再次保存时还会清理对应锚点数据。含文献引用或表格的笔记，覆盖时须保留 `[n]` + 文末参考文献列表和表格语法。这类笔记建议在应用内编辑，或只用 MCP 改标题、标签、文件夹。
 - 批量删除前先列出待删清单，由用户确认。
 
 ## 写入安全护栏
 
-桌面应用与 MCP 可能同时持有同一份数据：应用内的详情表单或笔记编辑器仍有旧快照，外部写入也可能与用户正在进行的编辑冲突。因此所有写入工具（含 Zotero 同步和笔记工具）遵循同一套规则：
+桌面应用与 MCP 可能同时持有同一份数据。应用内的详情表单或笔记编辑器仍有旧快照，外部写入也可能与用户尚未保存的编辑冲突。所有写入工具（含 Zotero 同步和笔记工具）遵循同一套规则：
 
-1. 写入前先读桌面应用运行标记（开发模式同样写入），标记不存在时再检测进程：Windows 用 `tasklist` 查 `PaperQuay.exe`，其他平台用 `pgrep -x PaperQuay`。检测会排除 MCP 自身进程和命令行含 `paperquay-mcp` 的进程，所以用 `PaperQuay.exe` + `ELECTRON_RUN_AS_NODE=1` 启动 MCP 不会误判。
+1. 写入前先读桌面应用运行标记（开发模式同样写入）。
+   标记不存在时再检测进程：Windows 用 `tasklist` 查 `PaperQuay.exe`，其他平台用 `pgrep -x PaperQuay`。
+   检测会排除 MCP 自身进程和命令行含 `paperquay-mcp` 的进程。因此，用 `PaperQuay.exe` + `ELECTRON_RUN_AS_NODE=1` 启动 MCP 不会误判。
 2. 默认检测到应用运行时拒绝写入，数据库不变，错误提示要求先关闭应用或改为受检并行写。
 3. 运行标记损坏、不可读，或进程检测失败时，无法确认运行状态，同样拒绝写入。
 4. 传 `allowWhileAppRunning: true` 表示**受检并行写**：应用在运行或状态未知时，写入必须携带读取到的版本（`expectedUpdatedAt`、`expectedCategoryVersions` 或删除预览的 `previewVersion`）。版本缺失或已变化会被拒绝，返回 `PAPER_CONFLICT` / `CATEGORY_CONFLICT` / `NOTE_CONFLICT` 与当前版本号，不会静默覆盖。
-5. 文库写入改为目标记录写（单篇 UPSERT / 分类单行写），不再全表重写；写提交后更新数据目录的外部写入标记，桌面应用收到后刷新列表，正在编辑的详情表单显示“外部更新”提示。
+5. 文库写入使用目标记录写（单篇 UPSERT / 分类单行写），不再全表重写。写入提交后更新数据目录的外部写入标记。桌面应用收到标记后刷新列表，正在编辑的详情表单显示“外部更新”提示。
 6. 环境变量 `PAPERQUAY_MCP_WRITE=off` 禁用全部写入工具，优先级高于 `allowWhileAppRunning`。
 7. 存在待应用的备份恢复（`<数据目录的上级目录>/PaperQuay-restore/pending.json`）时，写入工具返回 `BACKUP_RESTORE_PENDING`，`allowWhileAppRunning` 不能覆盖，直到应用启动完成恢复。
 
@@ -124,7 +128,7 @@ Skills 只规定操作顺序和安全边界，参数以 `tools/list` 和本文�
 
 安装包把服务放在 asar 之外：`resources/paperquay-mcp/server.cjs`，同目录 `node_modules/` 下有 `sqlite-vec` 和当前平台的 `sqlite-vec-<os>-<arch>`。缺少时启动会报 `Cannot find module 'sqlite-vec'`。不要执行 asar 内的文件。
 
-用应用自带的 `PaperQuay.exe` 并设置 `ELECTRON_RUN_AS_NODE=1` 启动，不需要另装 Node.js。设置页「MCP 服务」会按当前安装路径生成 Proma、Claude、Codex 的配置片段，并带上 `--data-dir`，优先复制该片段。Proma 示例：
+用应用自带的 `PaperQuay.exe` 并设置 `ELECTRON_RUN_AS_NODE=1` 启动，不需要另装 Node.js。设置页“MCP 服务”会按当前安装路径生成 Proma、Claude、Codex 的配置片段，并带上 `--data-dir`，优先复制该片段。Proma 示例：
 
 ```json
 {

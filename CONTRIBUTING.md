@@ -1,12 +1,12 @@
 # Contributing to PaperQuay
 
-PaperQuay is an early-stage desktop app. Small, focused contributions are easier to review and safer for users.
+PaperQuay is a local-first desktop app. Small, focused contributions are easier to review and safer for users.
 
 ## Good First Contributions
 
 - Fix UI text, layout, dark mode contrast, or English/Chinese localization.
 - Improve the README, release notes, setup instructions, or troubleshooting notes.
-- Add tests or small fixes around import, metadata parsing, Zotero compatibility, PDF reading, translation, or Agent workflows.
+- Add tests or small fixes around import, metadata parsing, Zotero compatibility, PDF reading, translation, or external-agent workflows.
 - Report reproducible bugs with steps, screenshots, logs, and platform details.
 
 ## Platform Scope
@@ -38,7 +38,7 @@ When testing against data, start the app with `--user-data-dir=<empty directory>
 - Prefer clear module boundaries and readable code over large mixed refactors.
 - Do not commit local data, API keys, PDFs, database files, parser output, build artifacts, or backups.
 - Update documentation when behavior, settings, release workflow, or user-facing text changes.
-- For UI changes, include screenshots or short recordings when possible.
+- For UI changes, include screenshots or short recordings when possible. Capture them from the current build with temporary data, and remove personal paths, titles, and API keys.
 - For bug fixes, describe the root cause and how you verified the fix.
 - Pull requests run the Build workflow (`npm ci`, `npm run build`, `npm test` on Windows); make sure it passes.
 
