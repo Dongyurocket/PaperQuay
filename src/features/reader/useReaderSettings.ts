@@ -7,13 +7,11 @@ import {
 } from 'react';
 
 import {
-  approveWritePath,
   getAppDefaultPaths,
-  readLocalTextFileIfExists,
 } from '../../services/desktop';
 import type { AppDefaultPaths } from '../../services/desktop';
 import {
-  readReaderConfigFile,
+  resolveReaderConfigForHydration,
   writeReaderConfigFile,
 } from '../../services/readerConfig';
 import {
@@ -35,6 +33,7 @@ import {
 import {
   emitUiLanguageChanged,
 } from '../../app/appEvents';
+import { toast } from '../../ui/toast';
 import {
   buildLegacyConfigPath,
   buildLegacyModelPresets,
@@ -73,6 +72,8 @@ export function useReaderSettings({
   const [librarySettings, setLibrarySettings] = useState<LibrarySettings | null>(null);
   const [appDefaultPaths, setAppDefaultPaths] = useState<AppDefaultPaths | null>(null);
   const [configHydrated, setConfigHydrated] = useState(false);
+  const [configPersistenceEnabled, setConfigPersistenceEnabled] = useState(false);
+  const [configLoadError, setConfigLoadError] = useState('');
 
   const l = useCallback<LocaleTextFn>(
     (zh, en) => pickLocaleText(settings.uiLanguage, zh, en),
@@ -303,35 +304,44 @@ export function useReaderSettings({
           defaultPaths,
         );
 
-        try {
-          const parsedConfig = await readReaderConfigFile(defaultPaths);
-          if (parsedConfig) {
+        // 主配置缺失（ENOENT）才回退旧路径；读取/解析失败一律视为错误，
+        // 不拿默认值继续写回，否则会用回退值覆盖文件里的 API Key。
+        const hydration = await resolveReaderConfigForHydration({
+          defaultPaths,
+          legacyConfigPath: buildLegacyConfigPath(defaultPaths.executableDir),
+        });
+
+        if (cancelled) {
+          return;
+        }
+
+        if (hydration.error) {
+          // 保留 localStorage 里的上次设置/密钥供本次会话使用，但禁用配置持久化，
+          // 并保留 raw 文件原样，等待用户修复或删除后重启。
+          setReaderSecrets(legacySecrets);
+          setConfigPersistenceEnabled(false);
+          const message = l(
+            `读取配置文件失败，已暂停写回以保护 API Key：${defaultPaths.configPath}（${hydration.error.message}）。修复或删除该文件后重启应用。`,
+            `Failed to read the settings file. Writing is paused to protect API keys: ${defaultPaths.configPath} (${hydration.error.message}). Fix or remove the file, then restart the app.`,
+          );
+          console.error('Failed to read the reader config file.', hydration.error);
+          setConfigLoadError(message);
+          setError(message);
+          setStatusMessage(message);
+          toast({ tone: 'error', message, duration: 0, key: 'reader-config-load-error' });
+        } else {
+          if (hydration.config) {
             nextConfig = mergeReaderConfigWithDefaults(
-              parsedConfig,
+              hydration.config,
               loadSettings(),
               legacySecrets,
               defaultPaths,
             );
-          } else {
-            const legacyConfigText = await readLocalTextFileIfExists(
-              buildLegacyConfigPath(defaultPaths.executableDir),
-            );
-
-            if (legacyConfigText) {
-              const parsedLegacyConfig = JSON.parse(legacyConfigText) as Partial<ReaderConfigFile>;
-
-              nextConfig = mergeReaderConfigWithDefaults(
-                parsedLegacyConfig,
-                loadSettings(),
-                legacySecrets,
-                defaultPaths,
-              );
-            }
           }
-        } catch {
-        }
-        if (cancelled) {
-          return;
+          setSettings(nextConfig.settings);
+          setReaderSecrets(nextConfig.secrets ?? DEFAULT_SECRETS);
+          setConfigPersistenceEnabled(true);
+          setConfigLoadError('');
         }
 
         let nativeLibrarySettings: LibrarySettings | null = null;
@@ -344,13 +354,12 @@ export function useReaderSettings({
         const configZoteroDir = nextConfig.zoteroLocalDataDir.trim();
         const nativeZoteroDir = nativeLibrarySettings?.zoteroLocalDataDir.trim() ?? '';
         const resolvedZoteroDir = nativeZoteroDir || configZoteroDir;
-        const hydratedSecrets = nextConfig.secrets ?? DEFAULT_SECRETS;
 
-        setSettings(nextConfig.settings);
-        setReaderSecrets(hydratedSecrets);
+        // 必须始终用文库里的 Zotero 目录回填：读取失败时 configZoteroDir 为空，
+        // 若跳过赋值，Reader 的 500ms 同步 effect 会把空值写回文库，抹掉用户已配置的目录。
         setZoteroLocalDataDir(resolvedZoteroDir);
         setLibrarySettings(nativeLibrarySettings);
-        if (nativeLibrarySettings && configZoteroDir && !nativeZoteroDir) {
+        if (nativeLibrarySettings && !hydration.error && configZoteroDir && !nativeZoteroDir) {
           const syncedSettings = await updateLibrarySettings({
             ...nativeLibrarySettings,
             zoteroLocalDataDir: configZoteroDir,
@@ -395,17 +404,7 @@ export function useReaderSettings({
     emitUiLanguageChanged(settings.uiLanguage);
   }, [settings]);
 
-  useEffect(() => {
-    const mineruCacheDir = settings.mineruCacheDir.trim();
-
-    if (!configHydrated || !mineruCacheDir) {
-      return;
-    }
-
-    void approveWritePath(mineruCacheDir).catch((error) => {
-      console.error('Failed to approve the configured MinerU cache directory.', error);
-    });
-  }, [configHydrated, settings.mineruCacheDir]);
+  // MinerU 缓存目录的写权限由主进程按配置文件登记，渲染层不再自行批准路径。
 
   useEffect(() => {
     if (qaModelPresets.some((preset) => preset.id === settings.qaActivePresetId)) {
@@ -421,7 +420,7 @@ export function useReaderSettings({
   }, [qaModelPresets, settings.qaActivePresetId]);
 
   useEffect(() => {
-    if (!configHydrated || !appDefaultPaths) {
+    if (!configHydrated || !configPersistenceEnabled || !appDefaultPaths) {
       return undefined;
     }
 
@@ -449,6 +448,7 @@ export function useReaderSettings({
   }, [
     appDefaultPaths,
     configHydrated,
+    configPersistenceEnabled,
     readerSecrets,
     settings,
     zoteroLocalDataDir,
@@ -610,6 +610,7 @@ export function useReaderSettings({
   return {
     appDefaultPaths,
     configHydrated,
+    configLoadError,
     l,
     qaModelPresets,
     readerSecrets,

@@ -21,7 +21,7 @@ import { createScrollRestoreScheduler } from './scrollRestoreScheduler';
 import EmptyState from '../../components/EmptyState';
 import { ContextMenu, type ContextMenuEntry } from '../../components/ContextMenu';
 import { useWheelScrollDelegate } from '../../hooks/useWheelScrollDelegate';
-import { approveWritePath, selectSavePdfPath, writeLocalBinaryFile } from '../../services/desktop';
+import { selectSavePdfPath, writeLocalBinaryFile } from '../../services/desktop';
 import {
   extractTranslatableMarkdownFromMineruBlock,
   extractTextFromMineruBlock,
@@ -1978,7 +1978,9 @@ function PdfViewer({
         return;
       }
 
-      await approveWritePath(targetPath);
+      // 写权限由主进程策略决定：保存对话框已登记目标路径；同目录批注版
+      // 导出依赖文库附件目录的受限写规则。
+
       await writeLocalBinaryFile(targetPath, new Uint8Array(nextBytes));
       const updatingCurrentAnnotatedFile =
         sourcePath && normalizePathForCompare(targetPath) === normalizePathForCompare(sourcePath);

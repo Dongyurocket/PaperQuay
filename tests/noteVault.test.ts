@@ -159,7 +159,7 @@ test('vault 里无 id 的新文件导入为新笔记，目录结构映射为文�
   }
 });
 
-test('应用内删除笔记后，manifest 记录的文件被清理；非受管文件不动', () => {
+test('应用内删除笔记后，manifest 记录的文件在确认后清理；非受管文件不动', () => {
   const { dir, vaultDir, noteStore, vault } = setup();
   try {
     const note = noteStore.createNote({
@@ -175,10 +175,94 @@ test('应用内删除笔记后，manifest 记录的文件被清理；非受管�
     writeFileSync(path.join(vaultDir, '我自己的文件.md'), '用户内容');
 
     noteStore.deleteNote({ id: note.id });
-    const stats = vault.syncNow();
+    // 单次删除 1/1 = 100%，超过 5% 熔断阈值：先暂缓，文件仍在。
+    const pending = vault.syncNow();
+    assert.equal(pending.removed, 0);
+    assert.equal(pending.removalConfirmationRequired, true);
+    assert.equal(pending.pendingRemovals, 1);
+    assert.ok(existsSync(path.join(vaultDir, '会删除.md')));
+
+    const stats = vault.syncNow({ confirmRemoval: true });
     assert.equal(stats.removed, 1);
+    assert.equal(stats.removalConfirmationRequired, false);
     assert.ok(!existsSync(path.join(vaultDir, '会删除.md')));
     assert.ok(existsSync(path.join(vaultDir, '我自己的文件.md')));
+  } finally {
+    noteStore.close();
+    cleanupDir(dir);
+  }
+});
+
+test('501+ 既有 vault 文件首次导入后全部保留，不会因 500 条列表截断被删除', () => {
+  const { dir, vaultDir, noteStore, vault } = setup();
+  try {
+    vault.syncNow(); // 建 vault 目录
+    const count = 520;
+    for (let index = 0; index < count; index += 1) {
+      const name = `外部笔记-${String(index).padStart(3, '0')}`;
+      writeFileSync(path.join(vaultDir, `${name}.md`), `\n正文 ${index}\n`);
+    }
+
+    const stats = vault.syncNow();
+    assert.equal(stats.created, count);
+    assert.equal(stats.removed, 0);
+    assert.equal(stats.removalConfirmationRequired, false);
+
+    const markdownFiles = readdirSync(vaultDir).filter((name) => name.endsWith('.md'));
+    assert.equal(markdownFiles.length, count);
+    // 窗口外（最早创建）的文件必须仍在，且每一篇的正文都完整保留。
+    for (let index = 0; index < count; index += 1) {
+      const fileName = `外部笔记-${String(index).padStart(3, '0')}.md`;
+      assert.match(readFileSync(path.join(vaultDir, fileName), 'utf8'), new RegExp(`正文 ${index}`));
+    }
+
+    const second = vault.syncNow();
+    assert.equal(second.removed, 0);
+    assert.equal(
+      readdirSync(vaultDir).filter((name) => name.endsWith('.md')).length,
+      count,
+    );
+  } finally {
+    noteStore.close();
+    cleanupDir(dir);
+  }
+});
+
+test('501+ 数据库笔记全部导出，文件数量与笔记数一致', () => {
+  const { dir, vaultDir, noteStore, vault } = setup();
+  try {
+    const count = 520;
+    const noteIds: string[] = [];
+    for (let index = 0; index < count; index += 1) {
+      const note = noteStore.createNote({
+        title: `数据库笔记-${String(index).padStart(3, '0')}`,
+        content: `内容 ${index}`,
+      });
+      noteIds.push(note.id);
+    }
+
+    const stats = vault.syncNow();
+    assert.equal(stats.exported, count);
+    assert.equal(stats.total, count);
+    assert.equal(stats.removed, 0);
+    assert.equal(
+      readdirSync(vaultDir).filter((name) => name.endsWith('.md')).length,
+      count,
+    );
+
+    // 编辑窗口外的旧笔记（自己仍应在结果里，而不是被挤出后当作已删除）。
+    noteStore.updateNote({
+      id: noteIds[0],
+      patch: { content: '窗口外编辑', contentText: '窗口外编辑' },
+    });
+
+    const second = vault.syncNow();
+    assert.equal(second.exported, 1);
+    assert.equal(second.removed, 0);
+    assert.equal(
+      readdirSync(vaultDir).filter((name) => name.endsWith('.md')).length,
+      count,
+    );
   } finally {
     noteStore.close();
     cleanupDir(dir);

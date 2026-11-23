@@ -163,6 +163,49 @@ export async function queryLibraryPapers(
   }
 }
 
+const ALL_PAPERS_PAGE_SIZE = 1000;
+
+/**
+ * 按当前筛选取全量文献（分页拉取，不受 library_list_papers 的 1000 条上限影响）。
+ * 仅供必须持有完整快照的流程（阅读器跨文献跳转、批量任务）使用。
+ */
+export async function listAllLibraryPapers(
+  request: ListPapersRequest = {},
+): Promise<LiteraturePaper[]> {
+  const papers: LiteraturePaper[] = [];
+  const seenPaperIds = new Set<string>();
+  let offset = 0;
+
+  for (;;) {
+    const result = await queryLibraryPapers({
+      ...request,
+      limit: ALL_PAPERS_PAGE_SIZE,
+      offset,
+    });
+
+    for (const paper of result.papers) {
+      if (!seenPaperIds.has(paper.id)) {
+        seenPaperIds.add(paper.id);
+        papers.push(paper);
+      }
+    }
+
+    if (result.papers.length === 0 || offset + result.papers.length >= result.total) {
+      return papers;
+    }
+    offset += result.papers.length;
+  }
+}
+
+/** 单条文献查询：跨文献跳转时不再依赖被截断的列表快照。 */
+export async function getLibraryPaper(paperId: string): Promise<LiteraturePaper | null> {
+  try {
+    return await invoke<LiteraturePaper | null>('library_get_paper', { paperId });
+  } catch (error) {
+    throw new Error(toErrorMessage(error, '读取文献失败'));
+  }
+}
+
 export async function listLibraryTags(): Promise<import('../types/library').LibraryTagCount[]> {
   try {
     return await invoke<import('../types/library').LibraryTagCount[]>('library_list_tags');

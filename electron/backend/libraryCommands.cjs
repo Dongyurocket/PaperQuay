@@ -51,6 +51,32 @@ function isSamePath(left, right) {
   return comparablePath(left) === comparablePath(right);
 }
 
+/**
+ * 分类父级校验：新父级不能是自身、自己的后代、系统分类或不存在的分类。
+ * 历史上已经存在环时 visited 集合保证遍历终止（环上的移动会被拒绝并提示修复）。
+ */
+function assertCategoryParentAllowed(categories, categoryId, parentId) {
+  const nextParentId = cleanString(parentId);
+  if (!nextParentId) return;
+  if (nextParentId === categoryId) {
+    throw new Error('A category cannot be its own parent');
+  }
+
+  const parent = categories.find((item) => item.id === nextParentId);
+  if (!parent) throw new Error(`Parent category does not exist: ${nextParentId}`);
+  if (parent.isSystem) throw new Error('System categories cannot be used as a parent');
+
+  const seen = new Set([categoryId]);
+  let cursor = nextParentId;
+  while (cursor) {
+    if (seen.has(cursor)) {
+      throw new Error('A category cannot be moved under itself or its descendants');
+    }
+    seen.add(cursor);
+    cursor = categories.find((item) => item.id === cursor)?.parentId ?? null;
+  }
+}
+
 function isSubPath(root, candidate) {
   const relative = path.relative(path.resolve(root), path.resolve(candidate));
   return Boolean(relative) && !relative.startsWith('..') && !path.isAbsolute(relative);
@@ -652,9 +678,13 @@ function createLibraryCommands(context) {
       const name = cleanString(request?.name);
       if (!name) throw new Error('Category name cannot be empty');
 
-      const parentId = request?.parentId || null;
+      const parentId = cleanString(request?.parentId) || null;
+      const categoryId = id('cat');
+      if (parentId) {
+        assertCategoryParentAllowed(library.categories, categoryId, parentId);
+      }
       const category = {
-        id: id('cat'),
+        id: categoryId,
         name,
         parentId,
         sortOrder: library.categories.filter((item) => item.parentId === parentId && !item.isSystem).length,
@@ -665,7 +695,7 @@ function createLibraryCommands(context) {
         paperCount: 0,
       };
       library.categories.push(category);
-      await store.save(library);
+      store.saveCategory(category);
       return store.listCategoriesWithCounts().find((item) => item.id === category.id);
     },
 
@@ -676,11 +706,17 @@ function createLibraryCommands(context) {
       if (category.isSystem) throw new Error('System categories cannot be modified');
 
       if (request.name != null && cleanString(request.name)) category.name = cleanString(request.name);
-      if (request.parentId !== undefined) category.parentId = request.parentId || null;
+      if (request.parentId !== undefined) {
+        const nextParentId = cleanString(request.parentId) || null;
+        if (nextParentId !== (category.parentId ?? null)) {
+          assertCategoryParentAllowed(library.categories, category.id, nextParentId);
+        }
+        category.parentId = nextParentId;
+      }
       if (request.sortOrder != null) category.sortOrder = request.sortOrder;
       category.updatedAt = now();
 
-      await store.save(library);
+      store.saveCategory(category);
       return store.listCategoriesWithCounts().find((item) => item.id === category.id);
     },
 
@@ -734,6 +770,13 @@ function createLibraryCommands(context) {
       const resolved = await resolvePaperRequest(request);
       const result = store.queryPapers(resolved.request);
       return { ...result, papers: resolved.applyToPapers(result.papers) };
+    },
+
+    /** 单条文献查询：跨文献跳转不受 library_list_papers 的 1000 条截断影响。 */
+    async library_get_paper({ paperId }) {
+      const idValue = cleanString(paperId);
+      if (!idValue) return null;
+      return store.getPaper(idValue);
     },
 
     /** 与 library_query_papers 同筛选同排序，仅分批枚举 id（供全选/批量目标管理，P2-2）。 */

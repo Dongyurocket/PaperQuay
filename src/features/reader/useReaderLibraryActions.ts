@@ -12,7 +12,6 @@ import {
   selectDirectory,
   selectLocalPdfSource,
   selectSaveFilePath,
-  approveWritePath,
   writeLocalTextFile,
 } from '../../services/desktop';
 import {
@@ -1312,7 +1311,6 @@ export function useReaderLibraryActions({
           const filePath = `${targetDir}${targetDir.includes('\\') ? '\\' : '/'}${citationKey}.bib`;
 
           try {
-            await approveWritePath(filePath);
             await writeLocalTextFile(filePath, `${paperToBibtexEntry(paper, { citationKey }, usedKeys)}\n`);
             succeededCount += 1;
           } catch {

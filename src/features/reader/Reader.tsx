@@ -21,7 +21,8 @@ import { repairMineruCacheImages, selectDirectory, selectLocalPdfSource } from '
 import { buildMineruCachePathCandidates } from '../../utils/mineruCache';
 import {
   addLibraryAttachment,
-  listLibraryPapers,
+  getLibraryPaper,
+  listAllLibraryPapers,
 } from '../../services/library';
 import { AppLocaleProvider } from '../../i18n/uiLanguage';
 import { getHomeTabTitle, HOME_TAB_ID, type ReaderTab, useTabsStore } from '../../stores/useTabsStore';
@@ -610,7 +611,8 @@ function Reader({ workspaceActive = true }: ReaderProps) {
 
     let cancelled = false;
 
-    void listLibraryPapers({ limit: 5000, sortBy: 'updatedAt', sortDirection: 'desc' })
+    // 分页取全量：library_list_papers 会在 1000 条处截断，不能用来构建全库 workspaceItemMap。
+    void listAllLibraryPapers({ sortBy: 'updatedAt', sortDirection: 'desc' })
       .then((papers) => {
         if (!cancelled) {
           setAllLibraryPapers(papers);
@@ -719,9 +721,8 @@ function Reader({ workspaceActive = true }: ReaderProps) {
       const paperId = workspaceId.slice('native-library:'.length);
 
       try {
-        const papers = await listLibraryPapers({ limit: 1000, sortBy: 'updatedAt', sortDirection: 'desc' });
-        setAllLibraryPapers(papers);
-        const paper = papers.find((item) => item.id === paperId);
+        // 单条查询：不拉取、也不覆盖全库快照，避免 1000 条截断影响窗口外文献。
+        const paper = await getLibraryPaper(paperId);
         const workspaceItem = paper
           ? createNativeLibraryWorkspaceItem(paper, librarySettings?.storageDir)
           : null;
@@ -785,10 +786,7 @@ function Reader({ workspaceActive = true }: ReaderProps) {
       }
 
       try {
-        const papers = await listLibraryPapers({ limit: 1000, sortBy: 'updatedAt', sortDirection: 'desc' });
-        setAllLibraryPapers(papers);
-
-        const paper = papers.find((item) => item.id === normalizedPaperId);
+        const paper = await getLibraryPaper(normalizedPaperId);
 
         if (!paper || !openPaper(paper)) {
           const message = l('没有找到该引用对应的文献', 'No paper was found for this reference.');

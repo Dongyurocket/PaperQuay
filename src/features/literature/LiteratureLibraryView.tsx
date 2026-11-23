@@ -29,6 +29,7 @@ import {
   importPdfsToLibrary,
   initializeLiteratureLibrary,
   listAllLibraryPaperIds,
+  listAllLibraryPapers,
   listLibraryCategories,
   queryLibraryPapers,
   previewLibraryPdfAssetNames,
@@ -296,21 +297,9 @@ const PAPER_PAGE_SIZE = 500;
 
 /** 需要「全库文献」的后台任务（MinerU 状态/批量元数据）按页取齐，不再受 1000 条硬上限截断。 */
 async function fetchAllLibraryPapers(): Promise<LiteraturePaper[]> {
-  const all: LiteraturePaper[] = [];
-  let offset = 0;
-
-  for (;;) {
-    const result = await queryLibraryPapers({
-      ...buildPaperQuery(DEFAULT_LIBRARY_FILTERS, { sortBy: 'manual', sortDirection: 'asc' }, null, ''),
-      limit: 1000,
-      offset,
-    });
-    all.push(...result.papers);
-    if (result.papers.length === 0 || all.length >= result.total) break;
-    offset += result.papers.length;
-  }
-
-  return all;
+  return listAllLibraryPapers(
+    buildPaperQuery(DEFAULT_LIBRARY_FILTERS, { sortBy: 'manual', sortDirection: 'asc' }, null, ''),
+  );
 }
 const PAPER_SORT_FIELDS: LiteraturePaperSortBy[] = [
   'manual',

@@ -403,7 +403,8 @@ function createNoteVault(context) {
       notesVaultDir: cleanString(settings?.dir),
       notesVaultUpdatedAtMs: now(),
     };
-    await store.save(library);
+    // 只写设置；整库保存会用旧快照覆盖并发的桌面/MCP 写入。
+    await store.saveSettings(library.settings);
     return {
       dir: library.settings.notesVaultDir,
       updatedAtMs: library.settings.notesVaultUpdatedAtMs,
@@ -432,7 +433,12 @@ function createNoteVault(context) {
     return parentId;
   }
 
-  function syncNow() {
+  // 单次同步删除文件的熔断阈值：删除数超过受管文件总数的 5% 或超过 20 个时，
+  // 必须由调用方带入 confirmRemoval 才真正删除，避免「截断列表/异常数据」造成批量误删。
+  const REMOVAL_CONFIRM_MIN_COUNT = 20;
+  const REMOVAL_CONFIRM_RATIO = 0.05;
+
+  function syncNow(options = {}) {
     const settings = getSettings();
     const vaultDir = settings.dir;
     if (!vaultDir) {
@@ -461,7 +467,21 @@ function createNoteVault(context) {
     // ---- 阶段 1：导入（vault → DB）----
     const files = listMarkdownFiles(vaultDir);
     let folders = noteStore.listFolders();
-    let notes = noteStore.listNotes({ includeDeleted: false });
+    // 同步必须看到全量笔记：listNotes 默认只返回 500 条，用它做后续清理判断会误删文件。
+    let notes = noteStore.listAllNotes({ includeDeleted: false });
+    // 标题索引只给 wikiLink 解析用，增量维护；不再在每个文件里重建 O(N) 的 Map。
+    const notesById = new Map(notes.map((item) => [item.id, item]));
+    const noteIndexById = new Map(notes.map((item, index) => [item.id, index]));
+    const upsertLocalNote = (note) => {
+      const index = noteIndexById.get(note.id);
+      if (index === undefined) {
+        noteIndexById.set(note.id, notes.length);
+        notes.push(note);
+      } else {
+        notes[index] = note;
+      }
+      notesById.set(note.id, note);
+    };
     for (const rel of files) {
       const abs = path.join(vaultDir, rel);
       let raw;
@@ -495,7 +515,7 @@ function createNoteVault(context) {
           continue;
         }
         const contentChanged =
-          serializeNoteMarkdown(existing, papersById, new Map(notes.map((item) => [item.id, item]))) !== contentText ||
+          serializeNoteMarkdown(existing, papersById, notesById) !== contentText ||
           cleanString(existing.title) !== titleFromFile;
         const meta = manifest.metadata[noteId] || {};
         const fileHash = contentHash(raw);
@@ -519,7 +539,7 @@ function createNoteVault(context) {
           conflictNotes.add(noteId);
         } else if (contentChanged && (fileIsNewer || fileChangedSinceExport)) {
           const folderId = resolveFolderByPath(dirSegments, folders, createdFolders);
-          noteStore.updateNote({
+          const saved = noteStore.updateNote({
             id: noteId,
             patch: {
               title: titleFromFile || existing.title,
@@ -538,7 +558,7 @@ function createNoteVault(context) {
           });
           stats.imported += 1;
           stats.updated += 1;
-          notes = noteStore.listNotes({ includeDeleted: false });
+          upsertLocalNote(saved);
         } else {
           stats.skipped += 1;
         }
@@ -564,14 +584,16 @@ function createNoteVault(context) {
         stats.imported += 1;
         stats.created += 1;
         manifest.files[created.id] = rel;
-        notes = noteStore.listNotes({ includeDeleted: false });
+        upsertLocalNote(created);
       }
     }
 
     // ---- 阶段 2：导出（DB → vault）----
     folders = noteStore.listFolders();
     const foldersById = new Map(folders.map((folder) => [folder.id, folder]));
-    notes = noteStore.listNotes({ includeDeleted: false });
+    notes = noteStore.listAllNotes({ includeDeleted: false });
+    // 阶段 2 的 wikiLink 解析索引只建一次；notes 在本阶段不再变化。
+    const exportNotesById = new Map(notes.map((item) => [item.id, item]));
 
     for (const note of notes) {
       if (conflictNotes.has(note.id)) continue;
@@ -581,12 +603,7 @@ function createNoteVault(context) {
       // 标题或文件夹变化都让文件名跟随，旧文件在下方按 manifest 清理。
       let rel = `${expectedPrefix}${baseName}.md`;
 
-      const content = buildNoteFileContent(
-        note,
-        folderPath,
-        papersById,
-        new Map(notes.map((item) => [item.id, item])),
-      );
+      const content = buildNoteFileContent(note, folderPath, papersById, exportNotesById);
       let existingContent = null;
       try {
         existingContent = fs.readFileSync(path.join(vaultDir, rel), 'utf8');
@@ -635,8 +652,23 @@ function createNoteVault(context) {
     }
 
     // ---- 阶段 3：清理 manifest 里已不存在笔记对应的文件 ----
-    for (const [noteId, rel] of Object.entries(manifest.files)) {
-      if (!notes.some((note) => note.id === noteId)) {
+    // 只按 id 存在性判断，且 notes 来自 listAllNotes（全量），不会因为列表截断误删。
+    const liveNoteIds = new Set(notes.map((note) => note.id));
+    const pendingRemovals = Object.entries(manifest.files)
+      .filter(([noteId]) => !liveNoteIds.has(noteId));
+    const managedFileCount = Object.keys(manifest.files).length;
+    const removalNeedsConfirmation =
+      pendingRemovals.length > REMOVAL_CONFIRM_MIN_COUNT ||
+      (managedFileCount > 0 &&
+        pendingRemovals.length / managedFileCount > REMOVAL_CONFIRM_RATIO);
+    stats.pendingRemovals = pendingRemovals.length;
+
+    if (pendingRemovals.length > 0 && removalNeedsConfirmation && options.confirmRemoval !== true) {
+      // 熔断：本轮不删文件、不改 manifest，保留待清理条目供用户确认后重试。
+      stats.removalConfirmationRequired = true;
+    } else {
+      stats.removalConfirmationRequired = false;
+      for (const [noteId, rel] of pendingRemovals) {
         try {
           fs.rmSync(path.join(vaultDir, rel), { force: true });
           stats.removed += 1;
@@ -646,6 +678,7 @@ function createNoteVault(context) {
         delete manifest.files[noteId];
         delete manifest.metadata[noteId];
       }
+      stats.pendingRemovals = 0;
     }
 
     saveManifest(vaultDir, manifest);

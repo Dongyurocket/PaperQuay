@@ -113,6 +113,18 @@
         "filter": [
           "**/*"
         ]
+      },
+      {
+        "from": "node_modules/pdfjs-dist/cmaps",
+        "to": "pdfjs/cmaps"
+      },
+      {
+        "from": "node_modules/pdfjs-dist/standard_fonts",
+        "to": "pdfjs/standard_fonts"
+      },
+      {
+        "from": "node_modules/pdfjs-dist/image_decoders",
+        "to": "pdfjs/image_decoders"
       }
     ],
     "asar": true,

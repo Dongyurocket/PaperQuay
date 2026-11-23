@@ -153,6 +153,10 @@ export interface NotesVaultSyncStats {
   conflicts: number;
   total: number;
   createdFolders: number;
+  /** 本轮检测到但被删除熔断拦下的待清理文件数。 */
+  pendingRemovals?: number;
+  /** 为 true 时本轮没有删除任何文件，调用方确认后需带 confirmRemoval 重试。 */
+  removalConfirmationRequired?: boolean;
 }
 
 export async function getNotesVaultSettings(): Promise<NotesVaultSettings> {
@@ -173,9 +177,14 @@ export async function updateNotesVaultSettings(settings: {
   }
 }
 
-export async function syncNotesVaultNow(): Promise<NotesVaultSyncStats> {
+export async function syncNotesVaultNow(options?: {
+  /** 数量超过熔断阈值时，显式确认后才真正删除 vault 文件。 */
+  confirmRemoval?: boolean;
+}): Promise<NotesVaultSyncStats> {
   try {
-    const stats = await invoke<NotesVaultSyncStats>('notes_vault_sync_now');
+    const stats = await invoke<NotesVaultSyncStats>('notes_vault_sync_now', {
+      options: options ?? {},
+    });
     // 同步可能从 vault 导入了新笔记/文件夹，广播一次让工作区刷新。
     emitNoteChanged({
       action: 'updated',

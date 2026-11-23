@@ -78,8 +78,8 @@ function createNoteCommands(context) {
       return noteVault.updateSettings(settings ?? {});
     },
 
-    notes_vault_sync_now() {
-      return noteVault.syncNow();
+    notes_vault_sync_now({ options } = {}) {
+      return noteVault.syncNow(options ?? {});
     },
   };
 }

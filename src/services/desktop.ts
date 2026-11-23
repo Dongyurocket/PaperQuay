@@ -201,12 +201,19 @@ export async function selectSaveFilePath(options?: {
   }
 }
 
-export async function approveWritePath(path: string): Promise<void> {
+/** 用主进程 safeStorage（Windows DPAPI / macOS Keychain）加密一段配置 JSON。 */
+export async function encryptReaderSecretPayload(payload: string): Promise<string> {
   try {
-    await invoke('approve_write_path', { path });
-  } catch (error) {
-    throw new Error(toErrorMessage(error, `Failed to approve write path: ${path}`));
+    const result = await invoke<{ value: string }>('reader_secret_encrypt', { value: payload });
+    return result?.value ?? payload;
+  } catch {
+    return payload;
   }
+}
+
+export async function decryptReaderSecretPayload(payload: string): Promise<string> {
+  const result = await invoke<{ value: string }>('reader_secret_decrypt', { value: payload });
+  return result?.value ?? payload;
 }
 
 export type RevealLocalPathResult =

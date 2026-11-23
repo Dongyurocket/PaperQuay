@@ -62,7 +62,7 @@ function buildLibraryFilter(db, request = {}) {
     } else if (category && !category.systemKey) {
       cteSql = `WITH RECURSIVE filter_cat_ids(id) AS (
         SELECT ?
-        UNION ALL
+        UNION
         SELECT c.id FROM categories c JOIN filter_cat_ids f ON c.parent_id = f.id
       )`;
       params.push(category.id);

@@ -141,3 +141,188 @@ test('library_delete_paper keeps managed files still referenced by another paper
     rmSync(appPaths.dataDir, { recursive: true, force: true });
   }
 });
+
+test('category moves reject self/descendant/system/missing parents', async () => {
+  const appPaths = createAppPaths();
+  let store = null;
+
+  try {
+    store = createLibraryStore(appPaths);
+    const commands = createLibraryCommands({ appPaths, store });
+    const a = await commands.library_create_category({ request: { name: 'A' } });
+    const b = await commands.library_create_category({ request: { name: 'B', parentId: a.id } });
+    const c = await commands.library_create_category({ request: { name: 'C', parentId: b.id } });
+
+    await assert.rejects(
+      commands.library_update_category({ request: { id: a.id, parentId: a.id } }),
+      /own parent/,
+    );
+    await assert.rejects(
+      commands.library_update_category({ request: { id: a.id, parentId: b.id } }),
+      /descendants/,
+    );
+    await assert.rejects(
+      commands.library_update_category({ request: { id: a.id, parentId: c.id } }),
+      /descendants/,
+    );
+    await assert.rejects(
+      commands.library_update_category({ request: { id: a.id, parentId: 'cat-missing' } }),
+      /does not exist/,
+    );
+
+    const systemCategory = store.listCategoriesWithCounts().find((item) => item.isSystem);
+    await assert.rejects(
+      commands.library_update_category({ request: { id: a.id, parentId: systemCategory.id } }),
+      /System categories/,
+    );
+
+    // 合法移动仍然可用。
+    const moved = await commands.library_update_category({ request: { id: c.id, parentId: a.id } });
+    assert.equal(moved.parentId, a.id);
+  } finally {
+    store?.close();
+    rmSync(appPaths.dataDir, { recursive: true, force: true });
+  }
+});
+
+test('legacy category cycles neither hang category queries nor survive restart', async () => {
+  const { DatabaseSync } = require('node:sqlite');
+  const appPaths = createAppPaths();
+  let store = null;
+
+  try {
+    store = createLibraryStore(appPaths);
+    const commands = createLibraryCommands({ appPaths, store });
+    const a = await commands.library_create_category({ request: { name: 'Cycle A' } });
+    const b = await commands.library_create_category({ request: { name: 'Cycle B', parentId: a.id } });
+
+    // 预热一次查询计划，计时只反映环存在时是否终止，而不是冷启动成本。
+    store.listCategoriesWithCounts();
+    await commands.library_query_papers({ request: { categoryId: a.id, limit: 1 } });
+
+    // 模拟旧版本写坏的环：A → B → A。此时 store 未重启，不经过启动修复。
+    const raw = new DatabaseSync(appPaths.libraryDatabasePath);
+    raw.prepare('UPDATE categories SET parent_id = ? WHERE id = ?').run(b.id, a.id);
+    raw.close();
+
+    const startList = Date.now();
+    const categories = store.listCategoriesWithCounts();
+    const listElapsed = Date.now() - startList;
+    assert.equal(categories.length >= 2, true);
+    assert.ok(listElapsed < 100, `category list took ${listElapsed}ms with a cycle present`);
+
+    const startQuery = Date.now();
+    const page = await commands.library_query_papers({ request: { categoryId: a.id, limit: 10 } });
+    const queryElapsed = Date.now() - startQuery;
+    assert.equal(Array.isArray(page.papers), true);
+    assert.ok(queryElapsed < 100, `paper query took ${queryElapsed}ms with a cycle present`);
+
+    // 重启：启动自检断开环，分类仍可用。
+    store.close();
+    store = createLibraryStore(appPaths);
+    const repaired = store.listCategoriesWithCounts();
+    const repairedA = repaired.find((item) => item.id === a.id);
+    const repairedB = repaired.find((item) => item.id === b.id);
+    assert.ok(
+      (repairedA.parentId ?? null) === null || (repairedB.parentId ?? null) === null,
+      'at least one edge in the cycle should be detached on startup',
+    );
+  } finally {
+    store?.close();
+    rmSync(appPaths.dataDir, { recursive: true, force: true });
+  }
+});
+
+test('library_get_paper exposes papers beyond the 1000-row list clamp', async () => {
+  const appPaths = createAppPaths();
+  let store = null;
+
+  try {
+    store = createLibraryStore(appPaths);
+    const library = store.load();
+    for (let index = 0; index < 1200; index += 1) {
+      library.papers.push({
+        id: `paper-${index}`,
+        title: `Paper ${index}`,
+        year: null,
+        publication: null,
+        doi: null,
+        url: null,
+        abstractText: null,
+        keywords: [],
+        importedAt: index,
+        updatedAt: index,
+        lastReadAt: null,
+        readingProgress: 0,
+        isFavorite: false,
+        userNote: null,
+        aiSummary: null,
+        citation: null,
+        source: 'local',
+        sortOrder: index,
+        authors: [],
+        tags: [],
+        categoryIds: [],
+        attachments: [],
+      });
+    }
+    await store.save(library);
+
+    const commands = createLibraryCommands({ appPaths, store });
+    const clamped = await commands.library_list_papers({ request: { limit: 5000 } });
+    assert.equal(clamped.length, 1000, 'library_list_papers keeps its explicit 1000 clamp');
+
+    const paper = await commands.library_get_paper({ paperId: 'paper-1199' });
+    assert.equal(paper?.id, 'paper-1199');
+    assert.equal(await commands.library_get_paper({ paperId: 'paper-missing' }), null);
+
+    const page = await commands.library_query_papers({ request: { limit: 1000, offset: 1000 } });
+    assert.equal(page.total, 1200);
+    assert.equal(page.papers.length, 200);
+    assert.equal(page.papers.some((item) => item.id === 'paper-1199'), true);
+  } finally {
+    store?.close();
+    rmSync(appPaths.dataDir, { recursive: true, force: true });
+  }
+});
+
+test('startup cycle repair detaches a cycle node and keeps innocent descendants attached', async () => {
+  const { DatabaseSync } = require('node:sqlite');
+  const appPaths = createAppPaths();
+  let store = null;
+
+  try {
+    store = createLibraryStore(appPaths);
+    const commands = createLibraryCommands({ appPaths, store });
+    const a = await commands.library_create_category({ request: { name: 'Cycle A' } });
+    const b = await commands.library_create_category({ request: { name: 'Cycle B', parentId: a.id } });
+    // X 只是挂在环下，本身不在环上：修复必须保留 X → A。
+    const x = await commands.library_create_category({ request: { name: 'Innocent Child', parentId: a.id } });
+
+    const raw = new DatabaseSync(appPaths.libraryDatabasePath);
+    raw.prepare('UPDATE categories SET parent_id = ? WHERE id = ?').run(b.id, a.id);
+    raw.close();
+
+    store.close();
+    store = createLibraryStore(appPaths);
+    // 重新创建 commands：旧实例绑定的是已关闭的 store。
+    const reopenedCommands = createLibraryCommands({ appPaths, store });
+    const categories = store.listCategoriesWithCounts();
+    const byId = new Map(categories.map((item) => [item.id, item]));
+
+    assert.equal(byId.get(x.id).parentId, a.id, 'a descendant outside the cycle must keep its parent');
+    const aParent = byId.get(a.id).parentId ?? null;
+    const bParent = byId.get(b.id).parentId ?? null;
+    assert.ok(
+      aParent === null || bParent === null,
+      'exactly the cycle must be broken',
+    );
+    // 修复后仍能正常查询与移动。
+    await reopenedCommands.library_query_papers({ request: { categoryId: a.id, limit: 1 } });
+    await reopenedCommands.library_update_category({ request: { id: x.id, parentId: null } });
+    assert.equal(store.listCategoriesWithCounts().find((item) => item.id === x.id).parentId, null);
+  } finally {
+    store?.close();
+    rmSync(appPaths.dataDir, { recursive: true, force: true });
+  }
+});

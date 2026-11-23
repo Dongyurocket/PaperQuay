@@ -950,14 +950,13 @@ function createNoteStore(appPaths) {
     try { onMutation?.(note); } catch { /* Indexing must never make a committed save fail. */ }
   };
 
-  function listNotes(request = {}) {
+  function buildNoteListFilter(request = {}) {
     const paperId = cleanString(request.paperId);
     const linkedPaperId = cleanString(request.linkedPaperId);
     const type = cleanString(request.type);
     const pageKind = normalizePageKind(request.pageKind);
     const tag = cleanString(request.tag).replace(/^#/, '');
     const search = cleanString(request.search).toLowerCase();
-    const limit = Math.max(1, Math.min(5000, Math.trunc(Number(request.limit)) || 500));
     const includeDeleted = request.includeDeleted === true;
     const where = [];
     const args = [];
@@ -991,13 +990,38 @@ function createNoteStore(appPaths) {
       args.push(pattern, pattern, pattern, pattern);
     }
 
+    return {
+      whereSql: where.length > 0 ? `WHERE ${where.join(' AND ')}` : '',
+      args,
+    };
+  }
+
+  function listNotes(request = {}) {
+    const limit = Math.max(1, Math.min(5000, Math.trunc(Number(request.limit)) || 500));
+    const { whereSql, args } = buildNoteListFilter(request);
     const rows = db.prepare(`
       SELECT *
       FROM notes
-      ${where.length > 0 ? `WHERE ${where.join(' AND ')}` : ''}
+      ${whereSql}
       ORDER BY is_pinned DESC, updated_at DESC, created_at DESC
       LIMIT ?
     `).all(...args, limit);
+
+    return hydrateNotes(db, rows);
+  }
+
+  /**
+   * 全量列表：不套 500/5000 上限。仅给 vault 同步这类必须看到每一条笔记的内部流程使用；
+   * 渲染层列表仍走 listNotes 的分页/上限语义。
+   */
+  function listAllNotes(request = {}) {
+    const { whereSql, args } = buildNoteListFilter(request);
+    const rows = db.prepare(`
+      SELECT *
+      FROM notes
+      ${whereSql}
+      ORDER BY is_pinned DESC, updated_at DESC, created_at DESC
+    `).all(...args);
 
     return hydrateNotes(db, rows);
   }
@@ -1205,6 +1229,7 @@ function createNoteStore(appPaths) {
       return backlinkRowsByTargetId(db, [noteId]).get(noteId) ?? [];
     },
     listNotes,
+    listAllNotes,
     listTags,
     updateNote,
     snapshotTo(targetPath) {

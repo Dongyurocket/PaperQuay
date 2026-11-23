@@ -521,10 +521,11 @@ function categoryCountsFromDb(db) {
   counts.set('favorites', db.prepare('SELECT COUNT(*) AS n FROM papers WHERE is_favorite = 1').get().n);
 
   const categories = db.prepare('SELECT id, is_system AS isSystem FROM categories').all();
+  // UNION（而非 UNION ALL）让递归结果去重，历史数据里万一存在环也会自然终止。
   const countDescendants = db.prepare(`
     WITH RECURSIVE d(id) AS (
       SELECT ?
-      UNION ALL
+      UNION
       SELECT c.id FROM categories c JOIN d ON c.parent_id = d.id
     )
     SELECT COUNT(DISTINCT pc.paper_id) AS n FROM paper_categories pc WHERE pc.category_id IN (SELECT id FROM d)
@@ -1131,7 +1132,9 @@ function applyPaperChanges(db, { changes = [], requireVersion = false } = {}) {
 function saveCategoryToDb(db, category, { expectedUpdatedAt, requireVersion = false } = {}) {
   const idValue = cleanString(category?.id);
   if (!idValue) throw new Error('Category id is required');
-  const existing = db.prepare('SELECT updated_at AS updatedAt FROM categories WHERE id = ?').get(idValue);
+  const existing = db.prepare(
+    'SELECT updated_at AS updatedAt, parent_id AS parentId FROM categories WHERE id = ?',
+  ).get(idValue);
 
   if (existing) {
     assertRecordVersion('category', idValue, expectedUpdatedAt, existing.updatedAt, requireVersion);
@@ -1144,6 +1147,10 @@ function saveCategoryToDb(db, category, { expectedUpdatedAt, requireVersion = fa
     updatedAt: existing ? nextUpdatedAt(existing.updatedAt) : (Number(category.updatedAt) || Date.now()),
   };
 
+  // 只在父级发生变化（含新建）时校验，避免历史 dangling parent 阻塞无关的重命名。
+  if (!existing || (next.parentId ?? null) !== (existing.parentId ?? null)) {
+    assertCategoryParentAllowed(db, idValue, next.parentId);
+  }
   db.prepare(`
     INSERT INTO categories (
       id, name, parent_id, sort_order, is_system, system_key, created_at, updated_at
@@ -1358,8 +1365,107 @@ function databaseInitialized(db) {
   return row?.value === '1';
 }
 
+/**
+ * 校验分类父级：不能是自身、不能挂到不存在的分类或系统分类下，
+ * 也不能挂到自己的后代下（否则形成环，递归 CTE 会退化）。
+ * 遍历带 visited 集合，历史数据已有环时也能安全终止。
+ */
+function assertCategoryParentAllowed(db, categoryId, parentId) {
+  const nextParentId = cleanString(parentId);
+  if (!nextParentId) return;
+  if (nextParentId === categoryId) {
+    throw new Error('A category cannot be its own parent');
+  }
+
+  const parent = db.prepare(
+    'SELECT id, is_system AS isSystem FROM categories WHERE id = ?',
+  ).get(nextParentId);
+
+  if (!parent) throw new Error(`Parent category does not exist: ${nextParentId}`);
+  if (parent.isSystem) throw new Error('System categories cannot be used as a parent');
+
+  const seen = new Set([categoryId]);
+  let cursor = nextParentId;
+  while (cursor) {
+    if (seen.has(cursor)) {
+      throw new Error('A category cannot be moved under itself or its descendants');
+    }
+    seen.add(cursor);
+    cursor = db.prepare('SELECT parent_id AS parentId FROM categories WHERE id = ?')
+      .get(cursor)?.parentId ?? null;
+  }
+}
+
+/**
+ * 启动自检：断开历史数据中的分类环。
+ *
+ * 只摘除真正位于环上的一个节点（取 id 最小者，保证结果确定），
+ * 环外的子分类保持原来的父子关系——单纯把「遍历起点」置空会误伤
+ * 只是挂在环下面、本身不在环上的正常子分类。
+ * 可重复执行；不改 updated_at，避免修复动作触发版本冲突。
+ */
+function repairCategoryCyclesFromDb(db) {
+  const rows = db.prepare('SELECT id, parent_id AS parentId FROM categories').all();
+  const parentById = new Map(rows.map((row) => [row.id, row.parentId ?? null]));
+  const detach = db.prepare('UPDATE categories SET parent_id = NULL WHERE id = ?');
+  let repaired = 0;
+  // 每次只断一个环，最多需要节点数次迭代。
+  const maxRounds = rows.length + 1;
+
+  for (let round = 0; round < maxRounds; round += 1) {
+    let cycleMembers = null;
+
+    for (const row of rows) {
+      const chain = [];
+      const indexById = new Map();
+      let cursor = row.id;
+
+      while (cursor && parentById.has(cursor)) {
+        if (indexById.has(cursor)) {
+          cycleMembers = chain.slice(indexById.get(cursor));
+          break;
+        }
+        indexById.set(cursor, chain.length);
+        chain.push(cursor);
+        cursor = parentById.get(cursor) ?? null;
+      }
+
+      if (cycleMembers) break;
+    }
+
+    if (!cycleMembers || cycleMembers.length === 0) {
+      return repaired;
+    }
+
+    const targetId = [...cycleMembers].sort()[0];
+    detach.run(targetId);
+    parentById.set(targetId, null);
+    repaired += 1;
+  }
+
+  return repaired;
+}
+
 function legacyRagIndexes(raw) {
   return raw?.ragIndexes && typeof raw.ragIndexes === 'object' ? raw.ragIndexes : {};
+}
+
+/**
+ * Windows 上历史导入可能把 `C:/x/y.pdf` 原样写入数据库。统一为平台分隔符，
+ * 让附件目录包含校验与 `path.dirname` 的语义一致。
+ */
+function normalizeAttachmentPathSeparators(db) {
+  if (process.platform !== 'win32') return 0;
+
+  return withTransaction(db, () => {
+    const stored = db.prepare(
+      "UPDATE attachments SET stored_path = replace(stored_path, '/', char(92)) WHERE instr(stored_path, '/') > 0",
+    ).run();
+    const original = db.prepare(
+      "UPDATE attachments SET original_path = replace(original_path, '/', char(92)) WHERE original_path IS NOT NULL AND instr(original_path, '/') > 0",
+    ).run();
+    return Number(stored.changes) + Number(original.changes);
+  });
 }
 
 function createLibraryDatabaseStore(appPaths, helpers) {
@@ -1371,7 +1477,45 @@ function createLibraryDatabaseStore(appPaths, helpers) {
 
     if (rawLibrary && typeof rawLibrary === 'object') {
       saveLibraryToDb(db, appPaths, normalizeLibrary, rawLibrary);
+    } else {
+      // 全新数据库或旧版 SQLite：只补默认系统分类与设置，绝不整库重写，
+      // 否则会把旧库里的文献清空。按记录 UPSERT 的写入路径依赖系统分类
+      // 已经存在（旧实现靠整库保存顺带补齐）。
+      const defaults = normalizeLibrary({}, appPaths);
+      const existingCategoryIds = new Set(
+        db.prepare('SELECT id FROM categories').all().map((row) => row.id),
+      );
+
+      withTransaction(db, () => {
+        for (const category of defaults.categories) {
+          if (!existingCategoryIds.has(category.id)) {
+            saveCategoryToDb(db, category);
+          }
+        }
+        if (!db.prepare('SELECT 1 FROM library_settings LIMIT 1').get()) {
+          saveKeyValueTable(db, 'library_settings', defaults.settings);
+        }
+        db.prepare(`
+          INSERT INTO library_meta (key, value)
+          VALUES ('initialized', '1'), ('version', '1')
+          ON CONFLICT (key) DO UPDATE SET value = excluded.value
+        `).run();
+      });
     }
+  }
+
+  const repairedCategoryCycles = repairCategoryCyclesFromDb(db);
+  if (repairedCategoryCycles > 0) {
+    console.warn(
+      `[library] detached ${repairedCategoryCycles} category node(s) to break parent cycles`,
+    );
+  }
+
+  const normalizedAttachmentPaths = normalizeAttachmentPathSeparators(db);
+  if (normalizedAttachmentPaths > 0) {
+    console.warn(
+      `[library] normalized ${normalizedAttachmentPaths} attachment path(s) to the platform separator`,
+    );
   }
 
   return {
@@ -1450,6 +1594,55 @@ function createLibraryDatabaseStore(appPaths, helpers) {
         .all(cleanString(storedPath));
     },
 
+    /**
+     * 文件访问边界查询：候选路径本身是已登记附件，或位于某个附件的目录
+     * （含子目录）下。只允许「候选在附件目录内」，不能反过来把附件的祖先
+     * 目录当成附件目录。
+     *
+     * SQLite 没有 dirname；`rtrim(path, replace(path, sep, ''))` 会去掉尾部
+     * 非分隔符字符，正好留下以分隔符结尾的目录前缀。
+     */
+    isKnownAttachmentLocation(filePath) {
+      const absolute = cleanString(filePath);
+      if (!absolute) return false;
+      const resolved = path.resolve(absolute);
+      const directoryPrefix = `${path.dirname(resolved)}${path.sep}`;
+      // 目录前缀 = 去掉尾部所有非分隔符字符后的路径。同时接受 `/` 与 `\`
+      // 作为分隔符（历史导入可能原样保存正斜杠路径），再统一成平台分隔符
+      // 比较；长度必须 > 0，避免无分隔符的路径得到空前缀而匹配一切。
+      const dirExpr = (column) =>
+        `rtrim(${column}, replace(replace(${column}, '/', ''), char(92), ''))`;
+
+      return Boolean(
+        db.prepare(`
+          SELECT 1 FROM attachments
+          WHERE lower(stored_path) = lower(?1)
+             OR lower(original_path) = lower(?1)
+             OR (
+               stored_path IS NOT NULL
+               AND length(${dirExpr('stored_path')}) > 0
+               AND lower(replace(substr(?2, 1, length(${dirExpr('stored_path')})), '/', ?3))
+                 = lower(replace(${dirExpr('stored_path')}, '/', ?3))
+             )
+             OR (
+               original_path IS NOT NULL
+               AND length(${dirExpr('original_path')}) > 0
+               AND lower(replace(substr(?2, 1, length(${dirExpr('original_path')})), '/', ?3))
+                 = lower(replace(${dirExpr('original_path')}, '/', ?3))
+             )
+          LIMIT 1
+        `).get(resolved, directoryPrefix, path.sep),
+      );
+    },
+
+    isKnownAttachmentDirectory(directoryPath) {
+      const directory = cleanString(directoryPath);
+      if (!directory) return false;
+      // 用一个占位文件名复用同一套包含校验：目录本身及其子目录返回 true，
+      // 附件目录的祖先目录返回 false。
+      return this.isKnownAttachmentLocation(path.join(path.resolve(directory), '__paperquay_probe__'));
+    },
+
     savePaper(paper) {
       return savePaperToDb(db, paper);
     },
@@ -1520,6 +1713,32 @@ function createLibraryDatabaseStore(appPaths, helpers) {
 
     loadSettings() {
       return loadKeyValueTable(db, 'library_settings');
+    },
+
+    /** 只写设置，不触碰 papers/categories；替代整库 DELETE+重插。 */
+    saveSettings(settings) {
+      return withTransaction(db, () => {
+        saveKeyValueTable(db, 'library_settings', settings);
+        db.prepare(`
+          INSERT INTO library_meta (key, value)
+          VALUES ('initialized', '1'), ('version', '1')
+          ON CONFLICT (key) DO UPDATE SET value = excluded.value
+        `).run();
+      });
+    },
+
+    /** 仅更新排序字段，避免拖拽排序触发整库重写。 */
+    savePaperSortOrders(entries = []) {
+      const statement = db.prepare('UPDATE papers SET sort_order = ? WHERE id = ?');
+      return withTransaction(db, () => {
+        let updated = 0;
+        for (const entry of entries) {
+          const paperId = cleanString(entry?.paperId);
+          if (!paperId) continue;
+          updated += Number(statement.run(Number(entry.sortOrder) || 0, paperId).changes) || 0;
+        }
+        return updated;
+      });
     },
 
     savePdfAssetOperation(operation) {
