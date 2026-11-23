@@ -102,6 +102,15 @@ function createBackend({ app }) {
   cleanupLegacyBackupSettings(appPaths.libraryDatabasePath);
   const store = createLibraryStore(appPaths);
   perfMeasure('backend:init library-store', 'backend:init-start');
+  const { createPathPolicy } = require('./backend/pathPolicy.cjs');
+  const approvedReadPaths = new Set();
+  const approvedWritePaths = new Set();
+  const pathPolicy = createPathPolicy({
+    appPaths,
+    store,
+    approvedReadPaths,
+    approvedWritePaths,
+  });
   const noteStore = createNoteStore(appPaths);
   perfMeasure('backend:init note-store', 'backend:init-start');
   const ragStore = createRagStoreSafely(appPaths);
@@ -140,7 +149,9 @@ function createBackend({ app }) {
     app,
     appPaths,
     noteStore,
-    approvedWritePaths: new Set(),
+    approvedReadPaths,
+    approvedWritePaths,
+    pathPolicy,
     ragStore,
     store,
   };
@@ -167,6 +178,7 @@ function createBackend({ app }) {
     ...createUpdateCommands(context),
     ...createMcpClientConfigCommands(context),
     ...createRetainPdfIntegration(context),
+    ...require('./backend/secretStorage.cjs').createConfigSecretCommands(context),
   };
   guardRagIndexCommands(commands, {
     store,
@@ -188,6 +200,11 @@ function createBackend({ app }) {
 
   return {
     appPaths,
+    pathPolicy,
+    // 供 preload 在真实文件拖放后登记读权限（渲染层拿不到这个入口）。
+    approveReadPath(filePath) {
+      pathPolicy.approveReadPath(filePath);
+    },
     close() {
       context.noteIndexer.close();
       noteStore.close();

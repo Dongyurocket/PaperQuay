@@ -1,6 +1,7 @@
 const crypto = require('node:crypto');
 const {
   QA_STREAM_EVENT,
+  cleanString,
   completionEndpoint,
   embedTexts,
   embeddingsEndpoint,
@@ -20,7 +21,191 @@ const {
 const TEST_MODEL_TIMEOUT_MS = 20_000;
 const MAX_AGENT_TURN_IMAGE_BYTES = 8 * 1024 * 1024;
 const MAX_METADATA_EXCERPT_CHARS = 6_000;
+const TRANSLATION_REQUEST_TIMEOUT_MS = 120_000;
+const TRANSLATION_MAX_ATTEMPTS = 3;
+const TRANSLATION_MAX_BLOCKS_PER_REQUEST = 20;
+const TRANSLATION_MAX_CHARS_PER_REQUEST = 8_000;
 const activeQaControllers = new Map();
+const activeTranslationControllers = new Map();
+const translationRateLimitState = new Map();
+
+function delay(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+function isTranslationCancelError(error) {
+  return error?.code === 'TRANSLATION_CANCELLED' || error?.name === 'AbortError';
+}
+
+function createTranslationCancelledError() {
+  const cancelled = new Error('TRANSLATION_CANCELLED: Translation request was cancelled.');
+  cancelled.name = 'AbortError';
+  cancelled.code = 'TRANSLATION_CANCELLED';
+  return cancelled;
+}
+
+/**
+ * 给单次模型请求加 deadline。用独立的 AbortController 合并用户取消信号，
+ * 这样「用户取消」与「请求超时」在错误分类上不会混淆。
+ */
+async function chatWithTranslationDeadline({
+  options,
+  messages,
+  extra,
+  signal,
+  timeoutMs,
+}) {
+  const timeoutController = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    timeoutController.abort();
+  }, timeoutMs);
+  const mergedSignal = typeof AbortSignal.any === 'function'
+    ? AbortSignal.any([signal, timeoutController.signal])
+    : timeoutController.signal;
+
+  try {
+    return await openAiChat(options, messages, { ...extra, signal: mergedSignal });
+  } catch (error) {
+    if (timedOut) {
+      const timeoutError = new Error('AGENT_MODEL_TIMEOUT: Translation request timed out.');
+      timeoutError.name = 'TimeoutError';
+      throw timeoutError;
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function isRetryableTranslationError(error) {
+  const message = String(error?.message ?? error ?? '');
+  if (/HTTP (429|5\d\d)\b/.test(message)) return true;
+  if (/AGENT_MODEL_TIMEOUT|AGENT_MODEL_NETWORK_ERROR|TimeoutError|ETIMEDOUT|ECONNRESET|EAI_AGAIN/.test(message)) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * 每分钟请求数限流。批量翻译把 N 个块压成 1 次请求后，这个设置才真正有意义；
+ * 同一端点+模型共享一个时间槽，跨批次的请求按最小间隔排队。
+ */
+async function waitForTranslationRateLimit(key, requestsPerMinute) {
+  const rpm = Number(requestsPerMinute);
+  if (!Number.isFinite(rpm) || rpm <= 0) return;
+
+  const interval = Math.ceil(60_000 / rpm);
+  const now = Date.now();
+  const previous = translationRateLimitState.get(key) ?? 0;
+  const scheduled = Math.max(now, previous + interval);
+  translationRateLimitState.set(key, scheduled);
+
+  const wait = scheduled - now;
+  if (wait > 0) await delay(wait);
+}
+
+function stripCodeFence(text) {
+  const trimmed = String(text ?? '').trim();
+  const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+  return fenced ? fenced[1].trim() : trimmed;
+}
+
+/** 模型可能返回 {blocks:[...]}、裸数组或 {translations:{id:text}}，都接受。 */
+function parseTranslationBatchOutput(text, blocks) {
+  const candidates = [];
+  const stripped = stripCodeFence(text);
+  candidates.push(stripped);
+
+  const firstBrace = stripped.indexOf('{');
+  const lastBrace = stripped.lastIndexOf('}');
+  if (firstBrace >= 0 && lastBrace > firstBrace) {
+    candidates.push(stripped.slice(firstBrace, lastBrace + 1));
+  }
+  const firstBracket = stripped.indexOf('[');
+  const lastBracket = stripped.lastIndexOf(']');
+  if (firstBracket >= 0 && lastBracket > firstBracket) {
+    candidates.push(stripped.slice(firstBracket, lastBracket + 1));
+  }
+
+  for (const candidate of candidates) {
+    let parsed;
+    try {
+      parsed = JSON.parse(candidate);
+    } catch {
+      continue;
+    }
+
+    let entries = [];
+    if (Array.isArray(parsed)) {
+      entries = parsed;
+    } else if (parsed && Array.isArray(parsed.blocks)) {
+      entries = parsed.blocks;
+    } else if (parsed && parsed.translations && typeof parsed.translations === 'object') {
+      entries = Object.entries(parsed.translations).map(([blockId, translatedText]) => ({
+        blockId,
+        translatedText,
+      }));
+    }
+
+    const byId = new Map();
+    entries.forEach((entry, index) => {
+      if (!entry || typeof entry !== 'object') return;
+      const blockId = cleanString(entry.blockId ?? entry.block_id ?? entry.id);
+      const translatedText = typeof entry.translatedText === 'string'
+        ? entry.translatedText
+        : typeof entry.translated_text === 'string'
+          ? entry.translated_text
+          : typeof entry.text === 'string'
+            ? entry.text
+            : '';
+      if (!translatedText.trim()) return;
+      if (blockId) {
+        byId.set(blockId, translatedText);
+      } else if (blocks[index]) {
+        byId.set(blocks[index].blockId, translatedText);
+      }
+    });
+
+    if (byId.size > 0) {
+      return blocks.map((block) => ({
+        blockId: block.blockId,
+        translatedText: byId.get(block.blockId) ?? '',
+      }));
+    }
+  }
+
+  throw new Error('Translation output was not valid JSON');
+}
+
+/** 再按块数与字符数细分。渲染层已按 batchSize 分过一次，这里是后端的硬上限。 */
+function chunkTranslationBlocks(blocks) {
+  const chunks = [];
+  let current = [];
+  let currentChars = 0;
+
+  for (const block of blocks) {
+    const textLength = String(block.text ?? '').length;
+    const wouldExceedBlocks = current.length >= TRANSLATION_MAX_BLOCKS_PER_REQUEST;
+    const wouldExceedChars =
+      current.length > 0 && currentChars + textLength > TRANSLATION_MAX_CHARS_PER_REQUEST;
+
+    if (wouldExceedBlocks || wouldExceedChars) {
+      chunks.push(current);
+      current = [];
+      currentChars = 0;
+    }
+
+    current.push(block);
+    currentChars += textLength;
+  }
+
+  if (current.length > 0) chunks.push(current);
+  return chunks;
+}
 
 function stripThinkBlocks(text) {
   let result = String(text ?? '').trim();
@@ -489,21 +674,140 @@ function createAiCommands(context) {
       const data = await openAiChat(options, [
         { role: 'system', content: buildAcademicTranslationPrompt(options) },
         { role: 'user', content: options.text },
-      ]);
+      ], {
+        temperature: options.temperature,
+        timeoutMs: TRANSLATION_REQUEST_TIMEOUT_MS,
+      });
       return cleanTranslationText(pickChatText(data));
     },
 
     async translate_blocks_openai_compatible({ options }) {
-      const results = [];
+      const blocks = (Array.isArray(options.blocks) ? options.blocks : [])
+        .filter((block) => block && cleanString(block.blockId) && String(block.text ?? '').trim());
+      if (blocks.length === 0) return [];
 
-      for (const block of options.blocks ?? []) {
-        const translatedText = await commands.translate_text_openai_compatible({
-          options: { ...options, text: block.text },
-        });
-        results.push({ blockId: block.blockId, translatedText });
+      const requestId = cleanString(options.requestId) || crypto.randomUUID();
+      const controller = new AbortController();
+      activeTranslationControllers.set(requestId, controller);
+
+      const targetLanguage = cleanString(options.targetLanguage) || 'Simplified Chinese';
+      const sourceLanguage = cleanString(options.sourceLanguage) || 'the source language';
+      const rateLimitKey = `${cleanString(options.baseUrl)}::${cleanString(options.model)}`;
+      const requestTimeoutMs = Math.min(
+        600_000,
+        Math.max(200, Number(options.requestTimeoutMs) || TRANSLATION_REQUEST_TIMEOUT_MS),
+      );
+      const results = new Map();
+
+      try {
+        for (const chunk of chunkTranslationBlocks(blocks)) {
+          if (controller.signal.aborted) break;
+
+          await waitForTranslationRateLimit(rateLimitKey, options.requestsPerMinute);
+          let batchOutputs = null;
+          let lastError = null;
+
+          for (let attempt = 0; attempt < TRANSLATION_MAX_ATTEMPTS; attempt += 1) {
+            if (controller.signal.aborted) break;
+            try {
+              const data = await chatWithTranslationDeadline({
+                options,
+                messages: [
+                  {
+                    role: 'system',
+                    content: [
+                      `You are a professional academic translator. Translate every block from ${sourceLanguage} to ${targetLanguage}.`,
+                      'Preserve equations, LaTeX, citation markers such as [1], and inline markup exactly.',
+                      'Return only a JSON object: {"blocks":[{"blockId":"<input blockId>","translatedText":"<translation>"}]}.',
+                      'Return exactly one entry per input block, in the same order. Do not add commentary or code fences.',
+                    ].join(' '),
+                  },
+                  {
+                    role: 'user',
+                    content: JSON.stringify({
+                      blocks: chunk.map((block) => ({ blockId: block.blockId, text: block.text })),
+                    }),
+                  },
+                ],
+                extra: { temperature: options.temperature },
+                signal: controller.signal,
+                timeoutMs: requestTimeoutMs,
+              });
+
+              batchOutputs = parseTranslationBatchOutput(pickChatText(data), chunk);
+              break;
+            } catch (error) {
+              if (controller.signal.aborted) break;
+              lastError = error;
+              if (!isRetryableTranslationError(error) || attempt === TRANSLATION_MAX_ATTEMPTS - 1) {
+                break;
+              }
+              await delay(500 * 2 ** attempt);
+            }
+          }
+
+          if (controller.signal.aborted) break;
+
+          if (batchOutputs) {
+            for (const output of batchOutputs) {
+              if (output.translatedText.trim()) {
+                results.set(output.blockId, output.translatedText);
+              }
+            }
+            continue;
+          }
+
+          // 批量 JSON 失败时退回逐块翻译，避免整批译文丢失；错误保留给调用方。
+          if (lastError && !isRetryableTranslationError(lastError) && !/not valid JSON/.test(String(lastError.message))) {
+            throw lastError;
+          }
+
+          for (const block of chunk) {
+            if (controller.signal.aborted) break;
+            await waitForTranslationRateLimit(rateLimitKey, options.requestsPerMinute);
+            const data = await chatWithTranslationDeadline({
+              options,
+              messages: [
+                { role: 'system', content: buildAcademicTranslationPrompt(options) },
+                { role: 'user', content: block.text },
+              ],
+              extra: { temperature: options.temperature },
+              signal: controller.signal,
+              timeoutMs: requestTimeoutMs,
+            });
+            const translatedText = cleanTranslationText(pickChatText(data));
+            if (translatedText.trim()) {
+              results.set(block.blockId, translatedText);
+            }
+          }
+        }
+
+        // 取消必须表现为 rejection；不能把已取消的批次当作「部分译文」返回，
+        // 否则渲染层的停止按钮会被当成成功。
+        if (controller.signal.aborted) {
+          throw createTranslationCancelledError();
+        }
+
+        return blocks.map((block) => ({
+          blockId: block.blockId,
+          translatedText: results.get(block.blockId) ?? '',
+        }));
+      } catch (error) {
+        if (controller.signal.aborted || isTranslationCancelError(error)) {
+          throw createTranslationCancelledError();
+        }
+        throw error;
+      } finally {
+        activeTranslationControllers.delete(requestId);
       }
+    },
 
-      return results;
+    async translate_cancel({ requestId }) {
+      const key = cleanString(requestId);
+      const controller = key ? activeTranslationControllers.get(key) : null;
+      if (!controller) return { cancelled: false };
+      controller.abort();
+      return { cancelled: true };
     },
 
     async reparse_block_openai_compatible({ options }) {

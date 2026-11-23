@@ -3,6 +3,8 @@ const path = require('node:path');
 const { app, BrowserWindow, ipcMain, shell, dialog } = require('electron');
 const { createBackend } = require('./backend.cjs');
 const { createAppPaths } = require('./backend/libraryStore.cjs');
+const { isRendererCommandAllowed } = require('./ipcAllowlist.cjs');
+const { createIpcSenderGuard } = require('./ipcSecurity.cjs');
 const { perfMark, perfMeasure } = require('./perfTrace.cjs');
 const { removeDesktopRunMarker, writeDesktopRunMarker } = require('./backend/desktopRunMarker.cjs');
 const { createExternalWriteWatcher } = require('./backend/externalWriteWatch.cjs');
@@ -20,6 +22,7 @@ let externalWriteWatcher = null;
 let rendererRestorePayload = null;
 let restoreResumeLockFile = null;
 let singleInstanceLockAcquired = false;
+let mainWindowContentsId = null;
 
 function processIsAlive(pid) {
   if (!Number.isSafeInteger(pid) || pid < 1) return null;
@@ -121,6 +124,22 @@ function shouldIgnoreRendererConsoleMessage(level, message) {
   );
 }
 
+const assertTrustedIpcSender = createIpcSenderGuard({
+  isDev,
+  devServerUrl: process.env.VITE_DEV_SERVER_URL,
+  appDir: __dirname,
+});
+
+/**
+ * preload 在文档提交前执行 restore-sync，此时 senderFrame.url 可能还是空；
+ * 对这类启动期同步 IPC 只校验 WebContents 确实属于应用主窗口。
+ */
+function assertTrustedIpcWebContents(event) {
+  if (!mainWindowContentsId || event?.sender?.id !== mainWindowContentsId) {
+    throw new Error('Blocked IPC from an untrusted window.');
+  }
+}
+
 function createWindow() {
   const mainWindow = new BrowserWindow({
     width: 1440,
@@ -147,6 +166,8 @@ function createWindow() {
     perfMeasure('startup:window-visible', 'app:ready');
     mainWindow.show();
   });
+
+  mainWindowContentsId = mainWindow.webContents.id;
 
   if (isDev) {
     mainWindow.webContents.on('console-message', (event) => {
@@ -200,10 +221,19 @@ function createWindow() {
 }
 
 ipcMain.handle('paperquay:invoke', async (event, command, args) => {
+  assertTrustedIpcWebContents(event);
+  assertTrustedIpcSender(event);
+
+  if (!isRendererCommandAllowed(command)) {
+    throw new Error(`Unsupported Electron command: ${String(command)}`);
+  }
+
   return getBackend().invoke(command, args ?? {}, event);
 });
 
 ipcMain.handle('paperquay:window-control', (event, action) => {
+  assertTrustedIpcWebContents(event);
+  assertTrustedIpcSender(event);
   const targetWindow = BrowserWindow.fromWebContents(event.sender);
 
   if (!targetWindow) {
@@ -230,10 +260,20 @@ ipcMain.handle('paperquay:window-control', (event, action) => {
 });
 
 ipcMain.on('paperquay:renderer-restore-sync', (event) => {
-  event.returnValue = rendererRestorePayload;
+  try {
+    assertTrustedIpcWebContents(event);
+    event.returnValue = rendererRestorePayload;
+  } catch {
+    event.returnValue = null;
+  }
 });
 
-ipcMain.on('paperquay:renderer-restore-ack', (_event, payload) => {
+ipcMain.on('paperquay:renderer-restore-ack', (event, payload) => {
+  try {
+    assertTrustedIpcWebContents(event);
+  } catch {
+    return;
+  }
   if (!rendererRestorePayload || payload?.restoreId !== rendererRestorePayload.restoreId) return;
   try {
     Promise.resolve(require('./backend/backupImport.cjs').handleRendererRestoreAck(
@@ -246,6 +286,24 @@ ipcMain.on('paperquay:renderer-restore-ack', (_event, payload) => {
     });
   } catch (error) {
     console.error('[paperquay] Failed to persist renderer restore acknowledgement.', error);
+  }
+});
+
+// 仅供 preload 在真实文件拖放后登记读权限；不通过 contextBridge 暴露。
+ipcMain.on('paperquay:approve-read-paths', (event, paths) => {
+  try {
+    assertTrustedIpcWebContents(event);
+  } catch {
+    return;
+  }
+  if (!Array.isArray(paths)) return;
+  const backendInstance = getBackend();
+  for (const candidate of paths.slice(0, 100)) {
+    if (typeof candidate === 'string' && candidate) {
+      try {
+        backendInstance.approveReadPath(candidate);
+      } catch {}
+    }
   }
 });
 
@@ -275,7 +333,15 @@ app.whenReady().then(async () => {
     return;
   }
 
-  registerLocalPdfProtocol();
+  registerLocalPdfProtocol({
+    isPdfPathAllowed(filePath) {
+      try {
+        return getBackend().pathPolicy.isPdfPathAllowed(filePath);
+      } catch {
+        return false;
+      }
+    },
+  });
   let initializedBackend;
   try {
     const appPaths = createAppPaths(app);

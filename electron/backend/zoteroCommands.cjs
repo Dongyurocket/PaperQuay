@@ -12,7 +12,21 @@ const {
 } = require('./zoteroLocal.cjs');
 
 function createZoteroCommands(context) {
-  const { appPaths, fileCommands } = context;
+  const { appPaths, fileCommands, pathPolicy } = context;
+
+  /**
+   * Zotero 条目里的 PDF 路径由主进程扫描用户配置的 Zotero 目录得到；
+   * 这里把它们登记为可读，避免把整个 zoteroLocalDataDir 变成通用读根。
+   */
+  function approveLocalPdfs(items) {
+    if (!pathPolicy || !Array.isArray(items)) return items;
+
+    const paths = items
+      .map((item) => (typeof item?.localPdfPath === 'string' ? item.localPdfPath : ''))
+      .filter(Boolean);
+    if (paths.length > 0) pathPolicy.approveReadPaths(paths);
+    return items;
+  }
 
   return {
     zotero_lookup_key({ apiKey }) {
@@ -40,11 +54,11 @@ function createZoteroCommands(context) {
     },
 
     zotero_list_local_library_items({ options } = {}) {
-      return listLocalLibraryItems(options ?? {});
+      return approveLocalPdfs(listLocalLibraryItems(options ?? {}));
     },
 
     zotero_list_local_collection_items({ options } = {}) {
-      return listLocalCollectionItems(options ?? {});
+      return approveLocalPdfs(listLocalCollectionItems(options ?? {}));
     },
 
     zotero_list_related_notes({ options } = {}) {

@@ -606,6 +606,7 @@ export async function resolveLocalRag(input: {
     retrievedChunkCount: contextDocument.sectionCount,
     citations: contextDocument.citations,
     retrievals: contextDocument.retrievals,
+    budgetSkippedCount: contextDocument.budgetSkippedCount,
     indexedChunkCount: statusSummary.indexedChunkCount,
     totalChunkCount: statusSummary.totalChunkCount,
     ...diagnostics,

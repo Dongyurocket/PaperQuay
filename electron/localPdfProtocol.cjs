@@ -2,13 +2,32 @@ const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const path = require('node:path');
 const { Readable } = require('node:stream');
-const { protocol } = require('electron');
+const { app, protocol } = require('electron');
+const {
+  PDFJS_ASSET_DIRS,
+  resolvePdfJsAssetRoot,
+} = require('./pdfJsAssets.cjs');
+const { hasUnsafePathSyntax, isUncPath } = require('./backend/pathPolicy.cjs');
 
 const LOCAL_PDF_PROTOCOL = 'paperquay-pdf';
 const PDFJS_ASSET_PROTOCOL = 'paperquay-pdf-assets';
 
-const PDFJS_ASSET_ROOT = path.join(__dirname, '..', 'node_modules', 'pdfjs-dist');
-const PDFJS_ASSET_DIRS = new Set(['cmaps', 'standard_fonts', 'image_decoders']);
+// 开发态读 node_modules/pdfjs-dist；安装版读 extraResources 复制出的 resources/pdfjs。
+// 解析放到请求时执行，避免在纯 Node 测试环境里访问未初始化的 Electron app。
+function resolvePdfJsAssetRootAtRuntime() {
+  let isPackaged = false;
+
+  try {
+    const electron = require('electron');
+    isPackaged = Boolean(electron?.app?.isPackaged);
+  } catch {}
+
+  return resolvePdfJsAssetRoot({
+    isPackaged,
+    resourcesPath: process.resourcesPath,
+    appDir: __dirname,
+  });
+}
 
 function registerLocalPdfProtocolScheme() {
   protocol.registerSchemesAsPrivileged([
@@ -116,7 +135,12 @@ function createPdfStreamResponse(filePath, stat, request) {
   });
 }
 
-async function handleLocalPdfRequest(request) {
+async function handleLocalPdfRequest(request, options = {}) {
+  const method = String(request.method || 'GET').toUpperCase();
+  if (method !== 'GET' && method !== 'HEAD') {
+    return createPlainResponse('Method not allowed.', 405);
+  }
+
   let requestUrl;
 
   try {
@@ -133,6 +157,18 @@ async function handleLocalPdfRequest(request) {
 
   if (!filePath || path.extname(filePath).toLowerCase() !== '.pdf') {
     return createPlainResponse('Only PDF files can be served by this protocol.');
+  }
+
+  // UNC / 设备路径 / NTFS 数据流：协议层直接拒绝，不依赖调用方策略。
+  if (isUncPath(filePath) || hasUnsafePathSyntax(filePath)) {
+    return createPlainResponse('PDF path is not allowed.', 404);
+  }
+
+  // 协议原本只校验扩展名，任意渲染层脚本都能读取磁盘上任何 .pdf（含 UNC
+  // 共享）。允许范围与主进程文件策略一致：文库附件、译版、MinerU 缓存、
+  // 应用数据与用户通过对话框打开的路径。
+  if (typeof options.isPdfPathAllowed !== 'function' || !options.isPdfPathAllowed(filePath)) {
+    return createPlainResponse('PDF path is not allowed.', 404);
   }
 
   let stat;
@@ -179,12 +215,13 @@ async function handlePdfJsAssetRequest(request) {
     .filter(Boolean);
   const [assetDir, ...assetNameParts] = pathParts;
 
-  if (!PDFJS_ASSET_DIRS.has(assetDir) || assetNameParts.length === 0) {
+  if (!PDFJS_ASSET_DIRS.includes(assetDir) || assetNameParts.length === 0) {
     return createPlainResponse('Unknown PDF.js asset.', 404);
   }
 
-  const assetPath = path.resolve(PDFJS_ASSET_ROOT, assetDir, ...assetNameParts);
-  const allowedRoot = path.resolve(PDFJS_ASSET_ROOT, assetDir);
+  const pdfjsAssetRoot = resolvePdfJsAssetRootAtRuntime();
+  const assetPath = path.resolve(pdfjsAssetRoot, assetDir, ...assetNameParts);
+  const allowedRoot = path.resolve(pdfjsAssetRoot, assetDir);
 
   if (assetPath !== allowedRoot && !assetPath.startsWith(`${allowedRoot}${path.sep}`)) {
     return createPlainResponse('Illegal PDF.js asset path.', 400);
@@ -202,14 +239,15 @@ async function handlePdfJsAssetRequest(request) {
   }
 }
 
-function registerLocalPdfProtocol() {
-  protocol.handle(LOCAL_PDF_PROTOCOL, handleLocalPdfRequest);
+function registerLocalPdfProtocol(options = {}) {
+  protocol.handle(LOCAL_PDF_PROTOCOL, (request) => handleLocalPdfRequest(request, options));
   protocol.handle(PDFJS_ASSET_PROTOCOL, handlePdfJsAssetRequest);
 }
 
 module.exports = {
   LOCAL_PDF_PROTOCOL,
   PDFJS_ASSET_PROTOCOL,
+  handleLocalPdfRequest,
   registerLocalPdfProtocol,
   registerLocalPdfProtocolScheme,
 };

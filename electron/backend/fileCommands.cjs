@@ -6,7 +6,6 @@ const {
   cleanString,
   ensureFile,
   pathExists,
-  readJson,
   safeFileName,
   now,
 } = require('./utils.cjs');
@@ -136,15 +135,18 @@ function isWithinRoot(absolutePath, root) {
 
 function createFileCommands(context) {
   const { appPaths, approvedWritePaths, store } = context;
+  const { createPathPolicy } = require('./pathPolicy.cjs');
+  // 生产环境由 backend 注入与协议处理器共用的策略；测试可省略，按同样规则自建。
+  const pathPolicy = context.pathPolicy ?? createPathPolicy({
+    appPaths,
+    store,
+    approvedReadPaths: context.approvedReadPaths ?? new Set(),
+    approvedWritePaths,
+  });
   // 测试可注入 shell；运行时使用 Electron 的 shell。
   const shellApi = context.shell ?? shell;
-  const configuredMineruCacheDir = cleanString(
-    readJson(appPaths.configPath, null)?.settings?.mineruCacheDir,
-  );
-
-  if (configuredMineruCacheDir) {
-    approvedWritePaths.add(path.resolve(configuredMineruCacheDir));
-  }
+  // 自定义 MinerU 缓存目录由目录对话框授权并持久化；不再直接信任
+  // 渲染层可写的配置文件（否则一次 write_text_file 就能把它改成 C:\）。
 
   async function writeTextFileAtomically(filePath, content) {
     await fsp.mkdir(path.dirname(filePath), { recursive: true });
@@ -194,30 +196,7 @@ function createFileCommands(context) {
   }
 
   function assertWriteAllowed(filePath) {
-    const absolute = path.resolve(filePath);
-    const dataRoot = path.resolve(appPaths.dataDir);
-
-    // 应用数据目录与已批准的缓存目录不依赖文库状态；先做无 DB 的快速判断，
-    // 避免文库临时繁忙或损坏时连译文缓存都写不进去。
-    if (isWithinRoot(absolute, dataRoot)) return;
-
-    for (const approvedPath of approvedWritePaths) {
-      if (approvedPath && isWithinRoot(absolute, approvedPath)) return;
-    }
-
-    const library = store.load();
-    const translatedPdfDir = library.settings?.translatedPdfDir
-      ? path.resolve(library.settings.translatedPdfDir)
-      : null;
-    const roots = [
-      dataRoot,
-      path.resolve(library.settings.storageDir || path.join(appPaths.dataDir, 'paperquay-data')),
-      ...(translatedPdfDir ? [translatedPdfDir] : []),
-    ];
-
-    if (roots.some((root) => isWithinRoot(absolute, root))) return;
-
-    throw new Error(`Writing to this path is not allowed until approved: ${filePath}`);
+    pathPolicy.assertWriteAllowed(filePath);
   }
 
   /**
@@ -228,13 +207,11 @@ function createFileCommands(context) {
   function isRevealAllowed(absolutePath) {
     const library = typeof store?.load === 'function' ? store.load() ?? {} : {};
     const settings = library.settings ?? {};
-    const configuredCacheDir = cleanString(readJson(appPaths.configPath, null)?.settings?.mineruCacheDir);
     const roots = [
       appPaths.dataDir,
       settings.storageDir || (appPaths.dataDir ? path.join(appPaths.dataDir, 'paperquay-data') : ''),
       settings.translatedPdfDir,
       appPaths.mineruCacheDir,
-      configuredCacheDir,
       appPaths.remotePdfDownloadDir,
       ...approvedWritePaths,
     ];
@@ -257,7 +234,12 @@ function createFileCommands(context) {
   async function selectFiles(properties, filters, event) {
     const win = BrowserWindow.fromWebContents(event.sender);
     const result = await dialog.showOpenDialog(win, { properties, filters });
-    return result.canceled ? null : result.filePaths;
+    if (result.canceled) return null;
+
+    // 主进程对话框是用户授权读写的唯一入口：返回的路径与所在目录在这里
+    // 登记，渲染层不再持有自行批准任意路径的能力。
+    pathPolicy.approveReadPaths(result.filePaths);
+    return result.filePaths;
   }
 
   return {
@@ -336,7 +318,12 @@ function createFileCommands(context) {
     async select_directory({ title }, event) {
       const win = BrowserWindow.fromWebContents(event.sender);
       const result = await dialog.showOpenDialog(win, { title, properties: ['openDirectory'] });
-      return result.canceled ? null : result.filePaths[0] ?? null;
+      if (result.canceled || !result.filePaths[0]) return null;
+      const selected = result.filePaths[0];
+      // 目录选择通常用于缓存、导出或备份目标：读写都由这次用户选择授权。
+      pathPolicy.approveReadPath(selected);
+      pathPolicy.approveWritePath(selected);
+      return selected;
     },
 
     async prepare_mineru_cache_dir({ directory, previousDirectory }) {
@@ -344,9 +331,13 @@ function createFileCommands(context) {
       if (!targetDir) throw new Error('MinerU cache directory cannot be empty');
 
       const resolvedTargetDir = path.resolve(targetDir);
+      // 只接受目录对话框返回、或配置中已登记的缓存目录，拒绝渲染层任意指定。
+      pathPolicy.assertWriteAllowed(resolvedTargetDir);
       const existedBefore = await directoryExists(resolvedTargetDir);
       await fsp.mkdir(resolvedTargetDir, { recursive: true });
-      approvedWritePaths.add(resolvedTargetDir);
+      pathPolicy.assertWriteAllowed(resolvedTargetDir);
+      pathPolicy.approveReadPath(resolvedTargetDir);
+      pathPolicy.approveWritePath(resolvedTargetDir);
 
       const looseOutputFilesIgnored = await hasLooseMineruOutputFiles(resolvedTargetDir);
       const previousDir = cleanString(previousDirectory);
@@ -419,6 +410,7 @@ function createFileCommands(context) {
     },
 
     async list_directory_files({ directory, extensionFilter }) {
+      pathPolicy.assertReadAllowed(directory);
       try {
         const entries = await fsp.readdir(directory, { withFileTypes: true });
         const extension = cleanString(extensionFilter).replace(/^\./, '').toLowerCase();
@@ -448,7 +440,8 @@ function createFileCommands(context) {
 
       if (result.canceled || !result.filePath) return null;
 
-      approvedWritePaths.add(path.resolve(result.filePath));
+      pathPolicy.approveWritePath(result.filePath);
+      pathPolicy.approveReadPath(result.filePath);
       return result.filePath;
     },
 
@@ -466,16 +459,13 @@ function createFileCommands(context) {
 
       if (result.canceled || !result.filePath) return null;
 
-      approvedWritePaths.add(path.resolve(result.filePath));
+      pathPolicy.approveWritePath(result.filePath);
+      pathPolicy.approveReadPath(result.filePath);
       return result.filePath;
     },
 
-    async approve_write_path({ path: filePath }) {
-      approvedWritePaths.add(path.resolve(filePath));
-    },
-
     async path_exists({ path: filePath }) {
-      return pathExists(filePath);
+      return pathPolicy.isReadAllowed(filePath) ? pathExists(filePath) : false;
     },
 
     // 批量路径存在性检查：供文献库 MinerU 状态检查等场景单次 IPC 完成，
@@ -491,7 +481,11 @@ function createFileCommands(context) {
       return Promise.all(
         paths
           .slice(0, 10000)
-          .map((candidate) => (typeof candidate === 'string' && candidate ? pathExists(candidate) : false)),
+          .map((candidate) => (
+            typeof candidate === 'string' && candidate && pathPolicy.isReadAllowed(candidate)
+              ? pathExists(candidate)
+              : false
+          )),
       );
     },
 
@@ -527,11 +521,13 @@ function createFileCommands(context) {
     },
 
     async read_text_file({ path: filePath }) {
+      pathPolicy.assertReadAllowed(filePath);
       await ensureFile(filePath);
       return fsp.readFile(filePath, 'utf8');
     },
 
     async read_text_file_if_exists({ path: filePath }) {
+      pathPolicy.assertReadAllowed(filePath);
       try {
         const stat = await fsp.stat(filePath);
         if (!stat.isFile()) return null;
@@ -548,6 +544,7 @@ function createFileCommands(context) {
     },
 
     async read_binary_file_base64({ path: filePath }) {
+      pathPolicy.assertReadAllowed(filePath);
       await ensureFile(filePath);
       return (await fsp.readFile(filePath)).toString('base64');
     },
@@ -560,7 +557,11 @@ function createFileCommands(context) {
 
     async download_remote_file_to_path({ url, path: filePath, headers }) {
       assertWriteAllowed(filePath);
-      const response = await fetch(url, { headers: headers ?? undefined });
+      const trimmedUrl = cleanString(url);
+      if (!/^https?:\/\//i.test(trimmedUrl)) {
+        throw new Error('Only http and https URLs can be downloaded');
+      }
+      const response = await fetch(trimmedUrl, { headers: headers ?? undefined });
       if (!response.ok) throw new Error(`Remote download returned HTTP ${response.status}`);
 
       await fsp.mkdir(path.dirname(filePath), { recursive: true });

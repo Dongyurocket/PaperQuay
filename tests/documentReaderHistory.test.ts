@@ -11,9 +11,26 @@ import {
   upsertRecentPdfScrollPosition,
 } from '../src/features/reader/documentReaderHistory.ts';
 import { aggregateReadingTimeChartBins } from '../src/features/literature/readingTimeChartUtils.ts';
-import { loadPaperHistoryMap, savePaperHistory } from '../src/utils/paperHistory.ts';
+import { invalidatePaperHistoryCache, loadPaperHistoryMap, savePaperHistory } from '../src/utils/paperHistory.ts';
 import type { PdfReadingHeatmap, PdfScrollPosition } from '../src/types/reader.ts';
 import type { DocumentChatSession, PaperHistoryRecord } from '../src/types/reader.ts';
+
+/** 按 key 存取的内存 localStorage；分片存储依赖真实 key 语义。 */
+function installFakeLocalStorage(initial: Record<string, string> = {}): Map<string, string> {
+  const storage = new Map(Object.entries(initial));
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    value: {
+      getItem: (key: string) => (storage.has(key) ? storage.get(key)! : null),
+      setItem: (key: string, value: string) => { storage.set(key, String(value)); },
+      removeItem: (key: string) => { storage.delete(key); },
+      clear: () => storage.clear(),
+      key: (index: number) => [...storage.keys()][index] ?? null,
+      get length() { return storage.size; },
+    },
+  });
+  return storage;
+}
 
 function scrollPosition(overrides: Partial<PdfScrollPosition> = {}): PdfScrollPosition {
   return {
@@ -39,11 +56,8 @@ function heatmap(overrides: Partial<PdfReadingHeatmap> = {}): PdfReadingHeatmap 
 
 test('paper history round-trips retrieval diagnostics', () => {
   const originalLocalStorage = globalThis.localStorage;
-  let stored = '';
-  Object.defineProperty(globalThis, 'localStorage', {
-    configurable: true,
-    value: { getItem: () => stored || null, setItem: (_key: string, value: string) => { stored = value; } },
-  });
+  installFakeLocalStorage();
+  invalidatePaperHistoryCache();
   try {
     const qaContext = { origin: 'local-rag', retrievalState: 'retrieved', ftsStatuses: ['failed'],
       ftsHitCount: 0, partialSources: true } as const;
@@ -57,6 +71,7 @@ test('paper history round-trips retrieval diagnostics', () => {
     const restored = restorePaperQaHistory(loadPaperHistoryMap().synthetic, () => { throw new Error('unexpected session'); }, '');
     assert.deepEqual(restored.qaSessions[0].messages[0].qaContext, qaContext);
   } finally {
+    invalidatePaperHistoryCache();
     if (originalLocalStorage) Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: originalLocalStorage });
     else delete (globalThis as { localStorage?: Storage }).localStorage;
   }
@@ -76,13 +91,9 @@ test('paper history preserves PDF compare mode', () => {
     },
   });
 
-  Object.defineProperty(globalThis, 'localStorage', {
-    configurable: true,
-    value: {
-      getItem: () => storedHistory,
-      setItem: () => undefined,
-    },
-  });
+  // 旧版整表作为输入，验证启动时自动迁移为分片记录。
+  installFakeLocalStorage({ 'paper-reader-paper-history-v1': storedHistory });
+  invalidatePaperHistoryCache();
 
   try {
     assert.equal(
@@ -90,6 +101,7 @@ test('paper history preserves PDF compare mode', () => {
       'pdf-compare',
     );
   } finally {
+    invalidatePaperHistoryCache();
     if (originalLocalStorage) {
       Object.defineProperty(globalThis, 'localStorage', {
         configurable: true,

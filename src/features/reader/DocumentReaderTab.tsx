@@ -26,7 +26,8 @@ import {
   updateNote as updateStoredNote,
 } from '../../services/notes';
 import type { LocalDirectoryFileEntry } from '../../services/desktop';
-import { estimateRagTokens } from './readerRag';
+import { estimateRagTokens, trimDocumentTextToTokenBudget } from './readerRag';
+import { createPdfTextCache } from './pdfTextCache';
 import {
   extractTextFromMineruBlock,
   extractTranslatableMarkdownFromMineruBlock,
@@ -415,11 +416,7 @@ function DocumentReaderTab({
   const cachedSummaryAttemptKeyRef = useRef('');
   const cachedSummaryRequestIdRef = useRef(0);
   const pendingHistoryActiveBlockIdRef = useRef<string | null>(null);
-  const pdfTextCacheRef = useRef<{
-    key: string;
-    text: string;
-  } | null>(null);
-  const pdfTextPendingRef = useRef<Promise<string> | null>(null);
+  const pdfTextCacheRef = useRef(createPdfTextCache());
   const localeRef = useRef(locale);
   const lRef = useRef(l);
 
@@ -2012,35 +2009,37 @@ function DocumentReaderTab({
     settings.mineruCacheDir,
   ]);
 
+  const pdfTextSourceKey = `${currentDocument.workspaceId}::${getPdfSourceSignature(pdfSource, pdfPath || currentPdfName)}`;
+
+  useEffect(() => {
+    // PDF 身份变化即失效在途提取；旧 promise 的 then/finally 会通过 identity
+    // 校验发现自己已被替换，不再回写共享缓存。
+    pdfTextCacheRef.current.invalidate();
+  }, [pdfTextSourceKey]);
+
   const loadCachedPdfDocumentText = useCallback(async () => {
     if (!pdfSource) {
       return '';
     }
 
     const sourceForText = pdfSource;
-    const cacheKey = `${currentDocument.workspaceId}::${getPdfSourceSignature(pdfSource, pdfPath || currentPdfName)}`;
+    const cacheKey = pdfTextSourceKey;
+    const cachedText = pdfTextCacheRef.current.getCached(cacheKey);
 
-    if (pdfTextCacheRef.current?.key === cacheKey) {
-      return pdfTextCacheRef.current.text;
+    if (cachedText !== null) {
+      return cachedText;
     }
 
-    if (!pdfTextPendingRef.current) {
-      pdfTextPendingRef.current = loadPdfBinary(sourceForText)
-        .then((bytes) => (bytes ? extractPdfTextByPdfJs(bytes) : ''))
-        .then((text) => {
-          pdfTextCacheRef.current = {
-            key: cacheKey,
-            text,
-          };
-          return text;
-        })
-        .finally(() => {
-          pdfTextPendingRef.current = null;
-        });
+    const pendingText = pdfTextCacheRef.current.getPending(cacheKey);
+    if (pendingText) {
+      return pendingText;
     }
 
-    return pdfTextPendingRef.current;
-  }, [currentDocument.workspaceId, currentPdfName, pdfPath, pdfSource]);
+    return pdfTextCacheRef.current.start(cacheKey, () =>
+      loadPdfBinary(sourceForText)
+        .then((bytes) => (bytes ? extractPdfTextByPdfJs(bytes) : '')),
+    );
+  }, [pdfSource, pdfTextSourceKey]);
 
   const resolveSummaryRequest = useCallback(async () => {
     if (settings.summarySourceMode === 'pdf-text') {
@@ -2160,6 +2159,7 @@ function DocumentReaderTab({
         mineruBlocks: flatBlocks,
         mineruDocumentText,
         pdfDocumentText,
+        tokenBudget: options?.tokenBudget,
       });
 
       if (ragResolution.kind === 'retrieved') {
@@ -2191,25 +2191,38 @@ function DocumentReaderTab({
       }
     }
 
+    const pdfText = trimDocumentTextToTokenBudget(pdfDocumentText, options?.tokenBudget);
+
     if (settings.qaSourceMode === 'pdf-text') {
       return {
         blocks: summaryBlockInputs,
-        documentText: pdfDocumentText,
-        qaContext: buildQaContext({
-          origin: 'pdf-text',
-          rag: ragResolution,
-        }),
+        documentText: pdfText.text,
+        qaContext: {
+          ...buildQaContext({
+            origin: 'pdf-text',
+            rag: ragResolution,
+          }),
+          ...(pdfText.truncated ? { budgetSkippedCount: 1 } : {}),
+        },
         citations: [],
       };
     }
 
+    const mineruText = trimDocumentTextToTokenBudget(
+      mineruDocumentText,
+      options?.tokenBudget,
+    );
+
     return {
       blocks: summaryBlockInputs,
-      documentText: mineruDocumentText,
-      qaContext: buildQaContext({
-        origin: 'mineru-markdown',
-        rag: ragResolution,
-      }),
+      documentText: mineruText.text,
+      qaContext: {
+        ...buildQaContext({
+          origin: 'mineru-markdown',
+          rag: ragResolution,
+        }),
+        ...(mineruText.truncated ? { budgetSkippedCount: 1 } : {}),
+      },
       citations: [],
     };
   }, [
@@ -4303,8 +4316,7 @@ function DocumentReaderTab({
     }
 
     lastDocumentSignatureRef.current = signature;
-    pdfTextCacheRef.current = null;
-    pdfTextPendingRef.current = null;
+    pdfTextCacheRef.current = createPdfTextCache();
     setQaRagEnabled(true);
     void openDocumentItem();
   }, [document.attachmentKey, document.workspaceId, openDocumentItem]);

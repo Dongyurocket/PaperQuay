@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildMineruRagChunks, buildPdfRagChunks, buildRagContextText } from '../src/features/reader/readerRag.ts';
+import { buildMineruRagChunks, buildPdfRagChunks, buildRagContextText, estimateRagTokens } from '../src/features/reader/readerRag.ts';
 import type { RagChunkInput, RagRetrievalResult } from '../src/types/reader.ts';
 
 const BODY_SEED_TEXT =
@@ -297,7 +297,9 @@ test('token budget drops the least relevant sections and reports the count', () 
   });
   assert.equal(context.sectionCount, 1);
   assert.equal(context.citations.length, 1);
+  // 1 条 section 被整段丢弃；剩下的 1 条只是正文被截断，不算「丢弃证据」。
   assert.equal(context.budgetSkippedCount, 1);
+  assert.ok(estimateRagTokens(context.documentText) <= 10);
 });
 
 test('buildRagContextText bridges figure captions to equations and hydrates referenced bibliography', () => {

@@ -1,5 +1,6 @@
 const { clipboard, contextBridge, ipcRenderer, webUtils } = require('electron');
 const { remapRendererStorage } = require('../src/shared/rendererStorageRemap.cjs');
+const { isRendererCommandAllowed } = require('./ipcAllowlist.cjs');
 
 function restoreRendererStorage() {
   let payload;
@@ -111,6 +112,12 @@ function createDropSubscription(callback) {
       .map(toFilePath)
       .filter(Boolean);
 
+    // 真实文件拖放由 preload 直接登记读权限；这个入口不暴露给页面脚本，
+    // 合成 drop 事件里的 File 没有本地路径，无法借此读取任意文件。
+    if (paths.length > 0) {
+      ipcRenderer.send('paperquay:approve-read-paths', paths.slice(0, 100));
+    }
+
     emit({ type: 'drop', paths });
   };
 
@@ -130,6 +137,11 @@ function createDropSubscription(callback) {
 contextBridge.exposeInMainWorld('paperquay', {
   platform: process.platform,
   invoke(command, args) {
+    // 与主进程同一份白名单：渲染层被注入脚本时，连尝试调用未登记命令
+    // 的机会都没有。真正以 main 侧校验为准，这里只是尽早失败。
+    if (!isRendererCommandAllowed(command)) {
+      return Promise.reject(new Error(`Unsupported Electron command: ${String(command)}`));
+    }
     return ipcRenderer.invoke('paperquay:invoke', command, args ?? {});
   },
   listen(eventName, callback) {

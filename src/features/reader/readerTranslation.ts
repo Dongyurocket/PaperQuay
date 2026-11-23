@@ -41,7 +41,7 @@ export interface TranslateBlocksBestEffortOptions {
   targetLanguage: string;
   temperature?: number;
   translateBatch: (
-    options: OpenAICompatibleTranslateOptions,
+    options: OpenAICompatibleTranslateOptions & { signal?: AbortSignal },
   ) => Promise<TranslationBlockOutput[]>;
 }
 
@@ -292,6 +292,7 @@ export async function translateBlocksBestEffort({
           model,
           reasoningEffort,
           requestsPerMinute,
+          signal,
           sourceLanguage,
           targetLanguage,
           temperature,

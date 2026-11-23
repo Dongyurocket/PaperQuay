@@ -16,6 +16,9 @@ const RETAINPDF_HEALTH_TIMEOUT_MS = 1500;
 const RETAINPDF_LAUNCH_WAIT_MS = 60000;
 const RETAINPDF_REQUEST_TIMEOUT_MS = 10 * 60 * 1000;
 const RETAINPDF_JOB_TIMEOUT_MS = 6 * 60 * 60 * 1000;
+// starting/uploading 阶段没有可恢复的远端任务；进程崩溃或强制退出后，
+// 这些记录只能标记为可重试失败，不能永远占着「已有任务在运行」。
+const RETAINPDF_ORPHAN_START_TIMEOUT_MS = 10 * 60 * 1000;
 const RETAINPDF_MAX_ATTACH_ATTEMPTS = 3;
 
 const ACTIVE_STATUSES = new Set([
@@ -489,6 +492,23 @@ function isActiveStatus(status) {
   return ACTIVE_STATUSES.has(status);
 }
 
+/**
+ * active 记录是否已经失去推进者：
+ * - starting/uploading/submitting 没有可恢复的远端任务，10 分钟没有更新即视为孤儿；
+ * - running/queued/downloading/attaching 以 6 小时任务超时为准。
+ */
+function isStaleActiveRecord(record, at = Date.now()) {
+  if (!isActiveStatus(record?.status)) return false;
+  const updatedAt = Number(record.updatedAt) || Number(record.createdAt) || 0;
+  const age = at - updatedAt;
+
+  if (['starting', 'uploading', 'submitting'].includes(record.status)) {
+    return updatedAt === 0 || age >= RETAINPDF_ORPHAN_START_TIMEOUT_MS;
+  }
+
+  return updatedAt === 0 || age >= RETAINPDF_JOB_TIMEOUT_MS;
+}
+
 function findPaperPdfPath(paper) {
   const attachment = (paper?.attachments ?? []).find((item) => (
     item?.kind === 'pdf'
@@ -881,6 +901,21 @@ function createRetainPdfIntegration({ store, appPaths }) {
         });
       }
       for (const record of jobs.values()) {
+        // 新进程启动后，starting/uploading/submitting 的发起者已经不存在，
+        // 也没有可恢复的远端 job；直接标记为可重试失败，而不是永久占位。
+        if (['starting', 'uploading', 'submitting'].includes(record.status)) {
+          failJob(
+            record,
+            new Error('上次 RetainPDF 任务在启动/上传阶段中断，请重新发起翻译'),
+          );
+          continue;
+        }
+
+        if (isStaleActiveRecord(record)) {
+          failJob(record, new Error('RetainPDF 任务已超时中断，请重新发起翻译'));
+          continue;
+        }
+
         if (RESUME_STATUSES.has(record.status)) {
           void resumeRecord(record);
         }
@@ -897,7 +932,11 @@ function createRetainPdfIntegration({ store, appPaths }) {
 
     const existing = jobs.get(targetPaperId);
     if (existing && isActiveStatus(existing.status)) {
-      throw new Error('该文献已有 RetainPDF 翻译任务在进行');
+      if (!isStaleActiveRecord(existing)) {
+        throw new Error('该文献已有 RetainPDF 翻译任务在进行');
+      }
+      // 僵死的 active 记录不应永久阻塞重译：标记失败后按新任务重新开始。
+      failJob(existing, new Error('上一次 RetainPDF 任务已中断，已重新发起翻译'));
     }
 
     const { paper } = await resolvePaperPdf(targetPaperId);
@@ -1014,6 +1053,7 @@ module.exports = {
   detectRetainPdf,
   extractRetainPdfProgress,
   findRetainPdfExecutable,
+  isStaleActiveRecord,
   normalizeApiBase,
   normalizeRetainPdfDesktopConfig,
 };

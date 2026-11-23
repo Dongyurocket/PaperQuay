@@ -6,15 +6,90 @@ const {
   ensureFile,
   fileNameFromPath,
   hashBytes,
+  isPdf,
   now,
   parseMineruTokens,
   readRequestJson,
   readZipWithAdm,
+  safeFileName,
 } = require('./utils.cjs');
 const { getPdfPageCount, planPdfSplits, splitPdfFiles } = require('./pdfSplitter.cjs');
 const { mergeMineruParseResults } = require('./mineruMerge.cjs');
+const { isWithinRoot } = require('./pathPolicy.cjs');
 
 let globalMineruKeyIndex = 0;
+
+function normalizeEndpoint(value) {
+  return cleanString(value).replace(/\/+$/, '');
+}
+
+function isPrivateIpv4(hostname) {
+  const parts = hostname.split('.').map(Number);
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) {
+    return false;
+  }
+  return (
+    parts[0] === 10 ||
+    (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) ||
+    (parts[0] === 192 && parts[1] === 168) ||
+    (parts[0] === 169 && parts[1] === 254) ||
+    parts[0] === 127
+  );
+}
+
+/**
+ * MinerU 端点白名单：官方云端 + 本机/局域网自建服务。
+ *
+ * 不再与配置文件的 mineruApiBaseUrl 比对——配置文件是渲染层可写的，
+ * 渲染层能同时改「配置端点」和「请求端点」，这个比对挡不住它。这里只允许
+ * 云端官方主机与回环/私有地址，阻断把本地 PDF 上传到公网攻击者主机。
+ */
+function isAllowedMineruEndpoint(value) {
+  const raw = normalizeEndpoint(value);
+  if (!raw) return true;
+
+  let parsed;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return false;
+  }
+
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+  if (parsed.username || parsed.password) return false;
+
+  const hostname = parsed.hostname.toLowerCase();
+  let officialHost = '';
+  try {
+    officialHost = new URL(MINERU_API_BASE).hostname.toLowerCase();
+  } catch {}
+
+  if (officialHost && hostname === officialHost) return true;
+  if (hostname === 'localhost' || hostname === '::1' || hostname === '[::1]') return true;
+  if (hostname.endsWith('.local')) return true;
+  return isPrivateIpv4(hostname);
+}
+
+/**
+ * 解压目录只能落在 MinerU 缓存根目录内。渲染层传入的 extractDir 通常就是
+ * 阅读器按缓存键算出的目录，这里只做包含校验；越界时回退到受控默认目录，
+ * 而不是把攻击者指定的路径交给解压器。
+ */
+function resolveExtractDir(appPaths, requestedExtractDir, fallbackName, pathPolicy) {
+  const requested = cleanString(requestedExtractDir);
+  if (requested) {
+    const absolute = path.resolve(requested);
+    // 默认缓存根，或主进程已授权的自定义缓存目录（目录对话框/持久化授权）。
+    if (
+      isWithinRoot(absolute, appPaths.mineruCacheDir) ||
+      (pathPolicy && pathPolicy.isWriteAllowed(absolute))
+    ) {
+      return absolute;
+    }
+  }
+
+  return path.join(appPaths.mineruCacheDir, fallbackName);
+}
 
 function maskToken(token) {
   if (!token || token.length < 8) return '***';
@@ -156,20 +231,32 @@ async function runSingleMineruParse({
 }
 
 function createMineruCommands(context) {
-  const { appPaths } = context;
+  const { appPaths, pathPolicy } = context;
 
   return {
     async run_mineru_cloud_parse({ options }) {
       const rawTokens = options.apiTokens || options.apiToken;
       const tokens = parseMineruTokens(rawTokens);
       if (tokens.length === 0) throw new Error('MinerU API Token cannot be empty');
-      const apiBaseUrl = cleanString(options.apiBaseUrl).replace(/\/+$/, '') || MINERU_API_BASE;
+      const apiBaseUrl = normalizeEndpoint(options.apiBaseUrl) || MINERU_API_BASE;
+
+      // 只允许官方云端或本机/局域网 MinerU；否则渲染层可以把任意本地
+      // 文件上传到公网攻击者主机。
+      if (!isAllowedMineruEndpoint(apiBaseUrl)) {
+        throw new Error(`MinerU API endpoint is not allowed: ${apiBaseUrl}`);
+      }
 
       const pdfPath = options.pdfPath;
+      if (!isPdf(pdfPath)) {
+        throw new Error('Only PDF files can be parsed by MinerU');
+      }
+      // 只接受文库附件、缓存或用户通过文件对话框选过的 PDF。
+      pathPolicy.assertReadAllowed(pdfPath);
       await ensureFile(pdfPath);
 
       const fileName = fileNameFromPath(pdfPath);
       const dataId = `paper_reader_${now()}`;
+      const fallbackExtractName = `${safeFileName(path.basename(fileName, '.pdf'))}-${hashBytes(Buffer.from(dataId)).slice(0, 8)}`;
 
       // 1. 读取页数，判断是否需要自动拆分
       let totalPageCount = 0;
@@ -181,9 +268,11 @@ function createMineruCommands(context) {
 
       // 未超限（<= 200 页）或读取失败，走原生单卷解析
       if (totalPageCount <= 200) {
-        const singleExtractDir = options.extractDir || path.join(
-          appPaths.mineruCacheDir,
-          `${path.basename(fileName, '.pdf')}-${hashBytes(Buffer.from(dataId)).slice(0, 8)}`,
+        const singleExtractDir = resolveExtractDir(
+          appPaths,
+          options.extractDir,
+          fallbackExtractName,
+          pathPolicy,
         );
         return await runSingleMineruParse({
           pdfPath,
@@ -209,9 +298,11 @@ function createMineruCommands(context) {
         splitPdfResults = await splitPdfFiles(pdfPath, splitPlans, splitWorkDir);
       } catch (splitErr) {
         console.warn(`[MinerU] Failed to split PDF for ${fileName}, falling back to direct parse:`, splitErr);
-        const singleExtractDir = options.extractDir || path.join(
-          appPaths.mineruCacheDir,
-          `${path.basename(fileName, '.pdf')}-${hashBytes(Buffer.from(dataId)).slice(0, 8)}`,
+        const singleExtractDir = resolveExtractDir(
+          appPaths,
+          options.extractDir,
+          fallbackExtractName,
+          pathPolicy,
         );
         return await runSingleMineruParse({
           pdfPath,
@@ -256,9 +347,11 @@ function createMineruCommands(context) {
       }
 
       // 4. 产物合并（统一 content_list.json、middle.json、full.md 与 images）
-      const finalExtractDir = options.extractDir || path.join(
-        appPaths.mineruCacheDir,
-        `${path.basename(fileName, '.pdf')}-${hashBytes(Buffer.from(dataId)).slice(0, 8)}`,
+      const finalExtractDir = resolveExtractDir(
+        appPaths,
+        options.extractDir,
+        fallbackExtractName,
+        pathPolicy,
       );
 
       const merged = await mergeMineruParseResults(partResults, finalExtractDir);
@@ -286,4 +379,4 @@ function createMineruCommands(context) {
   };
 }
 
-module.exports = { createMineruCommands };
+module.exports = { createMineruCommands, isAllowedMineruEndpoint, resolveExtractDir };

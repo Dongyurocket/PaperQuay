@@ -1,4 +1,5 @@
 const fs = require('node:fs');
+const { resolveReaderConfigSecrets } = require('./secretStorage.cjs');
 const fsp = require('node:fs/promises');
 const path = require('node:path');
 const crypto = require('node:crypto');
@@ -441,10 +442,14 @@ async function collectBackupSources(context, {
     ...(normalizedConfig.settings && typeof normalizedConfig.settings === 'object' ? normalizedConfig.settings : {}),
     ...(localSettings && typeof localSettings === 'object' ? localSettings : {}),
   };
+  const configSecrets = resolveReaderConfigSecrets(config, context.appPaths) ?? {};
   normalizedConfig.secrets = {
     ...(legacySecrets && typeof legacySecrets === 'object' ? legacySecrets : {}),
     ...(normalizedConfig.secrets && typeof normalizedConfig.secrets === 'object' ? normalizedConfig.secrets : {}),
+    ...configSecrets,
   };
+  // 备份容器本身有密码加密；把 secrets 以明文写入备份，才能跨机器恢复。
+  delete normalizedConfig.secretsEncrypted;
   normalizedConfig.zoteroLocalDataDir = cleanString(normalizedConfig.zoteroLocalDataDir);
   normalizedConfig.settings.mineruCacheDir = sourceRoots.mineruCacheDir;
   normalizedConfig.settings.remotePdfDownloadDir = sourceRoots.remotePdfDownloadDir;

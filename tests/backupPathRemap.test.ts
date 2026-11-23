@@ -234,3 +234,31 @@ test('does not mutate its storage snapshot input', () => {
 
   assert.deepEqual(storage, before);
 });
+
+test('remaps per-paper history shards on restore', () => {
+  const shardKey = 'paper-reader-paper-history-v2:native-library:paper-1';
+  const storage = {
+    [shardKey]: JSON.stringify({
+      workspaceId: 'native-library:paper-1',
+      document: { localPdfPath: 'C:\\old\\library\\paper.pdf' },
+      lastPdfPath: 'C:\\old\\library\\paper.pdf',
+      lastMineruPath: 'C:\\old\\mineru\\paper.json',
+      pdfScrollPositions: {
+        'local:C:\\old\\library\\paper.pdf': { sourceKey: 'local:C:\\old\\library\\paper.pdf', top: 1 },
+      },
+      qaSessions: [],
+    }),
+  };
+
+  const result = remapRendererStorage(storage, {
+    rootMap: { 'C:\\old': 'D:\\restored' },
+    platform: 'win32',
+    hasMineruCache: true,
+  });
+  const record = JSON.parse(result.state[shardKey]);
+
+  assert.equal(record.document.localPdfPath, 'D:\\restored\\library\\paper.pdf');
+  assert.equal(record.lastPdfPath, 'D:\\restored\\library\\paper.pdf');
+  assert.equal(record.lastMineruPath, 'D:\\restored\\mineru\\paper.json');
+  assert.ok(Object.keys(record.pdfScrollPositions)[0].includes('D:\\restored'));
+});

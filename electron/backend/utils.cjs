@@ -1332,29 +1332,86 @@ async function embedTexts(texts, embedding) {
     .map((item) => item.embedding);
 }
 
+const MAX_ZIP_ENTRY_COUNT = 5000;
+const MAX_ZIP_ENTRY_BYTES = 512 * 1024 * 1024;
+const MAX_ZIP_TOTAL_BYTES = 2 * 1024 * 1024 * 1024;
+const WINDOWS_RESERVED_BASENAMES = new Set([
+  'con', 'prn', 'aux', 'nul',
+  ...Array.from({ length: 9 }, (_, index) => `com${index + 1}`),
+  ...Array.from({ length: 9 }, (_, index) => `lpt${index + 1}`),
+]);
+
+/** MinerU 云端下载的 zip 是外部输入：拒绝穿越、设备名、NTFS 数据流与超限解压。 */
+function assertSafeZipEntryName(entryName) {
+  const normalized = String(entryName ?? '').replace(/\\/g, '/');
+  if (!normalized || normalized.includes('\0')) {
+    throw new Error(`Illegal MinerU zip entry path: ${normalized}`);
+  }
+  if (normalized.startsWith('/') || /^[a-zA-Z]:/.test(normalized)) {
+    throw new Error(`Illegal MinerU zip entry path: ${normalized}`);
+  }
+
+  for (const segment of normalized.split('/')) {
+    if (!segment || segment === '.' || segment === '..') {
+      throw new Error(`Illegal MinerU zip entry path: ${normalized}`);
+    }
+    if (segment.includes(':')) {
+      throw new Error(`Illegal MinerU zip entry name (alternate data stream): ${normalized}`);
+    }
+    if (process.platform === 'win32' && /[. ]$/.test(segment)) {
+      throw new Error(`Illegal MinerU zip entry name (trailing dot or space): ${normalized}`);
+    }
+    const baseName = segment.split('.')[0].toLowerCase();
+    if (WINDOWS_RESERVED_BASENAMES.has(baseName)) {
+      throw new Error(`Illegal MinerU zip entry name (reserved device name): ${normalized}`);
+    }
+  }
+
+  return normalized;
+}
+
 async function readZipWithAdm(zipBytes, extractDir) {
   const AdmZip = require('adm-zip');
   const zip = new AdmZip(Buffer.from(zipBytes));
   const entries = zip.getEntries().filter((entry) => !entry.isDirectory);
-  const zipEntries = entries.map((entry) => entry.entryName.replace(/\\/g, '/'));
+
+  if (entries.length > MAX_ZIP_ENTRY_COUNT) {
+    throw new Error(`MinerU zip contains too many files: ${entries.length} > ${MAX_ZIP_ENTRY_COUNT}`);
+  }
+
+  const zipEntries = entries.map((entry) => String(entry.entryName).replace(/\\/g, '/'));
   let contentJsonText = null;
   let middleJsonText = null;
   let markdownText = null;
   let contentJsonPath = null;
   let middleJsonPath = null;
   let markdownPath = null;
+  let totalBytes = 0;
 
   await fsp.mkdir(extractDir, { recursive: true });
 
   for (const entry of entries) {
-    const normalized = entry.entryName.replace(/\\/g, '/');
-    if (normalized.includes('..') || path.isAbsolute(normalized)) {
-      throw new Error(`Illegal MinerU zip entry path: ${normalized}`);
+    const normalized = assertSafeZipEntryName(entry.entryName);
+    const declaredSize = Number(entry.header?.size) || 0;
+
+    if (declaredSize > MAX_ZIP_ENTRY_BYTES) {
+      throw new Error(`MinerU zip entry is too large: ${normalized} (${declaredSize} bytes)`);
+    }
+    totalBytes += declaredSize;
+    if (totalBytes > MAX_ZIP_TOTAL_BYTES) {
+      throw new Error(
+        `MinerU zip expands beyond ${MAX_ZIP_TOTAL_BYTES} bytes; refusing to extract.`,
+      );
     }
 
     const outputPath = path.join(extractDir, normalized);
     await fsp.mkdir(path.dirname(outputPath), { recursive: true });
     const data = entry.getData();
+
+    if (data.length > MAX_ZIP_ENTRY_BYTES) {
+      throw new Error(`MinerU zip entry is too large after extraction: ${normalized}`);
+    }
+
     await fsp.writeFile(outputPath, data);
 
     const lower = normalized.toLowerCase();

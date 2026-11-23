@@ -8,6 +8,7 @@ import {
   type NoteMutationOptions,
   updateNote,
 } from '../services/notes';
+import { resolveNextActiveNoteId } from './notesSelection.ts';
 
 export const GLOBAL_NOTES_PAPER_ID = 'global-notes';
 
@@ -58,10 +59,7 @@ export const useNotesStore = create<NotesState>()((set, get) => ({
 
       set((state) => ({
         notes,
-        activeNoteId:
-          state.activeNoteId && notes.some((note) => note.id === state.activeNoteId)
-            ? state.activeNoteId
-            : notes[0]?.id ?? null,
+        activeNoteId: resolveNextActiveNoteId(state.activeNoteId, notes),
       }));
     } catch (error) {
       set({

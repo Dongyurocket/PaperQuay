@@ -1,6 +1,7 @@
 'use strict';
 
 const PAPER_HISTORY_KEY = 'paper-reader-paper-history-v1';
+const PAPER_HISTORY_SHARD_PREFIX = 'paper-reader-paper-history-v2:';
 const READER_SETTINGS_KEY = 'paper-reader-settings-v3';
 
 function isRecord(value) {
@@ -259,6 +260,28 @@ function remapRendererStorage(storageRecord, options = {}) {
     ),
     warnings,
   );
+
+  // 分片历史（每篇论文一个 key）同样需要重映射路径；备份恢复后不能指向
+  // 旧机器上的 PDF/MinerU 位置。
+  for (const storageKey of Object.keys(state)) {
+    if (!storageKey.startsWith(PAPER_HISTORY_SHARD_PREFIX)) continue;
+
+    transformJsonState(
+      state,
+      storageKey,
+      (record, currentWarnings) => {
+        if (!isRecord(record)) return false;
+        return remapPaperHistory(
+          { [storageKey]: record },
+          remapPath,
+          options.hasMineruCache === true,
+          currentWarnings,
+        );
+      },
+      warnings,
+    );
+  }
+
   transformJsonState(state, READER_SETTINGS_KEY, (settings) => remapSettings(settings, remapPath), warnings);
 
   return { state, warnings };

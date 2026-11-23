@@ -60,6 +60,55 @@ export function estimateRagTokens(text: string): number {
   return Math.ceil(wideCount + (text.length - wideCount) / 3);
 }
 
+/**
+ * 全文回退（MinerU Markdown / PDF 文本）也要服从模型上下文预算。
+ * 保留开头（标题、摘要、方法通常在前），按 token 估算二分出最大前缀，
+ * 尽量切在行边界，并附上一行截断说明。
+ */
+export function trimDocumentTextToTokenBudget(
+  text: string,
+  tokenBudget?: number,
+): { text: string; truncated: boolean } {
+  if (
+    typeof tokenBudget !== 'number' ||
+    !Number.isFinite(tokenBudget) ||
+    tokenBudget <= 0 ||
+    !text
+  ) {
+    return { text, truncated: false };
+  }
+
+  if (estimateRagTokens(text) <= tokenBudget) {
+    return { text, truncated: false };
+  }
+
+  const marker = '\n\n[truncated]';
+  // 截断说明本身也占 token；先扣掉，保证最终文本不超过预算。
+  const contentBudget = Math.max(1, tokenBudget - estimateRagTokens(marker));
+  let low = 0;
+  let high = text.length;
+
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    if (estimateRagTokens(text.slice(0, mid)) <= contentBudget) {
+      low = mid;
+    } else {
+      high = mid - 1;
+    }
+  }
+
+  let cut = low;
+  const lastLineBreak = text.lastIndexOf('\n', cut);
+  if (lastLineBreak > cut * 0.8) {
+    cut = lastLineBreak;
+  }
+
+  return {
+    text: `${text.slice(0, cut).trim()}${marker}`,
+    truncated: true,
+  };
+}
+
 // Page decorations (page numbers, headers/footers, page footnotes) are not real
 // content. They must not become RAG chunks or citation anchors, otherwise a
 // citation can point at a page-number block and clicking it highlights the page
@@ -1334,6 +1383,22 @@ export function buildRagContextText(input: {
   }
 
   const keptSections = keptEntries.map((entry, idx) => renderSection(entry, idx));
+  let documentText = keptSections.join('\n\n').trim();
+
+  // 最后一道硬裁剪：只剩一个超长 section 时上面的循环无法再丢条目，
+  // 这里按预算裁剪文本本身，确保最终提示词不超过模型窗口。
+  if (
+    documentText &&
+    typeof input.tokenBudget === 'number' &&
+    Number.isFinite(input.tokenBudget) &&
+    input.tokenBudget > 0 &&
+    estimateRagTokens(documentText) > input.tokenBudget
+  ) {
+    // 注意：只截断正文、不丢弃证据条目，因此不增加 budgetSkippedCount
+    // （该字段的 UI 语义是「已丢弃证据」）。截断由文本末尾的标记表示。
+    documentText = trimDocumentTextToTokenBudget(documentText, input.tokenBudget).text;
+  }
+
   const keptCitations = keptEntries
     .map((entry, idx) => {
       const lookup = input.paperLookup?.(entry.anchor);
@@ -1352,7 +1417,7 @@ export function buildRagContextText(input: {
     .filter((citation): citation is DocumentChatCitation => Boolean(citation));
 
   return {
-    documentText: keptSections.join('\n\n').trim(),
+    documentText,
     sectionCount: keptSections.length,
     citations: keptCitations,
     retrievals: [...results, ...contextSupplements],

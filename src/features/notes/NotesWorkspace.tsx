@@ -29,9 +29,10 @@ import {
   emitOpenLibraryPaper,
   type NoteChangedEventDetail,
 } from '../../app/appEvents';
-import { listLibraryPapers } from '../../services/library';
+import { listAllLibraryPapers } from '../../services/library';
 import { useLocaleText } from '../../i18n/uiLanguage';
 import { useNotesStore } from '../../stores/useNotesStore';
+import { shouldNotifyExternalNoteChange } from '../../stores/notesSelection.ts';
 import { normalizeNotePaperTarget } from './notePaperTarget';
 import { useTabsStore, type NoteTab } from '../../stores/useTabsStore';
 import type { LiteraturePaper } from '../../types/library';
@@ -828,14 +829,42 @@ export function NotesWorkspace({ workspaceActive = true }: { workspaceActive?: b
     [activeTabId, tabs],
   );
 
-  const activeNote = useMemo(
-    () => {
-      const targetNoteId = activeNoteTab?.noteId ?? activeNoteId;
+  const activeNoteTargetId = activeNoteTab?.noteId ?? activeNoteId;
+  // 搜索/标签过滤会把当前笔记排除在 notes 列表之外；编辑器仍应保持绑定，
+  // 用最近一次加载到的完整记录兜底，而不是退回 notes[0]。
+  const [pinnedActiveNote, setPinnedActiveNote] = useState<Note | null>(null);
+  const activeNote = useMemo(() => {
+    const matched = notes.find((note) => note.id === activeNoteTargetId) ?? null;
 
-      return notes.find((note) => note.id === targetNoteId) ?? notes[0] ?? null;
-    },
-    [activeNoteId, activeNoteTab?.noteId, notes],
-  );
+    if (matched) {
+      return matched;
+    }
+
+    return pinnedActiveNote?.id === activeNoteTargetId ? pinnedActiveNote : null;
+  }, [activeNoteTargetId, notes, pinnedActiveNote]);
+
+  useEffect(() => {
+    const matched = notes.find((note) => note.id === activeNoteTargetId) ?? null;
+
+    if (matched) {
+      setPinnedActiveNote(matched);
+    }
+  }, [activeNoteTargetId, notes]);
+
+  /**
+   * 笔记被外部删除后必须解除绑定：清掉 pin、活动 id 与标签页，
+   * 否则 pin 兜底会让编辑器继续显示已经不存在的笔记。
+   */
+  const handleDeletedNote = useCallback((noteId: string) => {
+    setNoteTabExternalUpdate(noteId, false);
+    setPinnedActiveNote((current) => (current?.id === noteId ? null : current));
+
+    const notesState = useNotesStore.getState();
+    if (notesState.activeNoteId === noteId) {
+      notesState.setActiveNoteId(null);
+    }
+    useTabsStore.getState().closeTab(`note:${noteId}`);
+  }, [setNoteTabExternalUpdate]);
 
   const childrenByParent = useMemo(() => buildFolderChildren(folders), [folders]);
   const notesByFolder = useMemo(() => groupNotesByDirectFolder(notes, folders), [folders, notes]);
@@ -950,7 +979,27 @@ export function NotesWorkspace({ workspaceActive = true }: { workspaceActive?: b
         }
         settings = await updateNotesVaultSettings({ dir });
       }
-      const stats = await syncNotesVaultNow();
+      let stats = await syncNotesVaultNow();
+      if (stats.removalConfirmationRequired) {
+        const pendingRemovals = stats.pendingRemovals ?? 0;
+        const confirmed = await confirmAction({
+          title: '确认清理 vault 文件',
+          description:
+            `本次同步检测到 ${pendingRemovals} 个文件对应的笔记已不存在，数量超过安全阈值。` +
+            '继续会从 vault 删除这些 Markdown 文件（PaperQuay 内笔记不受影响）。',
+          confirmLabel: '删除文件',
+          danger: true,
+        });
+        if (!confirmed) {
+          setVaultMessage(
+            `同步完成：导入 ${stats.imported}、导出 ${stats.exported}；已暂缓清理 ${pendingRemovals} 个文件`,
+          );
+          void loadNotes();
+          void refreshFolders();
+          return;
+        }
+        stats = await syncNotesVaultNow({ confirmRemoval: true });
+      }
       setVaultMessage(
         `同步完成：导入 ${stats.imported}（新建 ${stats.created}）、导出 ${stats.exported}、清理 ${stats.removed}、冲突副本 ${stats.conflicts}`,
       );
@@ -1090,12 +1139,27 @@ export function NotesWorkspace({ workspaceActive = true }: { workspaceActive?: b
     }
   }, [activeNote, updateNoteTabTitle]);
 
+  // 文献候选只用于笔记里的文献引用/锚点跳转。工作区未激活时不预取，
+  // 避免每次启动都为隐藏的 Notes 分页拉全库。
+  const notesPapersLoadedRef = useRef(false);
+
+  useEffect(() => {
+    if (!workspaceActive || notesPapersLoadedRef.current) {
+      return;
+    }
+
+    notesPapersLoadedRef.current = true;
+    void listAllLibraryPapers({ sortBy: 'updatedAt', sortDirection: 'desc' })
+      .then(setPapers)
+      .catch(() => {
+        notesPapersLoadedRef.current = false;
+        setPapers([]);
+      });
+  }, [workspaceActive]);
+
   useEffect(() => {
     void loadNotes();
     void refreshTags();
-    void listLibraryPapers({ limit: 1000, sortBy: 'updatedAt', sortDirection: 'desc' })
-      .then(setPapers)
-      .catch(() => setPapers([]));
   }, [loadNotes, refreshTags]);
 
   useEffect(() => {
@@ -1110,7 +1174,6 @@ export function NotesWorkspace({ workspaceActive = true }: { workspaceActive?: b
     const handleNoteChanged = (event: Event) => {
       const detail = (event as CustomEvent<NoteChangedEventDetail>).detail;
       if (!detail?.noteId) return;
-      const fromThisWorkspaceEditor = detail.sourceId === NOTES_WORKSPACE_EDITOR_SOURCE_ID;
 
       // 文件夹增删改通过复用 NOTE_CHANGED_EVENT 广播（noteId 形如 folder:<id>）。
       if (detail.noteId.startsWith('folder:')) {
@@ -1125,11 +1188,12 @@ export function NotesWorkspace({ workspaceActive = true }: { workspaceActive?: b
         if (isNoteEventRecord(detail.note)) {
           updateNoteTabTitle(detail.note.id, detail.note.title || '未命名笔记');
         }
-        setNoteTabExternalUpdate(detail.noteId, !fromThisWorkspaceEditor);
+        // 「外部更新」标记由当前编辑器在比较版本/签名后通过
+        // onExternalUpdateChange 设置；这里不再把所有同 id 标签一并标脏。
       }
 
       if (detail.action === 'deleted') {
-        setNoteTabExternalUpdate(detail.noteId, false);
+        handleDeletedNote(detail.noteId);
       }
 
       window.setTimeout(() => {
@@ -1140,9 +1204,10 @@ export function NotesWorkspace({ workspaceActive = true }: { workspaceActive?: b
 
     window.addEventListener(NOTE_CHANGED_EVENT, handleNoteChanged);
     return () => window.removeEventListener(NOTE_CHANGED_EVENT, handleNoteChanged);
-  }, [loadNotes, refreshFolders, refreshTags, setNoteTabExternalUpdate, updateNoteTabTitle]);
+  }, [handleDeletedNote, loadNotes, refreshFolders, refreshTags, updateNoteTabTitle]);
 
-  // MCP/外部进程写入笔记：刷新列表，并让打开的编辑器进入现有的“外部更新”横幅流程。
+  // MCP/外部进程写入笔记：刷新列表，并按 noteId 逐个比较版本，只通知真正
+  // 变化的笔记。旧实现把所有打开的标签一律标记为「外部更新」，会产生假冲突。
   useEffect(() => {
     const handleExternalWrite = () => {
       void (async () => {
@@ -1151,20 +1216,27 @@ export function NotesWorkspace({ workspaceActive = true }: { workspaceActive?: b
           refreshTags().catch(() => undefined),
           refreshFolders().catch(() => undefined),
         ]);
+        const loadedNotes = new Map(
+          useNotesStore.getState().notes.map((note) => [note.id, note]),
+        );
         const openTabs = useTabsStore.getState().tabs.filter((tab) => tab.type === 'note');
         for (const tab of openTabs) {
           if (tab.type !== 'note') continue;
-          setNoteTabExternalUpdate(tab.noteId, true);
           try {
             const note = await getNote(tab.noteId);
-            if (note) {
-              emitNoteChanged({
-                noteId: note.id,
-                action: 'updated',
-                note,
-                sourceId: 'external-write',
-              });
+            if (!note) {
+              handleDeletedNote(tab.noteId);
+              continue;
             }
+            const previous = loadedNotes.get(note.id);
+            // 版本未变化（或外部写的是别的论文/笔记）时保持原状。
+            if (!shouldNotifyExternalNoteChange(previous, note)) continue;
+            emitNoteChanged({
+              noteId: note.id,
+              action: 'updated',
+              note,
+              sourceId: 'external-write',
+            });
           } catch {
             // 笔记可能已被外部删除；列表刷新会移除对应条目。
           }
@@ -1174,7 +1246,7 @@ export function NotesWorkspace({ workspaceActive = true }: { workspaceActive?: b
 
     window.addEventListener(EXTERNAL_NOTES_WRITE_EVENT, handleExternalWrite);
     return () => window.removeEventListener(EXTERNAL_NOTES_WRITE_EVENT, handleExternalWrite);
-  }, [loadNotes, refreshFolders, refreshTags, setNoteTabExternalUpdate]);
+  }, [handleDeletedNote, loadNotes, refreshFolders, refreshTags]);
 
   const handleCreateNote = useCallback((targetFolderId: string | null = activeFolderId) => {
     const folderId =

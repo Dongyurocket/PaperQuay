@@ -1,15 +1,19 @@
 import type { WorkspaceItem } from '../types/reader';
+import {
+  buildCachePaths,
+  buildLegacyMineruCachePaths as buildSharedLegacyMineruCachePaths,
+  buildMineruCachePathCandidates as buildSharedMineruCachePathCandidates,
+  buildMineruCachePaths as buildSharedMineruCachePaths,
+  buildTitleMineruCachePaths as buildSharedTitleMineruCachePaths,
+  getMineruJsonPathCandidates as getSharedMineruJsonPathCandidates,
+  getPathSeparator,
+  hashString,
+  joinPath,
+  sanitizePathSegment,
+  type MineruCachePaths,
+} from '../shared/mineruCachePaths.cjs';
 
-export interface MineruCachePaths {
-  directory: string;
-  manifestPath: string;
-  contentJsonPath: string;
-  contentListJsonPath: string;
-  middleJsonPath: string;
-  markdownPath: string;
-  translationsDir: string;
-  summariesDir: string;
-}
+export type { MineruCachePaths } from '../shared/mineruCachePaths.cjs';
 
 export function guessSiblingJsonPath(pdfPath: string): string {
   const separator = pdfPath.includes('\\') ? '\\' : '/';
@@ -39,106 +43,24 @@ export function guessSiblingMarkdownPath(path: string): string {
   return `${directory}${separator}full.md`;
 }
 
-function getPathSeparator(path: string): string {
-  return path.includes('\\') ? '\\' : '/';
-}
-
-function joinPath(basePath: string, ...segments: string[]): string {
-  const separator = getPathSeparator(basePath);
-  const normalizedBase = basePath.replace(/[\\/]+$/, '');
-
-  return [normalizedBase, ...segments.filter(Boolean)].join(separator);
-}
-
-function sanitizePathSegment(value: string): string {
-  const trimmed = value.trim().toLowerCase();
-
-  if (!trimmed) {
-    return 'document';
-  }
-
-  return trimmed
-    .replace(/[<>:"/\\|?*\u0000-\u001f]+/g, '-')
-    .replace(/\s+/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-|-$/g, '')
-    .slice(0, 48) || 'document';
-}
-
-function hashString(value: string): string {
-  let hash = 2166136261;
-
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-
-  return (hash >>> 0).toString(16).padStart(8, '0');
-}
-
-function buildCachePaths(rootDir: string, directoryName: string): MineruCachePaths {
-  const directory = joinPath(rootDir, directoryName);
-  const translationsDir = joinPath(directory, 'translations');
-  const summariesDir = joinPath(directory, 'summaries');
-
-  return {
-    directory,
-    manifestPath: joinPath(directory, 'paper_reader_manifest.json'),
-    contentJsonPath: joinPath(directory, 'content_list_v2.json'),
-    contentListJsonPath: joinPath(directory, 'content_list.json'),
-    middleJsonPath: joinPath(directory, 'middle.json'),
-    markdownPath: joinPath(directory, 'full.md'),
-    translationsDir,
-    summariesDir,
-  };
-}
-
-function stableDocumentKey(item: WorkspaceItem): string {
-  return item.workspaceId || item.itemKey || item.localPdfPath || item.title || 'document';
-}
-
 export function buildMineruCachePaths(rootDir: string, item: WorkspaceItem): MineruCachePaths {
-  const directoryName = `document-${hashString(stableDocumentKey(item))}`;
-
-  return buildCachePaths(rootDir, directoryName);
+  return buildSharedMineruCachePaths(rootDir, item);
 }
 
 export function buildTitleMineruCachePaths(rootDir: string, item: WorkspaceItem): MineruCachePaths {
-  const directoryName = `${sanitizePathSegment(item.title)}-${hashString(item.workspaceId)}`;
-
-  return buildCachePaths(rootDir, directoryName);
+  return buildSharedTitleMineruCachePaths(rootDir, item);
 }
 
 export function buildLegacyMineruCachePaths(rootDir: string, item: WorkspaceItem): MineruCachePaths {
-  const directoryName = `${sanitizePathSegment(item.title)}-${hashString(item.itemKey)}`;
-
-  return buildCachePaths(rootDir, directoryName);
+  return buildSharedLegacyMineruCachePaths(rootDir, item);
 }
 
 export function getMineruJsonPathCandidates(cachePaths: MineruCachePaths): string[] {
-  return [
-    cachePaths.contentJsonPath,
-    cachePaths.contentListJsonPath,
-    cachePaths.middleJsonPath,
-  ];
+  return getSharedMineruJsonPathCandidates(cachePaths);
 }
 
 export function buildMineruCachePathCandidates(rootDir: string, item: WorkspaceItem): MineruCachePaths[] {
-  const candidates = [
-    buildMineruCachePaths(rootDir, item),
-    buildTitleMineruCachePaths(rootDir, item),
-    buildLegacyMineruCachePaths(rootDir, item),
-  ];
-  const seenDirectories = new Set<string>();
-
-  return candidates.filter((candidate) => {
-    if (seenDirectories.has(candidate.directory)) {
-      return false;
-    }
-
-    seenDirectories.add(candidate.directory);
-    return true;
-  });
+  return buildSharedMineruCachePathCandidates(rootDir, item);
 }
 
 export function buildMineruTranslationCachePath(
@@ -216,3 +138,6 @@ export function buildSiblingPath(path: string, fileName: string): string {
 
   return directory ? `${directory}${separator}${fileName}` : fileName;
 }
+
+// buildCachePaths 供只需要目录内标准文件布局的调用方使用（与共享实现一致）。
+export { buildCachePaths };

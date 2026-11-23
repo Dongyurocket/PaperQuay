@@ -30,8 +30,13 @@ const {
 const { UPDATABLE_PAPER_FIELDS } = require('../backend/paperMetadataFields.cjs');
 const { createNoteStore } = require('../backend/noteStore.cjs');
 const { parseMarkdownToTiptap } = require('../../src/shared/markdownToTiptap.cjs');
+const {
+  buildMineruCachePathCandidates,
+  getMineruJsonPathCandidates,
+} = require('../../src/shared/mineruCachePaths.cjs');
 const { desktopRunMarkerState } = require('../backend/desktopRunMarker.cjs');
 const { recordExternalWrite } = require('../backend/externalWriteMarker.cjs');
+const { resolveReaderConfigSecrets } = require('../backend/secretStorage.cjs');
 const { id, now, safeFileName, fileNameFromPath, hashBytes, isPdf } = require('../backend/utils.cjs');
 const {
   addTranslatedPdfAttachment,
@@ -180,15 +185,6 @@ function isRealManagedFilePathSync(filePath, settings = {}) {
 
 const MAX_FIGURE_IMAGE_BYTES = 8 * 1024 * 1024;
 
-function fnv1aHex(value) {
-  let hash = 2166136261;
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return (hash >>> 0).toString(16).padStart(8, '0');
-}
-
 function flattenContentListBlocks(parsed) {
   const output = [];
   const pageCounters = new Map();
@@ -217,6 +213,83 @@ function flattenContentListBlocks(parsed) {
   });
 
   return output;
+}
+
+/**
+ * MCP 侧只需要把三种 MinerU JSON 统一成「页 + 块」序列：
+ * - content_list / content_list_v2：数组，交给 flattenContentListBlocks；
+ * - middle.json：`pdf_info[].para_blocks[]`，块序号按页内顺序，与阅读器的
+ *   `page-<n>-block-<m>` 规则一致。
+ */
+function flattenMineruBlocks(parsed) {
+  if (Array.isArray(parsed)) {
+    return flattenContentListBlocks(parsed);
+  }
+
+  if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.pdf_info)) {
+    return [];
+  }
+
+  const output = [];
+  parsed.pdf_info.forEach((pageInfo, outerIndex) => {
+    if (!pageInfo || typeof pageInfo !== 'object') return;
+    const rawPage = Number(pageInfo.page_idx);
+    const pageIndex = Number.isFinite(rawPage) && rawPage >= 0 ? Math.floor(rawPage) : outerIndex;
+    const paraBlocks = Array.isArray(pageInfo.para_blocks) ? pageInfo.para_blocks : [];
+    paraBlocks.forEach((block, blockIndex) => {
+      if (block && typeof block === 'object') {
+        output.push({ block, pageIndex, blockIndex });
+      }
+    });
+  });
+
+  return output;
+}
+
+/**
+ * 按 paperId + blockId/pageIndex 在 MinerU 缓存中定位块。
+ * 与阅读器共用缓存目录构造器；同时接受 content_list_v2 / content_list /
+ * middle.json 三种 JSON。
+ */
+function locateMineruFigureBlock({ cacheRoot, paperId, paperTitle, blockId, pageIndex }) {
+  const candidateCaches = [];
+  const seenDirectories = new Set();
+
+  for (const item of [
+    { workspaceId: `native-library:${paperId}`, itemKey: paperId, title: paperTitle },
+    { workspaceId: paperId, itemKey: paperId, title: paperTitle },
+  ]) {
+    for (const cachePaths of buildMineruCachePathCandidates(cacheRoot, item)) {
+      if (seenDirectories.has(cachePaths.directory)) continue;
+      seenDirectories.add(cachePaths.directory);
+      candidateCaches.push(cachePaths);
+    }
+  }
+
+  for (const cachePaths of candidateCaches) {
+    for (const jsonPath of getMineruJsonPathCandidates(cachePaths)) {
+      let parsed;
+      try {
+        parsed = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
+      } catch {
+        continue;
+      }
+
+      const blocks = flattenMineruBlocks(parsed);
+      const match = blocks.find((entry) => {
+        const computedId = `page-${entry.pageIndex + 1}-block-${entry.blockIndex + 1}`;
+        if (blockId) return computedId === blockId;
+        return entry.pageIndex === pageIndex
+          && (entry.block.type === 'image' || entry.block.type === 'table');
+      });
+
+      if (match) {
+        return { located: match, cacheDir: cachePaths.directory };
+      }
+    }
+  }
+
+  return { located: null, cacheDir: '' };
 }
 
 function blockCaptionText(block) {
@@ -928,7 +1001,7 @@ class PaperQuayKnowledgeService {
 
       const raw = JSON.parse(fs.readFileSync(this.appPaths.configPath, 'utf8'));
       const settings = raw?.settings ?? {};
-      const secrets = raw?.secrets ?? {};
+      const secrets = resolveReaderConfigSecrets(raw, this.appPaths) ?? {};
       const baseUrl = normalizeEmbeddingBaseUrl(settings.embeddingBaseUrl);
       const model = cleanString(settings.embeddingModel);
       const apiKey = cleanString(secrets.embeddingApiKey);
@@ -2230,47 +2303,13 @@ class PaperQuayKnowledgeService {
     if (!details) throw new Error(`Paper does not exist: ${targetId}`);
 
     const cacheRoot = this.resolveMineruCacheDir();
-    const paperHash = fnv1aHex(targetId);
-    const candidateDirs = [];
-
-    try {
-      const entries = fs.readdirSync(cacheRoot, { withFileTypes: true });
-      for (const entry of entries) {
-        if (!entry.isDirectory()) continue;
-        const lowerName = entry.name.toLowerCase();
-        if (lowerName === `document-${paperHash}` || lowerName.endsWith(`-${paperHash}`)) {
-          candidateDirs.push(path.join(cacheRoot, entry.name));
-        }
-      }
-    } catch {
-      // 未配置缓存目录时继续返回元数据与限制说明。
-    }
-
-    candidateDirs.sort((left, right) => Number(right.includes(`document-${paperHash}`)) - Number(left.includes(`document-${paperHash}`)));
-
-    let located = null;
-    let cacheDir = '';
-    for (const dir of candidateDirs) {
-      const jsonPath = path.join(dir, 'content_list_v2.json');
-      let parsed;
-      try {
-        parsed = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
-      } catch {
-        continue;
-      }
-      const blocks = flattenContentListBlocks(parsed);
-      const match = blocks.find((entry) => {
-        const computedId = `page-${entry.pageIndex + 1}-block-${entry.blockIndex + 1}`;
-        if (wantedBlockId) return computedId === wantedBlockId;
-        return entry.pageIndex === wantedPage
-          && (entry.block.type === 'image' || entry.block.type === 'table');
-      });
-      if (match) {
-        located = match;
-        cacheDir = dir;
-        break;
-      }
-    }
+    const { located, cacheDir } = locateMineruFigureBlock({
+      cacheRoot,
+      paperId: targetId,
+      paperTitle: details.title,
+      blockId: wantedBlockId,
+      pageIndex: wantedPage,
+    });
 
     if (!located) {
       return {
@@ -3085,6 +3124,32 @@ class PaperQuayKnowledgeService {
     };
   }
 
+  /**
+   * MCP 删除文献时同步清理 RAG 索引；否则已删除论文会继续被
+   * search_knowledge_base / read_paper_content 命中。
+   */
+  removeRagIndexes(paperIds) {
+    const ids = [...new Set((Array.isArray(paperIds) ? paperIds : []).map(cleanString).filter(Boolean))];
+    if (ids.length === 0 || !fs.existsSync(this.appPaths.ragDatabasePath)) {
+      return;
+    }
+
+    let ragStore = null;
+    try {
+      const { createRagStore } = require('../backend/ragStore.cjs');
+      ragStore = createRagStore(this.appPaths);
+      for (const paperId of ids) {
+        ragStore.removeDocumentIndex({ documentKey: paperId });
+      }
+    } catch (error) {
+      console.warn('[paperquay-mcp] Failed to remove RAG indexes for deleted papers.', error);
+    } finally {
+      try {
+        ragStore?.close();
+      } catch {}
+    }
+  }
+
   // 删除文献记录；deleteFilePaperIds（或 deleteFiles=true）时删除库内受管且未被共用的附件文件。
   // 受检并行写：应用运行时必须携带 preview_delete_papers 返回的 previewVersion。
   deletePapers({
@@ -3131,6 +3196,7 @@ class PaperQuayKnowledgeService {
         }),
       });
       this.markExternalWrite('library');
+      this.removeRagIndexes(ids);
 
       const filesToDelete = description.files;
       const fileErrors = [];
@@ -3274,6 +3340,7 @@ module.exports = {
   PaperQuayKnowledgeService,
   resolveAppPaths,
   resolveDefaultDataDir,
+  locateMineruFigureBlock,
   // 导出供测试注入 fake execFileSync 验证护栏进程过滤。
   detectDesktopAppRunning,
 };

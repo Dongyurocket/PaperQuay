@@ -105,12 +105,13 @@ async function migrateLibraryStorageDirectory(library, previousStorageDir, nextS
   const targetDir = cleanString(nextStorageDir);
 
   if (!previousDir || !targetDir || isSamePath(previousDir, targetDir)) {
-    return { copiedFiles: 0, updatedAttachments: 0 };
+    return { copiedFiles: 0, updatedAttachments: 0, changedPaperIds: [] };
   }
 
   await fsp.mkdir(targetDir, { recursive: true });
   let copiedFiles = 0;
   let updatedAttachments = 0;
+  const changedPaperIds = new Set();
 
   const canCopyWholeDirectory =
     !isSubPath(previousDir, targetDir) &&
@@ -151,11 +152,12 @@ async function migrateLibraryStorageDirectory(library, previousStorageDir, nextS
         attachment.missing = !(await pathExists(nextPath));
         updatedAttachments += 1;
         paper.updatedAt = now();
+        changedPaperIds.add(paper.id);
       }
     }
   }
 
-  return { copiedFiles, updatedAttachments };
+  return { copiedFiles, updatedAttachments, changedPaperIds: [...changedPaperIds] };
 }
 
 async function migrateTranslatedPdfDirectory(library, previousDir, nextDir, storageDir) {
@@ -163,12 +165,13 @@ async function migrateTranslatedPdfDirectory(library, previousDir, nextDir, stor
   const next = cleanString(nextDir);
 
   if (!prev || !next || isSamePath(prev, next)) {
-    return { copiedFiles: 0, updatedAttachments: 0 };
+    return { copiedFiles: 0, updatedAttachments: 0, changedPaperIds: [] };
   }
 
   await fsp.mkdir(next, { recursive: true });
   let copiedFiles = 0;
   let updatedAttachments = 0;
+  const changedPaperIds = new Set();
 
   for (const paper of library.papers) {
     for (const attachment of paper.attachments ?? []) {
@@ -199,11 +202,12 @@ async function migrateTranslatedPdfDirectory(library, previousDir, nextDir, stor
         attachment.missing = !(await pathExists(nextPath));
         updatedAttachments += 1;
         paper.updatedAt = now();
+        changedPaperIds.add(paper.id);
       }
     }
   }
 
-  return { copiedFiles, updatedAttachments };
+  return { copiedFiles, updatedAttachments, changedPaperIds: [...changedPaperIds] };
 }
 
 function normalizeDoi(value) {
@@ -606,7 +610,24 @@ async function fetchCrossrefReferences(doi, paperId = '') {
 }
 
 function createLibraryCommands(context) {
-  const { appPaths, store } = context;
+  const { appPaths, pathPolicy, ragStore, store } = context;
+
+  /**
+   * storageDir/translatedPdfDir 会成为 pathPolicy 的信任根，不能由渲染层
+   * 直接改成任意目录；新目录必须已通过目录对话框授权（或位于 dataDir 内）。
+   */
+  const assertSettingsPathAllowed = (nextValue, previousValue, mode) => {
+    const next = cleanString(nextValue);
+    const previous = cleanString(previousValue);
+    if (!next || next === previous || !pathPolicy) return;
+
+    const allowed = mode === 'write'
+      ? pathPolicy.isWriteAllowed(next)
+      : pathPolicy.isReadAllowed(next);
+    if (!allowed) {
+      throw new Error(`Settings path is not allowed without a directory picker: ${next}`);
+    }
+  };
 
   const resolvePaperRequest = async (request, library) => {
     if (!['hasPdf', 'hasTranslatedPdf', 'missingFile'].some((key) => typeof request[key] === 'boolean')) {
@@ -635,6 +656,10 @@ function createLibraryCommands(context) {
       const library = store.load();
       const previousStorageDir = library.settings.storageDir;
       const previousTranslatedDir = resolveTranslatedPdfStorageDir(library.settings, appPaths);
+
+      assertSettingsPathAllowed(settings.storageDir, previousStorageDir, 'write');
+      assertSettingsPathAllowed(settings.translatedPdfDir, library.settings.translatedPdfDir, 'write');
+
       library.settings = {
         ...library.settings,
         ...settings,
@@ -642,26 +667,35 @@ function createLibraryCommands(context) {
       };
       const nextStorageDir = library.settings.storageDir;
       const nextTranslatedDir = resolveTranslatedPdfStorageDir(library.settings, appPaths);
+      const changedPaperIds = new Set();
 
       if (nextStorageDir) {
-        await migrateLibraryStorageDirectory(
+        const migration = await migrateLibraryStorageDirectory(
           library,
           previousStorageDir,
           nextStorageDir,
         );
+        for (const paperId of migration.changedPaperIds) changedPaperIds.add(paperId);
         await fsp.mkdir(nextStorageDir, { recursive: true });
       }
 
       if (!isSamePath(previousTranslatedDir, nextTranslatedDir)) {
-        await migrateTranslatedPdfDirectory(
+        const migration = await migrateTranslatedPdfDirectory(
           library,
           previousTranslatedDir,
           nextTranslatedDir,
           nextStorageDir,
         );
+        for (const paperId of migration.changedPaperIds) changedPaperIds.add(paperId);
       }
 
-      await store.save(library);
+      // 只写 library_settings 与被迁移改写过附件路径的文献；不再整库
+      // DELETE + 重插，避免覆盖并发的桌面/MCP 写入。
+      await store.saveSettings(library.settings);
+      for (const paperId of changedPaperIds) {
+        const paper = library.papers.find((item) => item.id === paperId);
+        if (paper) store.savePaper(paper);
+      }
       return library.settings;
     },
 
@@ -748,11 +782,8 @@ function createLibraryCommands(context) {
         }
       }
 
-      library.categories = library.categories.filter((item) => !removeIds.has(item.id));
-      for (const paper of library.papers) {
-        paper.categoryIds = paper.categoryIds.filter((id) => !removeIds.has(id));
-      }
-      await store.save(library);
+      // 分类删除由外键级联清理 paper_categories；只删目标分类，不重写整库。
+      store.deleteCategories({ categoryIds: [...removeIds] });
     },
 
     async library_list_papers({ request = {} }) {
@@ -808,10 +839,13 @@ function createLibraryCommands(context) {
     async library_reorder_papers({ request }) {
       const library = store.load();
       const order = new Map((request.paperIds ?? []).map((paperId, index) => [paperId, index]));
+      const updates = [];
       for (const paper of library.papers) {
-        if (order.has(paper.id)) paper.sortOrder = order.get(paper.id);
+        if (order.has(paper.id)) {
+          updates.push({ paperId: paper.id, sortOrder: order.get(paper.id) });
+        }
       }
-      await store.save(library);
+      store.savePaperSortOrders(updates);
     },
 
     async library_import_pdfs({ request }) {
@@ -825,11 +859,16 @@ function createLibraryCommands(context) {
       await fsp.mkdir(storageDir, { recursive: true });
 
       for (const sourcePath of request.paths ?? []) {
+        const normalizedSourcePath = path.resolve(cleanString(sourcePath));
         try {
-          if (!isPdf(sourcePath)) throw new Error('Only PDF files can be imported');
-          await ensureFile(sourcePath);
+          if (!isPdf(normalizedSourcePath)) throw new Error('Only PDF files can be imported');
+          // 只允许导入文库/缓存/Zotero 目录或用户通过对话框、拖放显式选择的 PDF。
+          if (pathPolicy && !pathPolicy.isReadAllowed(normalizedSourcePath)) {
+            throw new Error(`Import source is outside the allowed paths: ${normalizedSourcePath}`);
+          }
+          await ensureFile(normalizedSourcePath);
 
-          const bytes = await fsp.readFile(sourcePath);
+          const bytes = await fsp.readFile(normalizedSourcePath);
           const contentHash = hashBytes(bytes);
           const duplicate = library.papers.find((paper) =>
             paper.attachments.some((attachment) => attachment.contentHash === contentHash),
@@ -842,12 +881,12 @@ function createLibraryCommands(context) {
 
           const metadata = request.metadata?.[sourcePath] ?? {};
           const paperId = id('paper');
-          const originalFileName = safeFileName(fileNameFromPath(sourcePath));
+          const originalFileName = safeFileName(fileNameFromPath(normalizedSourcePath));
           const attachmentId = id('att');
           const firstAuthor = Array.isArray(metadata.authors) ? metadata.authors[0] : '';
           const author = typeof firstAuthor === 'string' ? firstAuthor : firstAuthor?.name || '';
           const fileName = originalFileName;
-          let storedPath = sourcePath;
+          let storedPath = normalizedSourcePath;
           let relativePath = null;
           const importMode = request.importMode || library.settings.importMode;
 
@@ -866,8 +905,8 @@ function createLibraryCommands(context) {
                 });
             storedPath = path.join(storageDir, storedName);
             if (await pathExists(storedPath)) throw new Error(`PDF destination already exists: ${storedPath}`);
-            await fsp.copyFile(sourcePath, storedPath, require('node:fs').constants.COPYFILE_EXCL);
-            if (importMode === 'move') moveSourcesAfterCommit.push(sourcePath);
+            await fsp.copyFile(normalizedSourcePath, storedPath, require('node:fs').constants.COPYFILE_EXCL);
+            if (importMode === 'move') moveSourcesAfterCommit.push(normalizedSourcePath);
             relativePath = path.relative(storageDir, storedPath);
           }
 
@@ -918,7 +957,7 @@ function createLibraryCommands(context) {
               id: attachmentId,
               paperId,
               kind: 'pdf',
-              originalPath: sourcePath,
+              originalPath: normalizedSourcePath,
               storedPath,
               relativePath,
               language: null,
@@ -937,7 +976,12 @@ function createLibraryCommands(context) {
         }
       }
 
-      await store.save(library);
+      // 只插入本次新增的文献；已有记录与设置保持不动。
+      for (const result of results) {
+        if (result.status === 'imported' && result.paper) {
+          store.savePaper(result.paper);
+        }
+      }
       for (const sourcePath of moveSourcesAfterCommit) {
         await fsp.rm(sourcePath, { force: true }).catch((error) => {
           console.warn(`[PaperQuay] Imported file is stored but the original could not be removed: ${sourcePath}`, error);
@@ -1084,6 +1128,18 @@ function createLibraryCommands(context) {
       }
 
       store.deletePaper(request.paperId);
+
+      // 同步清理 RAG 索引；否则已删除论文会继续出现在检索结果中。
+      if (ragStore && typeof ragStore.removeDocumentIndex === 'function') {
+        try {
+          await ragStore.removeDocumentIndex({ documentKey: request.paperId });
+        } catch (error) {
+          console.warn(
+            `[PaperQuay] Failed to remove the RAG index for deleted paper ${request.paperId}.`,
+            error,
+          );
+        }
+      }
     },
 
     async library_relocate_attachment({ request }) {
@@ -1091,17 +1147,25 @@ function createLibraryCommands(context) {
       const paper = paperId ? store.getPaper(paperId) : null;
       if (!paper) throw new Error('Attachment does not exist');
 
+      const newPath = path.resolve(cleanString(request.newPath));
+      // 附件表是读/写权限的信任锚：只能指向用户已授权的 PDF，
+      // 否则一次 relocate 就能把任意文件变成可读附件。
+      if (!isPdf(newPath)) throw new Error('Only PDF attachments can be relocated');
+      if (pathPolicy && !pathPolicy.isReadAllowed(newPath)) {
+        throw new Error(`Relocating to this path is not allowed: ${newPath}`);
+      }
+      await ensureFile(newPath);
+
       const attachment = paper.attachments.find((item) => item.id === request.attachmentId);
-      await ensureFile(request.newPath);
-      const stat = await fsp.stat(request.newPath);
-      attachment.storedPath = request.newPath;
+      const stat = await fsp.stat(newPath);
+      attachment.storedPath = newPath;
       const storageDir = cleanString(store.loadSettings().storageDir);
-      attachment.relativePath = storageDir && isSubPath(storageDir, request.newPath)
-        ? path.relative(storageDir, request.newPath).replace(/\\/g, '/')
+      attachment.relativePath = storageDir && isSubPath(storageDir, newPath)
+        ? path.relative(storageDir, newPath).replace(/\\/g, '/')
         : null;
-      attachment.fileName = fileNameFromPath(request.newPath);
+      attachment.fileName = fileNameFromPath(newPath);
       attachment.fileSize = stat.size;
-      attachment.contentHash = await hashFile(request.newPath);
+      attachment.contentHash = await hashFile(newPath);
       attachment.missing = false;
       paper.updatedAt = now();
 
@@ -1117,10 +1181,16 @@ function createLibraryCommands(context) {
       const paper = store.getPaper(request.paperId);
       if (!paper) throw new Error('Paper does not exist');
 
+      const sourcePath = path.resolve(cleanString(request.sourcePath));
+      if (!isPdf(sourcePath)) throw new Error('Only PDF attachments can be added');
+      if (pathPolicy && !pathPolicy.isReadAllowed(sourcePath)) {
+        throw new Error(`Adding this attachment path is not allowed: ${sourcePath}`);
+      }
+
       const settings = store.loadSettings();
       await addTranslatedPdfAttachment({
         paper,
-        sourcePath: request.sourcePath,
+        sourcePath,
         kind: request.kind,
         language: request.language,
         settings,

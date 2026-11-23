@@ -1,14 +1,16 @@
 const fs = require('node:fs');
 const { embedTexts } = require('./utils.cjs');
 const { chunkNote, noteSignature } = require('./noteSearch.cjs');
+const { resolveReaderConfigSecrets } = require('./secretStorage.cjs');
 
 function resolveNoteEmbedding(appPaths) {
   try {
     const raw = JSON.parse(fs.readFileSync(appPaths.configPath, 'utf8'));
     const settings = raw.settings || {};
+    const secrets = resolveReaderConfigSecrets(raw, appPaths) || {};
     const baseUrl = String(settings.embeddingBaseUrl || '').trim().replace(/\/embeddings\/?$/i, '').replace(/\/+$/, '');
     const model = String(settings.embeddingModel || '').trim();
-    const apiKey = String(raw.secrets?.embeddingApiKey || '').trim();
+    const apiKey = String(secrets.embeddingApiKey || '').trim();
     if (!baseUrl || !model || !apiKey) return null;
     return {
       baseUrl: /\/v\d+$/i.test(baseUrl) ? baseUrl : `${baseUrl}/v1`, model, apiKey,
