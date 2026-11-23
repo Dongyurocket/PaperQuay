@@ -292,8 +292,8 @@ export default function LiteratureCategorySidebar({
               : selectedCategoryId === category.id
               ? 'bg-[var(--pq-accent-soft)] text-[var(--pq-accent)] shadow-[0_8px_20px_var(--pq-accent-shadow)] ring-1 ring-[var(--pq-accent-ring)]'
               : category.isSystem
-                ? 'text-[var(--pq-text)] hover:bg-white/70 dark:hover:bg-white/8'
-                : 'text-[var(--pq-text-muted)] hover:bg-white/70 hover:text-[var(--pq-text)] dark:hover:bg-white/8',
+                ? 'text-[var(--pq-text)] hover:bg-[var(--pq-hover)]'
+                : 'text-[var(--pq-text-muted)] hover:bg-[var(--pq-hover)] hover:text-[var(--pq-text)]',
           )}
           style={{ paddingLeft: `${12 + category.depth * 18}px` }}
           aria-expanded={hasChildren ? !collapsed : undefined}
@@ -316,8 +316,8 @@ export default function LiteratureCategorySidebar({
                 }}
                 title={collapsed ? l('展开分类', 'Expand category') : l('折叠分类', 'Collapse category')}
                 className={clsx(
-                  'inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-lg transition hover:bg-black/5 dark:hover:bg-white/10',
-                  selectedCategoryId === category.id ? 'text-white' : 'text-[var(--pq-text-faint)] dark:text-[#8d8d8d]',
+                  'inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-lg transition hover:bg-[var(--pq-hover)]',
+                  selectedCategoryId === category.id ? 'text-[var(--pq-accent)]' : 'text-[var(--pq-text-faint)]',
                 )}
               >
                 <ChevronRight
@@ -335,8 +335,8 @@ export default function LiteratureCategorySidebar({
             className={clsx(
               'ml-2 shrink-0 rounded-full px-2 py-0.5 text-[11px]',
               selectedCategoryId === category.id
-                ? 'bg-white/75 text-[var(--pq-accent)] dark:bg-white/14'
-                : 'bg-white/62 text-[var(--pq-text-faint)] dark:bg-white/8',
+                ? 'bg-[var(--pq-surface-1)] text-[var(--pq-accent)]'
+                : 'bg-[var(--pq-surface-2)] text-[var(--pq-text-faint)]',
             )}
           >
             {category.paperCount}
@@ -355,17 +355,17 @@ export default function LiteratureCategorySidebar({
       <div className="pq-toolbar px-3.5 py-3">
         <div className="flex items-center justify-between">
           <div>
-            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#8a8f94] dark:text-[#a0a0a0]">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--pq-text-faint)]">
               PaperQuay
             </div>
-            <div className="mt-0.5 text-base font-semibold tracking-tight text-[#202124] dark:text-[#e8e8e8]">
+            <div className="mt-0.5 text-base font-semibold tracking-tight text-[var(--pq-text)]">
               {l('本地文库', 'Local Library')}
             </div>
           </div>
           <button
             type="button"
             onClick={() => onCreateCategory(null)}
-            className="pq-icon-button h-8 w-8 border border-[var(--pq-border)] bg-white/65 dark:bg-white/6"
+            className="pq-icon-button h-8 w-8 border border-[var(--pq-border)] bg-white/65 dark:bg-white/5"
             title={l('新建分类', 'New Category')}
           >
             <FolderPlus className="h-4 w-4" strokeWidth={1.9} />
@@ -389,7 +389,7 @@ export default function LiteratureCategorySidebar({
           }}
           onDrop={handleRootDrop}
           onContextMenu={(event) => openContextMenu(event, null)}
-          className="mb-2 rounded-xl border border-dashed border-[var(--pq-border)] bg-white/32 px-2.5 py-2 text-xs text-[var(--pq-text-muted)] transition hover:border-[var(--pq-accent-border-strong)] hover:bg-[var(--pq-accent-soft)] hover:text-[var(--pq-accent)]"
+          className="mb-2 rounded-xl border border-dashed border-[var(--pq-border)] bg-[var(--pq-surface-2)] px-2.5 py-2 text-xs text-[var(--pq-text-muted)] transition hover:border-[var(--pq-accent-border-strong)] hover:bg-[var(--pq-accent-soft)] hover:text-[var(--pq-accent)]"
         >
           {l('拖动分类到这里可移到顶层；右键可新建顶层分类。', 'Drop a category here to move it to the root level. Right-click to create a root category.')}
         </div>

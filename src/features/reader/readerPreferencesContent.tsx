@@ -830,7 +830,7 @@ export function ReaderPreferencesContent({
                 <button
                   type="button"
                   onClick={() => setShowMineruTokens((prev) => !prev)}
-                  className="absolute right-2.5 top-2.5 rounded-lg p-1.5 text-[var(--pq-text-faint)] hover:bg-slate-200/60 hover:text-[var(--pq-text-muted)] dark:text-[var(--pq-text-faint)] dark:hover:bg-white/10 dark:hover:text-slate-200 transition"
+                  className="absolute right-2.5 top-2.5 rounded-lg p-1.5 text-[var(--pq-text-faint)] hover:bg-[var(--pq-hover)] hover:text-[var(--pq-text-muted)] transition"
                   title={showMineruTokens ? l('隐藏 API Key', 'Hide API Keys') : l('显示 API Key', 'Show API Keys')}
                   aria-label={showMineruTokens ? l('隐藏 API Key', 'Hide API Keys') : l('显示 API Key', 'Show API Keys')}
                 >
@@ -947,7 +947,7 @@ export function ReaderPreferencesContent({
           >
             <div className="space-y-3">
               <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_140px]">
-                <div className="rounded-2xl border border-[var(--pq-border)] bg-white px-4 py-3">
+                <div className="rounded-2xl border border-[var(--pq-border)] bg-[var(--pq-surface-1)] px-4 py-3">
                   <div className="text-sm font-medium text-[var(--pq-text)]">
                     {l('MinerU 批处理并发数', 'MinerU Batch Concurrency')}
                   </div>
@@ -996,7 +996,7 @@ export function ReaderPreferencesContent({
                   <button
                     type="button"
                     onClick={onToggleBatchMineruPause}
-                    className="rounded-xl border border-[var(--pq-border)] bg-white px-4 py-2 text-sm text-[var(--pq-text-muted)] transition hover:bg-[var(--pq-surface-2)]"
+                    className="rounded-xl border border-[var(--pq-border)] bg-[var(--pq-surface-1)] px-4 py-2 text-sm text-[var(--pq-text-muted)] transition hover:bg-[var(--pq-surface-2)]"
                   >
                     {batchMineruPaused ? l('继续', 'Resume') : l('暂停', 'Pause')}
                   </button>
@@ -1255,7 +1255,7 @@ export function ReaderPreferencesContent({
               </div>
             </div>
 
-            <div className="rounded-2xl border border-[var(--pq-border)] bg-slate-50/70 px-3 py-2 text-xs leading-5 text-[var(--pq-text-muted)]">
+            <div className="rounded-2xl border border-[var(--pq-border)] bg-[var(--pq-surface-2)] px-3 py-2 text-xs leading-5 text-[var(--pq-text-muted)]">
               {l(
                 '整篇翻译会按结构块分批调用模型，并将结果缓存到当前文档会话中。',
                 'Full-document translation is executed in batches by structured blocks and cached in the current document session.',
@@ -1308,9 +1308,9 @@ export function ReaderPreferencesContent({
                 onClick={() => (translating ? onCancelTranslate?.() : onTranslate?.())}
                 disabled={translating ? !canCancelTranslate : !canTriggerTranslate}
                 className={clsx(
-                  'rounded-xl px-4 py-2 text-sm font-medium text-white transition disabled:opacity-60',
+                  'rounded-xl px-4 py-2 text-sm font-medium transition disabled:opacity-60',
                   translating
-                    ? 'bg-[var(--pq-danger-button-bg)] hover:bg-[var(--pq-danger-button-bg-hover)]'
+                    ? 'bg-[var(--pq-danger-button-bg)] text-[var(--pq-danger-button-text)] hover:bg-[var(--pq-danger-button-bg-hover)]'
                     : 'bg-[var(--pq-accent-button-bg)] text-[var(--pq-accent-button-text)] hover:bg-[var(--pq-accent-button-bg-hover)]',
                 )}
               >
@@ -1406,7 +1406,7 @@ export function ReaderPreferencesContent({
               'Decide whether overview generation should prefer PDF text or MinerU Markdown.',
             )}
           >
-            <div className="rounded-2xl border border-[var(--pq-border)] bg-slate-50/80 p-3">
+            <div className="rounded-2xl border border-[var(--pq-border)] bg-[var(--pq-surface-2)] p-3">
               <div className="text-xs font-medium uppercase tracking-[0.14em] text-[var(--pq-text-faint)]">
                 {l('当前概览模型', 'Current Overview Preset')}
               </div>
@@ -1431,7 +1431,7 @@ export function ReaderPreferencesContent({
                     className={
                       settings.summarySourceMode === option.value
                         ? 'rounded-2xl border border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-[var(--pq-accent-bg)] px-4 py-3 text-left transition'
-                        : 'rounded-2xl border border-[var(--pq-border)] bg-slate-50/70 px-4 py-3 text-left transition hover:bg-[var(--pq-surface-2)]'
+                        : 'rounded-2xl border border-[var(--pq-border)] bg-[var(--pq-surface-2)] px-4 py-3 text-left transition hover:bg-[var(--pq-surface-3)]'
                     }
                   >
                     <div className="text-sm font-medium text-[var(--pq-text)]">{option.label}</div>
@@ -1516,7 +1516,7 @@ export function ReaderPreferencesContent({
                   className={
                     settings.qaSourceMode === option.value
                       ? 'rounded-2xl border border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-[var(--pq-accent-bg)] px-4 py-3 text-left text-[var(--pq-accent)] transition'
-                      : 'rounded-2xl border border-[var(--pq-border)] bg-[var(--pq-surface-2)] px-4 py-3 text-left text-[var(--pq-text-muted)] transition hover:border-[var(--pq-border-strong)] hover:bg-white'
+                      : 'rounded-2xl border border-[var(--pq-border)] bg-[var(--pq-surface-2)] px-4 py-3 text-left text-[var(--pq-text-muted)] transition hover:border-[var(--pq-border-strong)] hover:bg-[var(--pq-surface-1)]'
                   }
                 >
                   <div className="text-sm font-medium">{option.label}</div>
@@ -1543,7 +1543,7 @@ export function ReaderPreferencesContent({
                 checked={settings.localRagEnabled}
                 onChange={(checked) => onSettingChange('localRagEnabled', checked)}
               />
-              <div className="rounded-2xl border border-[var(--pq-border)] bg-slate-50/80 px-3 py-2 text-xs leading-5 text-[var(--pq-text-muted)]">
+              <div className="rounded-2xl border border-[var(--pq-border)] bg-[var(--pq-surface-2)] px-3 py-2 text-xs leading-5 text-[var(--pq-text-muted)]">
                 {l(
                   'Embedding 模型请在“AI 模型”分区配置；这里仅控制检索策略和 Top-K 检索块数。',
                   'Configure the embedding model in the AI Models section. This panel controls only retrieval strategy and Top-K retrieved blocks.',
@@ -1563,7 +1563,7 @@ export function ReaderPreferencesContent({
                         className={
                           settings.ragSourceMode === option.value
                             ? 'rounded-2xl border border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-[var(--pq-accent-bg)] px-4 py-3 text-left text-[var(--pq-accent)] transition'
-                            : 'rounded-2xl border border-[var(--pq-border)] bg-[var(--pq-surface-2)] px-4 py-3 text-left text-[var(--pq-text-muted)] transition hover:border-[var(--pq-border-strong)] hover:bg-white'
+                            : 'rounded-2xl border border-[var(--pq-border)] bg-[var(--pq-surface-2)] px-4 py-3 text-left text-[var(--pq-text-muted)] transition hover:border-[var(--pq-border-strong)] hover:bg-[var(--pq-surface-1)]'
                         }
                       >
                         <div className="text-sm font-medium">{option.label}</div>
@@ -1597,7 +1597,7 @@ export function ReaderPreferencesContent({
                 </div>
               </div>
               {settings.localRagEnabled ? (
-                <div className="space-y-2 rounded-2xl border border-[var(--pq-border)] bg-white/60 px-3 py-3">
+                <div className="space-y-2 rounded-2xl border border-[var(--pq-border)] bg-[var(--pq-surface-2)] px-3 py-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="text-xs font-medium text-[var(--pq-text-muted)]">
                       {l('知识库索引管理', 'Knowledge Base Indexing')}
@@ -1636,7 +1636,7 @@ export function ReaderPreferencesContent({
                       <button
                         type="button"
                         onClick={onToggleRagIndexPause}
-                        className="rounded-xl border border-[var(--pq-border)] bg-white px-4 py-2 text-sm text-[var(--pq-text-muted)] transition hover:bg-[var(--pq-surface-2)]"
+                        className="rounded-xl border border-[var(--pq-border)] bg-[var(--pq-surface-1)] px-4 py-2 text-sm text-[var(--pq-text-muted)] transition hover:bg-[var(--pq-surface-2)]"
                       >
                         {ragIndexPaused ? l('继续', 'Resume') : l('暂停', 'Pause')}
                       </button>
@@ -1695,7 +1695,7 @@ export function ReaderPreferencesContent({
                   <button
                     type="button"
                     onClick={onToggleBatchSummaryPause}
-                    className="rounded-xl border border-[var(--pq-border)] bg-white px-4 py-2 text-sm text-[var(--pq-text-muted)] transition hover:bg-[var(--pq-surface-2)]"
+                    className="rounded-xl border border-[var(--pq-border)] bg-[var(--pq-surface-1)] px-4 py-2 text-sm text-[var(--pq-text-muted)] transition hover:bg-[var(--pq-surface-2)]"
                   >
                     {batchSummaryPaused ? l('继续', 'Resume') : l('暂停', 'Pause')}
                   </button>

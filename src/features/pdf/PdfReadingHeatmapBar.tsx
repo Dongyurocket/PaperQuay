@@ -88,7 +88,7 @@ export function PdfReadingHeatmapBar({
 
   return (
     <div className="absolute inset-x-3 bottom-3 z-20 pointer-events-none">
-      <div className="rounded-xl border border-slate-200/80 bg-white/88 px-3 py-2 shadow-[0_14px_34px_rgba(15,23,42,0.10)] backdrop-blur-xl dark:border-white/10 dark:bg-[var(--pq-sidebar)] dark:shadow-[0_14px_34px_rgba(0,0,0,0.28)]">
+      <div className="rounded-xl border border-[var(--pq-border)] bg-[var(--pq-bg-elevated)] px-3 py-2 shadow-[var(--pq-shadow-float)] backdrop-blur-xl">
         <div className="mb-1.5 flex items-center justify-between gap-3 text-[11px] font-medium text-[var(--pq-text-muted)] dark:text-[var(--pq-text-faint)]">
           <span>{label}</span>
           <span>
@@ -159,11 +159,11 @@ export function PdfReadingHeatmapBar({
             </>
           ) : null}
           <div
-            className="absolute inset-y-1.5 w-px -translate-x-1/2 bg-slate-900 shadow-[0_0_0_1px_rgba(255,255,255,0.7)] dark:bg-white"
+            className="absolute inset-y-1.5 w-px -translate-x-1/2 bg-[var(--pq-text)] shadow-[var(--pq-shadow-soft)]"
             style={{ left: currentLeft }}
           />
           <div
-            className="absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-slate-900 shadow-[0_4px_12px_rgba(15,23,42,0.28)] transition group-hover:scale-110 dark:bg-white"
+            className="absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[var(--pq-surface-1)] bg-[var(--pq-text)] shadow-[var(--pq-shadow-float)] transition group-hover:scale-110"
             style={{ left: currentLeft }}
           />
         </button>

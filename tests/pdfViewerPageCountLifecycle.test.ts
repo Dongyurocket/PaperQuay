@@ -111,7 +111,7 @@ class Lifecycle {
     });
     for (const ref of this.hosts.keys()) if (!mountedRefs.has(ref)) (ref as any).current = null;
     const pending = this.hooks.filter((hook) => hook.pending);
-    for (const hook of pending) { hook.cleanup?.(); hook.pending = false; }
+    for (const hook of pending) { (hook.cleanup as (() => void) | undefined)?.(); hook.pending = false; }
     for (const hook of pending) hook.cleanup = hook.effect?.();
   }
 
@@ -131,7 +131,7 @@ class Lifecycle {
 
   unmount() {
     this.mounted = false;
-    for (const hook of this.hooks) hook.cleanup?.();
+    for (const hook of this.hooks) (hook.cleanup as (() => void) | undefined)?.();
   }
 
   get pageCount() {

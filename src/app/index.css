@@ -78,6 +78,13 @@
   --pq-bg-elevated: rgba(255, 255, 255, 0.86);
   --pq-bg-solid: var(--pq-surface-1);
   --pq-bg-subtle: var(--pq-bg-secondary);
+  /* 遮罩层：不要用 bg-slate-950/62 这类非 5 倍数透明度——Tailwind 不会为
+     它生成 CSS，浅色主题下遮罩会完全消失。 */
+  --pq-overlay-soft: rgba(2, 6, 23, 0.28);
+  --pq-overlay-strong: rgba(2, 6, 23, 0.62);
+  /* 窗口关闭按钮：沿用 Windows 原生标题栏的关闭色，深浅主题一致。 */
+  --pq-window-close-bg: #e81123;
+  --pq-window-close-text: #ffffff;
   font-family:
     ui-sans-serif,
     system-ui,
@@ -164,6 +171,10 @@
   --pq-bg-elevated: rgba(26, 26, 26, 0.88);
   --pq-bg-solid: var(--pq-surface-1);
   --pq-bg-subtle: var(--pq-surface-2);
+  --pq-overlay-soft: rgba(0, 0, 0, 0.45);
+  --pq-overlay-strong: rgba(0, 0, 0, 0.7);
+  --pq-window-close-bg: #e81123;
+  --pq-window-close-text: #ffffff;
   background: var(--pq-bg-primary);
 }
 
@@ -241,21 +252,33 @@ textarea,
 
 /* 键盘焦点可见：此前只有 3 个文件零散写了 focus-visible，大部分控件（图标按钮、导航、列表行）
    用键盘 Tab 过去时没有任何视觉反馈。这里统一给可聚焦元素补一圈使用 accent 的焦点环；
-   已自带 ring 的元素通过 .pq-focus-ring-reset 或后续自定义 class 覆盖。 */
+   已自带 ring 的元素通过 .pq-focus-ring-reset 或后续自定义 class 覆盖。
+   注意：全局规则不改 border-radius（曾把每个聚焦元素的几何形状改掉，见 D7-5）。 */
 :focus-visible {
   outline: 2px solid var(--pq-accent);
   outline-offset: 2px;
-  border-radius: 4px;
 }
 
-/* 输入类控件用自身边框/阴影表达焦点，不再叠 outline。 */
+/* 只有自带焦点视觉的包装控件才隐藏原生 outline（E4）。
+   此前这里连裸 input/textarea/select 一起 outline:none，导致 35 个原生控件
+   （复选框、滑块、文件/颜色选择器、普通文本框）完全没有焦点提示。 */
 .pq-input:focus-visible,
+.pq-input input:focus-visible,
+.pq-input textarea:focus-visible,
+.pq-input select:focus-visible,
 .pq-chat-composer:focus-visible,
+.pq-chat-composer input:focus-visible,
+.pq-chat-composer textarea:focus-visible {
+  outline: none;
+}
+
+/* 裸表单控件保留可见焦点环。 */
 input:focus-visible,
 textarea:focus-visible,
 select:focus-visible,
 [contenteditable='true']:focus-visible {
-  outline: none;
+  outline: 2px solid var(--pq-accent);
+  outline-offset: 1px;
 }
 
 /* 对话框/浮层面板自身接收焦点时不应出现焦点环。 */
@@ -456,7 +479,8 @@ select:focus-visible,
 .pq-input:focus {
   border-color: var(--pq-accent);
   background: var(--pq-surface);
-  box-shadow: 0 0 0 3px var(--pq-focus-ring);
+  /* 实心 accent 环（约 3.9:1），此前 10% accent 仅 1.13:1（E4）。 */
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--pq-accent) 45%, transparent);
 }
 
 .pq-input::placeholder,

@@ -553,6 +553,8 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
     perspectiveEdgeTypes('mixed'),
   );
   const [embeddingMinSimilarity, setEmbeddingMinSimilarity] = useState(0.82);
+  // S5：相似度滑杆连续拖动时每次都请求后端会打满主进程；防抖后再触发图谱重建。
+  const [debouncedEmbeddingMinSimilarity, setDebouncedEmbeddingMinSimilarity] = useState(0.82);
   const [relationLabel, setRelationLabel] = useState('related');
   const [relationDescription, setRelationDescription] = useState('');
   const [relationWorking, setRelationWorking] = useState(false);
@@ -683,6 +685,11 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
   }, [search]);
 
   useEffect(() => {
+    const handle = window.setTimeout(() => setDebouncedEmbeddingMinSimilarity(embeddingMinSimilarity), 260);
+    return () => window.clearTimeout(handle);
+  }, [embeddingMinSimilarity]);
+
+  useEffect(() => {
     let cancelled = false;
     let unsubscribe: (() => void) | null = null;
 
@@ -724,7 +731,7 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
           includeReferences: enabledEdgeTypes.paper_cites_paper,
           includeCoAuthors: enabledEdgeTypes.co_author,
           includeCustomRelations: enabledEdgeTypes.custom_relation,
-          embeddingMinSimilarity,
+          embeddingMinSimilarity: debouncedEmbeddingMinSimilarity,
           embeddingEdgeLimit: 120,
         });
 
@@ -756,7 +763,7 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
   }, [
     workspaceActive,
     debouncedSearch,
-    embeddingMinSimilarity,
+    debouncedEmbeddingMinSimilarity,
     enabledEdgeTypes.custom_relation,
     enabledEdgeTypes.co_author,
     enabledEdgeTypes.paper_cites_paper,

@@ -69,8 +69,7 @@ test('win32: no PaperQuay.exe process at all means the desktop app is not runnin
 
 test('win32: tasklist failure is reported as unknown instead of blocking writes', () => {
   const exec = () => {
-    const error = new Error('spawn tasklist ENOENT');
-    error.code = 'ENOENT';
+    const error = Object.assign(new Error('spawn tasklist ENOENT'), { code: 'ENOENT' });
     throw error;
   };
   const result = detectDesktopAppRunning({ execFileSync: exec, selfPid: SELF_PID, platform: 'win32' });
@@ -94,8 +93,7 @@ test('linux: pgrep output with another PaperQuay process still blocks writes', (
 
 test('linux: pgrep exit code 1 (no match) means not running', () => {
   const exec = () => {
-    const error = new Error('Command failed: pgrep -x PaperQuay');
-    error.status = 1;
+    const error = Object.assign(new Error('Command failed: pgrep -x PaperQuay'), { status: 1 });
     throw error;
   };
   const result = detectDesktopAppRunning({ execFileSync: exec, selfPid: SELF_PID, platform: 'linux' });

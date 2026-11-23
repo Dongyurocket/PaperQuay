@@ -38,11 +38,11 @@ export default function LiteratureReadingTimeChart({
     <section className="pq-card p-4">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--pq-text-faint)] dark:text-[#8d8d8d]">
+          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--pq-text-faint)] dark:text-[var(--pq-text-faint)]">
             <Clock3 className="h-3.5 w-3.5" strokeWidth={2} />
             {l('阅读时间图', 'Reading Time')}
           </div>
-          <div className="mt-2 text-2xl font-semibold tabular-nums text-[var(--pq-text)] dark:text-[#f3f3f3]">
+          <div className="mt-2 text-2xl font-semibold tabular-nums text-[var(--pq-text)] dark:text-[var(--pq-text)]">
             {formatReadingDuration(totalMs)}
           </div>
         </div>
@@ -51,7 +51,7 @@ export default function LiteratureReadingTimeChart({
         </div>
       </div>
 
-      <div className="mt-4 flex h-28 items-end gap-1.5 rounded-xl border border-[var(--pq-border)] bg-white/54 px-3 py-3 dark:bg-white/5">
+      <div className="mt-4 flex h-28 items-end gap-1.5 rounded-xl border border-[var(--pq-border)] bg-white/55 px-3 py-3 dark:bg-white/5">
         {bars.map((value, index) => {
           const ratio = maxBarMs > 0 ? value / maxBarMs : 0;
           const height = hasReadingTime ? Math.max(6, Math.round(ratio * 92)) : 4;
@@ -78,18 +78,18 @@ export default function LiteratureReadingTimeChart({
 
       <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
         <div className="rounded-lg border border-[var(--pq-border)] bg-white/50 px-3 py-2 dark:bg-white/5">
-          <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--pq-text-faint)] dark:text-[#8d8d8d]">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--pq-text-faint)] dark:text-[var(--pq-text-faint)]">
             {l('活跃区段', 'Active Segments')}
           </div>
-          <div className="mt-1 font-semibold tabular-nums text-[var(--pq-text-muted)] dark:text-[#e0e0e0]">
+          <div className="mt-1 font-semibold tabular-nums text-[var(--pq-text-muted)] dark:text-[var(--pq-text-muted)]">
             {activeBarCount}/{READING_TIME_CHART_BAR_COUNT}
           </div>
         </div>
         <div className="rounded-lg border border-[var(--pq-border)] bg-white/50 px-3 py-2 dark:bg-white/5">
-          <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--pq-text-faint)] dark:text-[#8d8d8d]">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--pq-text-faint)] dark:text-[var(--pq-text-faint)]">
             {l('最后阅读', 'Last Read')}
           </div>
-          <div className="mt-1 truncate font-semibold text-[var(--pq-text-muted)] dark:text-[#e0e0e0]">
+          <div className="mt-1 truncate font-semibold text-[var(--pq-text-muted)] dark:text-[var(--pq-text-muted)]">
             {formatLastReadTime(heatmap?.updatedAt ?? 0, l)}
           </div>
         </div>

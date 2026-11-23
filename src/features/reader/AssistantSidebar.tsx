@@ -1,3 +1,4 @@
+import { Suspense, lazy, useEffect, useState } from 'react';
 import {
   ExternalLink,
   FileText,
@@ -29,13 +30,23 @@ import type {
   SelectedExcerpt,
 } from '../../types/reader';
 import { cn } from '../../utils/cn';
-import { NotesSidebar } from '../notes/NotesSidebar';
+import { perfMark, perfMeasure } from '../../utils/perfTrace';
 import { ChatPanel, ChatWorkspacePanel } from './assistantSidebarChat';
 import {
   InfoDrawerContent,
   TranslateDrawerContent,
 } from './assistantSidebarDrawers';
 import { SectionCard, SelectionPanel, SummaryPanel } from './assistantSidebarPrimitives';
+
+// S1：摘录面板会拉起 Tiptap/ProseMirror/lowlight（经 NotesSidebar → NoteEditor），
+// 改为首次打开「摘录」后再加载，冷启动不再解析编辑器依赖。
+const LazyNotesSidebar = lazy(() => {
+  perfMark('notesSidebar:start');
+  return import('../notes/NotesSidebar').then((module) => {
+    perfMeasure('notesSidebar:loaded', 'notesSidebar:start');
+    return { default: module.NotesSidebar };
+  });
+});
 
 export interface AssistantSidebarCoreProps {
   activePanel: AssistantPanelKey;
@@ -207,6 +218,13 @@ function AssistantSidebar({
 }: AssistantSidebarProps) {
   const l = useLocaleText();
 
+  // 摘录面板首次打开后常驻挂载：切回问答/翻译时不卸载编辑器，避免草稿与锚点插入丢失。
+  const [notesPanelMounted, setNotesPanelMounted] = useState(activePanel === 'notes');
+
+  useEffect(() => {
+    if (activePanel === 'notes') setNotesPanelMounted(true);
+  }, [activePanel]);
+
   const togglePanel = (panel: Exclude<AssistantPanelKey, null>) => {
     onActivePanelChange(activePanel === panel ? null : panel);
   };
@@ -326,29 +344,33 @@ function AssistantSidebar({
             ) : null}
 
             <div className="h-full min-h-0" hidden={activePanel !== 'notes'}>
-              <NotesSidebar
-                notes={notes}
-                activeNoteId={activeNoteId}
-                papers={notePaperCandidates}
-                documentTitle={documentTitle}
-                loading={notesLoading}
-                saving={notesSaving}
-                error={notesError}
-                selectedExcerpt={selectedExcerpt}
-                pendingAnchorInsert={pendingAnchorInsert}
-                onPendingAnchorInsertHandled={onPendingAnchorInsertHandled}
-                noteEditorSourceId={noteEditorSourceId}
-                externalUpdateNote={externalUpdateNote}
-                onExternalUpdateApply={onExternalUpdateApply}
-                onAddSelectionToNote={onAddSelectionToNote}
-                onCreateStandaloneNote={onCreateStandaloneNote}
-                onSelectNote={onSelectNote}
-                onUpdateNote={onUpdateNote}
-                onDeleteNote={onDeleteNote}
-                onJumpToNoteAnchor={onJumpToNoteAnchor}
-                onPaperClick={onNotePaperClick}
-                onCollapse={() => onActivePanelChange(null)}
-              />
+              {notesPanelMounted ? (
+                <Suspense fallback={null}>
+                  <LazyNotesSidebar
+                    notes={notes}
+                    activeNoteId={activeNoteId}
+                    papers={notePaperCandidates}
+                    documentTitle={documentTitle}
+                    loading={notesLoading}
+                    saving={notesSaving}
+                    error={notesError}
+                    selectedExcerpt={selectedExcerpt}
+                    pendingAnchorInsert={pendingAnchorInsert}
+                    onPendingAnchorInsertHandled={onPendingAnchorInsertHandled}
+                    noteEditorSourceId={noteEditorSourceId}
+                    externalUpdateNote={externalUpdateNote}
+                    onExternalUpdateApply={onExternalUpdateApply}
+                    onAddSelectionToNote={onAddSelectionToNote}
+                    onCreateStandaloneNote={onCreateStandaloneNote}
+                    onSelectNote={onSelectNote}
+                    onUpdateNote={onUpdateNote}
+                    onDeleteNote={onDeleteNote}
+                    onJumpToNoteAnchor={onJumpToNoteAnchor}
+                    onPaperClick={onNotePaperClick}
+                    onCollapse={() => onActivePanelChange(null)}
+                  />
+                </Suspense>
+              ) : null}
             </div>
 
           </div>
@@ -370,7 +392,7 @@ function AssistantSidebar({
                   'relative flex h-10 w-10 items-center justify-center rounded-xl transition',
                   active
                     ? 'bg-[var(--pq-accent-soft)] text-[var(--pq-accent)] ring-1 ring-[var(--pq-accent-ring)]'
-                    : 'text-[var(--pq-text-muted)] hover:bg-white/70 hover:text-[var(--pq-text)]',
+                    : 'text-[var(--pq-text-muted)] hover:bg-[var(--pq-hover)] hover:text-[var(--pq-text)]',
                 )}
               >
                 {active ? (

@@ -3,6 +3,8 @@ const path = require('node:path');
 const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
 const { Arch } = require('builder-util');
+const { assertPdfJsAssets } = require('./pdfJsAssets.cjs');
+const { auditPackagingDependencies } = require('./packagingDependencies.cjs');
 
 const execFileAsync = promisify(execFile);
 
@@ -104,12 +106,38 @@ async function assertMcpSqliteVec(context) {
   console.log(`[afterPack] verified MCP sqlite-vec resources: ${packageName}/${extensionFile}`);
 }
 
+async function assertPackagedPdfJsAssets(context) {
+  const resourcesDir = context.packager.getResourcesDir(context.appOutDir);
+  const sourceRoot = path.join(context.packager.projectDir, 'node_modules', 'pdfjs-dist');
+  const counts = await assertPdfJsAssets(resourcesDir, sourceRoot);
+  console.log(
+    `[afterPack] verified PDF.js assets: ${Object.entries(counts)
+      .map(([dir, count]) => `${dir}=${count}`)
+      .join(', ')}`,
+  );
+}
+
+async function assertPackagedRuntimeDependencies(context) {
+  const projectDir = context.packager.projectDir;
+  const { problems } = auditPackagingDependencies(projectDir);
+
+  if (problems.length > 0) {
+    throw new Error(`Packaging dependency audit failed:\n${problems.join('\n')}`);
+  }
+
+  console.log('[afterPack] packaging dependency audit passed');
+}
+
 async function afterPack(context) {
   await updateWindowsExecutableIcon(context);
   await adHocSignMacApp(context);
   await assertMcpSqliteVec(context);
+  await assertPackagedPdfJsAssets(context);
+  await assertPackagedRuntimeDependencies(context);
 }
 
 exports.default = afterPack;
 exports.sqliteVecPlatformPackage = sqliteVecPlatformPackage;
 exports.assertMcpSqliteVec = assertMcpSqliteVec;
+exports.assertPackagedPdfJsAssets = assertPackagedPdfJsAssets;
+exports.assertPackagedRuntimeDependencies = assertPackagedRuntimeDependencies;

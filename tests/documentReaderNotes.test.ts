@@ -24,6 +24,7 @@ function note(overrides: Partial<Note> = {}): Note {
     id: overrides.id ?? 'note-1',
     paperId: overrides.paperId ?? 'paper-1',
     type: overrides.type ?? 'standalone',
+    pageKind: overrides.pageKind ?? null,
     title: overrides.title ?? 'Reader Note',
     content: overrides.content ?? '',
     aiChatMessageIds: overrides.aiChatMessageIds ?? [],

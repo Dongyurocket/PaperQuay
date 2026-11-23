@@ -107,9 +107,38 @@ jobs:
             core.setOutput('tag_name', tagName);
             core.setOutput('version', version);
 
+  verify:
+    name: Verify before packaging
+    needs: create-release
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Run tests
+        run: npm test
+
   build-electron:
     name: Build ${{ matrix.name }}
-    needs: create-release
+    needs:
+      - create-release
+      - verify
     runs-on: ${{ matrix.platform }}
     permissions:
       contents: write
@@ -283,6 +312,7 @@ jobs:
     name: Publish release
     needs:
       - create-release
+      - verify
       - build-electron
     runs-on: ubuntu-latest
     permissions:

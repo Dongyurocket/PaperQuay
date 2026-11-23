@@ -512,12 +512,12 @@ export default function LiteraturePaperList({
             {l('正在加载文献库...', 'Loading library...')}
           </div>
         ) : papers.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-[var(--pq-border)] bg-white/58 p-8 text-center dark:bg-white/5">
-            <BookOpenText className="mx-auto h-9 w-9 text-[var(--pq-text-faint)] dark:text-[#a0a0a0]" strokeWidth={1.7} />
+          <div className="rounded-2xl border border-dashed border-[var(--pq-border)] bg-white/60 p-8 text-center dark:bg-white/5">
+            <BookOpenText className="mx-auto h-9 w-9 text-[var(--pq-text-faint)] dark:text-[var(--pq-text-muted)]" strokeWidth={1.7} />
             <div className="mt-4 text-lg font-semibold">
               {l('还没有文献', 'No papers yet')}
             </div>
-            <div className="mx-auto mt-2 max-w-md text-sm leading-6 text-[var(--pq-text-muted)] dark:text-[#a0a0a0]">
+            <div className="mx-auto mt-2 max-w-md text-sm leading-6 text-[var(--pq-text-muted)] dark:text-[var(--pq-text-muted)]">
               {l(
                 '点击“导入 PDF”选择一个或多个文件。应用会把路径、附件和基础元数据保存到本地文库。',
                 'Click "Import PDF" to select one or more files. The app will save paths, attachments, and basic metadata into the local library.',
@@ -550,7 +550,7 @@ export default function LiteraturePaperList({
               return (
                 <div key={paper.id} className="pq-paper-row relative">
                   {showBeforeIndicator ? (
-                    <div className="pointer-events-none absolute -top-1 left-3 right-3 z-10 h-0.5 rounded-full bg-[#2f7f85]" />
+                    <div className="pointer-events-none absolute -top-1 left-3 right-3 z-10 h-0.5 rounded-full bg-[var(--pq-accent)]" />
                   ) : null}
                   <div
                     role="button"
@@ -597,7 +597,7 @@ export default function LiteraturePaperList({
                           ? 'border-[var(--pq-accent-border)] bg-[var(--pq-accent-soft)]/60'
                           : dropIndicator?.paperId === paper.id
                             ? 'border-[var(--pq-accent-border-strong)] bg-[var(--pq-accent-soft)]'
-                            : 'hover:border-[var(--pq-accent-border)] hover:bg-white/92',
+                            : 'hover:border-[var(--pq-accent-border)] hover:bg-[var(--pq-surface-2)]',
                       sortDraggingPaperId === paper.id && 'opacity-60 ring-2 ring-[color-mix(in_srgb,var(--pq-accent)_30%,transparent)]',
                       categoryDraggingPaperId === paper.id && 'opacity-70 ring-2 ring-[color-mix(in_srgb,var(--pq-accent)_35%,transparent)]',
                     )}
@@ -615,8 +615,8 @@ export default function LiteraturePaperList({
                         className={clsx(
                           'mt-0.5 flex h-8 w-7 cursor-pointer items-center justify-center rounded-lg border transition',
                           multiSelected
-                            ? 'border-[var(--pq-accent-border-strong)] bg-[var(--pq-accent)] text-white'
-                            : 'border-[var(--pq-border)] bg-white/70 text-transparent hover:border-[var(--pq-accent-border)]',
+                            ? 'border-[var(--pq-accent-border-strong)] bg-[var(--pq-accent)] text-[var(--pq-accent-button-text)]'
+                            : 'border-[var(--pq-border)] bg-[var(--pq-surface-2)] text-transparent hover:border-[var(--pq-accent-border)]',
                         )}
                       >
                         <Check className="h-4 w-4" strokeWidth={2.4} />
@@ -654,11 +654,11 @@ export default function LiteraturePaperList({
                         </span>
                       </span>
                       {titleDisplay.secondary ? (
-                        <span className="mt-0.5 block truncate text-xs text-[var(--pq-text-muted)] dark:text-[#a0a0a0]">
+                        <span className="mt-0.5 block truncate text-xs text-[var(--pq-text-muted)] dark:text-[var(--pq-text-muted)]">
                           {titleDisplay.secondary}
                         </span>
                       ) : null}
-                      <span className="mt-1 block truncate text-xs text-[var(--pq-text-muted)] dark:text-[#a0a0a0]">
+                      <span className="mt-1 block truncate text-xs text-[var(--pq-text-muted)] dark:text-[var(--pq-text-muted)]">
                         {paperAuthors(paper, locale)}
                       </span>
                       <span className="pq-card-badges mt-2 flex flex-wrap gap-1.5">
@@ -666,7 +666,7 @@ export default function LiteraturePaperList({
                           className={clsx(
                             'rounded-full border px-2 py-0.5 text-[11px] font-semibold',
                             status?.checkingMineru
-                              ? 'border-[var(--pq-border-strong)] bg-[var(--pq-surface-2)] text-[var(--pq-text-muted)] dark:border-white/10 dark:bg-white/[0.06] dark:text-[#a0a0a0]'
+                              ? 'border-[var(--pq-border-strong)] bg-[var(--pq-surface-2)] text-[var(--pq-text-muted)] dark:border-white/10 dark:bg-white/[0.06] dark:text-[var(--pq-text-muted)]'
                               : mineruParsed
                                 ? 'border-[color-mix(in_srgb,var(--pq-success)_28%,transparent)] bg-[var(--pq-success-bg)] text-[var(--pq-success)] '
                                 : 'border-[color-mix(in_srgb,var(--pq-warning)_28%,transparent)] bg-[var(--pq-warning-bg)] text-[var(--pq-warning)] ',
@@ -697,7 +697,7 @@ export default function LiteraturePaperList({
                                   ? 'border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-[var(--pq-accent-bg)] text-[var(--pq-accent)] '
                                   : ragStatus === 'failed'
                                     ? 'border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-error-bg)] text-[var(--pq-danger)] '
-                                    : 'border-[var(--pq-border-strong)] bg-[var(--pq-surface-2)] text-[var(--pq-text-muted)] dark:border-white/10 dark:bg-white/[0.06] dark:text-[#a0a0a0]',
+                                    : 'border-[var(--pq-border-strong)] bg-[var(--pq-surface-2)] text-[var(--pq-text-muted)] dark:border-white/10 dark:bg-white/[0.06] dark:text-[var(--pq-text-muted)]',
                             )}
                           >
                             {indexingRag && ragStatus !== 'excluded'
@@ -718,7 +718,7 @@ export default function LiteraturePaperList({
                             'rounded-full border px-2 py-0.5 text-[11px] font-semibold',
                             overviewGenerated
                               ? 'border-[color-mix(in_srgb,var(--pq-info)_28%,transparent)] bg-[var(--pq-info-bg)] text-[var(--pq-info)] '
-                              : 'border-[var(--pq-border-strong)] bg-[var(--pq-surface-2)] text-[var(--pq-text-muted)] dark:border-white/10 dark:bg-white/[0.06] dark:text-[#a0a0a0]',
+                              : 'border-[var(--pq-border-strong)] bg-[var(--pq-surface-2)] text-[var(--pq-text-muted)] dark:border-white/10 dark:bg-white/[0.06] dark:text-[var(--pq-text-muted)]',
                           )}
                         >
                           {overviewGenerated
@@ -737,13 +737,13 @@ export default function LiteraturePaperList({
                             </span>
                           ))}
                           {paper.tags.length > 3 ? (
-                            <span className="rounded-full bg-[var(--pq-surface-2)] px-2 py-0.5 text-[11px] font-semibold text-[var(--pq-text-muted)] dark:bg-white/[0.06] dark:text-[#a0a0a0]">
+                            <span className="rounded-full bg-[var(--pq-surface-2)] px-2 py-0.5 text-[11px] font-semibold text-[var(--pq-text-muted)] dark:bg-white/[0.06] dark:text-[var(--pq-text-muted)]">
                               +{paper.tags.length - 3}
                             </span>
                           ) : null}
                         </span>
                       ) : null}
-                      <span className="mt-2 block truncate text-[11px] text-[var(--pq-text-faint)] dark:text-[#8d8d8d]">
+                      <span className="mt-2 block truncate text-[11px] text-[var(--pq-text-faint)] dark:text-[var(--pq-text-faint)]">
                         {pdfPath ? truncateMiddle(pdfPath, 68) : l('缺少 PDF 附件', 'Missing PDF attachment')}
                       </span>
                     </span>
@@ -762,7 +762,7 @@ export default function LiteraturePaperList({
                     </span>
                   </div>
                   {showAfterIndicator ? (
-                    <div className="pointer-events-none absolute -bottom-1 left-3 right-3 z-10 h-0.5 rounded-full bg-[#2f7f85]" />
+                    <div className="pointer-events-none absolute -bottom-1 left-3 right-3 z-10 h-0.5 rounded-full bg-[var(--pq-accent)]" />
                   ) : null}
                 </div>
               );

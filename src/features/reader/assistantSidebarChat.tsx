@@ -1363,9 +1363,9 @@ export function ChatWorkspacePanel({
                               className={cn(
                                 'rounded-full px-2 py-0.5 text-[11px]',
                                 qaContextBadgeTone === 'success' &&
-                                  'border border-emerald-200 bg-emerald-50 text-emerald-700',
+                                  'border border-[color-mix(in_srgb,var(--pq-success)_28%,transparent)] bg-[var(--pq-success-bg)] text-[var(--pq-success)]',
                                 qaContextBadgeTone === 'warning' &&
-                                  'border border-amber-200 bg-amber-50 text-amber-700',
+                                  'border border-[color-mix(in_srgb,var(--pq-warning)_28%,transparent)] bg-[var(--pq-warning-bg)] text-[var(--pq-warning)]',
                                 qaContextBadgeTone === 'neutral' &&
                                   'border border-[var(--pq-border)] bg-[var(--pq-surface-2)] text-[var(--pq-text-muted)]',
                               )}
@@ -1502,7 +1502,7 @@ export function ChatWorkspacePanel({
           )}
 
           {error ? (
-            <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600">
+            <div className="mt-4 rounded-2xl border border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-error-bg)] px-4 py-3 text-sm text-[var(--pq-danger)]">
               {error}
             </div>
           ) : null}
@@ -1871,7 +1871,7 @@ export function ChatWorkspacePanel({
                         type="button"
                         disabled={running}
                         onClick={() => onSessionDelete(session.id)}
-                        className="pq-icon-button h-7 w-7 shrink-0 rounded-lg border border-transparent bg-transparent text-rose-500 opacity-0 transition hover:bg-rose-50 hover:text-rose-600 focus:opacity-100 disabled:cursor-not-allowed disabled:text-[var(--pq-text-faint)] disabled:opacity-40 group-hover:opacity-100"
+                        className="pq-icon-button h-7 w-7 shrink-0 rounded-lg border border-transparent bg-transparent text-[var(--pq-danger)] opacity-0 transition hover:bg-[var(--pq-error-bg)] focus:opacity-100 disabled:cursor-not-allowed disabled:text-[var(--pq-text-faint)] disabled:opacity-40 group-hover:opacity-100"
                         aria-label={l('删除会话', 'Delete chat')}
                         title={l('删除会话', 'Delete chat')}
                       >

@@ -498,7 +498,7 @@ function SelectionPanel({
         </HintPanel>
       ) : (
         <>
-          <div className="rounded-[22px] border border-slate-200/80 bg-white px-4 py-4">
+          <div className="rounded-[22px] border border-[var(--pq-border)] bg-[var(--pq-surface-1)] px-4 py-4">
             <MarkdownPreview content={selectedExcerpt.text} />
           </div>
 
@@ -547,14 +547,14 @@ function SelectionPanel({
             <button
               type="button"
               onClick={onTranslateSelectedExcerpt}
-              className="rounded-xl border border-[var(--pq-border)] bg-white px-4 py-2 text-sm font-medium text-[var(--pq-text-muted)] transition hover:border-[var(--pq-border-strong)] hover:bg-[var(--pq-surface-2)]"
+              className="rounded-xl border border-[var(--pq-border)] bg-[var(--pq-surface-1)] px-4 py-2 text-sm font-medium text-[var(--pq-text-muted)] transition hover:border-[var(--pq-border-strong)] hover:bg-[var(--pq-surface-2)]"
             >
               {l('立即翻译', 'Translate Now')}
             </button>
             <button
               type="button"
               onClick={onClearSelectedExcerpt}
-              className="rounded-xl border border-[var(--pq-border)] bg-white px-4 py-2 text-sm font-medium text-[var(--pq-text-muted)] transition hover:border-[var(--pq-border-strong)] hover:bg-[var(--pq-surface-2)]"
+              className="rounded-xl border border-[var(--pq-border)] bg-[var(--pq-surface-1)] px-4 py-2 text-sm font-medium text-[var(--pq-text-muted)] transition hover:border-[var(--pq-border-strong)] hover:bg-[var(--pq-surface-2)]"
             >
               {l('清除', 'Clear')}
             </button>

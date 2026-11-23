@@ -27,3 +27,14 @@ export function useLocaleText() {
     [locale],
   );
 }
+
+/**
+ * 把界面语言同步到 <html lang>（E5）。
+ *
+ * index.html 里的 lang="zh-CN" 只是首屏水合前的兜底；切到英文界面后
+ * 读屏器、断词与字体选择仍按 zh-CN 处理，所以运行时必须跟着 uiLanguage 更新。
+ */
+export function applyDocumentLanguage(locale: UiLanguage): void {
+  if (typeof document === 'undefined') return;
+  document.documentElement.lang = locale;
+}

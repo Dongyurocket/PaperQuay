@@ -78,7 +78,7 @@ export default function LiteratureReadingHeatmapPreview({
           : l('暂无阅读热力', 'No reading heat yet')
       }
     >
-      <span className="mb-1 flex min-w-0 items-center justify-between gap-2 text-[11px] font-medium text-[var(--pq-text-faint)] dark:text-[#8d8d8d]">
+      <span className="mb-1 flex min-w-0 items-center justify-between gap-2 text-[11px] font-medium text-[var(--pq-text-faint)] dark:text-[var(--pq-text-faint)]">
         <span className="truncate">{l('阅读热力', 'Reading Heat')}</span>
         <span className="shrink-0">{hasHeat ? totalLabel : l('未读', 'Unread')}</span>
       </span>

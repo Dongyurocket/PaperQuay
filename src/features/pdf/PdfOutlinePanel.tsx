@@ -75,7 +75,7 @@ export const PdfOutlinePanel = memo(function PdfOutlinePanel({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex items-center gap-1.5 border-b border-slate-200/70 px-2.5 py-2.5 dark:border-[var(--pq-border)]">
+      <div className="flex items-center gap-1.5 border-b border-[var(--pq-border)] px-2.5 py-2.5">
         <div className="relative min-w-0 flex-1">
           <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--pq-text-faint)] dark:text-[var(--pq-text-faint)]" />
           <input
@@ -140,7 +140,7 @@ export const PdfOutlinePanel = memo(function PdfOutlinePanel({
                       'group flex w-full items-center gap-0.5 rounded-lg pr-1 text-left transition-colors',
                       isActive
                         ? 'bg-[var(--pq-accent-bg)] text-[var(--pq-accent)] '
-                        : 'text-[var(--pq-text-muted)] hover:bg-slate-100/80 dark:text-[var(--pq-text-muted)] dark:hover:bg-[var(--pq-surface-2)]',
+                        : 'text-[var(--pq-text-muted)] hover:bg-[var(--pq-hover)]',
                     )}
                     style={{ paddingLeft: `${(depth - 1) * 12 + 2}px` }}
                   >

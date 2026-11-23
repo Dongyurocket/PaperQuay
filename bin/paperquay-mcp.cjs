@@ -11,6 +11,25 @@
  */
 
 const readline = require('node:readline');
+
+// F3：node:sqlite 需要 Node.js 22.13+。版本过低时直接给出可读错误，
+// 而不是在第一次查询时抛 "No such built-in module: node:sqlite"。
+function assertSupportedNodeVersion() {
+  const [major = 0, minor = 0] = String(process.versions.node || '')
+    .split('.')
+    .map((part) => Number.parseInt(part, 10) || 0);
+  const supported = major > 22 || (major === 22 && minor >= 13);
+  if (supported) return;
+
+  process.stderr.write(
+    `PaperQuay MCP requires Node.js 22.13 or newer (node:sqlite). Current version: ${process.versions.node}.\n`
+    + 'Install a newer Node.js or point your MCP client at the app-bundled server (ELECTRON_RUN_AS_NODE).\n',
+  );
+  process.exit(1);
+}
+
+assertSupportedNodeVersion();
+
 const { PaperQuayKnowledgeService } = require('../electron/mcp/knowledgeMcpService.cjs');
 
 // ELECTRON_RUN_AS_NODE 模式下本进程的映像名仍是 PaperQuay.exe。改写进程标题让
@@ -790,7 +809,7 @@ async function handleToolCall(name, args) {
     case 'list_note_tags':
       return service.listNoteTags(args || {});
     case 'list_note_folders':
-      return service.listNoteFolders(args || {});
+      return service.listNoteFolders();
     case 'create_note_folder':
       return service.createNoteFolder(args || {});
     case 'rename_note_folder':
@@ -808,7 +827,7 @@ async function handleToolCall(name, args) {
     case 'import_pdfs':
       return service.importPdfs(args || {});
     case 'list_categories':
-      return service.listCategories(args || {});
+      return service.listCategories();
     case 'manage_category':
       return service.manageCategory(args || {});
     case 'set_paper_categories':

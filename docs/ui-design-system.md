@@ -101,8 +101,9 @@
 
 | 模块 | 用途 |
 | --- | --- |
-| `menu.tsx` 的 `Menu` | **唯一菜单实现**：右键菜单与 `⋯` 溢出/下拉菜单。支持分隔符、`danger`/`accent` 色调、点击外部关闭；由键盘或按钮打开时传 `keyboardAnchor`，聚焦首项。坐标为视口坐标，经 `clampPosition` 贴边钳制，边距 8px。 |
-| `dialog.tsx` 的 `Dialog` / `ConfirmDialog` | 模态：Portal、焦点陷阱、Esc、滚动锁。 |
+| `menu.tsx` 的 `Menu` | **唯一菜单实现**：右键菜单与 `⋯` 溢出/下拉菜单。支持分隔符、`danger`/`accent` 色调、点击外部关闭；键盘（Esc / Tab / ↑↓ / Home / End）始终可用，指针打开的菜单关闭时把焦点归还给触发元素。坐标为视口坐标，经 `clampPosition` 贴边钳制，边距 8px。 |
+| `dialog.tsx` 的 `Dialog` / `ConfirmDialog` | 模态：Portal、焦点陷阱、Esc、滚动锁、焦点归还。`overlay` 选遮罩强度，`align="top"` 供搜索型浮层靠上；嵌套对话框按栈只让栈顶响应 Esc / Tab。 |
+| `textInputDialog.tsx` 的 `TextInputDialog` | 单行文本输入模态（重命名、批量加标签），替代 `window.prompt`。 |
 | `confirmHost.tsx` 的 `confirmAction()` | 命令式确认，返回 `Promise<boolean>`；**不用 `window.confirm`**。 |
 | `toast.tsx` 的 `toast` | 一次性反馈，见 §2.4。 |
 | `taskCenter.tsx` | 长任务全局进度。 |
@@ -115,6 +116,7 @@
 | 位置 | 原因 |
 | --- | --- |
 | `src/features/graph/KnowledgeGraphWorkspace.tsx` 图谱节点菜单 | 在画布容器内 `absolute` 定位，坐标属于容器并随平移、缩放变化；`Menu` 使用 Portal 和视口坐标，迁移会错位。 |
+| `src/app/App.tsx` 标题栏关闭按钮 | 悬停色沿用 Windows 原生标题栏的关闭色，已收敛为 `--pq-window-close-bg` / `--pq-window-close-text` 令牌，两套主题一致。 |
 
 锚点弹出层不是菜单，不要改成 `Menu`，也不要当作漏迁的菜单：如 PDF 工具行的颜色面板、笔记编辑器的插入表格网格、模型预设选择器。
 
@@ -148,12 +150,13 @@
 
 ## 四、禁止项
 
-1. **不在 JSX 里写死调色板类名**（`text-slate-500`、`bg-emerald-50`、`border-slate-200` 等），一律用 `var(--pq-*)`。存量少数实心按钮的 `dark:` 成对写法改动时顺带处理。
-2. **不用 `window.confirm`**，改用 `confirmAction()`。
-3. **不新增 `fixed inset-0` 自建遮罩**，用 `Dialog`。
-4. **不省略键盘焦点样式**：全局 `:focus-visible` 已生效，没有替代焦点样式时不要用 `outline-none` 覆盖。
+1. **不在 JSX 里写死调色板类名**（`text-slate-500`、`bg-emerald-50`、`border-slate-200` 等），一律用 `var(--pq-*)`。存量少数实心按钮的 `dark:` 成对写法改动时顺带处理。硬编码调色板与任意 hex 颜色由 `tests/uiDesignTokens.test.ts` 守卫。
+2. **不用 `window.confirm` / `window.alert` / `window.prompt`**，改用 `confirmAction()`、`Dialog` 或 `TextInputDialog`；由 `tests/uiDesignTokens.test.ts` 守卫。
+3. **不新增 `fixed inset-0` 自建遮罩**，用 `Dialog`（`src/ui` 内除外）；由 `tests/uiDesignTokens.test.ts` 守卫。
+4. **不省略键盘焦点样式**：全局 `:focus-visible` 已生效，没有替代焦点样式时不要用 `outline-none` 覆盖；抑制 outline 只允许作用于自带焦点视觉的包装控件（`.pq-input` / `.pq-chat-composer` 内部）。
 5. **不用 CSS 属性选择器「补丁」修正硬编码色**（已删除的 `.pq-saas-scope [class*="text-slate-900"]` 就是反例），直接改源码用令牌。
 6. **不在未验证深色主题的情况下提交配色改动**。
+7. **实心强调 / 危险 / 成功 / 警告按钮只用按钮级令牌**（`--pq-*-button-bg/-text`），不写裸 `text-white`；由 `tests/uiDesignTokens.test.ts` 守卫。
 
 ## 五、已知约束
 

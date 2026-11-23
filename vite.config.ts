@@ -1,59 +1,30 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
-function manualChunks(id: string) {
-  const normalized = id.replace(/\\/g, '/');
+import { transformSharedCjsForDev } from './vite.sharedCjs';
 
-  if (!normalized.includes('/node_modules/')) {
-    return undefined;
-  }
-
-  if (
-    normalized.includes('/node_modules/pdfjs-dist/') ||
-    normalized.includes('/node_modules/react-pdf/')
-  ) {
-    return 'vendor-pdf';
-  }
-
-  if (
-    normalized.includes('/node_modules/lucide-react/')
-  ) {
-    return 'vendor-icons';
-  }
-
-  if (
-    normalized.includes('/node_modules/llamaindex/') ||
-    normalized.includes('/node_modules/@llamaindex/')
-  ) {
-    return 'vendor-llamaindex';
-  }
-
-  if (
-    normalized.includes('/node_modules/katex/') ||
-    normalized.includes('/node_modules/react-markdown/') ||
-    normalized.includes('/node_modules/rehype-') ||
-    normalized.includes('/node_modules/remark-') ||
-    normalized.includes('/node_modules/unified/') ||
-    normalized.includes('/node_modules/mdast-') ||
-    normalized.includes('/node_modules/micromark') ||
-    normalized.includes('/node_modules/hast') ||
-    normalized.includes('/node_modules/unist-') ||
-    normalized.includes('/node_modules/vfile')
-  ) {
-    return 'vendor-markdown';
-  }
-
-  if (
-    normalized.includes('/node_modules/react/') ||
-    normalized.includes('/node_modules/react-dom/') ||
-    normalized.includes('/node_modules/scheduler/') ||
-    normalized.includes('/node_modules/zustand/')
-  ) {
-    return 'vendor-react';
-  }
-
-  return 'vendor';
-}
+// S1：按组切分 vendor。React 运行时优先级最高，否则 @tiptap/react 的
+// 「递归包含依赖」会把 react-dom 拖进 vendor-editor，首屏被迫加载整个编辑器包。
+const codeSplittingGroups = [
+  { name: 'vendor-react', test: /node_modules[\\/](react|react-dom|scheduler|zustand)[\\/]/, priority: 50 },
+  { name: 'vendor-graph', test: /node_modules[\\/](cytoscape|cytoscape-fcose|cose-base|layout-base)[\\/]/, priority: 40 },
+  {
+    name: 'vendor-editor',
+    test: /node_modules[\\/](@tiptap|prosemirror-|orderedmap|rope-sequence|w3c-keyname|lowlight|highlight\.js)[\\/]/,
+    priority: 30,
+  },
+  { name: 'vendor-pdf', test: /node_modules[\\/](pdfjs-dist|react-pdf)[\\/]/, priority: 25 },
+  { name: 'vendor-icons', test: /node_modules[\\/]lucide-react[\\/]/, priority: 25 },
+  { name: 'vendor-llamaindex', test: /node_modules[\\/](@?llamaindex)[\\/]/, priority: 25 },
+  {
+    // 必须高于 vendor-editor：@tiptap/extension-mathematics 依赖 katex，
+    // 若编辑器组先递归捕获，katex 会被并进 vendor-editor，首屏的 KaTeX 就被迫带上整个编辑器包。
+    name: 'vendor-markdown',
+    test: /node_modules[\\/](katex|react-markdown|rehype-|remark-|unified|mdast-|micromark|hast|unist-|vfile)/,
+    priority: 45,
+  },
+  { name: 'vendor', test: /node_modules/, priority: 0 },
+];
 
 export default defineConfig(() => ({
   base: './',
@@ -61,20 +32,12 @@ export default defineConfig(() => ({
   plugins: [
     react(),
     {
-      name: 'shared-markdown-parser-dev-export',
+      name: 'shared-cjs-dev-export',
       apply: 'serve',
-      // Vite serves local CJS sources directly in dev; Electron still needs CJS.
+      // Vite dev 直接提供本地 CJS 源码；Electron 侧仍需要 CJS，渲染层要求 ESM。
       transform(code, id) {
-        if (!id.split('?')[0].replace(/\\/g, '/').endsWith('/src/shared/markdownToTiptap.cjs')) {
-          return null;
-        }
-        return {
-          code: code.replace(
-            'module.exports = { parseMarkdownToTiptap };',
-            'export { parseMarkdownToTiptap };',
-          ),
-          map: null,
-        };
+        const transformed = transformSharedCjsForDev(code, id);
+        return transformed === null ? null : { code: transformed, map: null };
       },
     },
   ],
@@ -89,7 +52,10 @@ export default defineConfig(() => ({
   envPrefix: ['VITE_'],
   build: {
     target: 'chrome120',
-    minify: 'esbuild',
+    // F5：esbuild 会把临时二进制写到 %TEMP%，本机安全软件会锁住它，
+    // 导致 `npm run build` 在 vite:esbuild-transpile 阶段偶发 `Access is denied`。
+    // Vite 8 的 oxc 压缩器不依赖 esbuild 临时文件，产物等价。
+    minify: 'oxc',
     sourcemap: false,
     chunkSizeWarningLimit: 1800,
     rolldownOptions: {
@@ -97,7 +63,7 @@ export default defineConfig(() => ({
         pluginTimings: false,
       },
       output: {
-        manualChunks,
+        codeSplitting: { groups: codeSplittingGroups },
       },
     },
   },

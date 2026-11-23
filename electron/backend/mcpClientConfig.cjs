@@ -2,7 +2,10 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 
-const MIN_NODE = [22, 5, 0];
+// node:sqlite 需要 Node.js 22.13+（22.5 起有实验实现，但 22.13 才稳定可用）；
+// 测试与构建要求 22.18+（package.json engines）。这里按最低可运行版本判定，
+// 过低时由 MCP 启动检查给出明确错误，而不是运行期抛 "No such module"。
+const MIN_NODE = [22, 13, 0];
 
 function nodeVersionParts(version) {
   return String(version || '')
@@ -124,7 +127,7 @@ function buildMcpClientConfig({
     systemNodeSatisfiesSqlite: systemNodeOk,
     launchHint: installed
       ? 'Installed launch uses the app Electron binary with ELECTRON_RUN_AS_NODE=1, so a separate Node.js install is not required.'
-      : 'Development launch uses system Node. node:sqlite requires Node.js 22.5 or newer.',
+      : 'Development launch uses system Node. node:sqlite requires Node.js 22.13 or newer.',
     snippets: buildSnippets({ command, args, env, dataDir }),
   };
 }

@@ -366,7 +366,7 @@ export function SelectionQuickActions({
     >
       <div
         ref={popoverRef}
-        className="pointer-events-auto w-[min(360px,calc(100vw-32px))] rounded-[20px] border border-slate-200/80 bg-white/96 p-3 shadow-[0_18px_48px_rgba(15,23,42,0.16)] backdrop-blur-xl"
+        className="pointer-events-auto w-[min(360px,calc(100vw-32px))] rounded-[20px] border border-[var(--pq-border)] bg-[var(--pq-bg-elevated)] p-3 shadow-[var(--pq-shadow-float)] backdrop-blur-xl"
         style={{
           maxHeight: `calc(100vh - ${POPOVER_VIEWPORT_MARGIN * 2}px)`,
           overflowY: 'auto',
@@ -394,7 +394,7 @@ export function SelectionQuickActions({
           </button>
         </div>
 
-        <div className="mt-3 rounded-2xl border border-slate-200/80 bg-slate-50/90 px-3 py-2.5">
+        <div className="mt-3 rounded-2xl border border-[var(--pq-border)] bg-[var(--pq-surface-2)] px-3 py-2.5">
           <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--pq-text-faint)]">
             {translationTitle}
           </div>
@@ -439,7 +439,7 @@ export function SelectionQuickActions({
               onClick={onDistillSelectionAppendToCard}
               disabled={selectionDistilling}
               title={activeExcerptCardTitle}
-              className="inline-flex items-center rounded-xl border border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-white px-3 py-2 text-sm font-medium text-[var(--pq-accent)] transition-all duration-200 hover:border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] hover:bg-[var(--pq-accent-bg)] disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex items-center rounded-xl border border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-[var(--pq-surface-1)] px-3 py-2 text-sm font-medium text-[var(--pq-accent)] transition-all duration-200 hover:border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] hover:bg-[var(--pq-accent-bg)] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {l('追加到当前摘录卡', 'Append to Current Card')}
             </button>
@@ -447,7 +447,7 @@ export function SelectionQuickActions({
           <button
             type="button"
             onClick={onTranslateSelectedExcerpt}
-            className="inline-flex items-center rounded-xl border border-[var(--pq-border)] bg-white px-3 py-2 text-sm font-medium text-[var(--pq-text-muted)] transition-all duration-200 hover:border-[var(--pq-border-strong)] hover:bg-[var(--pq-surface-2)]"
+            className="inline-flex items-center rounded-xl border border-[var(--pq-border)] bg-[var(--pq-surface-1)] px-3 py-2 text-sm font-medium text-[var(--pq-text-muted)] transition-all duration-200 hover:border-[var(--pq-border-strong)] hover:bg-[var(--pq-surface-2)]"
           >
             {selectedExcerptTranslation.trim()
               ? l('重新翻译', 'Translate Again')

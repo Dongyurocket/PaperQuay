@@ -47,6 +47,7 @@ function paper(overrides: Partial<LiteraturePaper> = {}): LiteraturePaper {
     tags: [],
     categoryIds: [],
     attachments: [],
+    ragEnabled: overrides.ragEnabled ?? true,
   };
 }
 

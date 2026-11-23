@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState, type MouseEvent } from 'react';
 import type { Note, NoteFolder } from '../../types/notes';
 import { listNoteFolders } from '../../services/notes';
+import { useLocaleText } from '../../i18n/uiLanguage';
+import { TextInputDialog } from '../../ui/textInputDialog';
 import { NoteCard } from './NoteCard';
 import { buildBatchNotePatches, buildBatchTagPatches, sortNotes, type NoteListSort } from './notesQuickWins';
 
@@ -26,6 +28,8 @@ export function NotesList({
   const [sort, setSort] = useState<NoteListSort>('updatedAt');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [folders, setFolders] = useState<NoteFolder[]>([]);
+  const [tagDialogOpen, setTagDialogOpen] = useState(false);
+  const l = useLocaleText();
   const sortedNotes = useMemo(() => sortNotes(notes, sort), [notes, sort]);
   const canBatchUpdate = Boolean(onBatchUpdate);
 
@@ -70,14 +74,9 @@ export function NotesList({
             <button
               type="button"
               className="pq-icon-button h-7 px-2 text-[11px]"
-              onClick={() => {
-                const tag = window.prompt('添加标签')?.trim();
-                if (!tag) return;
-                onBatchUpdate(buildBatchTagPatches(notes, [...selectedIds], tag));
-                setSelectedIds(new Set());
-              }}
+              onClick={() => setTagDialogOpen(true)}
             >
-              标签
+              {l('标签', 'Tag')}
             </button>
             <select
               className="pq-input h-7 max-w-36 px-2 text-[11px]"
@@ -117,6 +116,22 @@ export function NotesList({
           }) : undefined}
         />
       ))}
+      <TextInputDialog
+        open={tagDialogOpen}
+        title={l('添加标签', 'Add tag')}
+        description={l('为选中的笔记添加同一个标签。', 'Add one tag to every selected note.')}
+        label={l('标签名', 'Tag name')}
+        initialValue=""
+        placeholder={l('例如：待读', 'e.g. to-read')}
+        confirmLabel={l('添加', 'Add')}
+        cancelLabel={l('取消', 'Cancel')}
+        onClose={() => setTagDialogOpen(false)}
+        onSubmit={(tag) => {
+          onBatchUpdate?.(buildBatchTagPatches(notes, [...selectedIds], tag));
+          setSelectedIds(new Set());
+          setTagDialogOpen(false);
+        }}
+      />
     </div>
   );
 }

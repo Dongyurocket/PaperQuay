@@ -22,6 +22,21 @@ const bundle = await build({
   define: { 'import.meta.url': '"http://localhost/test.js"' },
   external: ['react', 'react/*', 'react-dom', 'react-dom/*'],
   loader: { '.css': 'empty' }, write: false, logLevel: 'silent',
+  plugins: [{
+    // E2：NoteEditor 改用 confirmAction()，这里把它换成可控桩，
+    // 保持「覆盖外部版本 / 刷新丢弃编辑」两条确认路径可断言。
+    name: 'confirm-action-stub',
+    setup(builder) {
+      builder.onResolve({ filter: /(^|\/)ui\/confirmHost(\.tsx)?$/ }, () => ({ path: 'confirmHost', namespace: 'stub' }));
+      builder.onLoad({ filter: /.*/, namespace: 'stub' }, () => ({
+        loader: 'js',
+        contents: `
+          export const confirmAction = () => Promise.resolve(globalThis.__confirmResult !== false);
+          export const ConfirmHost = () => null;
+        `,
+      }));
+    },
+  }],
 });
 const module = { exports: {} };
 new Function('require', 'module', 'exports', bundle.outputFiles[0].text)(require, module, module.exports);
@@ -57,7 +72,7 @@ test('external changes preserve the draft and require confirmation before refres
   let updates = 0;
   const onUpdate = async () => { updates += 1; };
   let confirm = false;
-  window.confirm = () => confirm;
+  globalThis.__confirmResult = confirm;
   const render = async (current) => act(async () => root.render(React.createElement(NoteEditor, { note: current, saving: false, onUpdate, editorSourceId: 'conflict-test' })));
   try {
     await render(original);
@@ -69,6 +84,7 @@ test('external changes preserve the draft and require confirmation before refres
     await click(container, '保存');
     assert.equal(updates, 0);
     confirm = true;
+    globalThis.__confirmResult = confirm;
     await click(container, '刷新');
     assert.equal(container.querySelector('input').value, 'External');
   } finally {
@@ -162,7 +178,7 @@ test('restored drafts retain anchor metadata removed by an external version', as
   let savedPatch;
   const onUpdate = async (_id, patch) => { savedPatch = patch; };
   const render = async (current) => act(async () => root.render(React.createElement(NoteEditor, { note: current, saving: false, onUpdate, editorSourceId: 'anchor-test' })));
-  window.confirm = () => true;
+  globalThis.__confirmResult = true;
   try {
     await render(original);
     await setTitle(container, 'Local draft');

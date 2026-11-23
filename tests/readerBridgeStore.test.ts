@@ -93,7 +93,7 @@ test('bridge comparison preserves no-op updates and detects every bridge field',
   );
   assert.equal(areReaderTabBridgeStatesEqual(base, { ...base, translating: true }), false);
   assert.equal(areReaderTabBridgeStatesEqual(base, { ...base, translatedCount: 1 }), false);
-  assert.equal(areReaderTabBridgeStatesEqual(base, { ...base, assistantSidebarProps: {} }), false);
+  assert.equal(areReaderTabBridgeStatesEqual(base, { ...base, assistantSidebarProps: {} as never }), false);
   assert.equal(areReaderTabBridgeStatesEqual(base, { ...base, onDetachAssistant: () => undefined }), false);
   assert.equal(areReaderTabBridgeStatesEqual(base, { ...base, onAttachAssistant: () => undefined }), false);
   assert.equal(areReaderTabBridgeStatesEqual(base, { ...base, onTranslate: () => undefined }), false);

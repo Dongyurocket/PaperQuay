@@ -14,7 +14,8 @@ import { cn } from '../utils/cn';
  *   - 点击遮罩、或在遮罩上再次右键，关闭菜单；
  *   - `tone="danger"` 用错误色，`tone="accent"` 用强调色，默认项为弱化文字；
  *   - 超出窗口右下边缘时，按宽度与估算高度钳制回窗口内并留 8px 安全边距；
- *   - 默认保留原有右键菜单行为；传入 keyboardAnchor 时启用工具栏菜单的键盘导航。
+ *   - 传入 keyboardAnchor 时打开即聚焦首项；无论以何种方式打开，
+ *     Esc/方向键/Home/End 都可用，关闭时把焦点归还给触发元素（E4）。
  */
 
 export interface MenuItem {
@@ -68,24 +69,34 @@ export function Menu({
   keyboardAnchor,
 }: MenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
+  const restoreFocusRef = useRef<HTMLElement | null>(null);
+
   useEffect(() => {
+    // 指针打开的菜单不抢焦点（否则右键会跳走焦点），但要记住触发前的焦点，
+    // 关闭时归还；键盘打开的菜单直接聚焦首项。
+    restoreFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+
     if (!keyboardAnchor) return;
     const first = menuRef.current?.querySelector<HTMLButtonElement>('button:not(:disabled)');
     (first ?? menuRef.current)?.focus();
   }, [keyboardAnchor]);
 
+  const restoreFocus = () => {
+    const target = keyboardAnchor ?? restoreFocusRef.current;
+    target?.focus?.();
+  };
+
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (!keyboardAnchor) return;
     if (event.key === 'Escape') {
       event.preventDefault();
       event.stopPropagation();
       onClose();
-      keyboardAnchor.focus();
+      restoreFocus();
       return;
     }
     if (event.key === 'Tab') {
       onClose();
-      keyboardAnchor.focus();
+      restoreFocus();
       return;
     }
     if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
@@ -112,9 +123,9 @@ export function Menu({
     >
       <div
         ref={menuRef}
-        role={keyboardAnchor ? "menu" : undefined}
-        aria-label={keyboardAnchor?.getAttribute("aria-label") ?? keyboardAnchor?.title}
-        tabIndex={keyboardAnchor ? -1 : undefined}
+        role="menu"
+        aria-label={keyboardAnchor?.getAttribute("aria-label") ?? keyboardAnchor?.title ?? title}
+        tabIndex={-1}
         onKeyDown={handleKeyDown}
         className={cn("pq-card fixed overflow-hidden p-1 shadow-[var(--pq-shadow-dialog)]", keyboardAnchor && "!rounded-[var(--pq-radius-sm)]")}
         style={{ left: position.left, top: position.top, width, boxShadow: keyboardAnchor ? "var(--pq-shadow-dialog)" : undefined }}
@@ -137,13 +148,13 @@ export function Menu({
                 key={entry.id}
                 type="button"
                 disabled={entry.disabled}
-                role={keyboardAnchor ? (entry.checked === undefined ? "menuitem" : "menuitemcheckbox") : undefined}
-                aria-checked={keyboardAnchor && entry.checked !== undefined ? entry.checked : undefined}
-                tabIndex={keyboardAnchor ? -1 : undefined}
+                role={entry.checked === undefined ? "menuitem" : "menuitemcheckbox"}
+                aria-checked={entry.checked === undefined ? undefined : entry.checked}
+                tabIndex={-1}
                 onClick={() => {
                   if (entry.disabled) return;
                   onClose();
-                  keyboardAnchor?.focus();
+                  restoreFocus();
                   void entry.onSelect();
                 }}
                 className={cn(

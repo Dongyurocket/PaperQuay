@@ -1,28 +1,23 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { pathToFileURL } from "node:url";
 import test from "node:test";
 
 import { build } from "esbuild";
 
+// F5：不在磁盘上落产物。esbuild 写 %TEMP% 会被本机安全软件锁住
+// （`Access is denied`），改为 `write: false` 后用 data: URL 直接 import。
 async function loadReaderShared() {
-  const outdir = await mkdtemp(join(tmpdir(), "paperquay-reader-settings-test-"));
-  const outfile = join(outdir, "readerShared.mjs");
-
-  await build({
+  const bundle = await build({
     bundle: true,
     entryPoints: ["src/features/reader/readerShared.ts"],
     format: "esm",
-    outfile,
     platform: "node",
     sourcemap: false,
-    write: true,
+    write: false,
+    logLevel: "silent",
   });
 
-  const module = await import(pathToFileURL(outfile).href);
-  await rm(outdir, { recursive: true, force: true });
+  const code = bundle.outputFiles[0].text;
+  const module = await import(`data:text/javascript;base64,${Buffer.from(code, "utf8").toString("base64")}`);
   return module as typeof import("../src/features/reader/readerShared.ts");
 }
 
@@ -57,7 +52,6 @@ test("normalizeReaderSettings migrates review writing model preset from overview
   const settings = normalizeReaderSettings({
     reviewModelPresetId: "",
     summaryModelPresetId: "summary-model",
-    agentModelPresetId: "agent-model",
   });
 
   assert.equal(settings.reviewModelPresetId, "summary-model");

@@ -74,6 +74,7 @@ import type {
   UpdateNoteRequest,
 } from '../../types/notes';
 import { cn } from '../../utils/cn';
+import { confirmAction } from '../../ui/confirmHost';
 import { HashTag } from './extensions/HashTag';
 import { NoteAnchorLink } from './extensions/NoteAnchorLink';
 import { PaperReference, type PaperReferenceLocation } from './extensions/PaperReference';
@@ -736,6 +737,7 @@ export function NoteEditor({
   const appliedUpdatedAtRef = useRef<number | null>(note?.updatedAt ?? null);
   const dirtyRef = useRef(false);
   const restoringDraftRef = useRef(false);
+  const pendingDraftRef = useRef<Parameters<typeof writeNoteEditorDraft>[1] | null>(null);
   const externalUpdateAvailableRef = useRef(false);
   const externalUpdateGenerationRef = useRef(0);
   const noteSessionRef = useRef({ noteId: note?.id ?? null, generation: 0 });
@@ -1513,7 +1515,10 @@ export function NoteEditor({
       ...(previousDraft?.pendingAnchors ?? []),
       ...pendingAnchorsRef.current.values(),
     ]).filter((anchor) => contentAnchorIds.has(anchor.id));
-    writeNoteEditorDraft(editorSourceIdRef.current, {
+
+    // S5：每次按键都全量序列化 + 写 localStorage 会拖慢输入；
+    // 草稿写入防抖 300ms，切换笔记或卸载时立即冲刷（见下方 effect）。
+    pendingDraftRef.current = {
       noteId: note.id,
       baseUpdatedAt: appliedUpdatedAtRef.current ?? note.updatedAt ?? null,
       savedSignature: lastSavedSignatureRef.current,
@@ -1524,8 +1529,21 @@ export function NoteEditor({
       snapshot: snapshotRef.current,
       pendingAnchors: draftAnchors,
       updatedAt: Date.now(),
-    });
+    };
+
+    const timer = window.setTimeout(() => {
+      const payload = pendingDraftRef.current;
+      if (payload) writeNoteEditorDraft(editorSourceIdRef.current, payload);
+    }, 300);
+
+    return () => window.clearTimeout(timer);
   }, [color, currentSignature, dirty, loadedStateNoteId, note, note?.id, note?.updatedAt, revision, tagText, title]);
+
+  // 卸载或切换笔记时立即冲刷未落盘的草稿，避免防抖窗口内丢失编辑。
+  useEffect(() => () => {
+    const payload = pendingDraftRef.current;
+    if (payload) writeNoteEditorDraft(editorSourceIdRef.current, payload);
+  }, [note?.id]);
 
   useEffect(() => {
     if (!editor || editor.isDestroyed || !note || !pendingAnchorInsert) return;
@@ -1562,10 +1580,14 @@ export function NoteEditor({
   const save = useCallback(async () => {
     if (!note || saving) return;
     const overwritingExternal = externalUpdateAvailableRef.current;
-    if (overwritingExternal && !window.confirm(l(
-      '此笔记已有外部更新。保存会覆盖外部版本，确定继续？',
-      'This note has changed elsewhere. Saving will overwrite the external version. Continue?',
-    ))) return;
+    if (overwritingExternal && !(await confirmAction({
+      title: l('覆盖外部版本？', 'Overwrite external version?'),
+      description: l(
+        '此笔记已有外部更新。保存会覆盖外部版本，确定继续？',
+        'This note has changed elsewhere. Saving will overwrite the external version. Continue?',
+      ),
+      danger: true,
+    }))) return;
 
     const snapshot = editor ? snapshotFromEditor(editor) : snapshotRef.current;
     snapshotRef.current = snapshot;
@@ -1632,11 +1654,12 @@ export function NoteEditor({
     setRevision((value) => value + 1);
   }, [color, editor, l, note, onUpdate, pageKind, saving, setExternalUpdateState, tagText, title]);
 
-  const refreshFromExternalUpdate = useCallback(() => {
-    if (dirty && !window.confirm(l(
-      '刷新会丢弃当前未保存的编辑，确定继续？',
-      'Refreshing will discard your unsaved edits. Continue?',
-    ))) return;
+  const refreshFromExternalUpdate = useCallback(async () => {
+    if (dirty && !(await confirmAction({
+      title: l('丢弃未保存的编辑？', 'Discard unsaved edits?'),
+      description: l('刷新会丢弃当前未保存的编辑，确定继续？', 'Refreshing will discard your unsaved edits. Continue?'),
+      danger: true,
+    }))) return;
     const incomingNote =
       note && isNoteRecord(externalUpdateNote, note.id)
         ? externalUpdateNote
@@ -1787,7 +1810,7 @@ export function NoteEditor({
               >
                 <Tag className="h-3.5 w-3.5 shrink-0" strokeWidth={1.8} />
                 {currentTags.length > 0 ? (
-                  <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--pq-accent)] px-1 text-[11px] font-semibold leading-none text-white">
+                  <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--pq-accent)] px-1 text-[11px] font-semibold leading-none text-[var(--pq-accent-button-text)]">
                     {currentTags.length > 9 ? '9+' : currentTags.length}
                   </span>
                 ) : null}
@@ -1872,7 +1895,7 @@ export function NoteEditor({
           </div>
           <button
             type="button"
-            onClick={refreshFromExternalUpdate}
+            onClick={() => void refreshFromExternalUpdate()}
             className="pq-button h-7 shrink-0 px-2.5 text-xs"
           >
             <RefreshCw className="h-3.5 w-3.5" strokeWidth={1.8} />
@@ -1918,7 +1941,7 @@ export function NoteEditor({
           {externalUpdateAvailable ? (
             <button
               type="button"
-              onClick={refreshFromExternalUpdate}
+              onClick={() => void refreshFromExternalUpdate()}
               className="pq-button h-8 px-3 text-sm"
               title={TEXT.refresh}
             >

@@ -20,6 +20,8 @@ function createDraft(overrides: Partial<ImportDraftItem> = {}): ImportDraftItem 
     year: '',
     publication: '',
     doi: '',
+    url: '',
+    abstractText: '',
     categoryId: '',
     ...overrides,
   };

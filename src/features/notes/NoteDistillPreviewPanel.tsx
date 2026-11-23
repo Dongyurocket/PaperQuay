@@ -1,5 +1,6 @@
 import { Check, Eye, Image, LoaderCircle, X } from 'lucide-react';
 import { useLocaleText } from '../../i18n/uiLanguage';
+import { Dialog } from '../../ui/dialog';
 import type { DistillPreviewState } from './noteDistillPreview';
 import { MarkdownPreview } from '../reader/assistantSidebarPrimitives';
 
@@ -35,13 +36,16 @@ export function NoteDistillPreviewPanel({
   const processing = state.phase === 'processing';
 
   return (
-    <div className="fixed inset-0 z-[11000] flex items-center justify-center bg-slate-950/35 p-4 backdrop-blur-sm">
-      <section
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="note-distill-preview-title"
-        className="flex max-h-[min(860px,calc(100vh-32px))] w-[min(1180px,calc(100vw-32px))] flex-col overflow-hidden rounded-2xl border border-[var(--pq-border)] bg-white shadow-[0_24px_80px_rgba(15,23,42,0.22)]"
-      >
+    <Dialog
+      open
+      onClose={onCancel}
+      overlay="soft"
+      dismissOnBackdrop={false}
+      size="xl"
+      labelledBy="note-distill-preview-title"
+      className="!max-w-[min(1180px,calc(100vw-32px))] max-h-[min(860px,calc(100vh-32px))]"
+    >
+      <section className="flex max-h-[min(860px,calc(100vh-32px))] flex-col overflow-hidden">
         <header className="flex items-start justify-between gap-4 border-b border-[var(--pq-border)] px-5 py-4">
           <div>
             <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-[var(--pq-accent)]">
@@ -60,7 +64,7 @@ export function NoteDistillPreviewPanel({
         </header>
 
         <div className="grid min-h-0 flex-1 gap-4 overflow-auto p-5 lg:grid-cols-2">
-          <div className="flex min-h-0 flex-col rounded-xl border border-[var(--pq-border)] bg-slate-50/70">
+          <div className="flex min-h-0 flex-col rounded-xl border border-[var(--pq-border)] bg-[var(--pq-surface-2)]">
             <div className="border-b border-[var(--pq-border)] px-4 py-3 text-sm font-semibold text-[var(--pq-text)]">
               {l('原始识别文本', 'Original recognition')}
             </div>
@@ -99,7 +103,7 @@ export function NoteDistillPreviewPanel({
                   type="button"
                   onClick={onReidentify}
                   disabled={reidentifying || processing}
-                  className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-white px-3 py-1.5 text-xs font-medium text-[var(--pq-accent)] hover:bg-[var(--pq-accent-bg)] disabled:opacity-60"
+                  className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-[var(--pq-surface-1)] px-3 py-1.5 text-xs font-medium text-[var(--pq-accent)] hover:bg-[var(--pq-accent-bg)] disabled:opacity-60"
                 >
                   {reidentifying ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Image className="h-3.5 w-3.5" />}
                   {reidentifying ? l('重识别中…', 'Re-recognizing…') : l('重识别并重新提炼', 'Re-recognize and distill')}
@@ -108,7 +112,7 @@ export function NoteDistillPreviewPanel({
             </div>
           </div>
 
-          <div className="flex min-h-0 flex-col rounded-xl border border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-white">
+          <div className="flex min-h-0 flex-col rounded-xl border border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-[var(--pq-surface-1)]">
             <div className="border-b border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] px-4 py-3 text-sm font-semibold text-[var(--pq-text)]">
               {l('提炼稿（可编辑）', 'Distilled draft (editable)')}
             </div>
@@ -153,7 +157,7 @@ export function NoteDistillPreviewPanel({
             </button>
             {ready ? (
               <>
-                <button type="button" onClick={onDirectSave} className="rounded-lg border border-[var(--pq-border-strong)] bg-white px-3 py-2 text-sm font-medium text-[var(--pq-text-muted)] hover:bg-[var(--pq-surface-2)]">
+                <button type="button" onClick={onDirectSave} className="rounded-lg border border-[var(--pq-border-strong)] bg-[var(--pq-surface-1)] px-3 py-2 text-sm font-medium text-[var(--pq-text-muted)] hover:bg-[var(--pq-surface-2)]">
                   {l('直接保存', 'Save directly')}
                 </button>
                 <button type="button" onClick={onConfirm} disabled={!state.distilledText.trim()} className="pq-button-primary px-3 py-2 text-sm">
@@ -165,6 +169,6 @@ export function NoteDistillPreviewPanel({
           </div>
         </footer>
       </section>
-    </div>
+    </Dialog>
   );
 }

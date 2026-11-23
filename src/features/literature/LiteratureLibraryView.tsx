@@ -8,7 +8,6 @@ import {
   type MouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from 'react';
-import { createPortal } from 'react-dom';
 import { Database, Sparkles, Star, Tag, Trash2, X } from 'lucide-react';
 import { useLocaleText } from '../../i18n/uiLanguage';
 import { localPathsExist } from '../../services/desktop';
@@ -3168,7 +3167,7 @@ export default function LiteratureLibraryView({
                   {l('导出 Bib', 'Export Bib')}
                 </button>
                 {bibExportMenuOpen ? (
-                  <span className="absolute left-0 top-full z-30 mt-1 flex min-w-[168px] flex-col rounded-xl border border-[var(--pq-border)] bg-white p-1 shadow-lg dark:bg-[#1b212b]">
+                  <span className="absolute left-0 top-full z-30 mt-1 flex min-w-[168px] flex-col rounded-xl border border-[var(--pq-border)] bg-[var(--pq-surface-1)] p-1 shadow-lg">
                     <button
                       type="button"
                       className="rounded-lg px-3 py-1.5 text-left text-xs hover:bg-[var(--pq-accent-soft)]"
@@ -3469,29 +3468,28 @@ export default function LiteratureLibraryView({
         />
       ) : null}
 
-      {metadataDialog ? createPortal(
-        <div
-          className="fixed inset-0 z-[10000] flex items-center justify-center bg-slate-950/30 p-4 backdrop-blur-[2px]"
-          onMouseDown={() => {
-            if (!metadataDialogBusy) {
-              setMetadataDialog(null);
-            }
-          }}
-        >
+      <Dialog
+        open={metadataDialog !== null}
+        onClose={() => {
+          if (!metadataDialogBusy) setMetadataDialog(null);
+        }}
+        dismissOnBackdrop={!metadataDialogBusy}
+        size="md"
+        labelledBy="pq-metadata-dialog-title"
+      >
+        {metadataDialog ? (
           <form
-            className="pq-card w-[min(520px,calc(100vw-32px))] p-4 shadow-[var(--pq-shadow-dialog)]"
-            onMouseDown={(event) => event.stopPropagation()}
             onSubmit={(event) => {
               event.preventDefault();
               void handleSubmitMetadataDialog();
             }}
           >
-            <div className="flex items-start gap-3">
+            <div className="flex items-start gap-3 p-4">
               <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[var(--pq-accent-bg)] text-[var(--pq-accent)]">
                 <Sparkles className="h-4.5 w-4.5" strokeWidth={1.9} />
               </span>
               <div className="min-w-0 flex-1">
-                <h2 className="text-base font-semibold text-[var(--pq-text)]">
+                <h2 id="pq-metadata-dialog-title" className="text-base font-semibold text-[var(--pq-text)]">
                   {l('解析元数据', 'Parse Metadata')}
                 </h2>
                 <p className="mt-1 text-sm leading-6 text-[var(--pq-text-muted)]">
@@ -3500,50 +3498,51 @@ export default function LiteratureLibraryView({
               </div>
             </div>
 
-            <label className="mt-4 block">
-              <span className="mb-1.5 block text-xs font-medium text-[var(--pq-text-muted)]">
-                {l('标题', 'Title')}
-              </span>
-              <input
-                value={metadataDialog.title}
-                onChange={(event) =>
-                  setMetadataDialog((current) =>
-                    current ? { ...current, title: event.target.value } : current,
-                  )
-                }
-                className="pq-input h-10 w-full px-3 text-sm"
-                autoFocus
-              />
-            </label>
+            <div className="px-4">
+              <label className="block">
+                <span className="mb-1.5 block text-xs font-medium text-[var(--pq-text-muted)]">
+                  {l('标题', 'Title')}
+                </span>
+                <input
+                  value={metadataDialog.title}
+                  onChange={(event) =>
+                    setMetadataDialog((current) =>
+                      current ? { ...current, title: event.target.value } : current,
+                    )
+                  }
+                  className="pq-input h-10 w-full px-3 text-sm"
+                />
+              </label>
 
-            <label className="mt-3 block">
-              <span className="mb-1.5 block text-xs font-medium text-[var(--pq-text-muted)]">
-                DOI
-              </span>
-              <input
-                value={metadataDialog.doi}
-                onChange={(event) =>
-                  setMetadataDialog((current) =>
-                    current ? { ...current, doi: event.target.value } : current,
-                  )
-                }
-                placeholder="10.xxxx/xxxxx"
-                className="pq-input h-10 w-full px-3 text-sm"
-              />
-            </label>
+              <label className="mt-3 block">
+                <span className="mb-1.5 block text-xs font-medium text-[var(--pq-text-muted)]">
+                  DOI
+                </span>
+                <input
+                  value={metadataDialog.doi}
+                  onChange={(event) =>
+                    setMetadataDialog((current) =>
+                      current ? { ...current, doi: event.target.value } : current,
+                    )
+                  }
+                  placeholder="10.xxxx/xxxxx"
+                  className="pq-input h-10 w-full px-3 text-sm"
+                />
+              </label>
 
-            <div className="mt-3 rounded-[var(--pq-radius-sm)] border border-[var(--pq-border-subtle)] bg-[var(--pq-bg-secondary)] px-3 py-2 text-xs leading-5 text-[var(--pq-text-faint)]">
-              <div className="font-medium text-[var(--pq-text-muted)]">{l('PDF 文件', 'PDF File')}</div>
-              <div
-                className="mt-0.5 truncate"
-                title={paperPdfPath(metadataDialog.paper, libraryStorageDir) || undefined}
-              >
-                {paperPdfPath(metadataDialog.paper, libraryStorageDir) ||
-                  l('未找到 PDF 路径', 'No PDF path found')}
+              <div className="mt-3 rounded-[var(--pq-radius-sm)] border border-[var(--pq-border-subtle)] bg-[var(--pq-bg-secondary)] px-3 py-2 text-xs leading-5 text-[var(--pq-text-faint)]">
+                <div className="font-medium text-[var(--pq-text-muted)]">{l('PDF 文件', 'PDF File')}</div>
+                <div
+                  className="mt-0.5 truncate"
+                  title={paperPdfPath(metadataDialog.paper, libraryStorageDir) || undefined}
+                >
+                  {paperPdfPath(metadataDialog.paper, libraryStorageDir) ||
+                    l('未找到 PDF 路径', 'No PDF path found')}
+                </div>
               </div>
             </div>
 
-            <div className="mt-5 flex justify-end gap-2">
+            <div className="mt-5 flex justify-end gap-2 p-4 pt-0">
               <button
                 type="button"
                 onClick={() => setMetadataDialog(null)}
@@ -3562,9 +3561,8 @@ export default function LiteratureLibraryView({
               </button>
             </div>
           </form>
-        </div>,
-        document.body,
-      ) : null}
+        ) : null}
+      </Dialog>
 
       <ImportConfirmationDialog
         open={importDialogOpen}

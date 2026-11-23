@@ -27,7 +27,7 @@ function pageElement(options: {
       width: options.rect?.width ?? 0,
       height: options.rect?.height ?? 0,
     }),
-  } as HTMLDivElement;
+  } as unknown as HTMLDivElement;
 }
 
 function block(overrides: Partial<PositionedMineruBlock> = {}): PositionedMineruBlock {

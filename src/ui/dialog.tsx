@@ -32,6 +32,8 @@ interface DialogProps {
   size?: DialogSize;
   /** 遮罩强度：普通弹窗用 soft，需要强遮挡的设置/预览用 strong。 */
   overlay?: 'soft' | 'strong';
+  /** 垂直位置：普通弹窗居中；命令面板这类搜索型浮层靠上。 */
+  align?: 'center' | 'top';
   /** 点击遮罩是否关闭，默认 true；有未保存内容的弹窗应传 false。 */
   dismissOnBackdrop?: boolean;
   labelledBy?: string;
@@ -48,12 +50,35 @@ const FOCUSABLE = [
   '[tabindex]:not([tabindex="-1"])',
 ].join(',');
 
+/**
+ * 打开中的对话框栈（后开者在上）。
+ *
+ * 设置窗口这类弹窗内部还会再开确认框/密码框：两个 Dialog 都在 document 上挂
+ * capture 阶段的 keydown，若不区分层级，外层的 Esc 会先关掉整窗、外层的焦点陷阱
+ * 也会和子对话框抢 Tab。只让栈顶响应 Esc 与 Tab，嵌套行为才符合预期。
+ */
+const dialogStack: symbol[] = [];
+
+function pushDialog(id: symbol) {
+  dialogStack.push(id);
+}
+
+function removeDialog(id: symbol) {
+  const index = dialogStack.lastIndexOf(id);
+  if (index >= 0) dialogStack.splice(index, 1);
+}
+
+function isTopmostDialog(id: symbol) {
+  return dialogStack[dialogStack.length - 1] === id;
+}
+
 export function Dialog({
   open,
   onClose,
   children,
   size = 'md',
   overlay = 'soft',
+  align = 'center',
   dismissOnBackdrop = true,
   labelledBy,
   describedBy,
@@ -62,6 +87,7 @@ export function Dialog({
   const panelRef = useRef<HTMLDivElement | null>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const onCloseRef = useRef(onClose);
+  const dialogIdRef = useRef<symbol>(Symbol('dialog'));
 
   // 调用方普遍传入内联 onClose。若直接进依赖数组，父级每次重渲染都会重建监听、
   // 重跑下面的打开副作用并重新聚焦第一个元素——模态里刚 Tab 走的焦点会被打回去。
@@ -70,6 +96,9 @@ export function Dialog({
   }, [onClose]);
 
   const handleKeyDown = useCallback((event: KeyboardEvent) => {
+    // 只有最上层对话框处理 Esc 与 Tab，避免嵌套时外层抢先关闭或抢焦点。
+    if (!isTopmostDialog(dialogIdRef.current)) return;
+
     if (event.key === 'Escape') {
       event.stopPropagation();
       onCloseRef.current();
@@ -116,6 +145,7 @@ export function Dialog({
     if (typeof document === 'undefined') return undefined;
 
     previousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    pushDialog(dialogIdRef.current);
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     document.addEventListener('keydown', handleKeyDown, true);
@@ -131,6 +161,7 @@ export function Dialog({
 
     return () => {
       window.cancelAnimationFrame(frame);
+      removeDialog(dialogIdRef.current);
       document.removeEventListener('keydown', handleKeyDown, true);
       document.body.style.overflow = previousOverflow;
       previousFocusRef.current?.focus?.();
@@ -140,13 +171,18 @@ export function Dialog({
   if (!open) return null;
 
   const panel = (
-    <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
+    <div
+      className={cn(
+        'fixed inset-0 z-[120] flex justify-center p-4',
+        align === 'top' ? 'items-start pt-[12vh]' : 'items-center',
+      )}
+    >
       <div
         className={cn(
           'absolute inset-0',
           overlay === 'strong'
-            ? 'bg-slate-950/62 backdrop-blur-sm dark:bg-black/70'
-            : 'bg-slate-950/28 backdrop-blur-[2px] dark:bg-black/45',
+            ? 'bg-[var(--pq-overlay-strong)] backdrop-blur-sm'
+            : 'bg-[var(--pq-overlay-soft)] backdrop-blur-[2px]',
         )}
         onClick={dismissOnBackdrop ? onClose : undefined}
         aria-hidden="true"
@@ -260,7 +296,7 @@ export function ConfirmDialog({
             className={cn(
               'px-4 py-2.5 text-sm disabled:opacity-60',
               danger
-                ? 'rounded-2xl bg-[var(--pq-danger)] font-semibold text-white transition hover:opacity-90'
+                ? 'rounded-2xl bg-[var(--pq-danger-button-bg)] font-semibold text-[var(--pq-danger-button-text)] transition hover:bg-[var(--pq-danger-button-bg-hover)]'
                 : 'pq-button-primary',
             )}
           >

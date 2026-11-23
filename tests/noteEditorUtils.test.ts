@@ -27,6 +27,7 @@ function note(overrides: Partial<Note> = {}): Note {
     id: overrides.id ?? 'note-1',
     paperId: overrides.paperId ?? 'paper-1',
     type: overrides.type ?? 'standalone',
+    pageKind: overrides.pageKind ?? null,
     title: overrides.title ?? 'Note',
     content: overrides.content ?? 'Plain note',
     contentJson: overrides.contentJson ?? null,

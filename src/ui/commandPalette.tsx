@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { Command, CornerDownLeft, Search } from 'lucide-react';
-import { createPortal } from 'react-dom';
 import { cn } from '../utils/cn';
 import { useLocaleText } from '../i18n/uiLanguage';
+import { Dialog } from './dialog';
 import { formatShortcut, listCommands, subscribeCommands, type AppCommand } from './commands';
 
 /**
@@ -10,11 +10,21 @@ import { formatShortcut, listCommands, subscribeCommands, type AppCommand } from
  *
  * 对熟练用户来说，「可搜索的动作清单」比引导式教程更实用：不用记快捷键，
  * 也不用满界面找按钮。动作来自 src/ui/commands.ts 的注册表，面板自身不硬编码业务。
+ *
+ * E4：浮层改由 Dialog 承载（焦点陷阱、Esc、滚动锁、焦点归还），
+ * 输入框使用 combobox + aria-activedescendant 播报当前项。
  */
 
 interface CommandPaletteProps {
   open: boolean;
   onClose: () => void;
+}
+
+const TITLE_ID = 'pq-command-palette-title';
+const LISTBOX_ID = 'pq-command-listbox';
+
+function optionId(index: number) {
+  return `pq-command-option-${index}`;
 }
 
 export function CommandPalette({ open, onClose }: CommandPaletteProps) {
@@ -63,44 +73,29 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
     setActiveIndex(0);
   }, [query]);
 
-  useEffect(() => {
-    if (!open) return undefined;
+  // 面板内的方向键与回车；Esc 与焦点归还由 Dialog 负责。
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      setActiveIndex((current) => (filtered.length === 0 ? 0 : (current + 1) % filtered.length));
+      return;
+    }
 
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        event.stopPropagation();
-        onClose();
-        return;
-      }
+    if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      setActiveIndex((current) => (filtered.length === 0 ? 0 : (current - 1 + filtered.length) % filtered.length));
+      return;
+    }
 
-      if (event.key === 'ArrowDown') {
-        event.preventDefault();
-        setActiveIndex((current) => (filtered.length === 0 ? 0 : (current + 1) % filtered.length));
-        return;
-      }
+    if (event.key === 'Enter') {
+      const target = filtered[activeIndex];
+      if (!target) return;
 
-      if (event.key === 'ArrowUp') {
-        event.preventDefault();
-        setActiveIndex((current) => (filtered.length === 0 ? 0 : (current - 1 + filtered.length) % filtered.length));
-        return;
-      }
-
-      if (event.key === 'Enter') {
-        const target = filtered[activeIndex];
-
-        if (!target) return;
-
-        event.preventDefault();
-        onClose();
-        void target.run();
-      }
-    };
-
-    document.addEventListener('keydown', handleKeyDown, true);
-
-    return () => document.removeEventListener('keydown', handleKeyDown, true);
-  }, [activeIndex, filtered, onClose, open]);
+      event.preventDefault();
+      onClose();
+      void target.run();
+    }
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -111,15 +106,21 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
 
   if (!open) return null;
 
-  return createPortal(
-    <div className="fixed inset-0 z-[150] flex items-start justify-center p-4 pt-[12vh]">
-      <div className="absolute inset-0 bg-slate-950/40 backdrop-blur-[2px] dark:bg-black/55" onClick={onClose} aria-hidden="true" />
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label={l('命令面板', 'Command palette')}
-        className="relative flex max-h-[70vh] w-full max-w-xl flex-col overflow-hidden rounded-[var(--pq-radius-lg)] border border-[var(--pq-border)] bg-[var(--pq-bg-primary)] shadow-[var(--pq-shadow-dialog)]"
-      >
+  const activeOptionId = filtered[activeIndex] ? optionId(activeIndex) : undefined;
+
+  return (
+    <Dialog
+      open
+      onClose={onClose}
+      align="top"
+      size="xl"
+      labelledBy={TITLE_ID}
+      className="max-h-[70vh] max-w-xl"
+    >
+      <h2 id={TITLE_ID} className="sr-only">
+        {l('命令面板', 'Command palette')}
+      </h2>
+      <div className="flex max-h-[70vh] flex-col" onKeyDown={handleKeyDown}>
         <div className="flex items-center gap-2 border-b border-[var(--pq-border)] px-3 py-2.5">
           <Search className="h-4 w-4 shrink-0 text-[var(--pq-text-faint)]" strokeWidth={1.9} />
           <input
@@ -128,12 +129,22 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
             onChange={(event) => setQuery(event.target.value)}
             placeholder={l('搜索操作、文献或笔记…', 'Search commands, papers, or notes…')}
             className="min-w-0 flex-1 bg-transparent text-sm text-[var(--pq-text)] outline-none placeholder:text-[var(--pq-text-faint)]"
+            role="combobox"
+            aria-expanded
+            aria-controls={LISTBOX_ID}
+            aria-activedescendant={activeOptionId}
             aria-label={l('搜索操作', 'Search commands')}
           />
           <kbd className="pq-chip shrink-0 px-1.5 py-0.5 text-[11px] text-[var(--pq-text-faint)]">Esc</kbd>
         </div>
 
-        <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto p-1.5" role="listbox" aria-label={l('可用操作', 'Available commands')}>
+        <div
+          ref={listRef}
+          id={LISTBOX_ID}
+          className="min-h-0 flex-1 overflow-y-auto p-1.5"
+          role="listbox"
+          aria-label={l('可用操作', 'Available commands')}
+        >
           {filtered.length === 0 ? (
             <div className="px-3 py-6 text-center text-xs text-[var(--pq-text-faint)]">
               {l('没有匹配的操作', 'No matching commands')}
@@ -153,7 +164,9 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
                   ) : null}
                   <button
                     type="button"
+                    id={optionId(index)}
                     role="option"
+                    tabIndex={-1}
                     aria-selected={index === activeIndex}
                     data-command-index={index}
                     onMouseEnter={() => setActiveIndex(index)}
@@ -185,8 +198,11 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
           </span>
           <span>{l('↑↓ 选择 · Esc 关闭', '↑↓ to move · Esc to close')}</span>
         </div>
+
+        <div className="sr-only" role="status" aria-live="polite">
+          {l(`${filtered.length} 个结果`, `${filtered.length} results`)}
+        </div>
       </div>
-    </div>,
-    document.body,
+    </Dialog>
   );
 }

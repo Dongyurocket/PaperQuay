@@ -143,7 +143,7 @@ export function ModelPresetPicker({
                   className={cn(
                     'flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition',
                     selected
-                      ? 'bg-[var(--pq-accent)] text-white'
+                      ? 'bg-[var(--pq-accent)] text-[var(--pq-accent-button-text)]'
                       : 'bg-[var(--pq-surface-2)] text-[var(--pq-text-faint)]',
                   )}
                 >
@@ -182,7 +182,7 @@ export function ModelPresetPicker({
         className={cn(
           'group flex max-w-[190px] items-center gap-2 text-sm transition-all',
           pill
-            ? 'h-9 w-[136px] rounded-full border border-[rgba(15,23,42,0.10)] bg-white px-3 text-[var(--pq-text-muted)] shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_20px_rgba(15,23,42,0.04)] hover:border-[rgba(13,148,136,0.22)] hover:bg-white hover:shadow-[0_2px_5px_rgba(15,23,42,0.06),0_12px_26px_rgba(15,23,42,0.06)] sm:w-[156px] sm:px-4 dark:border-white/10 dark:bg-white/8'
+            ? 'h-9 w-[136px] rounded-full border border-[var(--pq-border)] bg-[var(--pq-surface-1)] px-3 text-[var(--pq-text-muted)] shadow-[var(--pq-shadow-soft)] hover:border-[var(--pq-accent-border)] hover:bg-[var(--pq-surface-2)] sm:w-[156px] sm:px-4'
             : 'pq-input h-10 rounded-xl px-3 text-[var(--pq-text-muted)] hover:border-[var(--pq-border-strong)] hover:bg-[var(--pq-accent-soft)]',
           compact ? 'w-10 justify-center px-0' : !pill && 'w-[190px]',
         )}

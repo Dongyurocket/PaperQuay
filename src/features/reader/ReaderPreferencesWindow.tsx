@@ -1,9 +1,9 @@
 import clsx from 'clsx';
 import { X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 
 import { useWheelScrollDelegate } from '../../hooks/useWheelScrollDelegate';
+import { Dialog } from '../../ui/dialog';
 import { pickLocaleText, type PreferencesSectionKey } from './readerShared';
 import {
   buildReaderPreferencesSections,
@@ -44,15 +44,9 @@ export default function ReaderPreferencesWindow({
       setActiveSection(normalizedSection);
     }
 
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        onClose();
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onClose, open, preferredSection]);
+    // Esc 由 Dialog 统一处理（并区分嵌套层级），这里不再自行监听。
+    return undefined;
+  }, [open, preferredSection]);
 
   if (!open) {
     return null;
@@ -60,25 +54,25 @@ export default function ReaderPreferencesWindow({
 
   const activeSectionMeta = sections.find((section) => section.key === activeSection);
 
-  const dialog = (
-    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/62 backdrop-blur-sm">
-      <button
-        type="button"
-        aria-label={l('关闭设置窗口', 'Close settings window')}
-        className="absolute inset-0 cursor-default"
-        onClick={onClose}
-      />
-
-      <div className="paperquay-settings relative flex h-[min(760px,calc(100vh-32px))] w-[min(1080px,calc(100vw-32px))] overflow-hidden rounded-[var(--pq-radius-lg)] border border-[var(--pq-border)] bg-[var(--pq-bg-primary)] shadow-[var(--pq-shadow-dialog)]">
+  return (
+    <Dialog
+      open
+      onClose={onClose}
+      overlay="strong"
+      size="xl"
+      labelledBy="pq-preferences-title"
+      className="!max-w-[min(1080px,calc(100vw-32px))]"
+    >
+      <div className="flex h-[min(760px,calc(100vh-32px))] overflow-hidden">
         <aside
           ref={sidebarRef}
           onWheelCapture={handleSidebarWheelCapture}
           className="flex min-h-0 w-64 shrink-0 flex-col border-r border-[var(--pq-border)] bg-[var(--pq-sidebar)] px-4 py-4 backdrop-blur-xl"
         >
           <div className="shrink-0 px-3 pb-4">
-            <div className="mt-2 text-2xl font-semibold tracking-tight text-[var(--pq-text)]">
+            <h2 id="pq-preferences-title" className="mt-2 text-2xl font-semibold tracking-tight text-[var(--pq-text)]">
               {l('设置', 'Settings')}
-            </div>
+            </h2>
             <div className="mt-2 text-sm leading-6 text-[var(--pq-text-muted)]">
               {l(
                 '像桌面应用一样管理文库、阅读、解析与模型能力。',
@@ -176,8 +170,6 @@ export default function ReaderPreferencesWindow({
           </div>
         </section>
       </div>
-    </div>
+    </Dialog>
   );
-
-  return createPortal(dialog, document.body);
 }

@@ -335,7 +335,7 @@ export function ReaderPreferencesModelsSection({
             return (
               <div
                 key={preset.id}
-                className="rounded-2xl border border-[var(--pq-border)] bg-slate-50/70 p-4"
+                className="rounded-2xl border border-[var(--pq-border)] bg-[var(--pq-surface-2)] p-4"
               >
               <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="min-w-0 truncate text-sm font-semibold text-[var(--pq-text)]">
@@ -346,7 +346,7 @@ export function ReaderPreferencesModelsSection({
                     type="button"
                     onClick={() => void handleListModelPresetModels(preset)}
                     disabled={!preset.baseUrl.trim() || Boolean(presetModelListLoadingMap[preset.id])}
-                    className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-[var(--pq-border)] bg-white px-3 text-xs font-medium text-[var(--pq-text-muted)] transition hover:border-[var(--pq-border-strong)] hover:bg-[var(--pq-surface-2)] disabled:cursor-not-allowed disabled:opacity-50"
+                    className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-[var(--pq-border)] bg-[var(--pq-surface-1)] px-3 text-xs font-medium text-[var(--pq-text-muted)] transition hover:border-[var(--pq-border-strong)] hover:bg-[var(--pq-surface-2)] disabled:cursor-not-allowed disabled:opacity-50"
                     title={l('读取模型列表', 'Load model list')}
                   >
                     <RefreshCw
@@ -368,7 +368,7 @@ export function ReaderPreferencesModelsSection({
                       !preset.apiKey.trim() ||
                       Boolean(presetTestLoadingMap[preset.id])
                     }
-                    className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-[var(--pq-border)] bg-white px-3 text-xs font-medium text-[var(--pq-text-muted)] transition hover:border-[var(--pq-border-strong)] hover:bg-[var(--pq-surface-2)] disabled:cursor-not-allowed disabled:opacity-50"
+                    className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-[var(--pq-border)] bg-[var(--pq-surface-1)] px-3 text-xs font-medium text-[var(--pq-text-muted)] transition hover:border-[var(--pq-border-strong)] hover:bg-[var(--pq-surface-2)] disabled:cursor-not-allowed disabled:opacity-50"
                     title={l('测试模型连接', 'Test model connection')}
                   >
                     <TestTube2 className="h-3.5 w-3.5" strokeWidth={1.9} />
@@ -382,7 +382,7 @@ export function ReaderPreferencesModelsSection({
                     type="button"
                     onClick={() => onQaModelPresetRemove(preset.id)}
                     disabled={qaModelPresets.length <= 1}
-                    className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-[var(--pq-border)] bg-white px-3 text-xs font-medium text-[var(--pq-text-muted)] transition hover:border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] hover:bg-[var(--pq-error-bg)] hover:text-[var(--pq-danger)] disabled:cursor-not-allowed disabled:hover:border-[var(--pq-border)] disabled:hover:bg-white disabled:hover:text-[var(--pq-text-muted)] disabled:opacity-50"
+                    className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-[var(--pq-border)] bg-[var(--pq-surface-1)] px-3 text-xs font-medium text-[var(--pq-text-muted)] transition hover:border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] hover:bg-[var(--pq-error-bg)] hover:text-[var(--pq-danger)] disabled:cursor-not-allowed disabled:hover:border-[var(--pq-border)] disabled:hover:bg-[var(--pq-surface-1)] disabled:hover:text-[var(--pq-text-muted)] disabled:opacity-50"
                     title={l('删除模型预设', 'Delete model preset')}
                   >
                     <Trash2 className="h-3.5 w-3.5" strokeWidth={1.9} />
@@ -596,7 +596,7 @@ export function ReaderPreferencesModelsSection({
           <button
             type="button"
             onClick={onQaModelPresetAdd}
-            className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-dashed border-[var(--pq-border-strong)] bg-white px-4 text-sm font-medium text-[var(--pq-text-muted)] transition hover:border-[var(--pq-border-strong)] hover:bg-[var(--pq-surface-2)]"
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-dashed border-[var(--pq-border-strong)] bg-[var(--pq-surface-1)] px-4 text-sm font-medium text-[var(--pq-text-muted)] transition hover:border-[var(--pq-border-strong)] hover:bg-[var(--pq-surface-2)]"
           >
             <Plus className="h-4 w-4" strokeWidth={1.9} />
             <span>{l('新增模型预设', 'Add Model Preset')}</span>
@@ -619,7 +619,7 @@ export function ReaderPreferencesModelsSection({
             return (
               <div
                 key={binding.key}
-                className="rounded-2xl border border-[var(--pq-border)] bg-slate-50/70 p-3 dark:border-white/10 dark:bg-[var(--pq-sidebar)]"
+                className="rounded-2xl border border-[var(--pq-border)] bg-[var(--pq-surface-2)] p-3"
               >
                 <div className="grid gap-3 lg:grid-cols-[minmax(150px,220px)_minmax(0,1fr)_auto] lg:items-center">
                   <div className="min-w-0">

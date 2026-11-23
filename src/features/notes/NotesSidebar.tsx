@@ -16,6 +16,7 @@ import { listNoteFolders, searchNotes, type NoteMutationOptions, type NoteSearch
 import type { LiteraturePaper } from '../../types/library';
 import type { SelectedExcerpt } from '../../types/reader';
 import { cn } from '../../utils/cn';
+import { useLocaleText } from '../../i18n/uiLanguage';
 import { NoteEditor } from './NoteEditor';
 import {
   copyTextToClipboard,
@@ -33,6 +34,8 @@ type SidebarContextMenu =
   | { kind: 'surface'; x: number; y: number }
   | { kind: 'anchor'; x: number; y: number; note: Note; anchor: NoteAnchor }
   | { kind: 'note'; x: number; y: number; note: Note };
+
+type Localizer = <T,>(zh: T, en: T) => T;
 
 interface NotesSidebarProps {
   notes: Note[];
@@ -58,30 +61,30 @@ interface NotesSidebarProps {
   onCollapse?: () => void;
 }
 
-const FILTERS: Array<{ key: NotesFilterKey; label: string }> = [
-  { key: 'all', label: '全部' },
-  { key: 'highlight', label: 'PDF' },
-  { key: 'ai-chat', label: 'AI' },
-  { key: 'standalone', label: '笔记' },
+const FILTERS: Array<{ key: NotesFilterKey; zh: string; en: string }> = [
+  { key: 'all', zh: '全部', en: 'All' },
+  { key: 'highlight', zh: 'PDF', en: 'PDF' },
+  { key: 'ai-chat', zh: 'AI', en: 'AI' },
+  { key: 'standalone', zh: '笔记', en: 'Notes' },
 ];
-const PAGE_KIND_FILTERS: Array<{ key: NotePageKind; label: string }> = [
-  { key: 'paper-card', label: '论文卡' }, { key: 'concept', label: '概念' },
-  { key: 'synthesis', label: '综述' }, { key: 'qa', label: '问答' },
-  { key: 'excerpt', label: '摘录' }, { key: 'index', label: '索引' },
-  { key: 'log', label: '日志' }, { key: 'overview', label: '总览' },
+const PAGE_KIND_FILTERS: Array<{ key: NotePageKind; zh: string; en: string }> = [
+  { key: 'paper-card', zh: '论文卡', en: 'Paper card' }, { key: 'concept', zh: '概念', en: 'Concept' },
+  { key: 'synthesis', zh: '综述', en: 'Review' }, { key: 'qa', zh: '问答', en: 'Q&A' },
+  { key: 'excerpt', zh: '摘录', en: 'Excerpt' }, { key: 'index', zh: '索引', en: 'Index' },
+  { key: 'log', zh: '日志', en: 'Log' }, { key: 'overview', zh: '总览', en: 'Overview' },
 ];
 
-function anchorPageLabel(anchor: NoteAnchor) {
+function anchorPageLabel(anchor: NoteAnchor, l: Localizer) {
   if (anchor.pdfLocation?.pageNumber) return `P${anchor.pdfLocation.pageNumber}`;
 
   const normalized = anchor.label.replace(/\s+/g, ' ').trim();
   const pageMatch = normalized.match(/\bP\s*(\d+)\b/i);
   if (pageMatch) return `P${pageMatch[1]}`;
 
-  return normalized || '定位';
+  return normalized || l('定位', 'Location');
 }
 
-function anchorSourceTitle(anchor: NoteAnchor, fallbackTitle?: string) {
+function anchorSourceTitle(anchor: NoteAnchor, fallbackTitle: string | undefined, l: Localizer) {
   const explicitTitle = anchor.sourceTitle?.replace(/\s+/g, ' ').trim();
   if (explicitTitle && !/^PDF\b/i.test(explicitTitle) && !/^P\s*\d+\b/i.test(explicitTitle)) {
     return explicitTitle;
@@ -90,7 +93,7 @@ function anchorSourceTitle(anchor: NoteAnchor, fallbackTitle?: string) {
   const fallback = fallbackTitle?.replace(/\s+/g, ' ').trim();
   if (fallback) return fallback;
 
-  return '文献';
+  return l('文献', 'Paper');
 }
 
 function excerptPreview(value: string) {
@@ -133,6 +136,7 @@ export function NotesSidebar({
   onPaperClick,
   onCollapse,
 }: NotesSidebarProps) {
+  const l = useLocaleText();
   const [filter, setFilter] = useState<NotesFilterKey>('all');
   const [search, setSearch] = useState('');
   const [folderId, setFolderId] = useState('');
@@ -173,10 +177,10 @@ export function NotesSidebar({
     const timer = setTimeout(() => {
       void searchNotes({ query, noteIds: JSON.parse(scopeIds) as string[], limit: 50 })
         .then((result) => { if (!cancelled) setSearchResult({ key: searchKey, result }); })
-        .catch((error: unknown) => { if (!cancelled) setSearchResult({ key: searchKey, error: error instanceof Error ? error.message : '笔记检索失败' }); });
+        .catch((error: unknown) => { if (!cancelled) setSearchResult({ key: searchKey, error: error instanceof Error ? error.message : l('笔记检索失败', 'Note search failed') }); });
     }, 250);
     return () => { cancelled = true; clearTimeout(timer); };
-  }, [drawerOpen, drawerTab, query, scopeIds, searchKey]);
+  }, [drawerOpen, drawerTab, query, scopeIds, searchKey, l]);
 
   const openSurfaceContextMenu = (event: MouseEvent) => {
     if (shouldUseNativeTextContextMenu(event.target)) return;
@@ -212,7 +216,7 @@ export function NotesSidebar({
       return [
         {
           id: 'jump',
-          label: '定位到原文',
+          label: l('定位到原文', 'Go to source'),
           disabled: !hasLocation,
           tone: 'accent',
           icon: <MapPin className="h-4 w-4" strokeWidth={1.8} />,
@@ -220,20 +224,20 @@ export function NotesSidebar({
         },
         {
           id: 'copy-excerpt',
-          label: '复制摘录',
+          label: l('复制摘录', 'Copy excerpt'),
           icon: <Copy className="h-4 w-4" strokeWidth={1.8} />,
           onSelect: () => copyTextToClipboard(anchor.excerpt),
         },
         {
           id: 'copy-quote',
-          label: '复制 Markdown 引用',
+          label: l('复制 Markdown 引用', 'Copy Markdown quote'),
           icon: <Quote className="h-4 w-4" strokeWidth={1.8} />,
           onSelect: () => copyTextToClipboard(buildQuoteMarkdown(anchor.excerpt)),
         },
         { type: 'separator', id: 'anchor-danger-separator' },
         {
           id: 'remove-anchor',
-          label: '从定位列表移除',
+          label: l('从定位列表移除', 'Remove from locations'),
           tone: 'danger',
           icon: <Trash2 className="h-4 w-4" strokeWidth={1.8} />,
           onSelect: () => {
@@ -251,7 +255,7 @@ export function NotesSidebar({
       return [
         {
           id: 'open-note',
-          label: '打开笔记',
+          label: l('打开笔记', 'Open note'),
           tone: 'accent',
           icon: <FileText className="h-4 w-4" strokeWidth={1.8} />,
           onSelect: () => {
@@ -261,13 +265,13 @@ export function NotesSidebar({
         },
         {
           id: 'copy-title',
-          label: '复制标题',
+          label: l('复制标题', 'Copy title'),
           icon: <Copy className="h-4 w-4" strokeWidth={1.8} />,
-          onSelect: () => copyTextToClipboard(note.title || '未命名笔记'),
+          onSelect: () => copyTextToClipboard(note.title || l('未命名笔记', 'Untitled note')),
         },
         {
           id: 'copy-content',
-          label: '复制正文',
+          label: l('复制正文', 'Copy body'),
           disabled: !notePlainText(note).trim(),
           icon: <Copy className="h-4 w-4" strokeWidth={1.8} />,
           onSelect: () => copyTextToClipboard(notePlainText(note)),
@@ -275,7 +279,7 @@ export function NotesSidebar({
         { type: 'separator', id: 'note-danger-separator' },
         {
           id: 'delete-note',
-          label: '删除笔记',
+          label: l('删除笔记', 'Delete note'),
           tone: 'danger',
           icon: <Trash2 className="h-4 w-4" strokeWidth={1.8} />,
           onSelect: () => onDeleteNote(note.id),
@@ -286,14 +290,14 @@ export function NotesSidebar({
     return [
       {
         id: 'new-note',
-        label: '新建笔记',
+        label: l('新建笔记', 'New note'),
         tone: 'accent',
         icon: <Plus className="h-4 w-4" strokeWidth={1.8} />,
         onSelect: onCreateStandaloneNote,
       },
       {
         id: 'add-selection',
-        label: '加入当前笔记',
+        label: l('加入当前笔记', 'Add to current note'),
         disabled: !canAddSelection,
         icon: <FilePlus2 className="h-4 w-4" strokeWidth={1.8} />,
         onSelect: onAddSelectionToNote,
@@ -331,7 +335,7 @@ export function NotesSidebar({
           aria-expanded={drawerOpen}
         >
           <ListTree className="h-4 w-4 shrink-0" strokeWidth={1.8} />
-          <span className="shrink-0">摘录</span>
+          <span className="shrink-0">{l('摘录', 'Excerpts')}</span>
           <span className="rounded-md bg-[var(--pq-bg-secondary)] px-1.5 py-0.5 text-[11px] text-[var(--pq-text-faint)]">
             {activeAnchors.length}
           </span>
@@ -344,8 +348,8 @@ export function NotesSidebar({
             onClick={onAddSelectionToNote}
             disabled={!canAddSelection}
             className="pq-icon-button h-8 w-8 disabled:opacity-40"
-            title="加入当前笔记"
-            aria-label="加入当前笔记"
+            title={l('加入当前笔记', 'Add to current note')}
+            aria-label={l('加入当前笔记', 'Add to current note')}
           >
             <FilePlus2 className="h-4 w-4" strokeWidth={1.8} />
           </button>
@@ -353,8 +357,8 @@ export function NotesSidebar({
             type="button"
             onClick={onCreateStandaloneNote}
             className="pq-icon-button h-8 w-8 bg-[var(--pq-accent-bg)] text-[var(--pq-accent)]"
-            title="新建笔记"
-            aria-label="新建笔记"
+            title={l('新建笔记', 'New note')}
+            aria-label={l('新建笔记', 'New note')}
           >
             <Plus className="h-4 w-4" strokeWidth={1.8} />
           </button>
@@ -363,8 +367,8 @@ export function NotesSidebar({
               type="button"
               onClick={onCollapse}
               className="pq-icon-button h-8 w-8"
-              title="收起侧边栏"
-              aria-label="收起侧边栏"
+              title={l('收起侧边栏', 'Collapse sidebar')}
+              aria-label={l('收起侧边栏', 'Collapse sidebar')}
             >
               <PanelRightClose className="h-4 w-4" strokeWidth={1.8} />
             </button>
@@ -376,8 +380,8 @@ export function NotesSidebar({
         <div className="pq-card absolute left-2 right-2 top-12 z-30 flex max-h-[min(480px,62%)] min-h-[180px] flex-col overflow-hidden p-2 shadow-[var(--pq-shadow-dialog)]">
           <div className="flex shrink-0 items-center gap-1 rounded-[var(--pq-radius-sm)] bg-[var(--pq-bg-secondary)] p-1">
             {([
-              ['anchors', `定位 ${activeAnchors.length}`],
-              ['notes', `笔记 ${notes.length}`],
+              ['anchors', l(`定位 ${activeAnchors.length}`, `Locations ${activeAnchors.length}`)],
+              ['notes', l(`笔记 ${notes.length}`, `Notes ${notes.length}`)],
             ] as Array<[DrawerTab, string]>).map(([tab, label]) => (
               <button
                 key={tab}
@@ -407,8 +411,8 @@ export function NotesSidebar({
                 <div className="space-y-1.5">
                   {activeAnchors.map((anchor) => {
                     const hasLocation = anchorHasLocation(anchor);
-                    const sourceTitle = anchorSourceTitle(anchor, documentTitle);
-                    const pageLabel = anchorPageLabel(anchor);
+                    const sourceTitle = anchorSourceTitle(anchor, documentTitle, l);
+                    const pageLabel = anchorPageLabel(anchor, l);
 
                     return (
                       <div
@@ -423,7 +427,7 @@ export function NotesSidebar({
                       >
                         <span className="block border-l-2 border-[var(--pq-border-strong)] pl-2 text-xs leading-5 text-[var(--pq-text-secondary)]">
                           <span className="line-clamp-3 break-words">
-                            “{excerptPreview(anchor.excerpt) || '无摘录文本'}”
+                            “{excerptPreview(anchor.excerpt) || l('无摘录文本', 'No excerpt text')}”
                           </span>
                         </span>
                         <span className="mt-1.5 flex min-w-0 items-center gap-1.5 pl-2">
@@ -438,8 +442,8 @@ export function NotesSidebar({
                                 onJumpToNoteAnchor(activeNote, anchor);
                               }}
                               className="rounded-md px-1 text-[11px] font-semibold text-[var(--pq-accent)] transition hover:bg-[var(--pq-accent-bg)] hover:text-[var(--pq-accent-hover)]"
-                              title="点击定位到原文"
-                              aria-label={`点击定位到原文 ${pageLabel}`}
+                              title={l('点击定位到原文', 'Click to go to source')}
+                              aria-label={l(`点击定位到原文 ${pageLabel}`, `Click to go to source ${pageLabel}`)}
                             >
                               {pageLabel}
                             </button>
@@ -455,7 +459,7 @@ export function NotesSidebar({
                 </div>
               ) : (
                 <div className="flex h-28 items-center justify-center rounded-[var(--pq-radius-sm)] border border-dashed border-[var(--pq-border-subtle)] text-xs text-[var(--pq-text-faint)]">
-                  暂无摘录
+                  {l('暂无摘录', 'No excerpts yet')}
                 </div>
               )}
             </div>
@@ -468,15 +472,15 @@ export function NotesSidebar({
                 <input
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
-                  placeholder="搜索笔记"
+                  placeholder={l('搜索笔记', 'Search notes')}
                   className="min-w-0 flex-1 bg-transparent text-xs outline-none placeholder:text-[var(--pq-text-faint)]"
                 />
               </label>
 
               <select value={folderId} onChange={(event) => setFolderId(event.target.value)}
-                className="pq-input mt-2 h-8 shrink-0 px-2 text-xs" aria-label="筛选笔记文件夹">
-                <option value="">全部文件夹</option>
-                <option value="__uncategorized__">未分类</option>
+                className="pq-input mt-2 h-8 shrink-0 px-2 text-xs" aria-label={l('筛选笔记文件夹', 'Filter note folders')}>
+                <option value="">{l('全部文件夹', 'All folders')}</option>
+                <option value="__uncategorized__">{l('未分类', 'Uncategorized')}</option>
                 {folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
               </select>
 
@@ -493,20 +497,26 @@ export function NotesSidebar({
                         : 'text-[var(--pq-text-muted)] hover:bg-[var(--pq-hover)] hover:text-[var(--pq-text)]',
                     )}
                   >
-                    {item.label}
+                    {l(item.zh, item.en)}
                   </button>
                 ))}
               </div>
 
               {query ? <div className="mt-1 text-[11px] text-[var(--pq-text-faint)]" role="status">
-                {!currentSearch ? '正在检索…' : currentSearch.error || `${currentSearch.result?.retrievalMode === 'hybrid' ? '混合检索' : '关键词检索'} · 当前文档 ${scopedNotes.length} 篇${currentSearch.result?.notes.length === 50 ? ' · 最多显示 50 条' : ''}${currentSearch.result?.warning ? ` · ${currentSearch.result.warning}` : ''}`}
+                {!currentSearch
+            ? l('正在检索…', 'Searching…')
+            : currentSearch.error
+              || l(
+                `${currentSearch.result?.retrievalMode === 'hybrid' ? '混合检索' : '关键词检索'} · 当前文档 ${scopedNotes.length} 篇${currentSearch.result?.notes.length === 50 ? ' · 最多显示 50 条' : ''}${currentSearch.result?.warning ? ` · ${currentSearch.result.warning}` : ''}`,
+                `${currentSearch.result?.retrievalMode === 'hybrid' ? 'Hybrid search' : 'Keyword search'} · ${scopedNotes.length} in this document${currentSearch.result?.notes.length === 50 ? ' · showing up to 50' : ''}${currentSearch.result?.warning ? ` · ${currentSearch.result.warning}` : ''}`,
+              )}
               </div> : null}
               <div className="mt-1 flex shrink-0 items-center gap-1 overflow-x-auto">
                 {PAGE_KIND_FILTERS.map((item) => (
                   <button key={item.key} type="button" onClick={() => setFilter(item.key)}
                     className={cn('shrink-0 rounded-md px-2 py-1 text-[11px] font-medium transition',
                       filter === item.key ? 'bg-[var(--pq-bg-tertiary)] text-[var(--pq-text)]' : 'text-[var(--pq-text-muted)] hover:bg-[var(--pq-hover)] hover:text-[var(--pq-text)]')}>
-                    {item.label}
+                    {l(item.zh, item.en)}
                   </button>
                 ))}
               </div>
@@ -568,10 +578,10 @@ export function NotesSidebar({
           y={contextMenu.y}
           title={
             contextMenu.kind === 'anchor'
-              ? contextMenu.anchor.label || '摘录'
+              ? contextMenu.anchor.label || l('摘录', 'Excerpt')
               : contextMenu.kind === 'note'
-                ? contextMenu.note.title || '未命名笔记'
-                : '笔记'
+                ? contextMenu.note.title || l('未命名笔记', 'Untitled note')
+                : l('笔记', 'Notes')
           }
           entries={contextMenuEntries}
           onClose={() => setContextMenu(null)}

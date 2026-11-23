@@ -5,12 +5,13 @@ import {
   useRef,
   useState,
   type DragEvent as ReactDragEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
 } from 'react';
 import { ContextMenu, type ContextMenuEntry } from '../ContextMenu';
 import { useLocaleText } from '../../i18n/uiLanguage';
 import type { AppTab } from '../../stores/useTabsStore';
-import TabItem, { type TabDropPosition } from './TabItem';
+import TabItem, { displayTabTitle, tabElementId, type TabDropPosition } from './TabItem';
 
 const TAB_DRAG_MIME = 'application/x-paperquay-tab-id';
 
@@ -161,6 +162,29 @@ function TabBar({ tabs, activeTabId, onSelect, onClose, onReorder }: TabBarProps
     setContextMenu({ tab, x: event.clientX, y: event.clientY });
   };
 
+  // E4：tablist 的方向键导航（roving tabindex 由 TabItem 的 active 控制）。
+  const handleTabListKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    const currentIndex = tabs.findIndex((tab) => tab.id === activeTabId);
+    if (currentIndex < 0) return;
+
+    event.preventDefault();
+    const nextIndex = event.key === 'Home'
+      ? 0
+      : event.key === 'End'
+        ? tabs.length - 1
+        : event.key === 'ArrowRight'
+          ? (currentIndex + 1) % tabs.length
+          : (currentIndex - 1 + tabs.length) % tabs.length;
+    const nextTab = tabs[nextIndex];
+    if (!nextTab) return;
+
+    onSelect(nextTab.id);
+    window.requestAnimationFrame(() => {
+      document.getElementById(tabElementId(nextTab.id))?.focus();
+    });
+  };
+
   const contextMenuEntries = useMemo<ContextMenuEntry[]>(() => {
     if (!contextMenu) return [];
 
@@ -223,8 +247,11 @@ function TabBar({ tabs, activeTabId, onSelect, onClose, onReorder }: TabBarProps
       className="flex h-9 shrink-0 items-end border-b border-[var(--pq-border)] bg-[var(--pq-surface-2)] px-1 pt-1"
     >
       <div
+        role="tablist"
+        aria-label={l('打开的标签', 'Open tabs')}
         className="flex min-w-0 flex-1 items-end overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         onDragOver={handleBarDragOver}
+        onKeyDown={handleTabListKeyDown}
       >
         {tabs.map((tab) => (
           <TabItem
@@ -248,7 +275,7 @@ function TabBar({ tabs, activeTabId, onSelect, onClose, onReorder }: TabBarProps
         <ContextMenu
           x={contextMenu.x}
           y={contextMenu.y}
-          title={contextMenu.tab.title}
+          title={displayTabTitle(contextMenu.tab, l)}
           entries={contextMenuEntries}
           onClose={() => setContextMenu(null)}
         />

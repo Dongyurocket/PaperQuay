@@ -1,4 +1,4 @@
-import { Component, useEffect, useMemo, useState, type ErrorInfo, type ReactNode } from 'react';
+import { Component, Suspense, lazy, useEffect, useMemo, useState, type ErrorInfo, type ReactNode } from 'react';
 import {
   FilePlus2,
   GitBranch,
@@ -13,9 +13,8 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import Reader from '../features/reader/Reader';
-import NotesWorkspace from '../features/notes/NotesWorkspace';
-import KnowledgeGraphWorkspace from '../features/graph/KnowledgeGraphWorkspace';
 import TabBar from '../components/tabs/TabBar';
+import { perfMark, perfMeasure } from '../utils/perfTrace';
 import {
   emitOpenPreferences,
   emitOpenStandalonePdf,
@@ -24,7 +23,7 @@ import {
   UI_LANGUAGE_CHANGED_EVENT,
 } from './appEvents';
 import { PAPERQUAY_ICON_URL } from './appIcon';
-import { AppLocaleProvider } from '../i18n/uiLanguage';
+import { AppLocaleProvider, applyDocumentLanguage } from '../i18n/uiLanguage';
 import { getCurrentWindow } from '../platform/electron/window';
 import { useThemeStore } from '../stores/useThemeStore';
 import { HOME_TAB_ID, useTabsStore } from '../stores/useTabsStore';
@@ -53,6 +52,28 @@ const workspaces: AppWorkspaceItem[] = [
   { key: 'graph', icon: GitBranch, labelZh: '图谱', labelEn: 'Graph' },
   { key: 'notes', icon: NotebookText, labelZh: '\u7b14\u8bb0', labelEn: 'Notes' },
 ];
+
+// S1\uff1aNotes / Graph \u6539\u4e3a\u5de5\u4f5c\u533a\u7ea7\u61d2\u52a0\u8f7d\u3002Reader\uff08\u6587\u5e93\uff09\u4fdd\u6301\u540c\u6b65\u5bfc\u5165\u2014\u2014
+// \u5b83\u662f\u9ed8\u8ba4\u5de5\u4f5c\u533a\uff0c\u4e5f\u8d1f\u8d23\u8bbe\u7f6e hydration \u4e0e\u8de8\u5de5\u4f5c\u533a\u4e8b\u4ef6\u3002
+const loadNotesWorkspace = () =>
+  import('../features/notes/NotesWorkspace').then((module) => ({ default: module.NotesWorkspace }));
+const loadGraphWorkspace = () =>
+  import('../features/graph/KnowledgeGraphWorkspace').then((module) => ({ default: module.default }));
+
+const LazyNotesWorkspace = lazy(() => {
+  perfMark('workspace:notes:start');
+  return loadNotesWorkspace().then((module) => {
+    perfMeasure('workspace:notes:loaded', 'workspace:notes:start');
+    return module;
+  });
+});
+const LazyGraphWorkspace = lazy(() => {
+  perfMark('workspace:graph:start');
+  return loadGraphWorkspace().then((module) => {
+    perfMeasure('workspace:graph:loaded', 'workspace:graph:start');
+    return module;
+  });
+});
 
 interface WorkspaceErrorBoundaryProps {
   children: ReactNode;
@@ -155,6 +176,21 @@ function App() {
   const activeWorkspaceItem = workspaces.find((workspace) => workspace.key === activeWorkspace) ?? workspaces[0];
   const activeWorkspaceLabel = isEnglish ? activeWorkspaceItem.labelEn : activeWorkspaceItem.labelZh;
 
+  // S1：首次进入后保持挂载（工作区内部状态、cytoscape 实例与笔记编辑器不能因切换而重置）。
+  const [visitedWorkspaces, setVisitedWorkspaces] = useState<ReadonlySet<AppWorkspaceKey>>(() => new Set());
+
+  useEffect(() => {
+    setVisitedWorkspaces((previous) => {
+      if (previous.has(activeWorkspace)) return previous;
+      const next = new Set(previous);
+      next.add(activeWorkspace);
+      return next;
+    });
+  }, [activeWorkspace]);
+
+  const mountNotes = activeWorkspace === 'notes' || visitedWorkspaces.has('notes');
+  const mountGraph = activeWorkspace === 'graph' || visitedWorkspaces.has('graph');
+
   useWorkspaceRestore(activeWorkspace, openNotesTab, openGraphTab);
 
   useEffect(() => {
@@ -165,6 +201,10 @@ function App() {
   }, []);
 
   useEffect(() => startExternalWriteBridge(), []);
+
+  useEffect(() => {
+    applyDocumentLanguage(uiLanguage);
+  }, [uiLanguage]);
 
   useEffect(() => {
     const handleLanguageChanged = (event: Event) => {
@@ -413,7 +453,7 @@ function App() {
                 <button
                   type="button"
                   onClick={handleWindowClose}
-                  className="inline-flex h-full w-11 cursor-default items-center justify-center text-[var(--pq-text-muted)] transition hover:bg-[#e81123] hover:text-white"
+                  className="inline-flex h-full w-11 cursor-default items-center justify-center text-[var(--pq-text-muted)] transition hover:bg-[var(--pq-window-close-bg)] hover:text-[var(--pq-window-close-text)]"
                   aria-label={closeWindowLabel}
                   title={closeLabel}
                 >
@@ -475,21 +515,47 @@ function App() {
           </aside>
 
           <main className="min-w-0 flex-1 overflow-hidden p-1.5">
-            <div className="h-full min-h-0 overflow-hidden" hidden={activeWorkspace !== 'library'}>
+            <div
+              id="pq-workspace-panel-library"
+              role="tabpanel"
+              aria-labelledby={activeWorkspace === 'library' ? `pq-tab-${activeTabId}` : undefined}
+              className="h-full min-h-0 overflow-hidden"
+              hidden={activeWorkspace !== 'library'}
+            >
               <WorkspaceErrorBoundary name="Library" resetKey={activeWorkspace}>
                 <Reader workspaceActive={activeWorkspace === 'library'} />
               </WorkspaceErrorBoundary>
             </div>
 
-            <div className="h-full min-h-0 overflow-hidden rounded-[var(--pq-radius-md)]" hidden={activeWorkspace !== 'notes'}>
+            <div
+              id="pq-workspace-panel-notes"
+              role="tabpanel"
+              aria-labelledby={activeWorkspace === 'notes' ? `pq-tab-${activeTabId}` : undefined}
+              className="h-full min-h-0 overflow-hidden rounded-[var(--pq-radius-md)]"
+              hidden={activeWorkspace !== 'notes'}
+            >
               <WorkspaceErrorBoundary name="Notes" resetKey={activeWorkspace}>
-                <NotesWorkspace workspaceActive={activeWorkspace === 'notes'} />
+                {mountNotes ? (
+                  <Suspense fallback={null}>
+                    <LazyNotesWorkspace workspaceActive={activeWorkspace === 'notes'} />
+                  </Suspense>
+                ) : null}
               </WorkspaceErrorBoundary>
             </div>
 
-            <div className="h-full min-h-0 overflow-hidden rounded-[var(--pq-radius-md)]" hidden={activeWorkspace !== 'graph'}>
+            <div
+              id="pq-workspace-panel-graph"
+              role="tabpanel"
+              aria-labelledby={activeWorkspace === 'graph' ? `pq-tab-${activeTabId}` : undefined}
+              className="h-full min-h-0 overflow-hidden rounded-[var(--pq-radius-md)]"
+              hidden={activeWorkspace !== 'graph'}
+            >
               <WorkspaceErrorBoundary name="Graph" resetKey={activeWorkspace}>
-                <KnowledgeGraphWorkspace workspaceActive={activeWorkspace === 'graph'} />
+                {mountGraph ? (
+                  <Suspense fallback={null}>
+                    <LazyGraphWorkspace workspaceActive={activeWorkspace === 'graph'} />
+                  </Suspense>
+                ) : null}
               </WorkspaceErrorBoundary>
             </div>
           </main>

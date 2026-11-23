@@ -14,6 +14,7 @@ type AttachmentResult = {
   id: string;
   kind: string;
   storedPath: string;
+  language?: string | null;
 };
 
 function createAppPaths() {

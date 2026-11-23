@@ -135,7 +135,7 @@ export const PdfThumbnailSidebar = memo(forwardRef<HTMLElement, PdfThumbnailSide
         collapsed
           ? 'pointer-events-none absolute inset-y-0 left-0 z-30 w-10 border-r-0 bg-transparent'
           : cn(
-              'relative border-r border-slate-200/80 bg-white/72 shadow-[8px_0_24px_rgba(15,23,42,0.04)] backdrop-blur-xl dark:border-white/10 dark:bg-[var(--pq-surface-1)] dark:shadow-none',
+              'relative border-r border-[var(--pq-border)] bg-[var(--pq-bg-elevated)] shadow-[var(--pq-shadow-soft)] backdrop-blur-xl',
               contentOverride ? 'w-[248px]' : 'w-[184px]',
             ),
       )}
@@ -146,7 +146,7 @@ export const PdfThumbnailSidebar = memo(forwardRef<HTMLElement, PdfThumbnailSide
             'flex shrink-0 flex-col items-center gap-3 transition-all duration-300 ease-out',
             collapsed
               ? 'pointer-events-auto w-10 px-1 py-3'
-              : 'w-10 border-r border-slate-200/70 px-1.5 py-4 dark:border-white/10',
+              : 'w-10 border-r border-[var(--pq-border)] px-1.5 py-4',
           )}
         >
           <button
@@ -176,7 +176,7 @@ export const PdfThumbnailSidebar = memo(forwardRef<HTMLElement, PdfThumbnailSide
         >
           {!collapsed ? (
             <div className="flex h-full min-h-0 flex-col">
-              <div className="border-b border-slate-200/70 px-2.5 py-3 text-xs font-medium text-[var(--pq-text-muted)] dark:border-[var(--pq-border)] dark:text-[var(--pq-text-faint)]">
+              <div className="border-b border-[var(--pq-border)] px-2.5 py-3 text-xs font-medium text-[var(--pq-text-muted)]">
                 {contentOverride ? (contentTitle ?? l('Outline', 'Outline')) : l('Page Thumbnails', 'Page Thumbnails')}
               </div>
               {contentOverride ?? (

@@ -240,7 +240,7 @@ function NotesDrawerContent({
                   className={cn(
                     'rounded-xl px-3 py-1.5 text-xs font-semibold transition',
                     viewMode === option.key
-                      ? 'bg-white text-[var(--pq-text)] shadow-sm'
+                      ? 'bg-[var(--pq-surface-1)] text-[var(--pq-text)] shadow-sm'
                       : 'text-[var(--pq-text-muted)] hover:text-[var(--pq-text)]',
                   )}
                 >
@@ -260,7 +260,7 @@ function NotesDrawerContent({
                   'Write Markdown notes here, for example:\n\n## Key Ideas\n- Method\n- Experiments\n\n$$E = mc^2$$',
                 )}
                 className={cn(
-                  'w-full resize-y rounded-2xl border border-[var(--pq-border)] bg-slate-50/80 px-4 py-3 font-mono text-sm leading-7 text-[var(--pq-text-muted)] outline-none transition focus:border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] focus:bg-white',
+                  'w-full resize-y rounded-2xl border border-[var(--pq-border)] bg-[var(--pq-surface-2)] px-4 py-3 font-mono text-sm leading-7 text-[var(--pq-text-muted)] outline-none transition focus:border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] focus:bg-[var(--pq-surface-1)]',
                   viewMode === 'split' ? 'min-h-[180px]' : 'min-h-[360px]',
                 )}
               />
@@ -277,7 +277,7 @@ function NotesDrawerContent({
           ) : null}
 
           {viewMode !== 'edit' ? (
-            <div className="rounded-[22px] border border-slate-200/80 bg-white px-4 py-4">
+            <div className="rounded-[22px] border border-[var(--pq-border)] bg-[var(--pq-surface-1)] px-4 py-4">
               <div className="mb-3 flex items-center justify-between gap-2">
                 <div className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--pq-text-faint)]">
                   {l('实时预览', 'Live Preview')}
@@ -335,7 +335,7 @@ function NotesDrawerContent({
               return (
                 <div
                   key={note.id}
-                  className="rounded-[22px] border border-slate-200/80 bg-white/78 p-4"
+                  className="rounded-[22px] border border-[var(--pq-border)] bg-[var(--pq-surface-1)] p-4"
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">

@@ -11,6 +11,51 @@ const require = createRequire(import.meta.url);
 const { buildMcpClientConfig } = require('../electron/backend/mcpClientConfig.cjs');
 const { PaperQuayKnowledgeService } = require('../electron/mcp/knowledgeMcpService.cjs');
 
+// F5：本机 %TEMP% 下 esbuild 落盘会被安全软件锁住（`Access is denied`）。
+// 这里需要真实 bundle 供子进程启动，所以改为写到仓库内 .tmp-test/（已在 .gitignore），
+// 并对 EACCES/EPERM 做有限重试。
+let scratchCounter = 0;
+
+function createScratchRoot() {
+  const candidates = [path.resolve('.tmp-test'), os.tmpdir()];
+  for (const base of candidates) {
+    const dir = path.join(base, `paperquay-mcp-launch-${process.pid}-${scratchCounter++}`);
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+      return dir;
+    } catch {
+      // 换下一个候选目录。
+    }
+  }
+  throw new Error('No writable scratch directory for the MCP launch test');
+}
+
+async function buildWithRetry(options, attempts = 4) {
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await build(options);
+    } catch (error) {
+      lastError = error;
+      const transient = /Access is denied|EPERM|EBUSY|Failed to write to output file/i.test(String(error?.message ?? ''));
+      if (!transient || attempt === attempts) break;
+      await new Promise((resolve) => setTimeout(resolve, attempt * 250));
+    }
+  }
+  throw lastError;
+}
+
+function removeScratchRoot(dir) {
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      fs.rmSync(dir, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      if (attempt === 3 || (error.code !== 'EPERM' && error.code !== 'EBUSY' && error.code !== 'EACCES')) return;
+    }
+  }
+}
+
 async function exerciseClient(config, noteId) {
   const child = spawn(config.command, config.args, {
     env: { ...process.env, ...config.env },
@@ -82,12 +127,12 @@ async function exerciseClient(config, noteId) {
 }
 
 test('generated development and packaged MCP configurations launch the same tool contracts', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'paperquay-mcp-launch-'));
+  const root = createScratchRoot();
   const resources = path.join(root, 'resources');
   const bundleDir = path.join(resources, 'paperquay-mcp');
   fs.mkdirSync(bundleDir, { recursive: true });
   try {
-    await build({
+    await buildWithRetry({
       entryPoints: ['bin/paperquay-mcp.cjs'], bundle: true, platform: 'node', format: 'cjs',
       target: 'node22', outfile: path.join(bundleDir, 'server.cjs'),
       external: ['sqlite-vec', 'sqlite-vec-*'], legalComments: 'none', logLevel: 'silent',
@@ -119,8 +164,6 @@ test('generated development and packaged MCP configurations launch the same tool
     assert.deepEqual(bundledTools, sourceTools);
     assert.ok(sourceTools.some((tool) => tool.name === 'get_note'));
   } finally {
-    try { fs.rmSync(root, { recursive: true, force: true }); } catch (error) {
-      if (error.code !== 'EPERM' && error.code !== 'EBUSY') throw error;
-    }
+    removeScratchRoot(root);
   }
 });

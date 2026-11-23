@@ -1,5 +1,5 @@
 import { Bot, FileText, Library, NotebookText, X } from 'lucide-react';
-import type { DragEvent, MouseEvent } from 'react';
+import type { DragEvent, KeyboardEvent, MouseEvent } from 'react';
 import { useLocaleText } from '../../i18n/uiLanguage';
 import type { AppTab } from '../../stores/useTabsStore';
 import { cn } from '../../utils/cn';
@@ -19,6 +19,23 @@ interface TabItemProps {
   onDrop: (event: DragEvent<HTMLDivElement>, tabId: string) => void;
   onDragEnd: () => void;
   onContextMenu: (event: MouseEvent<HTMLDivElement>, tab: AppTab) => void;
+}
+
+export function tabPanelId(tab: AppTab): string {
+  if (tab.type === 'graph') return 'pq-workspace-panel-graph';
+  if (tab.type === 'notes' || tab.type === 'note') return 'pq-workspace-panel-notes';
+  return 'pq-workspace-panel-library';
+}
+
+export function tabElementId(tabId: string): string {
+  return `pq-tab-${tabId}`;
+}
+
+/** 静态标签（笔记/图谱）在展示层本地化；文献与笔记标签保留用户可见标题。 */
+export function displayTabTitle(tab: AppTab, l: <T,>(zh: T, en: T) => T): string {
+  if (tab.type === 'notes') return l('笔记', 'Notes');
+  if (tab.type === 'graph') return l('知识图谱', 'Knowledge Graph');
+  return tab.title;
 }
 
 function TabItem({
@@ -44,6 +61,7 @@ function TabItem({
         : FileText;
   const closable = tab.type !== 'library';
   const isHomeTab = tab.type === 'library';
+  const title = displayTabTitle(tab, l);
 
   const handleClose = (event: MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
@@ -52,8 +70,11 @@ function TabItem({
 
   return (
     <div
-      role="button"
-      tabIndex={0}
+      role="tab"
+      id={tabElementId(tab.id)}
+      aria-selected={active}
+      aria-controls={tabPanelId(tab)}
+      tabIndex={active ? 0 : -1}
       draggable
       onClick={() => onSelect(tab.id)}
       onKeyDown={(event) => {
@@ -91,7 +112,7 @@ function TabItem({
       >
         <Icon className="h-3.5 w-3.5" strokeWidth={1.9} />
       </span>
-      <span className="min-w-0 flex-1 truncate text-left">{tab.title}</span>
+      <span className="min-w-0 flex-1 truncate text-left">{title}</span>
       {tab.type === 'note' && tab.externalUpdate ? (
         <span
           className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--pq-accent)]"
@@ -104,11 +125,15 @@ function TabItem({
           type="button"
           draggable={false}
           onClick={handleClose}
+          onKeyDown={(event) => {
+            // 关闭按钮的 Space/Enter 不能冒泡到标签的 keydown，否则会重新选中标签。
+            event.stopPropagation();
+          }}
           className={cn(
             'inline-flex h-5 w-5 shrink-0 cursor-default items-center justify-center rounded text-[var(--pq-text-faint)] transition hover:bg-[var(--pq-hover)] hover:text-[var(--pq-text)]',
-            active ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
+            active ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100',
           )}
-          aria-label={l(`关闭 ${tab.title}`, `Close ${tab.title}`)}
+          aria-label={l(`关闭 ${title}`, `Close ${title}`)}
         >
           <X className="h-3.5 w-3.5" strokeWidth={2} />
         </button>

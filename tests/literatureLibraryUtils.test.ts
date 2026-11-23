@@ -98,6 +98,7 @@ function paper(overrides: Partial<LiteraturePaper> & Pick<LiteraturePaper, 'id' 
     tags: overrides.tags ?? [],
     categoryIds: overrides.categoryIds ?? [],
     attachments: overrides.attachments ?? [],
+    ragEnabled: overrides.ragEnabled ?? true,
   };
 }
 

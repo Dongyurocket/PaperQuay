@@ -8,9 +8,12 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const { buildMcpClientConfig, nodeSatisfiesSqlite } = require('../electron/backend/mcpClientConfig.cjs');
 
-test('nodeSatisfiesSqlite accepts 22.5 and newer', () => {
+test('nodeSatisfiesSqlite requires the Node.js release that stabilises node:sqlite', () => {
+  // node:sqlite 在 22.5 引入实验实现，22.13 才可用于本项目（D8-5 / F3）。
   assert.equal(nodeSatisfiesSqlite('22.4.9'), false);
-  assert.equal(nodeSatisfiesSqlite('22.5.0'), true);
+  assert.equal(nodeSatisfiesSqlite('22.5.0'), false);
+  assert.equal(nodeSatisfiesSqlite('22.12.0'), false);
+  assert.equal(nodeSatisfiesSqlite('22.13.0'), true);
   assert.equal(nodeSatisfiesSqlite('v24.15.0'), true);
 });
 

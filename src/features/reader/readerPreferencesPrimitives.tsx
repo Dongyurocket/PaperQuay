@@ -89,7 +89,7 @@ export function BatchProgressCard({
   }
 
   return (
-    <div className="rounded-2xl border border-[var(--pq-border)] bg-slate-50/80 px-4 py-3">
+    <div className="rounded-2xl border border-[var(--pq-border)] bg-[var(--pq-surface-2)] px-4 py-3">
       <div className="flex items-center justify-between gap-3 text-sm">
         <div className="font-medium text-[var(--pq-text)]">{title}</div>
         <div className="text-[var(--pq-text-muted)]">

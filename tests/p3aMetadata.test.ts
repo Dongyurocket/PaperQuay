@@ -85,6 +85,7 @@ function makePaper(overrides: Partial<LiteraturePaper> = {}): LiteraturePaper {
     tags: [],
     categoryIds: [],
     attachments: [],
+    ragEnabled: true,
     ...overrides,
   };
 }
