@@ -32,19 +32,13 @@ import {
   insertImageFilesIntoView,
   NOTE_TEMPLATES,
   paragraphNode,
+  templateContentForLocale,
   type NoteTemplate,
 } from './noteEditorUtils';
-import { extractNoteReferences, upsertNoteReferenceList } from './noteReferences';
+import { extractNoteReferences, referenceListHeadingForLocale, upsertNoteReferenceList } from './noteReferences';
 import { NOTE_CITATION_STYLE_OPTIONS, type NoteCitationStyle } from './bibliography';
 import type { LiteraturePaper } from '../../types/library';
-import { useLocaleText } from '../../i18n/uiLanguage';
-
-const TOOLBAR_TEXT = {
-  editorLoading: 'Loading editor...',
-  linkPrompt: '\u8f93\u5165\u94fe\u63a5\u5730\u5740',
-  imagePrompt: '\u8f93\u5165\u56fe\u7247\u5730\u5740\u6216\u672c\u5730 data URL',
-  mathPrompt: '\u8f93\u5165 LaTeX \u516c\u5f0f',
-};
+import { useAppLocale, useLocaleText } from '../../i18n/uiLanguage';
 
 const TABLE_MENU_WIDTH = 208;
 const TABLE_MENU_HEIGHT = 230;
@@ -150,6 +144,7 @@ export function NoteEditorToolbar({
   onReferencePickerClose?: () => void;
 }) {
   const l = useLocaleText();
+  const locale = useAppLocale();
   const [tableOpen, setTableOpen] = useState(false);
   const [tableSize, setTableSize] = useState({ rows: 3, cols: 3 });
   const [tableMenuPosition, setTableMenuPosition] = useState<{ left: number; top: number } | null>(null);
@@ -240,7 +235,7 @@ export function NoteEditorToolbar({
   if (!editor) {
     return (
       <div className="flex h-10 items-center border-b border-[var(--pq-border)] px-3 text-xs text-[var(--pq-text-faint)]">
-        {TOOLBAR_TEXT.editorLoading}
+        {l('加载编辑器…', 'Loading editor...')}
       </div>
     );
   }
@@ -266,7 +261,7 @@ export function NoteEditorToolbar({
     setInputMenu({ kind, value: kind === 'math' ? 'E = mc^2' : previousUrl });
   };
   const insertTemplate = (template: NoteTemplate) => {
-    chain().insertContent([...template.content, paragraphNode()]).run();
+    chain().insertContent([...templateContentForLocale(template, locale), paragraphNode()]).run();
     setTemplateOpen(false);
   };
   const insertComponentBlock = () => {
@@ -301,10 +296,10 @@ export function NoteEditorToolbar({
     // 实时从当前文档派生，保证与编辑器内容一致（点击时才读取，避免 stale render）。
     const entries = extractNoteReferences(editor.getJSON());
     if (entries.length === 0) {
-      setReferenceListHint('笔记中还没有参考文献引用，请先插入引用。');
+      setReferenceListHint(l('笔记中还没有参考文献引用，请先插入引用。', 'No references in this note yet. Insert a citation first.'));
       return;
     }
-    upsertNoteReferenceList(editor, entries, papers, citationStyle);
+    upsertNoteReferenceList(editor, entries, papers, citationStyle, referenceListHeadingForLocale(locale));
     closeReferencePicker();
   };
   const submitInputMenu = () => {
@@ -328,53 +323,53 @@ export function NoteEditorToolbar({
 
   return (
     <div className="relative flex min-h-10 flex-wrap items-center gap-1 border-b border-[var(--pq-border)] bg-[var(--pq-surface)] px-3 py-1.5">
-      <ToolbarButton title="Undo" disabled={!editorState.canUndo} onClick={() => chain().undo().run()}>
+      <ToolbarButton title={l('撤销', 'Undo')} disabled={!editorState.canUndo} onClick={() => chain().undo().run()}>
         <Undo2 className="h-3.5 w-3.5" strokeWidth={1.8} />
       </ToolbarButton>
-      <ToolbarButton title="Redo" disabled={!editorState.canRedo} onClick={() => chain().redo().run()}>
+      <ToolbarButton title={l('重做', 'Redo')} disabled={!editorState.canRedo} onClick={() => chain().redo().run()}>
         <Redo2 className="h-3.5 w-3.5" strokeWidth={1.8} />
       </ToolbarButton>
       <Divider />
-      <ToolbarButton title="Paragraph" active={editorState.isParagraph} onClick={() => chain().setParagraph().run()}>
+      <ToolbarButton title={l('正文', 'Paragraph')} active={editorState.isParagraph} onClick={() => chain().setParagraph().run()}>
         <Pilcrow className="h-3.5 w-3.5" strokeWidth={1.8} />
       </ToolbarButton>
-      <ToolbarButton title="Heading 1" active={editorState.isHeading1} onClick={() => chain().toggleHeading({ level: 1 }).run()}>
+      <ToolbarButton title={l('一级标题', 'Heading 1')} active={editorState.isHeading1} onClick={() => chain().toggleHeading({ level: 1 }).run()}>
         <Heading1 className="h-3.5 w-3.5" strokeWidth={1.8} />
       </ToolbarButton>
-      <ToolbarButton title="Heading 2" active={editorState.isHeading2} onClick={() => chain().toggleHeading({ level: 2 }).run()}>
+      <ToolbarButton title={l('二级标题', 'Heading 2')} active={editorState.isHeading2} onClick={() => chain().toggleHeading({ level: 2 }).run()}>
         <Heading2 className="h-3.5 w-3.5" strokeWidth={1.8} />
       </ToolbarButton>
       <Divider />
-      <ToolbarButton title="Bold" active={editorState.isBold} onClick={() => chain().toggleBold().run()}>
+      <ToolbarButton title={l('加粗', 'Bold')} active={editorState.isBold} onClick={() => chain().toggleBold().run()}>
         <Bold className="h-3.5 w-3.5" strokeWidth={1.8} />
       </ToolbarButton>
-      <ToolbarButton title="Italic" active={editorState.isItalic} onClick={() => chain().toggleItalic().run()}>
+      <ToolbarButton title={l('斜体', 'Italic')} active={editorState.isItalic} onClick={() => chain().toggleItalic().run()}>
         <Italic className="h-3.5 w-3.5" strokeWidth={1.8} />
       </ToolbarButton>
-      <ToolbarButton title="Strike" active={editorState.isStrike} onClick={() => chain().toggleStrike().run()}>
+      <ToolbarButton title={l('删除线', 'Strikethrough')} active={editorState.isStrike} onClick={() => chain().toggleStrike().run()}>
         <Strikethrough className="h-3.5 w-3.5" strokeWidth={1.8} />
       </ToolbarButton>
-      <ToolbarButton title="Highlight" active={editorState.isHighlight} onClick={() => chain().toggleHighlight({ color: '#fef3c7' }).run()}>
+      <ToolbarButton title={l('高亮', 'Highlight')} active={editorState.isHighlight} onClick={() => chain().toggleHighlight({ color: '#fef3c7' }).run()}>
         <Highlighter className="h-3.5 w-3.5" strokeWidth={1.8} />
       </ToolbarButton>
       <Divider />
-      <ToolbarButton title="Bullet list" active={editorState.isBulletList} onClick={() => chain().toggleBulletList().run()}>
+      <ToolbarButton title={l('无序列表', 'Bullet list')} active={editorState.isBulletList} onClick={() => chain().toggleBulletList().run()}>
         <List className="h-3.5 w-3.5" strokeWidth={1.8} />
       </ToolbarButton>
-      <ToolbarButton title="Ordered list" active={editorState.isOrderedList} onClick={() => chain().toggleOrderedList().run()}>
+      <ToolbarButton title={l('有序列表', 'Ordered list')} active={editorState.isOrderedList} onClick={() => chain().toggleOrderedList().run()}>
         <ListOrdered className="h-3.5 w-3.5" strokeWidth={1.8} />
       </ToolbarButton>
-      <ToolbarButton title="Task list" active={editorState.isTaskList} onClick={() => chain().toggleTaskList().run()}>
+      <ToolbarButton title={l('任务列表', 'Task list')} active={editorState.isTaskList} onClick={() => chain().toggleTaskList().run()}>
         <ListChecks className="h-3.5 w-3.5" strokeWidth={1.8} />
       </ToolbarButton>
-      <ToolbarButton title="Quote" active={editorState.isBlockquote} onClick={() => chain().toggleBlockquote().run()}>
+      <ToolbarButton title={l('引用', 'Quote')} active={editorState.isBlockquote} onClick={() => chain().toggleBlockquote().run()}>
         <Quote className="h-3.5 w-3.5" strokeWidth={1.8} />
       </ToolbarButton>
-      <ToolbarButton title="Code block" active={editorState.isCodeBlock} onClick={() => chain().toggleCodeBlock().run()}>
+      <ToolbarButton title={l('代码块', 'Code block')} active={editorState.isCodeBlock} onClick={() => chain().toggleCodeBlock().run()}>
         <Code2 className="h-3.5 w-3.5" strokeWidth={1.8} />
       </ToolbarButton>
       <Divider />
-      <ToolbarButton title="Component" onClick={insertComponentBlock}>
+      <ToolbarButton title={l('组件块', 'Component')} onClick={insertComponentBlock}>
         <FileText className="h-3.5 w-3.5" strokeWidth={1.8} />
       </ToolbarButton>
       <div className="relative">
@@ -398,9 +393,9 @@ export function NoteEditorToolbar({
               <button key={template.id} type="button" onClick={() => insertTemplate(template)}>
                 <FileText className="h-4 w-4" strokeWidth={1.8} />
                 <span className="min-w-0">
-                  <span className="block truncate">{template.label}</span>
+                  <span className="block truncate">{l(template.label, template.labelEn)}</span>
                   <span className="block truncate text-[11px] font-normal text-[var(--pq-text-faint)]">
-                    {template.description}
+                    {l(template.description, template.descriptionEn)}
                   </span>
                 </span>
               </button>
@@ -418,10 +413,10 @@ export function NoteEditorToolbar({
             setTemplateOpen(false);
             onReferencePickerToggle?.();
           }}
-          title="插入参考文献引用"
+          title={l('插入参考文献引用', 'Insert reference citation')}
         >
           <BookMarked className="h-3.5 w-3.5" strokeWidth={1.8} />
-          <span>引用</span>
+          <span>{l('引用', 'Citation')}</span>
           <ChevronDown className="h-3 w-3" strokeWidth={1.8} />
         </button>
         {referencePickerOpen ? (
@@ -438,13 +433,13 @@ export function NoteEditorToolbar({
                     insertPaperReference(filteredReferencePapers[0]);
                   }
                 }}
-                placeholder="搜索文献标题或 ID"
+                placeholder={l('搜索文献标题或 ID', 'Search paper title or ID')}
                 className="pq-input h-8 w-full px-2 text-xs"
               />
             </div>
             <div className="max-h-56 overflow-y-auto">
               {filteredReferencePapers.length === 0 ? (
-                <div className="px-3 py-2 text-xs text-[var(--pq-text-faint)]">没有匹配的文献</div>
+                <div className="px-3 py-2 text-xs text-[var(--pq-text-faint)]">{l('没有匹配的文献', 'No matching papers')}</div>
               ) : filteredReferencePapers.map((paper) => (
                 <button key={paper.id} type="button" onClick={() => insertPaperReference(paper)}>
                   <BookMarked className="h-4 w-4" strokeWidth={1.8} />
@@ -459,7 +454,7 @@ export function NoteEditorToolbar({
             </div>
             <div className="border-t border-[var(--pq-border-subtle)] p-2">
               <div className="mb-2 flex items-center gap-1.5">
-                <span className="text-[11px] text-[var(--pq-text-faint)]">引用样式</span>
+                <span className="text-[11px] text-[var(--pq-text-faint)]">{l('引用样式', 'Citation style')}</span>
                 <div className="ml-auto flex gap-1">
                   {NOTE_CITATION_STYLE_OPTIONS.map((option) => (
                     <button
@@ -483,7 +478,7 @@ export function NoteEditorToolbar({
                 className="pq-button h-7 w-full px-2 text-xs"
                 onClick={insertReferenceList}
               >
-                插入/更新文末参考文献列表
+                {l('插入/更新文末参考文献列表', 'Insert/update the reference list')}
               </button>
               {referenceListHint ? (
                 <div className="mt-1.5 px-1 text-[11px] text-[var(--pq-text-faint)]">{referenceListHint}</div>
@@ -495,7 +490,7 @@ export function NoteEditorToolbar({
       <div className="relative">
         <ToolbarButton
           buttonRef={tableButtonRef}
-          title="Table"
+          title={l('表格', 'Table')}
           active={tableOpen}
           onClick={toggleTableMenu}
         >
@@ -520,7 +515,7 @@ export function NoteEditorToolbar({
                   <button
                     key={`${row}-${col}`}
                     type="button"
-                    aria-label={`Insert ${row} by ${col} table`}
+                    aria-label={l(`插入 ${row} x ${col} 表格`, `Insert ${row} by ${col} table`)}
                     onMouseEnter={() => setTableSize({ rows: row, cols: col })}
                     onFocus={() => setTableSize({ rows: row, cols: col })}
                     onClick={() => {
@@ -541,13 +536,13 @@ export function NoteEditorToolbar({
           document.body,
         ) : null}
       </div>
-      <ToolbarButton title="Math" onClick={() => openInputMenu('math')}>
+      <ToolbarButton title={l('公式', 'Math')} onClick={() => openInputMenu('math')}>
         <Sigma className="h-3.5 w-3.5" strokeWidth={1.8} />
       </ToolbarButton>
-      <ToolbarButton title="Link" active={editorState.isLink} onClick={() => openInputMenu('link')}>
+      <ToolbarButton title={l('链接', 'Link')} active={editorState.isLink} onClick={() => openInputMenu('link')}>
         <Link2 className="h-3.5 w-3.5" strokeWidth={1.8} />
       </ToolbarButton>
-      <ToolbarButton title="Image" onClick={() => openInputMenu('image')}>
+      <ToolbarButton title={l('图片', 'Image')} onClick={() => openInputMenu('image')}>
         <ImageIcon className="h-3.5 w-3.5" strokeWidth={1.8} />
       </ToolbarButton>
       <input
@@ -580,15 +575,15 @@ export function NoteEditorToolbar({
             }}
             placeholder={
               inputMenu.kind === 'link'
-                ? TOOLBAR_TEXT.linkPrompt
+                ? l('输入链接地址', 'Enter link URL')
                 : inputMenu.kind === 'image'
-                  ? TOOLBAR_TEXT.imagePrompt
-                  : TOOLBAR_TEXT.mathPrompt
+                  ? l('输入图片地址或本地 data URL', 'Enter an image URL or a local data URL')
+                  : l('输入 LaTeX 公式', 'Enter a LaTeX formula')
             }
             className="pq-input h-8 min-w-0 flex-1 px-2 text-xs"
           />
           <button type="submit" className="pq-button-primary h-8 px-3 text-xs">
-            Insert
+            {l('插入', 'Insert')}
           </button>
           {inputMenu.kind === 'image' ? (
             <button
@@ -596,13 +591,15 @@ export function NoteEditorToolbar({
               className="pq-button h-8 px-3 text-xs"
               onClick={() => imageInputRef.current?.click()}
             >
-              File
+              {l('文件', 'File')}
             </button>
           ) : null}
           <button
             type="button"
             className="pq-icon-button h-8 w-8"
             onClick={() => setInputMenu(null)}
+            title={l('关闭', 'Close')}
+            aria-label={l('关闭', 'Close')}
           >
             x
           </button>

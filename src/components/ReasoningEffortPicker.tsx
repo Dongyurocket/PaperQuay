@@ -4,6 +4,7 @@ import { Brain, Check } from 'lucide-react';
 import type { ModelReasoningEffort } from '../types/reader';
 import { placeAnchoredMenu } from '../utils/anchoredMenu';
 import { cn } from '../utils/cn';
+import { IconButton } from '../ui/button';
 
 const REASONING_OPTIONS: Array<{ value: ModelReasoningEffort; labelZh: string; labelEn: string }> = [
   { value: 'auto', labelZh: '自动', labelEn: 'Auto' },
@@ -202,9 +203,8 @@ export function ReasoningEffortPicker({
 
   return (
     <div ref={rootRef} className={cn('relative shrink-0', className)}>
-      <button
+      <IconButton
         ref={buttonRef}
-        type="button"
         onClick={() => {
           if (open) {
             closeMenu();
@@ -232,15 +232,15 @@ export function ReasoningEffortPicker({
         aria-haspopup="menu"
         aria-expanded={open}
         className={cn(
-          'pq-icon-button border',
-          compact ? 'h-8 w-8' : 'h-10 w-10',
+          'border',
+          compact ? undefined : 'h-10 w-10',
           value === 'auto'
             ? 'border-[var(--pq-border)] bg-[var(--pq-surface-1)] text-[var(--pq-text-faint)]'
             : 'border-[var(--pq-accent-border)] !bg-[var(--pq-accent-soft)] !text-[var(--pq-accent)] shadow-[0_0_0_3px_var(--pq-accent-ring)]',
         )}
       >
         <Brain className="h-4 w-4" strokeWidth={1.8} />
-      </button>
+      </IconButton>
 
       {typeof document === 'undefined' || !menu ? null : createPortal(menu, document.body)}
     </div>

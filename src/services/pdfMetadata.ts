@@ -1,13 +1,12 @@
-import { pdfjs } from 'react-pdf';
-import { readLocalBinaryFile } from './desktop';
-import type { LocalPdfMetadataPreview } from '../types/metadata';
-import { buildPdfJsDataDocumentInit } from '../utils/pdfJsCompatibility';
-import { getFileNameFromPath } from '../utils/text';
+import { invoke } from '../platform/electron/core.ts';
+import type { LocalPdfMetadataPreview } from '../types/metadata.ts';
+import { getFileNameFromPath } from '../utils/text.ts';
 
-pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-  'pdfjs-dist/build/pdf.worker.min.mjs',
-  import.meta.url,
-).toString();
+/**
+ * D4-13：整份 PDF 不再以 base64 经过 IPC。主进程的
+ * `pdf_read_metadata_preview` 只回传元数据与首页文本行，渲染层继续负责
+ * 标题/作者/DOI 这些纯启发式选择，输出形状保持不变。
+ */
 
 const DOI_PATTERN = /\b10\.\d{4,9}\/[-._;()/:A-Z0-9]+\b/i;
 
@@ -20,13 +19,20 @@ interface TextLine {
   orderIndex: number;
 }
 
-interface PdfTextItem {
-  text: string;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  orderIndex: number;
+interface PdfMetadataPreviewInfo {
+  title: string;
+  author: string;
+  subject: string;
+  keywords: string;
+  creationDate: string;
+  modDate: string;
+}
+
+export interface PdfMetadataPreviewPayload {
+  numPages: number;
+  info: PdfMetadataPreviewInfo;
+  firstPageText: string;
+  lines: TextLine[];
 }
 
 function normalizeWhitespace(value: string): string {
@@ -173,7 +179,7 @@ function cleanAuthorsCandidate(value: string): string[] {
       return false;
     }
 
-    return /[\u4e00-\u9fffA-Za-z]/.test(author);
+    return /[一-鿿A-Za-z]/.test(author);
   });
 
   return authors.length <= 8 ? authors : [];
@@ -187,145 +193,6 @@ function extractDoiCandidate(value: string): string | null {
 function parsePdfMetadataDate(value: string): string | null {
   const match = value.match(/(?:D:)?((?:19|20)\d{2})/);
   return match ? match[1] : null;
-}
-
-function isLowSignalLine(value: string): boolean {
-  const normalized = normalizeWhitespace(value);
-
-  if (!normalized || normalized.length < 4 || normalized.length > 240) {
-    return true;
-  }
-
-  return [
-    /^https?:\/\//i,
-    /www\./i,
-    /中国知网/i,
-    /\bcnki\b/i,
-    /^doi[:：]/i,
-    /^摘要[:：]?$/i,
-    /^abstract[:：]?$/i,
-    /^关键词[:：]?$/i,
-    /^key words?[:：]?$/i,
-    /^中图分类号/i,
-    /^收稿日期/i,
-    /^基金项目/i,
-  ].some((pattern) => pattern.test(normalized));
-}
-
-function estimatedItemRight(item: PdfTextItem): number {
-  if (item.width > 0) {
-    return item.x + item.width;
-  }
-
-  return item.x + item.text.length * Math.max(item.height, 7) * 0.48;
-}
-
-function splitVisualRowByColumns(row: PdfTextItem[]): PdfTextItem[][] {
-  const sorted = [...row].sort((left, right) => left.x - right.x);
-  const groups: PdfTextItem[][] = [];
-
-  for (const item of sorted) {
-    const current = groups[groups.length - 1];
-
-    if (!current) {
-      groups.push([item]);
-      continue;
-    }
-
-    const previous = current[current.length - 1];
-    const averageHeight =
-      current.reduce((sum, value) => sum + Math.max(value.height, 0), 0) / Math.max(current.length, 1);
-    const gap = item.x - estimatedItemRight(previous);
-    const columnGapThreshold = Math.max(28, Math.min(96, averageHeight * 3.2));
-
-    if (gap > columnGapThreshold) {
-      groups.push([item]);
-    } else {
-      current.push(item);
-    }
-  }
-
-  return groups;
-}
-
-function lineFromItems(items: PdfTextItem[]): TextLine {
-  const sorted = [...items].sort((left, right) => left.x - right.x);
-  const text = normalizeWhitespace(sorted.map((item) => item.text).join(' '));
-  const x = sorted.reduce((min, item) => Math.min(min, item.x), Number.POSITIVE_INFINITY);
-  const right = sorted.reduce(
-    (max, item) => Math.max(max, estimatedItemRight(item)),
-    Number.NEGATIVE_INFINITY,
-  );
-  const y = sorted.reduce((sum, item) => sum + item.y, 0) / sorted.length;
-  const avgHeight = sorted.reduce((sum, item) => sum + item.height, 0) / Math.max(sorted.length, 1);
-  const orderIndex = sorted.reduce(
-    (min, item) => Math.min(min, item.orderIndex),
-    Number.POSITIVE_INFINITY,
-  );
-
-  return {
-    text,
-    x: Number.isFinite(x) ? x : 0,
-    y,
-    width: Number.isFinite(right) && Number.isFinite(x) ? Math.max(0, right - x) : 0,
-    avgHeight,
-    orderIndex: Number.isFinite(orderIndex) ? orderIndex : 0,
-  };
-}
-
-function collectPageLines(textContent: {
-  items: Array<Record<string, unknown>>;
-}): TextLine[] {
-  const textItems = (textContent.items as Array<Record<string, unknown>>)
-    .map((item, orderIndex): PdfTextItem => ({
-      text: typeof item.str === 'string' ? item.str : '',
-      x: Array.isArray(item.transform) ? Number(item.transform[4] ?? 0) : 0,
-      y: Array.isArray(item.transform) ? Number(item.transform[5] ?? 0) : 0,
-      width: typeof item.width === 'number' ? item.width : 0,
-      height: typeof item.height === 'number' ? item.height : 0,
-      orderIndex,
-    }))
-    .filter((item) => item.text.trim());
-
-  const sorted = [...textItems].sort((left, right) => {
-    if (Math.abs(right.y - left.y) > 2.4) {
-      return right.y - left.y;
-    }
-
-    return left.x - right.x;
-  });
-
-  const visualRows: PdfTextItem[][] = [];
-
-  for (const item of sorted) {
-    const currentRow = visualRows[visualRows.length - 1];
-
-    if (!currentRow) {
-      visualRows.push([item]);
-      continue;
-    }
-
-    const currentY =
-      currentRow.reduce((sum, value) => sum + value.y, 0) / Math.max(currentRow.length, 1);
-
-    if (Math.abs(currentY - item.y) <= 2.8) {
-      currentRow.push(item);
-    } else {
-      visualRows.push([item]);
-    }
-  }
-
-  return visualRows
-    .flatMap(splitVisualRowByColumns)
-    .map(lineFromItems)
-    .filter((line) => !isLowSignalLine(line.text))
-    .sort((left, right) => {
-      if (Math.abs(right.y - left.y) > 2.4) {
-        return right.y - left.y;
-      }
-
-      return left.x - right.x;
-    });
 }
 
 function titleScore(line: TextLine, index: number): number {
@@ -680,50 +547,39 @@ function pickDoiFromLines(lines: TextLine[]): string | null {
 export async function extractLocalPdfMetadataPreview(
   path: string,
 ): Promise<LocalPdfMetadataPreview> {
-  const pdfData = await readLocalBinaryFile(path);
-  const safePdfData = new Uint8Array(pdfData);
-  const loadingTask = pdfjs.getDocument(buildPdfJsDataDocumentInit(safePdfData) as any);
-  const pdfDocument = await loadingTask.promise;
+  const preview = await invoke<PdfMetadataPreviewPayload>('pdf_read_metadata_preview', { path });
+  const info: Partial<PdfMetadataPreviewInfo> = preview?.info ?? {};
+  const lines = Array.isArray(preview?.lines) ? preview.lines : [];
+  const rawTitle = decodePdfMetadataValue(info.title);
+  const rawAuthor = decodePdfMetadataValue(info.author);
+  const rawSubject = decodePdfMetadataValue(info.subject);
+  const rawKeywords = decodePdfMetadataValue(info.keywords);
+  const dateYear =
+    decodePdfMetadataValue(info.creationDate) || decodePdfMetadataValue(info.modDate);
 
-  try {
-    const metadata = await pdfDocument.getMetadata().catch(() => null);
-    const info = (metadata?.info ?? {}) as Record<string, unknown>;
-    const rawTitle = decodePdfMetadataValue(info.Title);
-    const rawAuthor = decodePdfMetadataValue(info.Author);
-    const rawSubject = decodePdfMetadataValue(info.Subject);
-    const rawKeywords = decodePdfMetadataValue(info.Keywords);
-    const dateYear =
-      decodePdfMetadataValue(info.CreationDate) || decodePdfMetadataValue(info.ModDate);
+  const firstPageText = typeof preview?.firstPageText === 'string'
+    ? preview.firstPageText
+    : normalizeWhitespace(lines.map((line) => line.text).join(' '));
+  const title =
+    pickPdfTitleFromLines(lines, path) ??
+    cleanTitleCandidate(rawTitle, path) ??
+    cleanTitleCandidate(fileStem(path), path);
+  const doi =
+    extractDoiCandidate(rawTitle) ??
+    extractDoiCandidate(rawSubject) ??
+    extractDoiCandidate(rawKeywords) ??
+    pickDoiFromLines(lines);
+  const authors = cleanAuthorsCandidate(rawAuthor);
+  const publication =
+    rawSubject && !/^(摘要|abstract|keywords?)$/i.test(rawSubject) ? rawSubject : null;
+  const year = parsePdfMetadataDate(dateYear);
 
-    const firstPage = await pdfDocument.getPage(1);
-    const textContent = await firstPage.getTextContent();
-    const lines = collectPageLines(textContent);
-    const firstPageText = normalizeWhitespace(lines.map((line) => line.text).join(' '));
-    const title =
-      pickPdfTitleFromLines(lines, path) ??
-      cleanTitleCandidate(rawTitle, path) ??
-      cleanTitleCandidate(fileStem(path), path);
-    const doi =
-      extractDoiCandidate(rawTitle) ??
-      extractDoiCandidate(rawSubject) ??
-      extractDoiCandidate(rawKeywords) ??
-      pickDoiFromLines(lines);
-    const authors = cleanAuthorsCandidate(rawAuthor);
-    const publication =
-      rawSubject && !/^(摘要|abstract|keywords?)$/i.test(rawSubject) ? rawSubject : null;
-    const year = parsePdfMetadataDate(dateYear);
-
-    firstPage.cleanup();
-
-    return {
-      title,
-      authors,
-      doi,
-      publication,
-      year,
-      firstPageText,
-    };
-  } finally {
-    await pdfDocument.destroy();
-  }
+  return {
+    title,
+    authors,
+    doi,
+    publication,
+    year,
+    firstPageText,
+  };
 }

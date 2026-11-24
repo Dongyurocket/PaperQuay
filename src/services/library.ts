@@ -6,6 +6,8 @@ import type {
   UpdateTranslatedPdfLanguagesRequest,
   UpdateTranslatedPdfLanguagesResult,
   AssignPaperCategoryRequest,
+  BatchDeletePapersResult,
+  BatchUpdatePapersResult,
   CreateCategoryRequest,
   DeletePaperRequest,
   FetchAllReferencesResult,
@@ -17,6 +19,7 @@ import type {
   LibrarySnapshot,
   ListPapersRequest,
   QueryPapersResult,
+  PaperListSummary,
   PaperReference,
   LiteratureAttachment,
   LiteratureCategory,
@@ -206,11 +209,54 @@ export async function getLibraryPaper(paperId: string): Promise<LiteraturePaper 
   }
 }
 
+/** 单篇列表摘要：阅读进度/收藏等增量刷新使用，不返回正文类大字段。 */
+export async function getLibraryPaperSummary(paperId: string): Promise<PaperListSummary | null> {
+  try {
+    return await invoke<PaperListSummary | null>('library_get_paper_summary', { paperId });
+  } catch (error) {
+    throw new Error(toErrorMessage(error, '读取文献摘要失败'));
+  }
+}
+
+/** 批量收藏或移动分类：一个事务完成，避免全选后逐篇 IPC。 */
+export async function batchUpdateLibraryPapers(request: {
+  paperIds: string[];
+  isFavorite?: boolean;
+  addCategoryId?: string;
+}): Promise<BatchUpdatePapersResult> {
+  try {
+    return await invoke<BatchUpdatePapersResult>('library_batch_update_papers', { request });
+  } catch (error) {
+    throw new Error(toErrorMessage(error, '批量更新文献失败'));
+  }
+}
+
+/** 批量删除文献：文件清理后单事务删除记录。 */
+export async function batchDeleteLibraryPapers(request: {
+  paperIds: string[];
+  deleteFiles?: boolean;
+}): Promise<BatchDeletePapersResult> {
+  try {
+    return await invoke<BatchDeletePapersResult>('library_batch_delete_papers', { request });
+  } catch (error) {
+    throw new Error(toErrorMessage(error, '批量删除文献失败'));
+  }
+}
+
 export async function listLibraryTags(): Promise<import('../types/library').LibraryTagCount[]> {
   try {
     return await invoke<import('../types/library').LibraryTagCount[]>('library_list_tags');
   } catch (error) {
     throw new Error(toErrorMessage(error, '读取标签失败'));
+  }
+}
+
+/** 详情表单 citationKey 查重索引；只传 id + key，不拉整库文献。 */
+export async function listLibraryCitationKeys(): Promise<Array<{ id: string; citationKey: string }>> {
+  try {
+    return await invoke<Array<{ id: string; citationKey: string }>>('library_list_citation_keys');
+  } catch (error) {
+    throw new Error(toErrorMessage(error, '读取引用键失败'));
   }
 }
 

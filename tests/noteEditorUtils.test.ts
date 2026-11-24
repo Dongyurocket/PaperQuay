@@ -1,9 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import type { JSONContent } from '@tiptap/core';
 
 import {
   clearNoteEditorDraft,
   componentBlockNode,
+  contentHash,
+  createNoteEditorDraftStore,
   getImageFilesFromDataTransfer,
   headingNode,
   isImageFile,
@@ -12,6 +15,8 @@ import {
   normalizeAnchorPageLabel,
   normalizeAnchorSourceTitle,
   normalizeSuggestionQuery,
+  NOTE_EDITOR_DRAFT_MAX_BYTES,
+  NOTE_EDITOR_DRAFT_STORAGE_PREFIX,
   NOTE_TEMPLATES,
   paragraphNode,
   readNoteEditorDraft,
@@ -20,6 +25,7 @@ import {
   snapshotFromNote,
   writeNoteEditorDraft,
 } from '../src/features/notes/noteEditorUtils.ts';
+import type { NoteEditorDraft, NoteEditorDraftStorage } from '../src/features/notes/noteEditorUtils.ts';
 import type { Note, NoteAnchor } from '../src/types/notes.ts';
 
 function note(overrides: Partial<Note> = {}): Note {
@@ -238,4 +244,210 @@ test('image file helpers accept image MIME types and image extensions', () => {
     'image.png',
     'photo.bin',
   ]);
+});
+
+class MemoryDraftStorage implements NoteEditorDraftStorage {
+  private readonly values = new Map<string, string>();
+  quota: number | null = null;
+  failWrites = false;
+
+  get length(): number {
+    return this.values.size;
+  }
+
+  key(index: number): string | null {
+    return Array.from(this.values.keys())[index] ?? null;
+  }
+
+  getItem(key: string): string | null {
+    return this.values.get(key) ?? null;
+  }
+
+  setItem(key: string, value: string): void {
+    if (this.failWrites) throw new Error('storage unavailable');
+    if (this.quota !== null) {
+      const existing = this.values.get(key)?.length ?? 0;
+      let total = value.length - existing;
+      for (const [storedKey, storedValue] of this.values) {
+        if (storedKey !== key) total += storedKey.length + storedValue.length;
+      }
+      if (total > this.quota) {
+        throw Object.assign(new Error('quota exceeded'), { name: 'QuotaExceededError' });
+      }
+    }
+    this.values.set(key, value);
+  }
+
+  removeItem(key: string): void {
+    this.values.delete(key);
+  }
+
+  keys(): string[] {
+    return Array.from(this.values.keys());
+  }
+}
+
+function draftFor(noteId: string, title: string, updatedAt = 1): NoteEditorDraft {
+  const snapshot = snapshotFromNote(note({ id: noteId, title }));
+  return {
+    noteId,
+    baseUpdatedAt: 1,
+    savedSignature: 'saved',
+    draftSignature: `draft-${title}`,
+    title,
+    tagText: '',
+    color: '#fef3c7',
+    snapshot: { ...snapshot, contentText: title },
+    pendingAnchors: [],
+    updatedAt,
+  };
+}
+
+test('note editor drafts survive a module reload through the injected storage', () => {
+  const storage = new MemoryDraftStorage();
+  const first = createNoteEditorDraftStore({ storage });
+  first.write('reader', draftFor('note-1', 'Unsaved crash draft', 10));
+
+  // 新实例模拟崩溃/重启后重新加载模块：只能从存储恢复。
+  const reopened = createNoteEditorDraftStore({ storage });
+  assert.equal(reopened.read('reader', 'note-1')?.title, 'Unsaved crash draft');
+  assert.equal(reopened.read('reader', 'note-2'), null);
+});
+
+test('draft store evicts the oldest entries beyond its capacity', () => {
+  const storage = new MemoryDraftStorage();
+  const store = createNoteEditorDraftStore({ storage, maxEntries: 2 });
+  store.write('reader', draftFor('note-1', 'Oldest', 1));
+  store.write('reader', draftFor('note-2', 'Middle', 2));
+  store.write('reader', draftFor('note-3', 'Newest', 3));
+
+  assert.equal(store.read('reader', 'note-3')?.title, 'Newest');
+  const reopened = createNoteEditorDraftStore({ storage, maxEntries: 2 });
+  assert.equal(reopened.read('reader', 'note-3')?.title, 'Newest');
+  assert.equal(reopened.read('reader', 'note-2')?.title, 'Middle');
+  assert.equal(reopened.read('reader', 'note-1'), null);
+});
+
+test('draft persistence prunes older entries when the storage quota is exceeded', () => {
+  const storage = new MemoryDraftStorage();
+  const store = createNoteEditorDraftStore({ storage, maxBytes: 4096 });
+  store.write('reader', draftFor('note-1', 'A'.repeat(200), 1));
+  const firstBytes = storage.getItem(`${NOTE_EDITOR_DRAFT_STORAGE_PREFIX}reader::note-1`)?.length ?? 0;
+  assert.ok(firstBytes > 0);
+  storage.quota = Math.floor(firstBytes * 1.5);
+  store.write('reader', draftFor('note-2', 'B'.repeat(200), 2));
+
+  const reopened = createNoteEditorDraftStore({ storage });
+  assert.equal(reopened.read('reader', 'note-2')?.title, 'B'.repeat(200));
+  assert.equal(reopened.read('reader', 'note-1'), null, 'the oldest persisted draft makes room for the newest');
+});
+
+test('an oversized draft stays in memory without breaking later persistence', () => {
+  const storage = new MemoryDraftStorage();
+  const store = createNoteEditorDraftStore({ storage, maxBytes: 1200 });
+  store.write('reader', draftFor('note-big', 'X'.repeat(4000), 1));
+  store.write('reader', draftFor('note-small', 'small', 2));
+
+  assert.equal(store.read('reader', 'note-big')?.title, 'X'.repeat(4000), 'same-session edits still restore');
+  const reopened = createNoteEditorDraftStore({ storage });
+  assert.equal(reopened.read('reader', 'note-big'), null);
+  assert.equal(reopened.read('reader', 'note-small')?.title, 'small');
+});
+
+test('storage failures and corrupt values never break draft editing', () => {
+  const storage = new MemoryDraftStorage();
+  const store = createNoteEditorDraftStore({ storage });
+  store.write('reader', draftFor('note-1', 'Draft', 1));
+  storage.failWrites = true;
+  assert.doesNotThrow(() => store.write('reader', draftFor('note-2', 'Offline draft', 2)));
+  assert.equal(store.read('reader', 'note-2')?.title, 'Offline draft');
+
+  const corruptKey = `${NOTE_EDITOR_DRAFT_STORAGE_PREFIX}reader::note-corrupt`;
+  storage.failWrites = false;
+  storage.setItem(corruptKey, '{not json');
+  assert.equal(store.read('reader', 'note-corrupt'), null);
+  assert.equal(storage.getItem(corruptKey), null, 'corrupt drafts are removed instead of retried forever');
+});
+
+test('clear removes both the memory copy and the persisted draft', () => {
+  const storage = new MemoryDraftStorage();
+  const store = createNoteEditorDraftStore({ storage });
+  store.write('reader', draftFor('note-1', 'Draft', 1));
+  store.clear('reader', 'note-1');
+  assert.equal(store.read('reader', 'note-1'), null);
+
+  const reopened = createNoteEditorDraftStore({ storage });
+  assert.equal(reopened.read('reader', 'note-1'), null);
+  assert.deepEqual(storage.keys(), []);
+});
+
+test('data URL hashing samples evenly spaced middle windows', () => {
+  const head = 'data:image/png;base64,';
+  const body = 'A'.repeat(160 * 1024);
+  const original = `${head}${body}`;
+  const middle = Math.floor(original.length / 2);
+  const mutated = `${original.slice(0, middle)}B${original.slice(middle + 1)}`;
+  assert.equal(original.length, mutated.length);
+
+  const imageDoc = (src: string): JSONContent => ({
+    type: 'doc',
+    content: [{ type: 'image', attrs: { src, alt: 'same', title: 'same' } }],
+  });
+
+  assert.notEqual(
+    contentHash(imageDoc(original)),
+    contentHash(imageDoc(mutated)),
+    'an equal-length replacement in the middle of a data URL must change the hash',
+  );
+});
+
+test('drafts with eight 256KB screenshots persist without duplicated HTML', () => {
+  const storage = new MemoryDraftStorage();
+  const store = createNoteEditorDraftStore({ storage });
+  const src = (index: number) => `data:image/png;base64,${'A'.repeat(256 * 1024)}${index}`;
+  const contentJson: JSONContent = {
+    type: 'doc',
+    content: Array.from({ length: 8 }, (_, index) => ({
+      type: 'image',
+      attrs: { src: src(index), alt: `shot-${index}.png`, title: `shot-${index}.png` },
+    })),
+  };
+  const sentinel = 'data-persisted-html-sentinel';
+
+  store.write('reader', {
+    noteId: 'note-screenshots',
+    baseUpdatedAt: 1,
+    savedSignature: 'saved',
+    draftSignature: 'draft',
+    title: 'Screenshots',
+    tagText: '',
+    color: '#fef3c7',
+    snapshot: {
+      contentJson,
+      contentHtml: `<p>${sentinel}</p><img src="${src(0)}">`,
+      contentText: 'caption text',
+      wordCount: 2,
+    },
+    pendingAnchors: [],
+    updatedAt: 10,
+  });
+
+  const storageKey = `${NOTE_EDITOR_DRAFT_STORAGE_PREFIX}reader::note-screenshots`;
+  const serialized = storage.getItem(storageKey);
+  assert.ok(serialized, 'the 8-image draft must persist instead of exceeding the size cap');
+  assert.ok(
+    serialized.length < NOTE_EDITOR_DRAFT_MAX_BYTES,
+    `persisted draft (${serialized.length} chars) must stay under the cap`,
+  );
+  assert.doesNotMatch(serialized, new RegExp(sentinel), 'persisted drafts must omit duplicated HTML');
+
+  const reopened = createNoteEditorDraftStore({ storage });
+  const restored = reopened.read('reader', 'note-screenshots');
+  assert.equal(restored?.snapshot.contentText, 'caption text');
+  assert.equal(restored?.snapshot.contentHtml, '', 'persisted drafts restore from contentJson only');
+  assert.equal(restored?.snapshot.contentJson.content?.length, 8);
+  assert.equal(
+    String(restored?.snapshot.contentJson.content?.[7]?.attrs?.src).length,
+    'data:image/png;base64,'.length + 256 * 1024 + 1,
+  );
 });

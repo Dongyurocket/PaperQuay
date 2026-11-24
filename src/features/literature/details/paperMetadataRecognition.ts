@@ -1,6 +1,7 @@
 import type { LiteraturePaper, UpdatePaperRequest } from '../../../types/library.ts';
-import type { MetadataLookupResult } from '../../../types/metadata.ts';
-import { metadataUpdateForPaper } from '../literatureLibraryUtils.ts';
+
+// 元数据 patch 的唯一实现在 manualMetadataPatch.ts；这里保留导出以兼容对话框导入。
+export { buildManualMetadataUpdateRequest } from '../manualMetadataPatch.ts';
 
 export interface PaperMetadataDifference {
   key: Exclude<keyof UpdatePaperRequest, 'paperId' | 'expectedUpdatedAt'>;
@@ -27,28 +28,6 @@ const FIELD_LABELS: Partial<Record<PaperMetadataDifference['key'], string>> = {
   authorDetails: '作者详情',
   keywords: '关键词',
 };
-
-export function buildManualMetadataUpdateRequest(
-  paper: LiteraturePaper,
-  metadata: MetadataLookupResult | null,
-  draft: { title: string; doi: string },
-): UpdatePaperRequest | null {
-  const request = metadata ? metadataUpdateForPaper(paper, metadata) : null;
-  const output: UpdatePaperRequest = {
-    paperId: paper.id,
-    expectedUpdatedAt: paper.updatedAt,
-    ...(request ?? {}),
-  };
-  output.paperId = paper.id;
-  output.expectedUpdatedAt = paper.updatedAt;
-
-  const manualTitle = draft.title.trim();
-  const manualDoi = draft.doi.trim();
-  if (manualTitle && manualTitle !== paper.title.trim()) output.title = manualTitle;
-  if (manualDoi && manualDoi !== (paper.doi ?? '').trim()) output.doi = manualDoi;
-
-  return Object.keys(output).some((key) => key !== 'paperId' && key !== 'expectedUpdatedAt') ? output : null;
-}
 
 function currentValue(paper: LiteraturePaper, key: PaperMetadataDifference['key']): unknown {
   if (key === 'authors') return paper.authors.map((author) => author.name);

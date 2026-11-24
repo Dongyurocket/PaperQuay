@@ -21,7 +21,6 @@ import type {
   TranslationMap,
   WorkspaceItem,
 } from "../../types/reader";
-import { isPaperTaskRunning } from "./paperTaskState";
 import {
   getModelRuntimeConfig,
 } from "./readerShared";
@@ -33,6 +32,12 @@ import {
   translateBlocksBestEffort,
 } from "./readerTranslation";
 import {
+  beginTranslationCacheRestore,
+  createTranslationCacheIdentity,
+  deleteTranslationCache,
+  hasTranslationCacheClearedMarker,
+  isTranslationCacheRestoreTokenCurrent,
+  markTranslationCacheCleared,
   readTranslationCache,
   writeTranslationCache,
 } from "./readerTranslationCache";
@@ -158,6 +163,18 @@ export function useDocumentTranslation({
     [blockTranslations],
   );
 
+  // 译文缓存按目标语言 + 模型身份 + 源语言隔离；切换模型后不会读到另一套
+  // 译文，旧版 <targetLanguage>.json 仍会作为读取候选。
+  const documentTranslationCacheIdentity = useMemo(
+    () =>
+      createTranslationCacheIdentity(
+        translationModelPreset?.baseUrl,
+        translationModelPreset?.model,
+        settings.translationSourceLanguage,
+      ),
+    [settings.translationSourceLanguage, translationModelPreset],
+  );
+
   useEffect(() => {
     blockTranslationsRef.current = blockTranslations;
   }, [blockTranslations]);
@@ -228,8 +245,13 @@ export function useDocumentTranslation({
         item,
         mineruCacheDir: settings.mineruCacheDir,
         targetLanguage: settings.translationTargetLanguage,
+        identity: documentTranslationCacheIdentity,
       }),
-    [settings.mineruCacheDir, settings.translationTargetLanguage],
+    [
+      documentTranslationCacheIdentity,
+      settings.mineruCacheDir,
+      settings.translationTargetLanguage,
+    ],
   );
 
   const saveTranslationCache = useCallback(
@@ -240,9 +262,11 @@ export function useDocumentTranslation({
         sourceLanguage: settings.translationSourceLanguage,
         targetLanguage: settings.translationTargetLanguage,
         translations,
+        identity: documentTranslationCacheIdentity,
       });
     },
     [
+      documentTranslationCacheIdentity,
       settings.mineruCacheDir,
       settings.translationSourceLanguage,
       settings.translationTargetLanguage,
@@ -263,6 +287,17 @@ export function useDocumentTranslation({
     if (
       !translationSnapshot ||
       translationSnapshot.targetLanguage !== settings.translationTargetLanguage
+    ) {
+      return;
+    }
+
+    // 用户刚清除过译文时，文库页快照里的旧译文不应把清除结果又贴回来；
+    // 新译文成功写入缓存后会解除这个会话标记。
+    if (
+      hasTranslationCacheClearedMarker(
+        currentDocument,
+        settings.translationTargetLanguage,
+      )
     ) {
       return;
     }
@@ -292,6 +327,7 @@ export function useDocumentTranslation({
     );
   }, [
     blockTranslationTargetLanguage,
+    currentDocument,
     settings.translationTargetLanguage,
     setStatusMessage,
     translatedCount,
@@ -311,13 +347,28 @@ export function useDocumentTranslation({
       return;
     }
 
+    // 清除标记存在时不再读磁盘；token 记录恢复开始时的 generation，
+    // 读取期间若用户点了清除，结果会被丢弃而不是回填旧译文。
+    const restoreToken = beginTranslationCacheRestore(
+      currentDocument,
+      settings.translationTargetLanguage,
+    );
+
+    if (!restoreToken) {
+      return;
+    }
+
     let cancelled = false;
 
     void (async () => {
       const cachedTranslationResult =
         await tryLoadSavedTranslations(currentDocument);
 
-      if (cancelled || !cachedTranslationResult) {
+      if (
+        cancelled ||
+        !cachedTranslationResult ||
+        !isTranslationCacheRestoreTokenCurrent(restoreToken)
+      ) {
         return;
       }
 
@@ -428,18 +479,24 @@ export function useDocumentTranslation({
     let cacheWriteError: unknown = null;
 
     try {
-      const cachedTranslationResult = await tryLoadSavedTranslations(
+      // 用户清除后、新译文写入前，磁盘上的旧缓存（若删除失败）和文库页
+      // 快照都不应作为续译基础，否则清除的旧译文会被静默恢复。
+      const translationCacheCleared = hasTranslationCacheClearedMarker(
         currentDocument,
-      ).catch((cacheError) => {
-        console.warn('Failed to read translation cache before translation resume', cacheError);
-        return null;
-      });
+        settings.translationTargetLanguage,
+      );
+      const cachedTranslationResult = translationCacheCleared
+        ? null
+        : await tryLoadSavedTranslations(currentDocument).catch((cacheError) => {
+            console.warn('Failed to read translation cache before translation resume', cacheError);
+            return null;
+          });
       const resumedTranslations = mergeReaderTranslations(
         mergeReaderTranslations(
           blockTranslations,
           cachedTranslationResult?.translations,
         ),
-        translationSnapshot?.translations,
+        translationCacheCleared ? undefined : translationSnapshot?.translations,
       );
       const resumedCount = countTranslatedBlocks(resumedTranslations);
 
@@ -902,14 +959,60 @@ export function useDocumentTranslation({
   );
 
   const handleClearTranslations = useCallback(() => {
+    const targetLanguage = settings.translationTargetLanguage;
+
+    // 先同步推进清除标记与 generation：正在进行的磁盘恢复读取会在 await
+    // 之后检查 token，发现已经清除就不再回填旧译文。
+    markTranslationCacheCleared(currentDocument, targetLanguage);
     setBlockTranslations({});
-    setStatusMessage(
-      lRef.current(
-        "已清空当前文稿的译文缓存",
-        "Cleared the translation cache for the current paper",
-      ),
-    );
-  }, [setStatusMessage, lRef]);
+
+    void deleteTranslationCache({
+      item: currentDocument,
+      mineruCacheDir: settings.mineruCacheDir,
+      targetLanguage,
+      identity: documentTranslationCacheIdentity,
+    })
+      .then(({ failed }) => {
+        if (failed.length === 0) {
+          setStatusMessage(
+            lRef.current(
+              "已清空当前文稿的译文缓存",
+              "Cleared the translation cache for the current paper",
+            ),
+          );
+          return;
+        }
+
+        // 删除失败时不假装成功：保留会话清除标记，并如实报告失败的缓存文件。
+        const firstFailure = failed[0];
+        const extraSuffix = failed.length > 1 ? ` (+${failed.length - 1})` : "";
+        const detail = `${firstFailure.path}: ${firstFailure.message}${extraSuffix}`;
+
+        setStatusMessage(
+          lRef.current(
+            `已清空当前文稿的译文缓存，但部分磁盘缓存删除失败：${detail}`,
+            `Cleared the translation cache for the current paper, but some disk cache files could not be deleted: ${detail}`,
+          ),
+        );
+      })
+      .catch((error) => {
+        const detail = translationCacheFailureMessage(error);
+
+        setStatusMessage(
+          lRef.current(
+            `已清空当前文稿的译文缓存，但部分磁盘缓存删除失败：${detail}`,
+            `Cleared the translation cache for the current paper, but some disk cache files could not be deleted: ${detail}`,
+          ),
+        );
+      });
+  }, [
+    currentDocument,
+    documentTranslationCacheIdentity,
+    settings.mineruCacheDir,
+    settings.translationTargetLanguage,
+    setStatusMessage,
+    lRef,
+  ]);
 
   const applySelectedExcerptTranslation = useCallback(
     (translation: string) => {

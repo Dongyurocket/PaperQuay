@@ -3,14 +3,34 @@ import type { CreateNoteRequest, ListNotesRequest, Note, NoteTagSummary, UpdateN
 import {
   createNote,
   deleteNote,
+  listAllNotes,
   listNoteTags,
-  listNotes,
   type NoteMutationOptions,
   updateNote,
 } from '../services/notes';
 import { resolveNextActiveNoteId } from './notesSelection.ts';
 
 export const GLOBAL_NOTES_PAPER_ID = 'global-notes';
+
+// 搜索/标签切换会连续触发 loadNotes；用代次丢弃旧请求的晚到分页结果，
+// 避免旧结果覆盖新筛选。
+let notesLoadGeneration = 0;
+
+/** error 字段只存稳定码（供 noteErrorMessage 映射），不存后端原始 message。 */
+function resolveErrorCode(error: unknown, fallbackCode: string): string {
+  if (error && typeof error === 'object') {
+    const code = (error as { code?: unknown }).code;
+    if (typeof code === 'string' && code) return code;
+  }
+
+  const message = error instanceof Error
+    ? error.message
+    : typeof error === 'string'
+      ? error
+      : '';
+  const match = /^\s*([A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+)\b/.exec(message);
+  return match ? match[1] : fallbackCode;
+}
 
 interface NotesState {
   notes: Note[];
@@ -47,28 +67,40 @@ export const useNotesStore = create<NotesState>()((set, get) => ({
 
   async loadNotes(request = {}) {
     const { search, tag } = get();
+    const generation = notesLoadGeneration + 1;
+    notesLoadGeneration = generation;
     set({ loading: true, error: '' });
 
     try {
-      const notes = await listNotes({
-        search: search || undefined,
-        tag: tag || undefined,
-        limit: 1000,
-        ...request,
-      });
+      // 不再静默截断到 1000 条：按 notes_list 的分页一直取到短页。
+      const notes = await listAllNotes(
+        {
+          search: search || undefined,
+          tag: tag || undefined,
+          ...request,
+        },
+        {
+          onPage: (_page, accumulated) => {
+            if (notesLoadGeneration !== generation) return;
+            set({ notes: accumulated });
+          },
+        },
+      );
 
+      if (notesLoadGeneration !== generation) return;
       set((state) => ({
         notes,
         activeNoteId: resolveNextActiveNoteId(state.activeNoteId, notes),
       }));
     } catch (error) {
+      if (notesLoadGeneration !== generation) return;
       set({
         notes: [],
         activeNoteId: null,
-        error: error instanceof Error ? error.message : '加载笔记失败',
+        error: resolveErrorCode(error, 'NOTES_LIST_FAILED'),
       });
     } finally {
-      set({ loading: false });
+      if (notesLoadGeneration === generation) set({ loading: false });
     }
   },
 
@@ -89,7 +121,8 @@ export const useNotesStore = create<NotesState>()((set, get) => ({
           paperId: draft.paperId || GLOBAL_NOTES_PAPER_ID,
           type: draft.type || 'standalone',
           pageKind: draft.pageKind ?? null,
-          title: draft.title || '未命名笔记',
+          // 空标题不再回退成中文哨兵：未命名笔记由展示层按界面语言渲染。
+          title: draft.title ?? '',
           content: draft.content ?? '',
           contentJson: draft.contentJson ?? null,
           contentHtml: draft.contentHtml ?? null,
@@ -118,9 +151,9 @@ export const useNotesStore = create<NotesState>()((set, get) => ({
       void get().refreshTags();
       return note;
     } catch (error) {
-      const message = error instanceof Error ? error.message : '创建笔记失败';
-      set({ error: message });
-      throw new Error(message);
+      const code = resolveErrorCode(error, 'NOTE_CREATE_FAILED');
+      set({ error: code });
+      throw error instanceof Error ? error : new Error(code);
     } finally {
       set({ saving: false });
     }
@@ -140,9 +173,9 @@ export const useNotesStore = create<NotesState>()((set, get) => ({
       void get().refreshTags();
       return note;
     } catch (error) {
-      const message = error instanceof Error ? error.message : '保存笔记失败';
-      set({ error: message });
-      throw new Error(message);
+      const code = resolveErrorCode(error, 'NOTE_UPDATE_FAILED');
+      set({ error: code });
+      throw error instanceof Error ? error : new Error(code);
     } finally {
       set({ saving: false });
     }
@@ -162,9 +195,9 @@ export const useNotesStore = create<NotesState>()((set, get) => ({
       });
       void get().refreshTags();
     } catch (error) {
-      const message = error instanceof Error ? error.message : '删除笔记失败';
-      set({ error: message });
-      throw new Error(message);
+      const code = resolveErrorCode(error, 'NOTE_DELETE_FAILED');
+      set({ error: code });
+      throw error instanceof Error ? error : new Error(code);
     } finally {
       set({ saving: false });
     }

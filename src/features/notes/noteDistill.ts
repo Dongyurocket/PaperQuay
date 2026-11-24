@@ -1,11 +1,29 @@
 import type { JSONContent } from '@tiptap/core';
 import type { CreateNoteRequest, Note, NoteAnchor, UpdateNoteRequest } from '../../types/notes';
-import type { SelectedExcerpt } from '../../types/reader';
+import type { SelectedExcerpt, UiLanguage } from '../../types/reader';
 import { notePolishTextToNodes } from './notePolish.ts';
 import { collectText } from './notesTiptap.ts';
 import { createNoteAnchorFromSelection, noteAnchorBlockFromAnchor, titleFromText } from './noteUtils.ts';
 
-const MY_THOUGHTS_HEADING = '💭 我的想法：';
+function pickLocaleText<T>(locale: UiLanguage, zh: T, en: T): T {
+  return locale === 'en-US' ? en : zh;
+}
+
+function thoughtsHeading(locale: UiLanguage): string {
+  return pickLocaleText(locale, '💭 我的想法：', '💭 My thoughts:');
+}
+
+/** 追加时两种语言的「我的想法」都要识别：已有英文摘录卡切回中文界面也应插在它之前。 */
+function thoughtsHeadings(): string[] {
+  return [
+    pickLocaleText('zh-CN', '💭 我的想法：', '💭 My thoughts:'),
+    pickLocaleText('en-US', '💭 我的想法：', '💭 My thoughts:'),
+  ];
+}
+
+function excerptCardTag(locale: UiLanguage): string {
+  return pickLocaleText(locale, '摘录卡', 'Excerpt card');
+}
 
 export interface DistilledExcerptSource {
   text: string;
@@ -37,6 +55,7 @@ export function buildDistilledExcerptNoteCreateRequest({
   distilledText,
   sourceText,
   aiEnhanced = false,
+  locale = 'zh-CN',
 }: {
   paperId: string;
   selectedExcerpt: SelectedExcerpt;
@@ -45,6 +64,7 @@ export function buildDistilledExcerptNoteCreateRequest({
   distilledText: string;
   sourceText?: string;
   aiEnhanced?: boolean;
+  locale?: UiLanguage;
 }): CreateNoteRequest {
   const sourceExcerpt = buildDistilledExcerptSource(selectedExcerpt, {
     text: sourceText ?? selectedExcerpt.text,
@@ -59,7 +79,7 @@ export function buildDistilledExcerptNoteCreateRequest({
     content: [
       noteAnchorBlockFromAnchor(anchor),
       ...notePolishTextToNodes(distilledText),
-      { type: 'paragraph', content: [{ type: 'text', text: MY_THOUGHTS_HEADING }] },
+      { type: 'paragraph', content: [{ type: 'text', text: thoughtsHeading(locale) }] },
     ],
   };
   const contentText = collectText(contentJson);
@@ -74,7 +94,7 @@ export function buildDistilledExcerptNoteCreateRequest({
     excerpt: anchor.excerpt,
     pdfLocation: selectedExcerpt.pdfLocation ?? null,
     anchors: [anchor],
-    tags: ['摘录卡'],
+    tags: [excerptCardTag(locale)],
     color: '#dbeafe',
   };
 }
@@ -118,10 +138,13 @@ export function buildDistilledExcerptAppendPatch({
     : { type: 'doc', content: [] };
   const content = [...(existing.content ?? [])];
   // 「我的想法」区保持在末尾：新提炼内容插入到它之前（若存在）。
+  // 中英两种标题都识别，避免英文卡片在中文界面追加时被当成普通段落。
+  const headings = thoughtsHeadings();
   const thoughtsIndex = content.findIndex(
     (node) => node?.type === 'paragraph'
       && Array.isArray(node.content)
-      && node.content.some((child) => child?.type === 'text' && String(child.text ?? '').startsWith(MY_THOUGHTS_HEADING)),
+      && node.content.some((child) => child?.type === 'text'
+        && headings.some((heading) => String(child.text ?? '').startsWith(heading))),
   );
   const inserted: JSONContent[] = [
     noteAnchorBlockFromAnchor(anchor),

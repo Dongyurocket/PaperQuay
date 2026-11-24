@@ -20,7 +20,8 @@ const { createRoot } = require('react-dom/client');
 
 /**
  * A3 的原始缺陷在 useReaderSettings 里：读取失败被当成首次运行，防抖写回覆盖 API Key。
- * 这里用真实的 hook + 假的 bridge，断言失败路径不写配置、Zotero 目录不被清空。
+ * 现在设置由主进程文档持有；这里用真实的 hook + 假的 app settings bridge，
+ * 断言失败路径不写 patch、Zotero 目录不被清空，成功路径按 patch 持久化。
  */
 const bundle = await build({
   entryPoints: ['src/features/reader/useReaderSettings.ts'],
@@ -34,22 +35,17 @@ const bundle = await build({
   plugins: [{
     name: 'reader-settings-mocks',
     setup(builder) {
-      // 同时覆盖 './desktop'（readerConfig 内部）与 '../../services/desktop'（hook 内部）。
+      // 同时覆盖 './desktop'（内部）与 '../../services/desktop'（hook 内部）。
       builder.onResolve({ filter: /(^|\/)desktop(\.ts)?$/ }, () => ({ path: 'desktop', namespace: 'mock' }));
       builder.onResolve({ filter: /(^|\/)library(\.ts)?$/ }, () => ({ path: 'library', namespace: 'mock' }));
+      builder.onResolve({ filter: /(^|\/)appSettings(\.ts)?$/ }, () => ({ path: 'appSettings', namespace: 'mock' }));
       builder.onResolve({ filter: /(^|\/)toast(\.tsx?)?$/ }, () => ({ path: 'toast', namespace: 'mock' }));
       builder.onLoad({ filter: /.*/, namespace: 'mock' }, (args) => {
         if (args.path === 'desktop') {
           return {
             loader: 'js',
             contents: `
-              export const approveWritePath = async () => {};
               export const getAppDefaultPaths = async () => globalThis.__desktop.getAppDefaultPaths();
-              export const readLocalTextFileIfExists = async (p) => globalThis.__desktop.readTextFileIfExists(p);
-              export const writeLocalTextFile = async (p, c) => globalThis.__desktop.writeTextFile(p, c);
-              // 批量 2 的 B5 让 readerConfig 走 safeStorage 加解密；测试里保持明文直通。
-              export const encryptReaderSecretPayload = async (payload) => payload;
-              export const decryptReaderSecretPayload = async (payload) => payload;
             `,
           };
         }
@@ -59,6 +55,18 @@ const bundle = await build({
             contents: `
               export const getLibrarySettings = async () => globalThis.__library.getLibrarySettings();
               export const updateLibrarySettings = async (s) => globalThis.__library.updateLibrarySettings(s);
+            `,
+          };
+        }
+        if (args.path === 'appSettings') {
+          return {
+            loader: 'js',
+            contents: `
+              export const getAppSettings = (options) => globalThis.__appSettings.getAppSettings(options);
+              export const getAppSettingsSecrets = () => globalThis.__appSettings.getAppSettingsSecrets();
+              export const migrateLegacyAppSettings = (legacy) => globalThis.__appSettings.migrateLegacyAppSettings(legacy);
+              export const patchAppSettings = (patch, options) => globalThis.__appSettings.patchAppSettings(patch, options);
+              export const patchAppSettingsSecrets = (patch, options) => globalThis.__appSettings.patchAppSettingsSecrets(patch, options);
             `,
           };
         }
@@ -74,10 +82,31 @@ const module = { exports: {} };
 new Function('require', 'module', 'exports', bundle.outputFiles[0].text)(require, module, module.exports);
 const { useReaderSettings } = module.exports;
 
-function createBridge(overrides) {
-  const calls = { reads: [], writes: [], libraryUpdates: [] };
-  // 模拟磁盘：写入后能读回，writeReaderConfigFile 的读回校验才会通过。
-  const files = new Map();
+function createBridge({ document: initialDocument = null, readError = null, nativeZoteroDir = '' } = {}) {
+  const calls = { patches: [], secretPatches: [], libraryUpdates: [], migrations: [] };
+  const state = {
+    document: initialDocument
+      ? JSON.parse(JSON.stringify(initialDocument))
+      : {
+          version: 2,
+          revision: 1,
+          settings: {},
+          secrets: {},
+          zoteroLocalDataDir: nativeZoteroDir,
+          leftSidebarCollapsed: false,
+          updatedAt: 1,
+        },
+  };
+
+  const publicDocument = () => ({
+    version: state.document.version,
+    revision: state.document.revision,
+    settings: { ...state.document.settings },
+    zoteroLocalDataDir: state.document.zoteroLocalDataDir,
+    leftSidebarCollapsed: state.document.leftSidebarCollapsed,
+    updatedAt: state.document.updatedAt,
+  });
+
   globalThis.__desktop = {
     getAppDefaultPaths: async () => ({
       executableDir: '/app',
@@ -85,24 +114,12 @@ function createBridge(overrides) {
       mineruCacheDir: '/cache',
       remotePdfDownloadDir: '/downloads',
     }),
-    readTextFileIfExists: async (filePath) => {
-      calls.reads.push(filePath);
-      if (overrides.readTextFileIfExists) {
-        const value = await overrides.readTextFileIfExists(filePath);
-        if (value !== undefined) return value;
-      }
-      return files.get(filePath) ?? null;
-    },
-    writeTextFile: async (filePath, content) => {
-      calls.writes.push({ path: filePath, content });
-      if (!overrides.dropWrites) files.set(filePath, content);
-    },
   };
   globalThis.__library = {
     getLibrarySettings: async () => ({
       storageDir: '',
       translatedPdfDir: '',
-      zoteroLocalDataDir: overrides.nativeZoteroDir ?? '',
+      zoteroLocalDataDir: nativeZoteroDir,
       notesVaultDir: '',
       importMode: 'copy',
     }),
@@ -111,12 +128,56 @@ function createBridge(overrides) {
       return settings;
     },
   };
+  globalThis.__appSettings = {
+    async migrateLegacyAppSettings(legacy) {
+      if (readError) throw readError;
+      calls.migrations.push(legacy);
+      state.document.settings = {
+        ...(legacy.settings ?? {}),
+        ...state.document.settings,
+      };
+      if (legacy.noteCitationStyle) {
+        state.document.settings.noteCitationStyle = legacy.noteCitationStyle;
+      }
+      if (!state.document.zoteroLocalDataDir && nativeZoteroDir) {
+        state.document.zoteroLocalDataDir = nativeZoteroDir;
+      }
+      state.document.revision += 1;
+      return { ok: true, ...publicDocument() };
+    },
+    async getAppSettings() {
+      if (readError) throw readError;
+      return publicDocument();
+    },
+    async getAppSettingsSecrets() {
+      if (readError) throw readError;
+      return { ...state.document.secrets };
+    },
+    async patchAppSettings(patch, options = {}) {
+      calls.patches.push({ patch, options });
+      if (options.expectedRevision !== undefined && options.expectedRevision !== state.document.revision) {
+        return { ok: false, code: 'SETTINGS_CONFLICT', current: publicDocument() };
+      }
+      state.document.settings = { ...state.document.settings, ...patch };
+      if (options.zoteroLocalDataDir !== undefined) {
+        state.document.zoteroLocalDataDir = options.zoteroLocalDataDir;
+      }
+      state.document.revision += 1;
+      return { ok: true, ...publicDocument() };
+    },
+    async patchAppSettingsSecrets(patch, options = {}) {
+      calls.secretPatches.push({ patch, options });
+      if (options.expectedRevision !== undefined && options.expectedRevision !== state.document.revision) {
+        return { ok: false, code: 'SETTINGS_CONFLICT', current: publicDocument() };
+      }
+      state.document.secrets = { ...state.document.secrets, ...patch };
+      state.document.revision += 1;
+      return { ok: true, ...publicDocument() };
+    },
+  };
   globalThis.__toasts = [];
-  return calls;
+  return { calls, state };
 }
-
-const configWrites = (calls) =>
-  calls.writes.filter((write) => write.path === '/data/paperquay.config.json');
 
 async function renderHook() {
   const state = { current: null };
@@ -145,26 +206,35 @@ async function renderHook() {
   };
 }
 
-const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+/**
+ * 轮询等待 React 状态稳定，替代固定 100/50ms 延时：
+ * 回调在 act 内执行，条件满足即返回，超时才失败。
+ */
+async function waitFor(condition, label, timeoutMs = 3000) {
+  const startedAt = Date.now();
+  while (!condition()) {
+    if (Date.now() - startedAt > timeoutMs) assert.fail(`Timed out waiting for ${label}`);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
+  }
+}
 
-test('a corrupt config disables persistence, warns the user and keeps the Zotero dir', async () => {
-  const calls = createBridge({
-    readTextFileIfExists: async () => '{ "secrets": ',
+test('an unreadable settings document disables persistence, warns the user and keeps the Zotero dir', async () => {
+  const bridge = createBridge({
+    readError: new Error('SETTINGS_FILE_CORRUPT: empty settings file'),
     nativeZoteroDir: 'C:\\Users\\me\\Zotero',
   });
   const harness = await renderHook();
 
   try {
-    // 等 hydration 完成 + 350ms 配置防抖窗口过去。
-    await act(async () => { await wait(500); });
+    await waitFor(() => harness.state.current.configHydrated === true, 'settings hydration');
 
     assert.equal(harness.state.current.configHydrated, true);
     assert.ok(harness.state.current.configLoadError, 'configLoadError should be populated');
     assert.ok(globalThis.__toasts.some((item) => item.tone === 'error'), 'a visible error toast is required');
-    assert.equal(configWrites(calls).length, 0, 'must not overwrite an unreadable config file');
+    assert.equal(bridge.calls.patches.length, 0, 'must not write over an unreadable settings document');
     assert.equal(harness.state.current.zoteroLocalDataDir, 'C:\\Users\\me\\Zotero');
     assert.equal(
-      calls.libraryUpdates.some((settings) => settings.zoteroLocalDataDir === ''),
+      bridge.calls.libraryUpdates.some((settings) => settings.zoteroLocalDataDir === ''),
       false,
       'must not wipe the native Zotero directory',
     );
@@ -173,40 +243,51 @@ test('a corrupt config disables persistence, warns the user and keeps the Zotero
   }
 });
 
-test('a readable config is hydrated and persisted once hydration succeeds', async () => {
-  const originalConfig = JSON.stringify({ version: 1, settings: { uiLanguage: 'en-US' }, secrets: { qaModelPresets: [] } });
-  const calls = createBridge({
-    // 只在首次读取（hydration）时返回原文件；之后走模拟磁盘，让写回校验能通过。
-    readTextFileIfExists: async (filePath) =>
-      filePath === '/data/paperquay.config.json' && calls.writes.length === 0
-        ? originalConfig
-        : undefined,
+test('a readable document hydrates and later changes persist as patches', async () => {
+  const bridge = createBridge({
+    document: {
+      version: 2,
+      revision: 4,
+      settings: { uiLanguage: 'en-US', smoothScroll: true },
+      secrets: { qaModelPresets: [] },
+      zoteroLocalDataDir: '',
+      leftSidebarCollapsed: false,
+      updatedAt: 1,
+    },
   });
   const harness = await renderHook();
 
   try {
-    await act(async () => { await wait(500); });
+    await waitFor(() => harness.state.current.configHydrated === true, 'settings hydration');
 
     assert.equal(harness.state.current.configHydrated, true);
     assert.equal(harness.state.current.configLoadError, '');
     assert.equal(harness.state.current.settings.uiLanguage, 'en-US');
-    const writes = configWrites(calls);
-    assert.equal(writes.length >= 1, true, 'a readable config should be persisted');
-    assert.equal(JSON.parse(writes[writes.length - 1].content).settings.uiLanguage, 'en-US');
+
+    await act(async () => {
+      harness.state.current.updateSetting('smoothScroll', false);
+    });
+    await waitFor(() => bridge.calls.patches.length > 0, 'the settings patch');
+
+    assert.equal(bridge.state.document.settings.smoothScroll, false);
+    const patch = bridge.calls.patches.at(-1)?.patch ?? {};
+    assert.deepEqual(Object.keys(patch), ['smoothScroll']);
   } finally {
     await harness.unmount();
   }
 });
 
-test('an empty config file is treated as damaged, not as first run', async () => {
-  const calls = createBridge({ readTextFileIfExists: async () => '   \n' });
+test('a damaged document surfaces a recoverable error and writes nothing', async () => {
+  const bridge = createBridge({
+    readError: new Error('SETTINGS_FILE_CORRUPT: Settings file is not valid JSON'),
+  });
   const harness = await renderHook();
 
   try {
-    await act(async () => { await wait(500); });
+    await waitFor(() => Boolean(harness.state.current.configLoadError), 'the damaged-document error');
 
-    assert.ok(harness.state.current.configLoadError, 'empty file must surface a recoverable error');
-    assert.equal(configWrites(calls).length, 0);
+    assert.ok(harness.state.current.configLoadError, 'damaged document must surface a recoverable error');
+    assert.equal(bridge.calls.patches.length, 0);
   } finally {
     await harness.unmount();
   }

@@ -333,11 +333,26 @@ function loadKeyValueTable(db, tableName) {
 }
 
 function saveKeyValueTable(db, tableName, values) {
-  db.prepare(`DELETE FROM ${tableName}`).run();
-  const insert = db.prepare(`INSERT INTO ${tableName} (key, value_json) VALUES (?, ?)`);
+  const entries = Object.entries(values ?? {});
 
-  for (const [key, value] of Object.entries(values ?? {})) {
-    insert.run(key, JSON.stringify(value ?? null));
+  if (entries.length === 0) {
+    db.prepare(`DELETE FROM ${tableName}`).run();
+    return;
+  }
+
+  // 按键 UPSERT，只删除本次确实移除的键；不再先清空全表再重插，
+  // 避免与并发写入者互相覆盖。
+  const placeholders = entries.map(() => '?').join(', ');
+  db.prepare(`DELETE FROM ${tableName} WHERE key NOT IN (${placeholders})`)
+    .run(...entries.map(([key]) => key));
+
+  const upsert = db.prepare(`
+    INSERT INTO ${tableName} (key, value_json) VALUES (?, ?)
+    ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json
+  `);
+
+  for (const [key, value] of entries) {
+    upsert.run(key, JSON.stringify(value ?? null));
   }
 }
 
@@ -380,6 +395,28 @@ const PAPER_SELECT_COLUMNS = `
   user_note AS userNote,
   ai_summary AS aiSummary,
   citation,
+  source,
+  sort_order AS sortOrder,
+  rag_enabled AS ragEnabled
+`;
+
+/**
+ * 列表摘要投影：不含 abstract/doi/url/keywords 等大字段，供阅读进度等
+ * 单篇增量刷新使用；关联表仍按一个论文 id 水合。
+ */
+const PAPER_SUMMARY_SELECT_COLUMNS = `
+  id,
+  title,
+  title_zh AS titleZh,
+  year,
+  publication,
+  item_type AS itemType,
+  imported_at AS importedAt,
+  updated_at AS updatedAt,
+  last_read_at AS lastReadAt,
+  reading_progress AS readingProgress,
+  is_favorite AS isFavorite,
+  ai_summary AS aiSummary,
   source,
   sort_order AS sortOrder,
   rag_enabled AS ragEnabled
@@ -497,7 +534,7 @@ function countPapersFromDb(db, request = {}) {
 
 /** 与 queryPapersFromDb 同筛选同排序，仅枚举 id（供全选/批量目标分批枚举，P2-2）。 */
 function listPaperIdsFromDb(db, request = {}) {
-  const { limit, offset } = normalizePage({ ...request, limit: request?.limit ?? 1000 });
+  const { limit, offset } = normalizePage({ ...request, limit: request?.limit ?? 5000 });
   const filter = buildLibraryFilter(db, request);
   const rows = db
     .prepare(
@@ -569,6 +606,78 @@ function getPaperFromDb(db, paperId) {
   const row = db.prepare(`SELECT ${PAPER_SELECT_COLUMNS} FROM papers WHERE id = ?`).get(id);
   if (!row) return null;
   return hydratePaperRows(db, [row])[0];
+}
+
+/** 单篇列表摘要：只取列表/排序/阅读态字段并水合关联表，不返回正文类大字段。 */
+function getPaperSummaryFromDb(db, paperId) {
+  const id = cleanString(paperId);
+  if (!id) return null;
+  const row = db.prepare(`SELECT ${PAPER_SUMMARY_SELECT_COLUMNS} FROM papers WHERE id = ?`).get(id);
+  if (!row) return null;
+  return hydratePaperRows(db, [row])[0];
+}
+
+/** 轻量 citationKey 索引：详情表单查重不再需要整库 LiteraturePaper 快照。 */
+function listCitationKeysFromDb(db) {
+  return db.prepare(`
+    SELECT id, citation_key AS citationKey
+    FROM papers
+    WHERE citation_key IS NOT NULL AND length(trim(citation_key)) > 0
+    ORDER BY id
+  `).all();
+}
+
+/** 批量删除：单事务删除全部 id；返回实际删除数量（不存在的 id 忽略）。 */
+function deletePapersFromDb(db, paperIds = []) {  const ids = [...new Set((Array.isArray(paperIds) ? paperIds : []).map(cleanString).filter(Boolean))];
+  if (ids.length === 0) return 0;
+
+  return withTransaction(db, () => {
+    const statement = db.prepare('DELETE FROM papers WHERE id = ?');
+    let deleted = 0;
+    for (const paperId of ids) {
+      deleted += Number(statement.run(paperId).changes) || 0;
+    }
+    return deleted;
+  });
+}
+
+function findAttachmentsByStoredPathInDb(db, storedPath) {
+  return db
+    .prepare(
+      'SELECT id, paper_id AS paperId, stored_path AS storedPath FROM attachments WHERE lower(stored_path) = lower(?)',
+    )
+    .all(cleanString(storedPath));
+}
+
+/**
+ * 附件筛选（hasPdf/hasTranslatedPdf/missingFile）只需要 paper id 与附件行，
+ * 不需要水合作者/标签/关键词/摘要；供 library_query_papers 避免 store.load()
+ * 整库加载后仅用于 stat。
+ */
+function listAttachmentFilterSnapshotFromDb(db) {
+  return {
+    paperIds: db.prepare('SELECT id FROM papers').all().map((row) => row.id),
+    attachments: db.prepare(`
+      SELECT
+        id,
+        paper_id AS paperId,
+        kind,
+        original_path AS originalPath,
+        stored_path AS storedPath,
+        relative_path AS relativePath,
+        missing
+      FROM attachments
+    `).all(),
+  };
+}
+
+function loadLibrarySettingsFromDb(db) {
+  try {
+    return loadKeyValueTable(db, 'library_settings');
+  } catch {
+    // 旧库/半初始化库可能没有 settings 表；只读预览按空设置处理（不会误删文件）。
+    return {};
+  }
 }
 
 function getPaperIdByAttachmentId(db, attachmentId) {
@@ -1208,12 +1317,8 @@ function deletePapersWithPreviewFromDb(db, {
       if (!paper) throw new Error(`Paper does not exist: ${paperId}`);
       return paper;
     });
-    const findAttachmentsByStoredPath = (storedPath) => db
-      .prepare(
-        'SELECT id, paper_id AS paperId, stored_path AS storedPath FROM attachments WHERE lower(stored_path) = lower(?)',
-      )
-      .all(cleanString(storedPath));
-    const settings = loadKeyValueTable(db, 'library_settings');
+    const findAttachmentsByStoredPath = (storedPath) => findAttachmentsByStoredPathInDb(db, storedPath);
+    const settings = loadLibrarySettingsFromDb(db);
     const description = describe({
       papers,
       settings,
@@ -1562,6 +1667,14 @@ function createLibraryDatabaseStore(appPaths, helpers) {
       return getPaperFromDb(db, paperId);
     },
 
+    getPaperSummary(paperId) {
+      return getPaperSummaryFromDb(db, paperId);
+    },
+
+    listCitationKeys() {
+      return listCitationKeysFromDb(db);
+    },
+
     getCategory(categoryId) {
       return getCategoryFromDb(db, categoryId);
     },
@@ -1587,11 +1700,11 @@ function createLibraryDatabaseStore(appPaths, helpers) {
     },
 
     findAttachmentsByStoredPath(storedPath) {
-      return db
-        .prepare(
-          'SELECT id, paper_id AS paperId, stored_path AS storedPath FROM attachments WHERE lower(stored_path) = lower(?)',
-        )
-        .all(cleanString(storedPath));
+      return findAttachmentsByStoredPathInDb(db, storedPath);
+    },
+
+    listAttachmentFilterSnapshot() {
+      return listAttachmentFilterSnapshotFromDb(db);
     },
 
     /**
@@ -1705,6 +1818,10 @@ function createLibraryDatabaseStore(appPaths, helpers) {
 
     deletePaper(paperId) {
       deletePaperFromDb(db, paperId);
+    },
+
+    deletePapers(paperIds) {
+      return deletePapersFromDb(db, paperIds);
     },
 
     deletePapersWithPreview(input = {}) {
@@ -1876,4 +1993,9 @@ function createLibraryDatabaseStore(appPaths, helpers) {
   };
 }
 
-module.exports = { createLibraryDatabaseStore };
+module.exports = {
+  createLibraryDatabaseStore,
+  getPaperFromDb,
+  findAttachmentsByStoredPathInDb,
+  loadLibrarySettingsFromDb,
+};

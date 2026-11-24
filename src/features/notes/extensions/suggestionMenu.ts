@@ -1,9 +1,16 @@
 import type { SuggestionKeyDownProps, SuggestionProps } from '@tiptap/suggestion';
+import { pickDocumentLocaleText } from '../../../i18n/uiLanguage';
 
 export interface NoteSuggestionItem {
   id: string;
   label: string;
   description?: string;
+  /** UI 数据项（如模板命令）的英文展示文案；普通数据（笔记标题/标签）留空。 */
+  labelEn?: string;
+  descriptionEn?: string;
+  /** slash 基础命令以英文为 label，中文展示走 labelZh/descriptionZh。 */
+  labelZh?: string;
+  descriptionZh?: string;
 }
 
 function placePopup(popup: HTMLDivElement, props: SuggestionProps<NoteSuggestionItem>) {
@@ -47,7 +54,7 @@ function renderItems(
   if (props.items.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'pq-tiptap-suggestion-empty';
-    empty.textContent = '没有匹配项';
+    empty.textContent = pickDocumentLocaleText('没有匹配项', 'No matches');
     empty.style.color = 'var(--pq-text-muted)';
     empty.style.minHeight = '34px';
     popup.appendChild(empty);
@@ -76,7 +83,13 @@ function renderItems(
 
     const label = document.createElement('span');
     label.className = 'pq-tiptap-suggestion-label';
-    label.textContent = item.label || item.id;
+    // 模板项：label 中文 + labelEn 英文；slash 基础项：label 英文 + labelZh 中文；
+    // 笔记标题、标签等数据项不带双语字段，保持原文。
+    const zhLabel = item.labelZh ?? item.label;
+    const enLabel = item.labelEn ?? (item.labelZh ? item.label : null);
+    label.textContent = (enLabel
+      ? pickDocumentLocaleText(zhLabel, enLabel)
+      : item.label) || item.id;
     label.style.display = 'block';
     label.style.color = 'var(--pq-text-primary)';
     label.style.fontSize = '13px';
@@ -87,7 +100,12 @@ function renderItems(
     if (item.description) {
       const description = document.createElement('span');
       description.className = 'pq-tiptap-suggestion-description';
-      description.textContent = item.description;
+      const zhDescription = item.descriptionZh ?? item.description;
+      const enDescription = item.descriptionEn
+        ?? (item.descriptionZh ? item.description : null);
+      description.textContent = enDescription
+        ? pickDocumentLocaleText(zhDescription, enDescription)
+        : item.description;
       description.style.display = 'block';
       description.style.color = 'var(--pq-text-faint)';
       description.style.fontSize = '11px';

@@ -51,7 +51,7 @@ export function NotesList({
   if (notes.length === 0) {
     return (
       <div className="rounded-[var(--pq-radius-md)] border border-dashed border-[var(--pq-border-subtle)] bg-[var(--pq-surface-1)] px-4 py-7 text-center text-sm text-[var(--pq-text-faint)]">
-        No notes
+        {l('暂无笔记', 'No notes')}
       </div>
     );
   }
@@ -63,11 +63,11 @@ export function NotesList({
           value={sort}
           onChange={(event) => setSort(event.target.value as NoteListSort)}
           className="pq-input h-7 min-w-0 flex-1 px-2 text-[11px]"
-          aria-label="笔记排序"
+          aria-label={l('笔记排序', 'Sort notes')}
         >
-          <option value="updatedAt">按更新时间</option>
-          <option value="createdAt">按创建时间</option>
-          <option value="title">按标题</option>
+          <option value="updatedAt">{l('按更新时间', 'Recently updated')}</option>
+          <option value="createdAt">{l('按创建时间', 'Recently created')}</option>
+          <option value="title">{l('按标题', 'Title')}</option>
         </select>
         {selectedIds.size > 0 && onBatchUpdate ? (
           <>
@@ -81,7 +81,7 @@ export function NotesList({
             <select
               className="pq-input h-7 max-w-36 px-2 text-[11px]"
               value=""
-              aria-label="批量移动到文件夹"
+              aria-label={l('批量移动到文件夹', 'Move selected notes to folder')}
               onChange={(event) => {
                 onBatchUpdate(buildBatchNotePatches([...selectedIds], {
                   folderId: event.target.value === '__uncategorized__' ? null : event.target.value,
@@ -89,8 +89,8 @@ export function NotesList({
                 setSelectedIds(new Set());
               }}
             >
-              <option value="">移动到...</option>
-              <option value="__uncategorized__">未分类</option>
+              <option value="">{l('移动到...', 'Move to...')}</option>
+              <option value="__uncategorized__">{l('未分类', 'Uncategorized')}</option>
               {folders.map((folder) => (
                 <option key={folder.id} value={folder.id}>{folder.name}</option>
               ))}

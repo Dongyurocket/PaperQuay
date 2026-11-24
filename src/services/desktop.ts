@@ -8,6 +8,29 @@ export interface AppDefaultPaths {
   remotePdfDownloadDir: string;
 }
 
+export type PathAuthorizationReason =
+  | 'default'
+  | 'configured'
+  | 'dialog-approved'
+  | 'known-attachment'
+  | 'missing-approval'
+  | 'missing'
+  | 'unsafe'
+  | 'unavailable';
+
+export interface PathAuthorizationStatusEntry {
+  path: string;
+  exists: boolean;
+  authorized: boolean;
+  reason: PathAuthorizationReason;
+}
+
+export interface PathAuthorizationStatus {
+  storageDir: PathAuthorizationStatusEntry;
+  translatedPdfDir: PathAuthorizationStatusEntry;
+  mineruCacheDir: PathAuthorizationStatusEntry;
+}
+
 export interface LocalDirectoryFileEntry {
   path: string;
   name: string;
@@ -30,6 +53,8 @@ export interface MineruCacheDirectoryPreparation {
   entryCount: number;
   migratedCount: number;
   skippedCount: number;
+  /** 旧目录不可读时跳过迁移的原因；selection 本身仍然成功。 */
+  migrationSkippedReason?: string;
   looseOutputFilesIgnored: boolean;
   errors: Array<{
     name: string;
@@ -258,6 +283,19 @@ export async function getAppDefaultPaths(): Promise<AppDefaultPaths> {
   }
 }
 
+/**
+ * 只读查询文库/译版/MinerU 目录的授权状态。升级后自定义目录没有
+ * `.paperquay-approved-roots.json` 记录时返回 missing-approval，设置页据此
+ * 提示用户重新选择目录（select_directory 会登记授权）。
+ */
+export async function getPathAuthorizationStatus(): Promise<PathAuthorizationStatus> {
+  try {
+    return await invoke<PathAuthorizationStatus>('path_authorization_status');
+  } catch (error) {
+    throw new Error(toErrorMessage(error, '读取目录授权状态失败'));
+  }
+}
+
 export async function readLocalTextFile(path: string): Promise<string> {
   try {
     return await invoke<string>('read_text_file', { path });
@@ -282,6 +320,18 @@ export async function writeLocalTextFile(path: string, content: string): Promise
   }
 }
 
+/**
+ * 删除一个文本缓存文件。主进程只接受已授权写入根目录下的 `.json`，
+ * 返回 false 表示文件本来就不存在。
+ */
+export async function deleteLocalTextFile(path: string): Promise<boolean> {
+  try {
+    return Boolean(await invoke<boolean>('delete_text_file', { path }));
+  } catch (error) {
+    throw new Error(toErrorMessage(error, `删除文本文件失败: ${path}`));
+  }
+}
+
 export async function readLocalBinaryFile(path: string): Promise<Uint8Array> {
   try {
     const base64 = await invoke<string>('read_binary_file_base64', { path });
@@ -289,6 +339,23 @@ export async function readLocalBinaryFile(path: string): Promise<Uint8Array> {
     return decodeBase64(base64);
   } catch (error) {
     throw new Error(toErrorMessage(error, `读取二进制文件失败: ${path}`));
+  }
+}
+
+/**
+ * MinerU 资源只能通过缓存目录 + 相对引用读取：主进程会做字符串层拒绝与
+ * realpath 包含校验，渲染层不再持有任意绝对路径的读取能力。
+ */
+export async function readMineruAssetBytes(
+  cacheDir: string,
+  assetPath: string,
+): Promise<Uint8Array> {
+  try {
+    const base64 = await invoke<string>('read_mineru_asset_base64', { cacheDir, assetPath });
+
+    return decodeBase64(base64);
+  } catch (error) {
+    throw new Error(toErrorMessage(error, `读取 MinerU 资源失败: ${assetPath}`));
   }
 }
 

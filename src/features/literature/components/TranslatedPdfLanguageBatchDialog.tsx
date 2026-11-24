@@ -52,7 +52,7 @@ export default function TranslatedPdfLanguageBatchDialog({ entries, skippedCount
       <div className="mt-4 max-h-[50vh] overflow-auto rounded-lg border border-[var(--pq-border)]">
       <table className="w-full text-left text-xs"><thead className="sticky top-0 bg-[var(--pq-surface-2)]"><tr><th className="p-2">应用</th><th className="p-2">文献 / 附件</th><th className="p-2">原值</th><th className="p-2">保存后</th></tr></thead>
         <tbody>{entries.map((entry) => <tr key={entry.attachmentId} className="border-t border-[var(--pq-border)]">
-          <td className="p-2"><input type="checkbox" checked={selectedIds.has(entry.attachmentId)} disabled={saving} onChange={(event) => setSelectedIds((current) => { const next = new Set(current); event.target.checked ? next.add(entry.attachmentId) : next.delete(entry.attachmentId); return next; })} /></td>
+          <td className="p-2"><input type="checkbox" checked={selectedIds.has(entry.attachmentId)} disabled={saving} onChange={(event) => setSelectedIds((current) => { const next = new Set(current); if (event.target.checked) next.add(entry.attachmentId); else next.delete(entry.attachmentId); return next; })} /></td>
           <td className="max-w-[28rem] p-2"><div className="truncate" title={entry.paper.title}>{entry.paper.title}</div><div className="truncate text-[var(--pq-text-muted)]" title={entry.fileName}>{entry.fileName}</div></td>
           <td className="p-2">{isUnknown(entry.language) ? `语言待确认${entry.language ? `（原值 ${entry.language}）` : '（原值为空）'}` : entry.language}</td><td className="p-2">{clear ? '语言待确认' : normalizedLanguage || language}</td>
         </tr>)}</tbody>

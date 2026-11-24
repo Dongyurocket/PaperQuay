@@ -7,7 +7,7 @@ import path from 'node:path';
 
 const require = createRequire(import.meta.url);
 const { RENDERER_ALLOWED_COMMANDS, isRendererCommandAllowed } = require('../electron/ipcAllowlist.cjs');
-const { createIpcSenderGuard, isTrustedRendererUrl } = require('../electron/ipcSecurity.cjs');
+const { createIpcSenderGuard, isTrustedRendererNavigation, isTrustedRendererUrl } = require('../electron/ipcSecurity.cjs');
 const { createPathPolicy } = require('../electron/backend/pathPolicy.cjs');
 const { handleLocalPdfRequest } = require('../electron/localPdfProtocol.cjs');
 const { createMineruCommands, isAllowedMineruEndpoint, resolveExtractDir } = require('../electron/backend/mineruCommands.cjs');
@@ -87,6 +87,28 @@ test('IPC sender guard only trusts the application document main frame', () => {
   assert.equal(isTrustedRendererUrl('http://127.0.0.1:1420/', devOptions), true);
   assert.equal(isTrustedRendererUrl('http://127.0.0.1:9999/', devOptions), false);
   assert.equal(isTrustedRendererUrl(entryUrl, devOptions), false);
+});
+
+test('will-navigate only allows the application document, not arbitrary file:// pages', () => {
+  const prodOptions = { isDev: false, devServerUrl: '', appDir: 'C:\\app\\electron' };
+  const entryUrl = 'file:///C:/app/dist/index.html';
+
+  assert.equal(isTrustedRendererNavigation(entryUrl, prodOptions), true);
+  assert.equal(isTrustedRendererNavigation(`${entryUrl}#/reader`, prodOptions), true);
+  assert.equal(isTrustedRendererNavigation(`${entryUrl}?tab=notes`, prodOptions), true);
+  assert.equal(isTrustedRendererNavigation('file:///C:/Users/me/evil.html', prodOptions), false);
+  assert.equal(isTrustedRendererNavigation('file:///C:/app/dist/other.html', prodOptions), false);
+  assert.equal(isTrustedRendererNavigation('file:///C:/app/dist/../evil.html', prodOptions), false);
+  assert.equal(isTrustedRendererNavigation('file:///C:/app/dist/%2e%2e/evil.html', prodOptions), false);
+  assert.equal(isTrustedRendererNavigation('file://evil.example/C:/app/dist/index.html', prodOptions), false);
+  assert.equal(isTrustedRendererNavigation('https://evil.example/index.html', prodOptions), false);
+  assert.equal(isTrustedRendererNavigation('', prodOptions), false);
+
+  const devOptions = { isDev: true, devServerUrl: 'http://127.0.0.1:1420', appDir: 'C:\\app\\electron' };
+  assert.equal(isTrustedRendererNavigation('http://127.0.0.1:1420/', devOptions), true);
+  assert.equal(isTrustedRendererNavigation('http://127.0.0.1:1420/#/reader', devOptions), true);
+  assert.equal(isTrustedRendererNavigation('http://127.0.0.1:9999/', devOptions), false);
+  assert.equal(isTrustedRendererNavigation(entryUrl, devOptions), false);
 });
 
 test('path policy allows only known roots, attachments and dialog approvals', () => {

@@ -18,23 +18,22 @@
   StrCpy $pqRetry 0
 
   pq_check_running:
-    ; 优先按可执行文件路径匹配（与默认实现一致，只针对本应用的安装目录）
-    nsExec::Exec `"$PowerShellPath" -C "if ((Get-CimInstance -ClassName Win32_Process | ? {$$_.Path -and $$_.Path.StartsWith('$INSTDIR', 'CurrentCultureIgnoreCase')}).Count -gt 0) { exit 0 } else { exit 1 }"`
+    ; 只按可执行文件路径匹配本安装目录，不能按进程名兜底：
+    ; 同一台机器可能同时装有正式版或 MCP server（进程名同样是 PaperQuay.exe），
+    ; 按名 Kill 会误杀其它安装目录的进程，也会让临时目录安装被无关进程阻断。
+    ; 用父目录 -ieq $INSTDIR 做边界匹配：StartsWith 会把 PaperQuay Beta 当成 PaperQuay。
+    nsExec::Exec `"$PowerShellPath" -C "if ((Get-CimInstance -ClassName Win32_Process | ? {$$_.Path -and [IO.Path]::GetDirectoryName($$_.Path) -ieq '$INSTDIR'}).Count -gt 0) { exit 0 } else { exit 1 }"`
     Pop $R0
     ${if} $R0 == 0
       Goto pq_found
     ${endIf}
-    ; PowerShell 不可用时退化为按进程名检测
-    ${nsProcess::FindProcess} "${APP_EXECUTABLE_FILENAME}" $R0
-    ${if} $R0 == 0
-      Goto pq_found
-    ${endIf}
+    ; PowerShell 不可用时无法安全判断进程归属，直接按未运行处理。
     Goto pq_not_running
 
   pq_found:
     IntOp $pqRetry $pqRetry + 1
     ${if} $pqRetry > 4
-      MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "PaperQuay 的残留进程无法自动关闭。$\n请打开任务管理器，结束所有 PaperQuay.exe 进程后点击“重试”。" IDRETRY pq_retry_reset
+      MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "PaperQuay 的残留进程无法自动关闭。$\n请打开任务管理器，结束安装目录 $INSTDIR 下的 PaperQuay.exe 后点击“重试”。" IDRETRY pq_retry_reset
       Quit
       pq_retry_reset:
         StrCpy $pqRetry 0
@@ -43,10 +42,9 @@
 
     DetailPrint "正在关闭残留的 PaperQuay 进程..."
     ; 按路径精确结束，避免误杀其他目录下的同名进程
-    nsExec::Exec `"$PowerShellPath" -C "Get-CimInstance -ClassName Win32_Process | ? {$$_.Path -and $$_.Path.StartsWith('$INSTDIR', 'CurrentCultureIgnoreCase')} | % { Stop-Process -Id $$_.ProcessId -Force -ErrorAction SilentlyContinue }"`
+    nsExec::Exec `"$PowerShellPath" -C "Get-CimInstance -ClassName Win32_Process | ? {$$_.Path -and [IO.Path]::GetDirectoryName($$_.Path) -ieq '$INSTDIR'} | % { Stop-Process -Id $$_.ProcessId -Force -ErrorAction SilentlyContinue }"`
     Pop $R0
-    ; 兜底按进程名再杀一次，覆盖 PowerShell 不可用的场景
-    ${nsProcess::KillProcess} "${APP_EXECUTABLE_FILENAME}" $R0
+    ; 不再按进程名兜底 Kill：那会误杀其它安装目录的 PaperQuay/MCP 进程。
     ; 给进程退出和文件句柄释放留出时间
     Sleep 1500
     Goto pq_check_running

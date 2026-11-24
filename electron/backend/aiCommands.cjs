@@ -6,16 +6,10 @@ const {
   embedTexts,
   embeddingsEndpoint,
   listOpenAiModels,
-  mergeOpenAiStreamChunks,
   openAiChat,
   parseJsonObject,
-  pickChatThinking,
-  normalizeResponsesFinishStatus,
   pickChatText,
-  pickStreamThinkingDelta,
-  pickToolCalls,
   pickStreamTextDelta,
-  readOpenAiStreamResponse,
 } = require('./utils.cjs');
 
 const TEST_MODEL_TIMEOUT_MS = 20_000;
@@ -535,21 +529,6 @@ function parseNoteDistillResponse(value) {
     ? parsed.title.replace(/\s+/g, ' ').trim().slice(0, 60)
     : '';
   return { title, text };
-}
-
-function normalizedStringArray(value, limit = 120) {
-  const seen = new Set();
-  const values = [];
-
-  for (const rawValue of Array.isArray(value) ? value : []) {
-    const value = typeof rawValue === 'string' ? rawValue.trim() : '';
-    if (!value || seen.has(value)) continue;
-    seen.add(value);
-    values.push(value);
-    if (values.length >= limit) break;
-  }
-
-  return values;
 }
 
 function notePolishText(value) {

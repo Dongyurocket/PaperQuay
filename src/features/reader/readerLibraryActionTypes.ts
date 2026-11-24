@@ -2,11 +2,9 @@ import type { Dispatch, SetStateAction } from 'react';
 
 import type {
   MineruPage,
-  OpenAICompatibleTestResult,
   PositionedMineruBlock,
   QaModelPreset,
   ReaderSettings,
-  TranslationMap,
   WorkspaceItem,
 } from '../../types/reader';
 import type {
@@ -16,7 +14,6 @@ import type {
 } from '../../types/library';
 import type { ReaderDocumentTranslationSnapshot } from './documentReaderShared';
 import type {
-  BatchProgressState,
   LibraryPreviewLoadResult,
   LibraryPreviewOutcome,
   LibraryPreviewState,

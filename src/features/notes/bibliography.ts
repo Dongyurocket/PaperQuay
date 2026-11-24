@@ -3,11 +3,18 @@
 // 数据组装优先级：库内结构化字段（authors/year/publication/volume/issue/pages/doi）
 // → paper.citation 预生成串兜底 → 标题兜底。本模块只做纯文本格式化，不依赖 DOM/编辑器。
 import type { LiteraturePaper } from '../../types/library';
-import { loadSettings, SETTINGS_STORAGE_KEY } from '../reader/readerShared.ts';
+import {
+  loadSettings,
+  NOTE_CITATION_STYLE_STORAGE_KEY,
+} from '../reader/readerShared.ts';
+import {
+  getAppSettingsSnapshot,
+  patchAppSettingsAndSync,
+} from '../../app/settings/appSettingsCache.ts';
 
 export type NoteCitationStyle = 'gbt7714' | 'apa7' | 'ieee';
 
-export const NOTE_CITATION_STYLE_STORAGE_KEY = 'paperquay:note-citation-style:v1';
+export { NOTE_CITATION_STYLE_STORAGE_KEY };
 
 export const NOTE_CITATION_STYLE_OPTIONS: Array<{ id: NoteCitationStyle; label: string }> = [
   { id: 'gbt7714', label: 'GB/T 7714' },
@@ -21,17 +28,19 @@ export function normalizeNoteCitationStyle(value: unknown): NoteCitationStyle {
 
 export function loadNoteCitationStyle(): NoteCitationStyle {
   try {
+    // 主进程文档是唯一权威；缓存尚未 hydrate 时回退旧 localStorage，
+    // 仅用于首帧显示，不会再写回。
+    const snapshot = getAppSettingsSnapshot();
+    if (snapshot) {
+      return normalizeNoteCitationStyle(snapshot.settings.noteCitationStyle);
+    }
+
     if (typeof window === 'undefined') return 'gbt7714';
+
     const settings = loadSettings();
     const legacy = window.localStorage.getItem(NOTE_CITATION_STYLE_STORAGE_KEY);
-    if (legacy !== null && !window.localStorage.getItem(`${NOTE_CITATION_STYLE_STORAGE_KEY}:migrated`)) {
-      const migrated = normalizeNoteCitationStyle(legacy);
-      window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify({
-        ...settings,
-        noteCitationStyle: migrated,
-      }));
-      window.localStorage.setItem(`${NOTE_CITATION_STYLE_STORAGE_KEY}:migrated`, '1');
-      return migrated;
+    if (legacy !== null) {
+      return normalizeNoteCitationStyle(legacy);
     }
     return normalizeNoteCitationStyle(settings.noteCitationStyle);
   } catch {
@@ -39,17 +48,18 @@ export function loadNoteCitationStyle(): NoteCitationStyle {
   }
 }
 
-export function saveNoteCitationStyle(style: NoteCitationStyle): void {
-  try {
-    if (typeof window === 'undefined') return;
-    const settings = loadSettings();
-    window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify({
-      ...settings,
-      noteCitationStyle: normalizeNoteCitationStyle(style),
-    }));
-  } catch {
-    // 本地设置写入失败不阻断编辑。
-  }
+/**
+ * 通过单一设置文档的 patch 写入引用样式；不再整对象覆盖 localStorage。
+ * 调用方可以忽略返回的 Promise，冲突由设置缓存重放处理。
+ */
+export function saveNoteCitationStyle(style: NoteCitationStyle): Promise<void> {
+  const normalized = normalizeNoteCitationStyle(style);
+
+  return patchAppSettingsAndSync({ noteCitationStyle: normalized }).then((result) => {
+    if (!result.ok && typeof console !== 'undefined') {
+      console.warn('[paperquay] Failed to persist the note citation style.', result.code);
+    }
+  });
 }
 
 function trimTrailingPeriod(value: string): string {
@@ -66,7 +76,7 @@ function authorNames(paper: LiteraturePaper | undefined): string[] {
 
 // 是否 CJK 姓名（无空格、含中日韩字符）——CJK 姓名整体使用，不拆姓/名。
 function isCjkName(name: string): boolean {
-  return !/\s/.test(name) && /[　-鿿豈-﫿]/.test(name);
+  return !/\s/.test(name) && /[\u3000-\u9fff\uf900-\ufaff]/.test(name);
 }
 
 // GB/T 7714：姓前名后、全大写不强制（保持原拼写），至多 3 位后加 et al.（西文）/等（中文）。

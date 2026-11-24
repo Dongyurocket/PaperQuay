@@ -11,6 +11,7 @@ import {
   filterDemoPapers,
   hasMineruOutputForPaper,
   markPaperStatusesCheckingMineru,
+  mergePaperListSummary,
   metadataFromDraft,
   metadataFromZoteroItem,
   metadataUpdateForPaper,
@@ -439,4 +440,88 @@ test('MinerU helpers resolve sibling candidates from the current library storage
   );
 
   assert.equal(exists, true);
+});
+
+test('mergePaperListSummary updates list fields but preserves details-only fields', () => {
+  const paper = {
+    id: 'p1',
+    title: 'Old title',
+    titleZh: null,
+    year: '2020',
+    publication: 'Journal',
+    doi: '10.1000/old',
+    url: 'https://example.test/paper',
+    abstractText: 'Long abstract',
+    itemType: 'journalArticle',
+    keywords: ['old-keyword'],
+    importedAt: 1,
+    updatedAt: 10,
+    lastReadAt: null,
+    readingProgress: 0,
+    isFavorite: false,
+    userNote: 'private note',
+    aiSummary: null,
+    citation: 'citation',
+    source: 'local',
+    sortOrder: 0,
+    authors: [],
+    tags: [],
+    categoryIds: [],
+    attachments: [],
+    ragEnabled: true,
+  } as LiteraturePaper;
+
+  const merged = mergePaperListSummary(paper, {
+    id: 'p1',
+    title: 'New title',
+    titleZh: null,
+    year: '2020',
+    publication: 'Journal',
+    itemType: 'journalArticle',
+    importedAt: 1,
+    updatedAt: 11,
+    lastReadAt: 500,
+    readingProgress: 0.42,
+    isFavorite: true,
+    aiSummary: null,
+    source: 'local',
+    sortOrder: 0,
+    ragEnabled: true,
+    authors: paper.authors,
+    tags: paper.tags,
+    categoryIds: paper.categoryIds,
+    attachments: paper.attachments,
+  });
+
+  assert.equal(merged.title, 'New title');
+  assert.equal(merged.lastReadAt, 500);
+  assert.equal(merged.readingProgress, 0.42);
+  assert.equal(merged.isFavorite, true);
+  assert.equal(merged.doi, '10.1000/old', 'doi is not part of the summary');
+  assert.equal(merged.abstractText, 'Long abstract');
+  assert.deepEqual(merged.keywords, ['old-keyword']);
+  assert.equal(merged.userNote, 'private note');
+
+  const unchanged = mergePaperListSummary(merged, {
+    id: 'p1',
+    title: 'New title',
+    titleZh: null,
+    year: '2020',
+    publication: 'Journal',
+    itemType: 'journalArticle',
+    importedAt: 1,
+    updatedAt: 11,
+    lastReadAt: 500,
+    readingProgress: 0.42,
+    isFavorite: true,
+    aiSummary: null,
+    source: 'local',
+    sortOrder: 0,
+    ragEnabled: true,
+    authors: paper.authors,
+    tags: paper.tags,
+    categoryIds: paper.categoryIds,
+    attachments: paper.attachments,
+  });
+  assert.equal(unchanged, merged, 'identical summary must keep object identity');
 });

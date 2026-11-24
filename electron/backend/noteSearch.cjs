@@ -59,6 +59,11 @@ function keywordNotes(db, request = {}) {
           AND id IN (SELECT note_id FROM notes_fts WHERE notes_fts MATCH ?) ${order}`)
           .all(...params, match, limit);
       } catch { /* Old or unavailable FTS indexes retain the LIKE contract. */ }
+      // FTS 0 行不等于笔记不存在：旧库/迁移后可能是索引缺失而不是真的没匹配。
+      // 回退 LIKE 保证「搜不到」只由正文决定。
+      if (!rows || rows.length === 0) {
+        rows = undefined;
+      }
     }
     if (!rows) {
       channel = 'like';

@@ -9,6 +9,12 @@ const {
   safeFileName,
   now,
 } = require('./utils.cjs');
+const {
+  DEFAULT_DOWNLOAD_MAX_BYTES,
+  DEFAULT_DOWNLOAD_TIMEOUT_MS,
+  downloadUrlToFile,
+  resolveLimit,
+} = require('./httpIO.cjs');
 
 const MINERU_CACHE_MARKER_FILE = '.paperquay-mineru-cache.json';
 const MINERU_OUTPUT_FILE_NAMES = new Set([
@@ -143,6 +149,8 @@ function createFileCommands(context) {
     approvedReadPaths: context.approvedReadPaths ?? new Set(),
     approvedWritePaths,
   });
+  // 测试可注入目录列举器，模拟 OS 级不可读（EPERM/EACCES）。
+  const listMineruCacheEntries = context.listMineruCacheEntries ?? listPaperQuayMineruCacheEntries;
   // 测试可注入 shell；运行时使用 Electron 的 shell。
   const shellApi = context.shell ?? shell;
   // 自定义 MinerU 缓存目录由目录对话框授权并持久化；不再直接信任
@@ -321,7 +329,8 @@ function createFileCommands(context) {
       if (result.canceled || !result.filePaths[0]) return null;
       const selected = result.filePaths[0];
       // 目录选择通常用于缓存、导出或备份目标：读写都由这次用户选择授权。
-      pathPolicy.approveReadPath(selected);
+      // 只授权目录自身，不扩散到父目录；目录本身已覆盖全部子路径。
+      pathPolicy.approveReadDirectory(selected);
       pathPolicy.approveWritePath(selected);
       return selected;
     },
@@ -336,58 +345,84 @@ function createFileCommands(context) {
       const existedBefore = await directoryExists(resolvedTargetDir);
       await fsp.mkdir(resolvedTargetDir, { recursive: true });
       pathPolicy.assertWriteAllowed(resolvedTargetDir);
-      pathPolicy.approveReadPath(resolvedTargetDir);
+      // 只授权目录自身：迁移/读取的是它下面的缓存子目录，父目录不应因此可读。
+      pathPolicy.approveReadDirectory(resolvedTargetDir);
       pathPolicy.approveWritePath(resolvedTargetDir);
 
       const looseOutputFilesIgnored = await hasLooseMineruOutputFiles(resolvedTargetDir);
       const previousDir = cleanString(previousDirectory);
       let migratedCount = 0;
       let skippedCount = 0;
+      let migrationSkippedReason = '';
       const errors = [];
 
       if (previousDir) {
         const resolvedPreviousDir = path.resolve(previousDir);
 
-        if (!isSamePath(resolvedPreviousDir, resolvedTargetDir) && await directoryExists(resolvedPreviousDir)) {
-          const cacheEntries = await listPaperQuayMineruCacheEntries(resolvedPreviousDir);
-
-          for (const entry of cacheEntries) {
-            const resolvedSource = path.resolve(entry.path);
-
-            if (
-              isSamePath(resolvedSource, resolvedTargetDir) ||
-              isPathInside(resolvedTargetDir, resolvedSource)
-            ) {
-              skippedCount += 1;
-              continue;
+        if (!isSamePath(resolvedPreviousDir, resolvedTargetDir)) {
+          // previousDirectory 也是渲染层传入的：迁移前必须证明它在读根内，
+          // 否则可借「迁移」把任意目录复制进缓存根再读出。
+          // 但旧目录不可读只应跳过迁移：用户已经选了新目录，整次选择不能因此失败。
+          if (!pathPolicy.isReadAllowed(resolvedPreviousDir)) {
+            migrationSkippedReason = 'previous-not-authorized';
+          } else if (await directoryExists(resolvedPreviousDir)) {
+            let previousEntries = [];
+            try {
+              previousEntries = await listMineruCacheEntries(resolvedPreviousDir);
+            } catch (error) {
+              // 旧目录在策略内、但 OS 拒绝列举（ACL/占用）时仍应跳过迁移，
+              // 不能因为读不了旧目录而让用户已经选好的新目录失败。
+              if (['EPERM', 'EACCES', 'EBUSY'].includes(error?.code)) {
+                migrationSkippedReason = 'previous-unreadable';
+              } else {
+                throw error;
+              }
             }
 
-            const destination = path.join(resolvedTargetDir, entry.name);
+            for (const entry of previousEntries) {
+              const resolvedSource = path.resolve(entry.path);
+              if (!pathPolicy.isReadAllowed(resolvedSource)) {
+                // 符号链接/junction 可能把单个条目指向读根之外：跳过该条，不中断整次选择。
+                skippedCount += 1;
+                errors.push({ name: entry.name, message: 'source not authorized' });
+                continue;
+              }
 
-            try {
-              if (await directoryExists(destination)) {
+              if (
+                isSamePath(resolvedSource, resolvedTargetDir) ||
+                isPathInside(resolvedTargetDir, resolvedSource)
+              ) {
                 skippedCount += 1;
                 continue;
               }
 
-              await fsp.cp(entry.path, destination, {
-                recursive: true,
-                force: false,
-                errorOnExist: false,
-              });
-              migratedCount += 1;
-            } catch (error) {
-              errors.push({
-                name: entry.name,
-                message: error instanceof Error ? error.message : String(error),
-              });
+              const destination = path.join(resolvedTargetDir, entry.name);
+
+              try {
+                if (await directoryExists(destination)) {
+                  skippedCount += 1;
+                  continue;
+                }
+
+                await fsp.cp(entry.path, destination, {
+                  recursive: true,
+                  force: false,
+                  errorOnExist: false,
+                });
+                migratedCount += 1;
+              } catch (error) {
+                errors.push({
+                  name: entry.name,
+                  message: error instanceof Error ? error.message : String(error),
+                });
+              }
             }
           }
         }
       }
 
       const markerPath = path.join(resolvedTargetDir, MINERU_CACHE_MARKER_FILE);
-      const cacheEntries = await listPaperQuayMineruCacheEntries(resolvedTargetDir);
+      const cacheEntries = await listMineruCacheEntries(resolvedTargetDir);
       const marker = {
         version: 1,
         product: 'PaperQuay',
@@ -404,6 +439,7 @@ function createFileCommands(context) {
         entryCount: cacheEntries.length,
         migratedCount,
         skippedCount,
+        migrationSkippedReason,
         looseOutputFilesIgnored,
         errors,
       };
@@ -543,6 +579,39 @@ function createFileCommands(context) {
       await writeTextFileAtomically(filePath, content);
     },
 
+    /**
+     * 仅用于删除译文缓存一类 `.json` 文本文件：必须是已授权写入根目录下的
+     * 普通文件，避免把 `write_text_file` 的写入权限升级成任意删除。
+     * 返回 false 表示文件本来就不存在（清除缓存时视为已达成目标）。
+     */
+    async delete_text_file({ path: filePath }) {
+      assertWriteAllowed(filePath);
+
+      if (path.extname(String(filePath ?? '')).toLowerCase() !== '.json') {
+        throw new Error('Only .json files can be deleted with delete_text_file');
+      }
+
+      let stat;
+      try {
+        stat = await fsp.lstat(filePath);
+      } catch (error) {
+        if (error?.code === 'ENOENT' || error?.code === 'ENOTDIR') return false;
+        throw error;
+      }
+
+      if (!stat.isFile()) {
+        throw new Error('Only regular files can be deleted with delete_text_file');
+      }
+
+      try {
+        await fsp.unlink(filePath);
+        return true;
+      } catch (error) {
+        if (error?.code === 'ENOENT' || error?.code === 'ENOTDIR') return false;
+        throw error;
+      }
+    },
+
     async read_binary_file_base64({ path: filePath }) {
       pathPolicy.assertReadAllowed(filePath);
       await ensureFile(filePath);
@@ -561,11 +630,12 @@ function createFileCommands(context) {
       if (!/^https?:\/\//i.test(trimmedUrl)) {
         throw new Error('Only http and https URLs can be downloaded');
       }
-      const response = await fetch(trimmedUrl, { headers: headers ?? undefined });
-      if (!response.ok) throw new Error(`Remote download returned HTTP ${response.status}`);
-
-      await fsp.mkdir(path.dirname(filePath), { recursive: true });
-      await fsp.writeFile(filePath, Buffer.from(await response.arrayBuffer()));
+      await downloadUrlToFile(trimmedUrl, filePath, {
+        headers: headers ?? undefined,
+        timeoutMs: resolveLimit(context.httpLimits?.remoteDownloadTimeoutMs, DEFAULT_DOWNLOAD_TIMEOUT_MS),
+        maxBytes: resolveLimit(context.httpLimits?.maxRemoteFileBytes, DEFAULT_DOWNLOAD_MAX_BYTES),
+        label: 'Remote PDF download',
+      });
     },
 
     library_select_pdf_files(_args, event) {

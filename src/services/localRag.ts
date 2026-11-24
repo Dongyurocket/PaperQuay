@@ -26,7 +26,6 @@ import {
   ragListIndexStatuses,
   ragListIndexedChunkIds,
   ragReportDocumentIndexFailure,
-  ragRetrieveDocumentChunks,
   ragRetrieveDocumentChunksWithDiagnostics,
   type RagEmbeddingOptions,
 } from './rag';

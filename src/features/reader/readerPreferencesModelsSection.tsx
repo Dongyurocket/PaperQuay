@@ -30,8 +30,7 @@ import {
   SettingsField,
   SettingsInput,
   SettingsSelect,
-  ToggleRow,
-} from './readerPreferencesPrimitives';
+} from '../../app/settings/settingsPrimitives';
 import type {
   ReaderPreferencesLocalizer,
   ReaderSettingsChangeHandler,

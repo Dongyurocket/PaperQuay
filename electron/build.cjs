@@ -45,6 +45,10 @@ const env = {
 };
 
 async function main() {
+  // 直接调用本脚本（而非 npm run build）时也要保证打包内容里的 preload bundle 是最新的。
+  const { bundlePreload } = require('../scripts/bundle-preload.cjs');
+  await bundlePreload();
+
   const { bundleMcp } = require('../scripts/bundle-mcp.cjs');
   await bundleMcp();
 

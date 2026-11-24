@@ -34,6 +34,7 @@ export function joinReadableText(parts: string[]): string {
 
 export function normalizeSelectionText(value: string): string {
   let text = value
+    // eslint-disable-next-line no-control-regex -- 需要匹配并剔除不可见控制字符，保持原有字节级语义
     .replace(/[\u0000\u00A0\u1680\u180E\u2000-\u200D\u202F\u205F\u3000]/g, ' ')
     .replace(/\s+/g, ' ')
     .replace(/\s+([,.;:!?%)}\]])/g, '$1')

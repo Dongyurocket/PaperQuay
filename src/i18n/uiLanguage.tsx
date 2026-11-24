@@ -6,6 +6,8 @@ import {
 } from 'react';
 import type { UiLanguage } from '../types/reader';
 
+export { pickDocumentLocaleText } from './documentLocale';
+
 const AppLocaleContext = createContext<UiLanguage>('zh-CN');
 
 export function AppLocaleProvider({

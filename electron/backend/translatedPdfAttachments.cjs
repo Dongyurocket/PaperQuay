@@ -75,18 +75,6 @@ async function canDeleteOwnedFile(listAttachmentsByStoredPath, attachment, allow
     .some((other) => other.id !== attachment.id && isSamePath(other.storedPath, attachment.storedPath));
 }
 
-async function cleanupReplacedAttachments(replaced, storedPath, allowedDirs, listAttachmentsByStoredPath) {
-  for (const attachment of replaced) {
-    if (
-      attachment?.storedPath &&
-      !isSamePath(attachment.storedPath, storedPath) &&
-      await canDeleteOwnedFile(listAttachmentsByStoredPath, attachment, allowedDirs)
-    ) {
-      await fsp.rm(attachment.storedPath, { force: true }).catch(() => {});
-    }
-  }
-}
-
 async function readPdfPageCount(filePath) {
   try {
     const { PDFDocument } = require('pdf-lib');
@@ -125,8 +113,8 @@ async function addTranslatedPdfAttachment({
   language = 'und',
   settings,
   appPaths,
+  pathPolicy,
   persist,
-  listAttachmentsByStoredPath,
 }) {
   if (!paper) throw new Error('Paper does not exist');
 
@@ -147,6 +135,11 @@ async function addTranslatedPdfAttachment({
 
   const storageDir = storageDirFor(settings, appPaths);
   const targetDir = resolveTranslatedPdfStorageDir(settings, appPaths);
+  // 渲染层可调的附件写入也必须经过统一路径策略：自定义译版目录若未在
+  // 目录对话框重新授权，不能借「附加译版」把文件写进去再读出来。
+  if (pathPolicy && !pathPolicy.isWriteAllowed(path.join(targetDir, 'probe.pdf'))) {
+    throw new Error('Translated PDF directory is not authorized; select the directory again');
+  }
   await fsp.mkdir(targetDir, { recursive: true });
 
   const bytes = await fsp.readFile(cleanSource);

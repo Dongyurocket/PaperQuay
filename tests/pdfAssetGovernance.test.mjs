@@ -21,6 +21,7 @@ test('PDF names are stable, bounded, Unicode-normalized, and Windows-safe', () =
   assert.equal(first, buildPdfAssetFileName(options));
   assert.ok(Array.from(first).length <= 100);
   assert.match(first, /__translated-zh-CN__[a-f0-9]{8}\.pdf$/);
+  // eslint-disable-next-line no-control-regex -- 需要匹配并剔除不可见控制字符，保持原有字节级语义
   assert.ok(!/[<>:"/\\|?*\x00-\x1f]$/.test(first));
   assert.ok(buildPdfAssetFileName({ title: 'file', stableId: '1', author: 'CON' }).startsWith('_CON_'));
   const configured = buildPdfAssetFileName({

@@ -185,7 +185,9 @@ export function noteContentToTiptap(note: Note | null): JSONContent {
   });
 }
 
-export function titleFromNoteContent(text: string, fallback = '未命名笔记') {
+// 无正文时不再生成中文标题：数据层保持空标题，由展示层按语言显示「未命名笔记」。
+// 显式传入 fallback 的调用方仍按旧语义使用该值。
+export function titleFromNoteContent(text: string, fallback = '') {
   const normalized = text.replace(/\s+/g, ' ').trim();
   if (!normalized) return fallback;
   return normalized.length > 48 ? `${normalized.slice(0, 48)}...` : normalized;

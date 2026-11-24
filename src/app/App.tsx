@@ -35,6 +35,9 @@ import { registerCommands, useGlobalShortcuts } from '../ui/commands';
 import { useWorkspaceRestore, type AppWorkspaceKey } from './useWorkspaceRestore';
 import { startExternalWriteBridge } from '../services/externalWrite';
 import { cleanupRetiredAgentLocalState } from '../services/retiredAgentCleanup';
+import { AppSettingsWindow } from './settings/AppSettingsWindow';
+import { getAppSettingsSnapshot } from './settings/appSettingsCache';
+import { useAppSettingsStore } from './settings/useAppSettingsStore';
 
 type UiLanguage = 'zh-CN' | 'en-US';
 
@@ -131,6 +134,11 @@ class WorkspaceErrorBoundary extends Component<WorkspaceErrorBoundaryProps, Work
 
 function loadUiLanguage(): UiLanguage {
   try {
+    const snapshot = getAppSettingsSnapshot();
+    if (snapshot) {
+      return snapshot.settings.uiLanguage === 'en-US' ? 'en-US' : 'zh-CN';
+    }
+
     const rawValue = window.localStorage.getItem(SETTINGS_STORAGE_KEY);
     const parsed = rawValue ? JSON.parse(rawValue) : null;
     return parsed?.uiLanguage === 'en-US' ? 'en-US' : 'zh-CN';
@@ -248,7 +256,14 @@ function App() {
   }, [setActiveTab]);
 
   const handleOpenPreferences = () => {
-    emitOpenPreferences();
+    // 文库（Reader）保留完整阅读设置窗口；Notes / Graph 打开应用级设置，
+    // 两者共享 backup/MCP/updates 组件与主进程设置文档。
+    if (activeWorkspace === 'library') {
+      emitOpenPreferences();
+      return;
+    }
+
+    useAppSettingsStore.getState().openSettings('general');
   };
 
   // 全局命令与快捷键：App 层统一注册导航类动作，feature 层可按需追加。
@@ -313,6 +328,7 @@ function App() {
       },
     ]);
   }, [
+    activeWorkspace,
     closeTab,
     handleOpenStandalonePdf,
     isEnglish,
@@ -564,6 +580,7 @@ function App() {
         <Toaster />
         <TaskCenter />
         <ConfirmHost />
+        <AppSettingsWindow />
         <CommandPalette open={commandPaletteOpen} onClose={() => setCommandPaletteOpen(false)} />
       </div>
     </AppLocaleProvider>

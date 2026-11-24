@@ -1,6 +1,5 @@
 import {
   useCallback,
-  useEffect,
   useMemo,
   useState,
 } from 'react';
@@ -21,7 +20,6 @@ import {
 import {
   extractTranslatableMarkdownFromMineruBlock,
 } from '../../services/mineru';
-import { resolveSummaryOutputLanguage } from '../../services/summarySource';
 import {
   translateBlocksOpenAICompatible,
   translateTextOpenAICompatible,
@@ -70,7 +68,10 @@ import {
   sanitizeTranslationErrorMessage,
   translateBlocksBestEffort,
 } from './readerTranslation';
-import { readTranslationCache } from './readerTranslationCache';
+import {
+  createTranslationCacheIdentity,
+  readTranslationCache,
+} from './readerTranslationCache';
 import { indexLibraryPaperMineruSource } from './libraryRagIndexing';
 import type { UseReaderLibraryActionsOptions } from './readerLibraryActionTypes';
 import { useReaderLibraryBatchActions } from './useReaderLibraryBatchActions';
@@ -197,6 +198,16 @@ export function useReaderLibraryActions({
     });
   }, [setLibraryPreviewStates, setNativeLibraryItems, setStandaloneItems]);
 
+  // 文库页翻译与阅读器共用同一缓存身份，避免两个写入方落到不同文件而丢块。
+  const libraryTranslationCacheIdentity = useMemo(
+    () => createTranslationCacheIdentity(
+      translationModelPreset?.baseUrl,
+      translationModelPreset?.model,
+      settings.translationSourceLanguage,
+    ),
+    [settings.translationSourceLanguage, translationModelPreset],
+  );
+
   const saveLibraryTranslationCache = useCallback(
     async (item: WorkspaceItem, translations: TranslationMap) =>
       writeLibraryTranslationCache({
@@ -205,8 +216,10 @@ export function useReaderLibraryActions({
         sourceLanguage: settings.translationSourceLanguage,
         targetLanguage: settings.translationTargetLanguage,
         translations,
+        identity: libraryTranslationCacheIdentity,
       }),
     [
+      libraryTranslationCacheIdentity,
       settings.mineruCacheDir,
       settings.translationSourceLanguage,
       settings.translationTargetLanguage,
@@ -219,8 +232,13 @@ export function useReaderLibraryActions({
         item,
         mineruCacheDir: settings.mineruCacheDir,
         targetLanguage: settings.translationTargetLanguage,
+        identity: libraryTranslationCacheIdentity,
       }),
-    [settings.mineruCacheDir, settings.translationTargetLanguage],
+    [
+      libraryTranslationCacheIdentity,
+      settings.mineruCacheDir,
+      settings.translationTargetLanguage,
+    ],
   );
 
   // MinerU 解析成功后，把文献的 markdown 源后台纳入本地 RAG 知识库，
@@ -412,7 +430,7 @@ export function useReaderLibraryActions({
             },
           );
         });
-        const { result, jsonText, usedOcr } = parseResult;
+        const { result, jsonText } = parseResult;
 
         if (!jsonText?.trim()) {
           throw new Error(
@@ -1395,6 +1413,12 @@ export function useReaderLibraryActions({
             ? l(
                 `已迁移 ${prepared.migratedCount} 个旧缓存目录`,
                 `Migrated ${prepared.migratedCount} existing cache folder(s)`,
+              )
+            : '',
+          prepared.migrationSkippedReason
+            ? l(
+                '旧缓存目录未授权读取，已跳过迁移；原目录内容保持不变',
+                'The previous cache directory is not authorized for reading; migration was skipped and its contents were left untouched',
               )
             : '',
           prepared.looseOutputFilesIgnored

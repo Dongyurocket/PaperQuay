@@ -1,7 +1,9 @@
 import type { MouseEvent } from 'react';
 import { Trash2 } from 'lucide-react';
+import { useLocaleText } from '../../i18n/uiLanguage';
 import type { Note } from '../../types/notes';
 import { cn } from '../../utils/cn';
+import { noteDisplayTitle } from './notesDisplay';
 
 interface NoteCardProps {
   note: Note;
@@ -24,6 +26,9 @@ export function NoteCard({
   onSelectedChange,
   channels,
 }: NoteCardProps) {
+  const l = useLocaleText();
+  const displayTitle = noteDisplayTitle(note.title, l);
+
   return (
     <article
       onContextMenu={(event) => onContextMenu?.(event, note)}
@@ -43,12 +48,12 @@ export function NoteCard({
             checked={selected}
             onChange={(event) => onSelectedChange(event.target.checked)}
             className="ml-3 mt-2 shrink-0"
-            aria-label={`选择 ${note.title}`}
+            aria-label={l(`选择 ${displayTitle}`, `Select ${displayTitle}`)}
           />
         ) : null}
         <button type="button" onClick={() => onSelect(note)} className="block min-w-0 flex-1 py-2 pl-3 pr-10 text-left">
           <div className="truncate text-sm font-medium text-[var(--pq-text)]">
-            {note.title || 'Untitled Note'}
+            {displayTitle}
           </div>
           {channels?.length ? <div className="mt-0.5 text-[11px] text-[var(--pq-text-faint)]">{channels.join(' + ')}</div> : null}
         </button>
@@ -59,8 +64,8 @@ export function NoteCard({
           type="button"
           onClick={() => onDelete(note)}
           className="pq-icon-button h-7 w-7 rounded-md"
-          aria-label="Delete note"
-          title="Delete"
+          aria-label={l('删除笔记', 'Delete note')}
+          title={l('删除笔记', 'Delete note')}
         >
           <Trash2 className="h-3.5 w-3.5" strokeWidth={1.8} />
         </button>

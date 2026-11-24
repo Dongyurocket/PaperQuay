@@ -1,10 +1,7 @@
 const fsp = require('node:fs/promises');
 const path = require('node:path');
-const { resolveAttachmentFilters } = require('./libraryAttachmentAvailability.cjs');
+const { resolveAttachmentFilters, invalidateAttachmentAvailability } = require('./libraryAttachmentAvailability.cjs');
 const {
-  attachCategoryCounts,
-  normalizeAuthor,
-  normalizeTag,
   paperMatches,
   sortPapers,
 } = require('./libraryStore.cjs');
@@ -12,35 +9,35 @@ const {
   cleanString,
   ensureFile,
   fileNameFromPath,
-  hashBytes,
   hashFile,
   id,
   isPdf,
   now,
-  readRequestJson,
   safeFileName,
 } = require('./utils.cjs');
 const {
-  addTranslatedPdfAttachment,
-  removeTranslatedPdfAttachment,
+  DEFAULT_JSON_MAX_BYTES,
+  DEFAULT_JSON_TIMEOUT_MS,
+  resolveLimit,
+} = require('./httpIO.cjs');
+const {
   resolveTranslatedPdfStorageDir,
 } = require('./translatedPdfAttachments.cjs');
+const { isRealManagedFilePath } = require('./pdfAssetGovernance.cjs');
 const {
-  canonicalizeBcp47Language,
-  normalizeCitationKey,
-  normalizeOrcid,
-} = require('./metadataValidation.cjs');
-const { UPDATABLE_PAPER_FIELDS } = require('./paperMetadataFields.cjs');
+  findDuplicatePaper,
+  buildImportedAttachmentFileName,
+  applyPaperMetadataPatch,
+  buildImportedPaperRecord,
+} = require('../shared/libraryDomain.cjs');
 const {
-  inspectPdfAssets,
-  planPdfAssetNames,
-  isManagedPath,
-  isRealManagedFilePath,
-} = require('./pdfAssetGovernance.cjs');
+  createLibraryMetadataCommands,
+  fetchCrossrefReferences,
+} = require('./libraryMetadata.cjs');
+const { createLibraryAttachmentCommands } = require('./libraryAttachments.cjs');
+const { createLibraryCategoryCommands } = require('./libraryCategories.cjs');
 
-const OPENALEX_API_BASE = 'https://api.openalex.org';
-const LIBRARY_REFERENCE_PROGRESS_EVENT = 'paperquay://library-reference-progress';
-const MAX_CROSSREF_REFERENCES_PER_PAPER = 200;
+const DEFAULT_PDF_IMPORT_MAX_BYTES = 512 * 1024 * 1024;
 
 function comparablePath(filePath) {
   const resolved = path.resolve(filePath);
@@ -49,32 +46,6 @@ function comparablePath(filePath) {
 
 function isSamePath(left, right) {
   return comparablePath(left) === comparablePath(right);
-}
-
-/**
- * 分类父级校验：新父级不能是自身、自己的后代、系统分类或不存在的分类。
- * 历史上已经存在环时 visited 集合保证遍历终止（环上的移动会被拒绝并提示修复）。
- */
-function assertCategoryParentAllowed(categories, categoryId, parentId) {
-  const nextParentId = cleanString(parentId);
-  if (!nextParentId) return;
-  if (nextParentId === categoryId) {
-    throw new Error('A category cannot be its own parent');
-  }
-
-  const parent = categories.find((item) => item.id === nextParentId);
-  if (!parent) throw new Error(`Parent category does not exist: ${nextParentId}`);
-  if (parent.isSystem) throw new Error('System categories cannot be used as a parent');
-
-  const seen = new Set([categoryId]);
-  let cursor = nextParentId;
-  while (cursor) {
-    if (seen.has(cursor)) {
-      throw new Error('A category cannot be moved under itself or its descendants');
-    }
-    seen.add(cursor);
-    cursor = categories.find((item) => item.id === cursor)?.parentId ?? null;
-  }
 }
 
 function isSubPath(root, candidate) {
@@ -210,407 +181,13 @@ async function migrateTranslatedPdfDirectory(library, previousDir, nextDir, stor
   return { copiedFiles, updatedAttachments, changedPaperIds: [...changedPaperIds] };
 }
 
-function normalizeDoi(value) {
-  return cleanString(value)
-    .replace(/^https?:\/\/(?:dx\.)?doi\.org\//i, '')
-    .replace(/^doi:/i, '')
-    .trim()
-    .toLowerCase();
-}
-
-function firstString(...values) {
-  for (const value of values) {
-    if (typeof value === 'string' && value.trim()) {
-      return value.trim();
-    }
-
-    if (Array.isArray(value)) {
-      const nextValue = value.find((item) => typeof item === 'string' && item.trim());
-      if (nextValue) return nextValue.trim();
-    }
-  }
-
-  return null;
-}
-
-function normalizeYear(value) {
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return String(value);
-  }
-
-  const text = cleanString(value);
-  const match = text.match(/\b(18|19|20|21)\d{2}\b/);
-  return match?.[0] ?? null;
-}
-
-function doiUrl(doi) {
-  const normalized = normalizeDoi(doi);
-  return normalized ? `https://doi.org/${normalized}` : '';
-}
-
-function normalizeTitleForMatching(value) {
-  return cleanString(value)
-    .toLowerCase()
-    .replace(/&/g, ' and ')
-    .replace(/[^\p{L}\p{N}]+/gu, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function titleTokens(value) {
-  return normalizeTitleForMatching(value)
-    .split(' ')
-    .filter((token) => token.length > 1);
-}
-
-function diceCoefficient(left, right) {
-  const leftTokens = titleTokens(left);
-  const rightTokens = titleTokens(right);
-
-  if (leftTokens.length === 0 || rightTokens.length === 0) {
-    return 0;
-  }
-
-  const rightCounts = new Map();
-  for (const token of rightTokens) {
-    rightCounts.set(token, (rightCounts.get(token) ?? 0) + 1);
-  }
-
-  let matches = 0;
-  for (const token of leftTokens) {
-    const count = rightCounts.get(token) ?? 0;
-    if (count <= 0) continue;
-    matches += 1;
-    rightCounts.set(token, count - 1);
-  }
-
-  return (2 * matches) / (leftTokens.length + rightTokens.length);
-}
-
-function titleSimilarity(left, right) {
-  const normalizedLeft = normalizeTitleForMatching(left);
-  const normalizedRight = normalizeTitleForMatching(right);
-
-  if (!normalizedLeft || !normalizedRight) {
-    return 0;
-  }
-
-  if (normalizedLeft === normalizedRight) {
-    return 1;
-  }
-
-  const shorter = normalizedLeft.length < normalizedRight.length ? normalizedLeft : normalizedRight;
-  const longer = normalizedLeft.length < normalizedRight.length ? normalizedRight : normalizedLeft;
-  const containmentScore = shorter.length >= 16 && longer.includes(shorter)
-    ? Math.min(0.92, shorter.length / Math.max(longer.length, 1) + 0.18)
-    : 0;
-
-  return Math.max(diceCoefficient(normalizedLeft, normalizedRight), containmentScore);
-}
-
-function bestOpenAlexTitleMatch(results, requestedTitle) {
-  const candidates = (Array.isArray(results) ? results : [])
-    .map((item) => ({
-      item,
-      score: titleSimilarity(requestedTitle, firstString(item?.title, item?.display_name)),
-    }))
-    .filter((candidate) => candidate.score >= 0.78)
-    .sort((left, right) => right.score - left.score);
-
-  return candidates[0]?.item ?? null;
-}
-
-function buildUrl(base, params) {
-  const url = new URL(base);
-
-  for (const [key, value] of Object.entries(params ?? {})) {
-    const normalized = cleanString(value);
-    if (normalized) {
-      url.searchParams.set(key, normalized);
-    }
-  }
-
-  return url.toString();
-}
-
-function hasMetadataValue(metadata) {
-  return Boolean(
-    metadata &&
-    (
-      cleanString(metadata.doi) ||
-      cleanString(metadata.title) ||
-      cleanString(metadata.year) ||
-      cleanString(metadata.publication) ||
-      cleanString(metadata.url) ||
-      cleanString(metadata.abstractText) ||
-      cleanString(metadata.language) ||
-      (Array.isArray(metadata.authors) && metadata.authors.length > 0) ||
-      (Array.isArray(metadata.authorDetails) && metadata.authorDetails.length > 0)
-    ),
-  );
-}
-
-function safeNormalizeOrcid(value) {
-  try {
-    return normalizeOrcid(value);
-  } catch {
-    return null;
-  }
-}
-
-function abstractFromOpenAlexInvertedIndex(invertedIndex) {
-  if (!invertedIndex || typeof invertedIndex !== 'object') {
-    return null;
-  }
-
-  const positionedWords = [];
-
-  for (const [word, positions] of Object.entries(invertedIndex)) {
-    if (!Array.isArray(positions)) continue;
-
-    for (const position of positions) {
-      if (Number.isInteger(position) && position >= 0) {
-        positionedWords[position] = word;
-      }
-    }
-  }
-
-  const abstract = positionedWords.filter(Boolean).join(' ').trim();
-  return abstract || null;
-}
-
-function mapOpenAlexWork(item) {
-  if (!item || typeof item !== 'object') {
-    return null;
-  }
-
-  const publication =
-    item.primary_location?.source?.display_name ||
-    item.host_venue?.display_name ||
-    item.locations?.find((location) => location?.source?.display_name)?.source?.display_name ||
-    null;
-  const doi = normalizeDoi(item.doi);
-
-  return {
-    source: 'openalex',
-    doi: doi || null,
-    title: firstString(item.title, item.display_name),
-    authors: (item.authorships ?? [])
-      .map((authorship) => cleanString(authorship?.author?.display_name))
-      .filter(Boolean),
-    year: normalizeYear(item.publication_year ?? item.publication_date),
-    publication: cleanString(publication) || null,
-    url: firstString(item.primary_location?.landing_page_url, item.doi, item.id),
-    abstractText: abstractFromOpenAlexInvertedIndex(item.abstract_inverted_index),
-  };
-}
-
-function mapCrossrefWork(item) {
-  if (!item || typeof item !== 'object') {
-    return null;
-  }
-
-  return {
-    source: 'crossref',
-    doi: normalizeDoi(item.DOI) || null,
-    title: firstString(item.title),
-    authors: (item.author ?? [])
-      .map((author) => [author.given, author.family].filter(Boolean).join(' ') || author.name)
-      .map(cleanString)
-      .filter(Boolean),
-    authorDetails: (item.author ?? [])
-      .map((author) => {
-        const givenName = cleanString(author.given) || null;
-        const familyName = cleanString(author.family) || null;
-        const name = cleanString([givenName, familyName].filter(Boolean).join(' ') || author.name);
-        const affiliation = Array.isArray(author.affiliation)
-          ? author.affiliation.map((item) => cleanString(item?.name)).filter(Boolean).join('; ')
-          : '';
-        return {
-          name,
-          givenName,
-          familyName,
-          affiliation: affiliation || null,
-          orcid: safeNormalizeOrcid(author.ORCID),
-        };
-      })
-      .filter((author) => author.name),
-    language: canonicalizeBcp47Language(item.language),
-    year: normalizeYear(item.issued?.['date-parts']?.[0]?.[0] ?? item.published?.['date-parts']?.[0]?.[0]),
-    publication: firstString(item['container-title']),
-    url: firstString(item.URL, doiUrl(item.DOI)),
-    abstractText: firstString(item.abstract),
-  };
-}
-
-function mergeMetadataResults(...results) {
-  const usefulResults = results.filter(hasMetadataValue);
-  if (usefulResults.length === 0) {
-    return null;
-  }
-
-  const merged = {
-    source: usefulResults.map((result) => result.source).join('+'),
-    doi: null,
-    title: null,
-    authors: [],
-    authorDetails: [],
-    language: null,
-    year: null,
-    publication: null,
-    url: null,
-    abstractText: null,
-  };
-
-  for (const result of usefulResults) {
-    merged.doi ||= cleanString(result.doi) || null;
-    merged.title ||= cleanString(result.title) || null;
-    merged.year ||= cleanString(result.year) || null;
-    merged.publication ||= cleanString(result.publication) || null;
-    merged.url ||= cleanString(result.url) || null;
-    merged.abstractText ||= cleanString(result.abstractText) || null;
-    merged.language ||= canonicalizeBcp47Language(result.language) || null;
-
-    if (merged.authors.length === 0 && Array.isArray(result.authors) && result.authors.length > 0) {
-      merged.authors = result.authors.map(cleanString).filter(Boolean);
-    }
-    if (merged.authorDetails.length === 0 && Array.isArray(result.authorDetails) && result.authorDetails.length > 0) {
-      merged.authorDetails = result.authorDetails
-        .map((author) => ({
-          name: cleanString(author?.name),
-          givenName: cleanString(author?.givenName) || null,
-          familyName: cleanString(author?.familyName) || null,
-          affiliation: cleanString(author?.affiliation) || null,
-          orcid: safeNormalizeOrcid(author?.orcid),
-        }))
-        .filter((author) => author.name);
-    }
-  }
-
-  if (merged.authorDetails.length === 0) delete merged.authorDetails;
-  if (!merged.language) delete merged.language;
-
-  return merged;
-}
-
-async function lookupOpenAlexMetadata({ doi, title, settings }) {
-  if (settings?.openAlexEnabled === false) {
-    return null;
-  }
-
-  const params = {
-    api_key: settings?.openAlexApiKey,
-    mailto: settings?.openAlexMailto,
-  };
-  let endpoint = '';
-
-  if (doi) {
-    endpoint = buildUrl(`${OPENALEX_API_BASE}/works/${encodeURIComponent(doiUrl(doi))}`, params);
-  } else if (title) {
-    endpoint = buildUrl(`${OPENALEX_API_BASE}/works`, {
-      ...params,
-      filter: `title.search:${title}`,
-      'per-page': '10',
-    });
-  }
-
-  if (!endpoint) {
-    return null;
-  }
-
-  const data = await readRequestJson(await fetch(endpoint), 'OpenAlex metadata');
-  const item = doi ? data : bestOpenAlexTitleMatch(data?.results, title);
-  return mapOpenAlexWork(item);
-}
-
-async function lookupCrossrefMetadata({ doi, title }) {
-  const endpoint = doi
-    ? `https://api.crossref.org/works/${encodeURIComponent(doi)}`
-    : title
-      ? `https://api.crossref.org/works?rows=1&query.title=${encodeURIComponent(title)}`
-      : '';
-
-  if (!endpoint) {
-    return null;
-  }
-
-  const data = await readRequestJson(await fetch(endpoint), 'Crossref metadata');
-  const item = doi ? data.message : data.message?.items?.[0];
-  return mapCrossrefWork(item);
-}
-
-function emitLibraryReferenceProgress(sender, payload) {
-  if (!sender || typeof sender.send !== 'function') {
-    return;
-  }
-
-  sender.send('paperquay:event', LIBRARY_REFERENCE_PROGRESS_EVENT, {
-    updatedAt: Date.now(),
-    ...payload,
-  });
-}
-
-function delay(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function crossrefReferenceTitle(reference) {
-  return firstString(
-    reference?.['article-title'],
-    reference?.articleTitle,
-    reference?.title,
-    reference?.['series-title'],
-  );
-}
-
-function crossrefReferenceJournal(reference) {
-  return firstString(
-    reference?.['journal-title'],
-    reference?.journalTitle,
-    reference?.['volume-title'],
-    reference?.['container-title'],
-  );
-}
-
-function mapCrossrefReference(reference, index, paperId) {
-  const doi = normalizeDoi(reference?.DOI || reference?.doi);
-  const title = crossrefReferenceTitle(reference);
-  const unstructured = firstString(reference?.unstructured, reference?.key);
-
-  return {
-    id: `ref:${paperId}:${index + 1}`,
-    paperId,
-    seq: index + 1,
-    doi,
-    title: title || '',
-    authors: firstString(reference?.author) || '',
-    year: normalizeYear(reference?.year),
-    journal: crossrefReferenceJournal(reference) || '',
-    volume: cleanString(reference?.volume),
-    issue: cleanString(reference?.issue),
-    pages: firstString(reference?.['first-page'], reference?.page, reference?.pages) || '',
-    unstructured: unstructured || '',
-  };
-}
-
-async function fetchCrossrefReferences(doi, paperId = '') {
-  const normalizedDoi = normalizeDoi(doi);
-  if (!normalizedDoi) {
-    return [];
-  }
-
-  const endpoint = `https://api.crossref.org/works/${encodeURIComponent(normalizedDoi)}`;
-  const data = await readRequestJson(await fetch(endpoint), 'Crossref references');
-  const references = Array.isArray(data?.message?.reference) ? data.message.reference : [];
-
-  return references
-    .slice(0, MAX_CROSSREF_REFERENCES_PER_PAPER)
-    .map((reference, index) => mapCrossrefReference(reference, index, paperId))
-    .filter((reference) => reference.doi || reference.title || reference.unstructured);
-}
-
 function createLibraryCommands(context) {
-  const { appPaths, pathPolicy, ragStore, store } = context;
+  const { appPaths, appSettings, pathPolicy, ragStore, store } = context;
+  const httpLimits = {
+    timeoutMs: resolveLimit(context.httpLimits?.metadataTimeoutMs, DEFAULT_JSON_TIMEOUT_MS),
+    maxBytes: resolveLimit(context.httpLimits?.metadataMaxBytes, DEFAULT_JSON_MAX_BYTES),
+  };
+  const maxImportBytes = resolveLimit(context.importLimits?.maxPdfBytes, DEFAULT_PDF_IMPORT_MAX_BYTES);
 
   /**
    * storageDir/translatedPdfDir 会成为 pathPolicy 的信任根，不能由渲染层
@@ -629,27 +206,62 @@ function createLibraryCommands(context) {
     }
   };
 
+  /**
+   * zoteroLocalDataDir 的唯一所有者是应用设置文档；library_settings 只作为
+   * 旧版本兼容镜像。读取时始终覆盖为规范值，避免两份值漂移。
+   */
+  const withCanonicalZoteroDir = (settings) => {
+    if (!appSettings || !settings) return settings;
+    try {
+      const canonical = appSettings.getPublic().zoteroLocalDataDir;
+      if (!canonical) return settings;
+      return { ...settings, zoteroLocalDataDir: canonical };
+    } catch {
+      return settings;
+    }
+  };
+
   const resolvePaperRequest = async (request, library) => {
     if (!['hasPdf', 'hasTranslatedPdf', 'missingFile'].some((key) => typeof request[key] === 'boolean')) {
       return { request, applyToPapers: (papers) => papers };
     }
-    return resolveAttachmentFilters(request, library ?? store.load());
+    if (library) {
+      return resolveAttachmentFilters(request, library, {
+        cache: context.attachmentAvailabilityCache,
+      });
+    }
+    // 附件筛选只需 paper id + 附件行；不要为了 stat 水合整个文库。
+    const { paperIds, attachments } = store.listAttachmentFilterSnapshot();
+    const attachmentsByPaper = new Map();
+    for (const attachment of attachments) {
+      const list = attachmentsByPaper.get(attachment.paperId);
+      if (list) list.push(attachment);
+      else attachmentsByPaper.set(attachment.paperId, [attachment]);
+    }
+    return resolveAttachmentFilters(request, {
+      settings: store.loadSettings(),
+      papers: paperIds.map((id) => ({ id, attachments: attachmentsByPaper.get(id) ?? [] })),
+    }, {
+      cache: context.attachmentAvailabilityCache,
+    });
   };
 
   const commands = {
+    ...createLibraryMetadataCommands({ store, httpLimits }),
+    ...createLibraryAttachmentCommands({ appPaths, pathPolicy, store }),
+    ...createLibraryCategoryCommands({ store }),
+
     async library_init() {
-      // 只读取并规范化内存视图；不再每次启动全库 DELETE+重插
-      // （历史迁移遗留，随库规模线性阻塞主进程）。
-      const library = store.load();
+      // 首屏只返回设置与分类计数；文献列表由 library_query_papers 分页拉取，
+      // 避免启动时把整库（含作者/标签/附件/摘要）水合进渲染进程。
       return {
-        settings: library.settings,
-        categories: attachCategoryCounts(library),
-        papers: sortPapers(library.papers, { sortBy: 'manual' }),
+        settings: withCanonicalZoteroDir(store.loadSettings()),
+        categories: store.listCategoriesWithCounts(),
       };
     },
 
     async library_get_settings() {
-      return store.load().settings;
+      return withCanonicalZoteroDir(store.load().settings);
     },
 
     async library_update_settings({ settings }) {
@@ -659,6 +271,22 @@ function createLibraryCommands(context) {
 
       assertSettingsPathAllowed(settings.storageDir, previousStorageDir, 'write');
       assertSettingsPathAllowed(settings.translatedPdfDir, library.settings.translatedPdfDir, 'write');
+
+      if (appSettings && Object.prototype.hasOwnProperty.call(settings, 'zoteroLocalDataDir')) {
+        try {
+          const currentRevision = appSettings.getPublic().revision;
+          const zoteroResult = appSettings.patchZoteroDir(settings.zoteroLocalDataDir, {
+            expectedRevision: currentRevision,
+          });
+          if (!zoteroResult.ok) {
+            throw new Error(zoteroResult.message || 'Failed to update the Zotero data directory');
+          }
+          settings = { ...settings, zoteroLocalDataDir: zoteroResult.zoteroLocalDataDir };
+        } catch (error) {
+          // 设置文档损坏时不阻断文库设置保存；下次启动会继续提示修复。
+          console.warn('[paperquay] Failed to persist the Zotero data directory in app settings.', error);
+        }
+      }
 
       library.settings = {
         ...library.settings,
@@ -696,100 +324,23 @@ function createLibraryCommands(context) {
         const paper = library.papers.find((item) => item.id === paperId);
         if (paper) store.savePaper(paper);
       }
+      if (changedPaperIds.size > 0) invalidateAttachmentAvailability();
       return library.settings;
-    },
-
-    async library_list_categories() {
-      return store.listCategoriesWithCounts();
     },
 
     async library_list_tags() {
       return store.listTags();
     },
 
-    async library_create_category({ request }) {
-      const library = store.load();
-      const name = cleanString(request?.name);
-      if (!name) throw new Error('Category name cannot be empty');
-
-      const parentId = cleanString(request?.parentId) || null;
-      const categoryId = id('cat');
-      if (parentId) {
-        assertCategoryParentAllowed(library.categories, categoryId, parentId);
-      }
-      const category = {
-        id: categoryId,
-        name,
-        parentId,
-        sortOrder: library.categories.filter((item) => item.parentId === parentId && !item.isSystem).length,
-        isSystem: false,
-        systemKey: null,
-        createdAt: now(),
-        updatedAt: now(),
-        paperCount: 0,
-      };
-      library.categories.push(category);
-      store.saveCategory(category);
-      return store.listCategoriesWithCounts().find((item) => item.id === category.id);
-    },
-
-    async library_update_category({ request }) {
-      const library = store.load();
-      const category = library.categories.find((item) => item.id === request.id);
-      if (!category) throw new Error('Category does not exist');
-      if (category.isSystem) throw new Error('System categories cannot be modified');
-
-      if (request.name != null && cleanString(request.name)) category.name = cleanString(request.name);
-      if (request.parentId !== undefined) {
-        const nextParentId = cleanString(request.parentId) || null;
-        if (nextParentId !== (category.parentId ?? null)) {
-          assertCategoryParentAllowed(library.categories, category.id, nextParentId);
-        }
-        category.parentId = nextParentId;
-      }
-      if (request.sortOrder != null) category.sortOrder = request.sortOrder;
-      category.updatedAt = now();
-
-      store.saveCategory(category);
-      return store.listCategoriesWithCounts().find((item) => item.id === category.id);
-    },
-
-    async library_move_category({ request }) {
-      return commands.library_update_category({
-        request: {
-          id: request.categoryId,
-          parentId: request.parentId ?? null,
-          sortOrder: request.sortOrder,
-        },
-      });
-    },
-
-    async library_delete_category({ categoryId }) {
-      const library = store.load();
-      const target = library.categories.find((item) => item.id === categoryId);
-      if (!target) throw new Error('Category does not exist');
-      if (target.isSystem) throw new Error('System categories cannot be deleted');
-
-      const removeIds = new Set([categoryId]);
-      let changed = true;
-      while (changed) {
-        changed = false;
-        for (const category of library.categories) {
-          if (category.parentId && removeIds.has(category.parentId) && !removeIds.has(category.id)) {
-            removeIds.add(category.id);
-            changed = true;
-          }
-        }
-      }
-
-      // 分类删除由外键级联清理 paper_categories；只删目标分类，不重写整库。
-      store.deleteCategories({ categoryIds: [...removeIds] });
+    /** 详情表单的 citationKey 查重索引（只返回 id + key，不水合整库）。 */
+    async library_list_citation_keys() {
+      return store.listCitationKeys();
     },
 
     async library_list_papers({ request = {} }) {
       const library = store.load();
       const resolved = await resolvePaperRequest(request, library);
-      const limit = Math.max(1, Math.min(1000, resolved.request.limit ?? 300));
+      const limit = Math.max(1, Math.min(5000, resolved.request.limit ?? 300));
       return resolved.applyToPapers(sortPapers(library.papers.filter((paper) => paperMatches(paper, resolved.request, library)), resolved.request).slice(0, limit));
     },
 
@@ -810,6 +361,110 @@ function createLibraryCommands(context) {
       return store.getPaper(idValue);
     },
 
+    /** 单篇列表摘要：阅读进度/收藏等增量刷新只取列表字段，不返回正文大字段。 */
+    async library_get_paper_summary({ paperId }) {
+      const idValue = cleanString(paperId);
+      if (!idValue) return null;
+      return store.getPaperSummary(idValue);
+    },
+
+    /**
+     * 批量收藏/移动分类：一个命令、一个事务，避免全选后逐篇 IPC。
+     * 任一条目失败时整批回滚（与单篇命令相同的版本/存在性校验）。
+     */
+    async library_batch_update_papers({ request = {} }) {
+      const paperIds = [...new Set((Array.isArray(request.paperIds) ? request.paperIds : [])
+        .map(cleanString)
+        .filter(Boolean))];
+      if (paperIds.length === 0) return { papers: [], updated: 0 };
+
+      const favorite = typeof request.isFavorite === 'boolean' ? request.isFavorite : undefined;
+      const addCategoryId = cleanString(request.addCategoryId);
+      if (favorite === undefined && !addCategoryId) {
+        throw new Error('isFavorite or addCategoryId is required');
+      }
+      if (addCategoryId) {
+        const category = store.getCategory(addCategoryId);
+        if (!category || category.isSystem) {
+          throw new Error(`Invalid user category: ${addCategoryId}`);
+        }
+      }
+
+      const papers = store.applyPaperChanges({
+        requireVersion: false,
+        changes: paperIds.map((paperId) => ({
+          paperId,
+          change(paper) {
+            if (favorite !== undefined) paper.isFavorite = favorite;
+            if (addCategoryId && !paper.categoryIds.includes(addCategoryId)) {
+              paper.categoryIds.push(addCategoryId);
+            }
+          },
+        })),
+      });
+      return { papers, updated: papers.length };
+    },
+
+    /**
+     * 批量删除：先算出可安全清理的托管文件，再在单事务里删除记录，最后清理文件
+     * 与 RAG 索引。事务失败时文件尚未删除（不会出现“记录还在、PDF 已没了”）；
+     * 文件删除与 RAG 清理是 best-effort，失败只上报不回滚文献删除。
+     */
+    async library_batch_delete_papers({ request = {} }) {
+      const paperIds = [...new Set((Array.isArray(request.paperIds) ? request.paperIds : [])
+        .map(cleanString)
+        .filter(Boolean))];
+      if (paperIds.length === 0) return { deleted: 0, ragFailures: [], fileFailures: [] };
+
+      const papers = paperIds.map((paperId) => store.getPaper(paperId)).filter(Boolean);
+      const managedFiles = [];
+
+      // 共享附件判断必须在删除前完成：删除后再查 references 永远为空。
+      if (request.deleteFiles && papers.length > 0) {
+        const settings = store.loadSettings();
+        for (const paper of papers) {
+          for (const attachment of paper.attachments) {
+            const references = store.findAttachmentsByStoredPath(attachment.storedPath);
+            const shared = references.some((entry) => entry.paperId !== paper.id || entry.id !== attachment.id);
+            if (!shared && await isRealManagedFilePath(attachment.storedPath, settings)) {
+              managedFiles.push(attachment.storedPath);
+            }
+          }
+        }
+      }
+
+      const deleted = store.deletePapers(paperIds);
+      invalidateAttachmentAvailability();
+
+      const fileFailures = [];
+      for (const filePath of managedFiles) {
+        try {
+          await fsp.rm(filePath, { force: true });
+        } catch (error) {
+          fileFailures.push({
+            path: filePath,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+
+      const ragFailures = [];
+      if (ragStore && typeof ragStore.removeDocumentIndex === 'function') {
+        for (const paper of papers) {
+          try {
+            await ragStore.removeDocumentIndex({ documentKey: paper.id });
+          } catch (error) {
+            ragFailures.push({
+              paperId: paper.id,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+        }
+      }
+
+      return { deleted, ragFailures, fileFailures };
+    },
+
     /** 与 library_query_papers 同筛选同排序，仅分批枚举 id（供全选/批量目标管理，P2-2）。 */
     async library_list_paper_ids({ request = {} }) {
       return store.listPaperIds((await resolvePaperRequest(request)).request);
@@ -818,22 +473,6 @@ function createLibraryCommands(context) {
     /** 当前筛选的完整匹配计数（供全选三态与批量目标校验，P2-2）。 */
     async library_count_papers({ request = {} }) {
       return store.countPapers((await resolvePaperRequest(request)).request);
-    },
-
-    async library_inspect_pdf_assets() {
-      return inspectPdfAssets(store.load());
-    },
-
-    async library_plan_pdf_asset_names() {
-      const library = store.load();
-      const operations = planPdfAssetNames(library);
-      return {
-        createdAt: now(),
-        namingVersion: 1,
-        operations,
-        renameCount: operations.filter((item) => item.action === 'rename-preview' && item.ownership).length,
-        externalCount: operations.filter((item) => !item.ownership).length,
-      };
     },
 
     async library_reorder_papers({ request }) {
@@ -867,42 +506,49 @@ function createLibraryCommands(context) {
             throw new Error(`Import source is outside the allowed paths: ${normalizedSourcePath}`);
           }
           await ensureFile(normalizedSourcePath);
+          const sourceStat = await fsp.stat(normalizedSourcePath);
+          if (sourceStat.size > maxImportBytes) {
+            throw new Error(
+              `PDF exceeds the import size limit (${maxImportBytes} bytes): ${normalizedSourcePath}`,
+            );
+          }
+          const contentHash = await hashFile(normalizedSourcePath);
+          const metadata = request.metadata?.[sourcePath] ?? {};
+          const duplicateMatch = findDuplicatePaper({
+            papers: library.papers,
+            contentHash,
+            doi: metadata.doi,
+            title: metadata.title,
+          });
 
-          const bytes = await fsp.readFile(normalizedSourcePath);
-          const contentHash = hashBytes(bytes);
-          const duplicate = library.papers.find((paper) =>
-            paper.attachments.some((attachment) => attachment.contentHash === contentHash),
-          );
-
-          if (duplicate) {
-            results.push({ sourcePath, paper: duplicate, duplicated: true, existingPaperId: duplicate.id, status: 'duplicate', message: 'Duplicate PDF' });
+          if (duplicateMatch) {
+            results.push({
+              sourcePath,
+              paper: duplicateMatch.paper,
+              duplicated: true,
+              existingPaperId: duplicateMatch.paper.id,
+              status: 'duplicate',
+              message: 'Duplicate PDF',
+            });
             continue;
           }
 
-          const metadata = request.metadata?.[sourcePath] ?? {};
           const paperId = id('paper');
           const originalFileName = safeFileName(fileNameFromPath(normalizedSourcePath));
           const attachmentId = id('att');
-          const firstAuthor = Array.isArray(metadata.authors) ? metadata.authors[0] : '';
-          const author = typeof firstAuthor === 'string' ? firstAuthor : firstAuthor?.name || '';
           const fileName = originalFileName;
           let storedPath = normalizedSourcePath;
           let relativePath = null;
           const importMode = request.importMode || library.settings.importMode;
 
           if (importMode !== 'keep') {
-            const { buildPdfAssetFileName } = require('./pdfAssetGovernance.cjs');
-            const storedName = library.settings.autoRenameFiles === false
-              ? `${paperId}-${fileName}`
-              : buildPdfAssetFileName({
-                  author,
-                  institution: metadata.institution || metadata.publisher,
-                  year: metadata.year,
-                  title: metadata.title || path.basename(fileName, path.extname(fileName)),
-                  role: 'original',
-                  stableId: attachmentId,
-                  fileNamingRule: library.settings.fileNamingRule,
-                });
+            const storedName = buildImportedAttachmentFileName({
+              settings: library.settings,
+              paperId,
+              attachmentId,
+              fileName,
+              metadata,
+            });
             storedPath = path.join(storageDir, storedName);
             if (await pathExists(storedPath)) throw new Error(`PDF destination already exists: ${storedPath}`);
             await fsp.copyFile(normalizedSourcePath, storedPath, require('node:fs').constants.COPYFILE_EXCL);
@@ -911,64 +557,22 @@ function createLibraryCommands(context) {
           }
 
           const stat = await fsp.stat(storedPath);
-          const paper = {
-            id: paperId,
-            title: cleanString(metadata.title) || path.basename(fileName, path.extname(fileName)),
-            year: metadata.year ?? null,
-            publication: metadata.publication ?? null,
-            doi: metadata.doi ?? null,
-            url: metadata.url ?? null,
-            abstractText: metadata.abstractText ?? null,
-            itemType: metadata.itemType || 'journalArticle',
-            publisher: metadata.publisher ?? null,
-            institution: metadata.institution ?? null,
-            reportNumber: metadata.reportNumber ?? null,
-            volume: metadata.volume ?? null,
-            issue: metadata.issue ?? null,
-            pages: metadata.pages ?? null,
-            isbn: metadata.isbn ?? null,
-            issn: metadata.issn ?? null,
-            language: (() => {
-              if (metadata.language === null || metadata.language === undefined || !cleanString(metadata.language)) {
-                return null;
-              }
-              const normalized = canonicalizeBcp47Language(metadata.language);
-              if (!normalized) throw new Error(`无效的 BCP 47 语言标签：${metadata.language}`);
-              return normalized;
-            })(),
-            citationKey: normalizeCitationKey(metadata.citationKey),
-            keywords: Array.isArray(metadata.keywords) ? metadata.keywords : [],
-            importedAt: now(),
-            updatedAt: now(),
-            lastReadAt: null,
-            readingProgress: 0,
-            isFavorite: false,
-            userNote: null,
-            aiSummary: null,
-            citation: null,
+          const paper = buildImportedPaperRecord({
+            paperId,
+            attachmentId,
+            metadata,
             source: request.source === 'zotero' ? 'zotero' : 'local',
             sortOrder: Math.min(0, ...library.papers.map((item) => item.sortOrder ?? 0)) - 1,
-            authors: (Array.isArray(metadata.authorDetails) ? metadata.authorDetails : (metadata.authors ?? []))
-              .map((author, index) => normalizeAuthor(author, index))
-              .filter((author) => author.name),
-            tags: [],
             categoryIds: request.targetCategoryId ? [request.targetCategoryId] : [],
-            attachments: [{
-              id: attachmentId,
-              paperId,
-              kind: 'pdf',
+            attachment: {
               originalPath: normalizedSourcePath,
               storedPath,
               relativePath,
-              language: null,
               fileName,
-              mimeType: 'application/pdf',
               fileSize: stat.size,
               contentHash,
-              createdAt: now(),
-              missing: false,
-            }],
-          };
+            },
+          });
           library.papers.push(paper);
           results.push({ sourcePath, paper, duplicated: false, existingPaperId: null, status: 'imported', message: 'Imported' });
         } catch (error) {
@@ -987,13 +591,14 @@ function createLibraryCommands(context) {
           console.warn(`[PaperQuay] Imported file is stored but the original could not be removed: ${sourcePath}`, error);
         });
       }
+      if (results.some((result) => result.status === 'imported')) invalidateAttachmentAvailability();
       for (const result of results) {
         const paper = result.status === 'imported' ? result.paper : null;
         if (!paper?.id || !paper.doi) {
           continue;
         }
 
-        fetchCrossrefReferences(paper.doi, paper.id)
+        fetchCrossrefReferences(paper.doi, paper.id, httpLimits)
           .then((refs) => {
             if (refs.length > 0) {
               store.saveReferences(paper.id, refs);
@@ -1004,37 +609,6 @@ function createLibraryCommands(context) {
           });
       }
       return results;
-    },
-
-    async library_assign_paper_category({ request }) {
-      const paper = store.getPaper(request.paperId);
-      if (!paper) throw new Error('Paper does not exist');
-      if (!paper.categoryIds.includes(request.categoryId)) paper.categoryIds.push(request.categoryId);
-      paper.updatedAt = now();
-      store.savePaper(paper);
-      return paper;
-    },
-
-    async library_set_paper_categories({ request }) {
-      const paperId = cleanString(request?.paperId);
-      const categoryIds = request?.categoryIds;
-      if (!paperId) throw new Error('paperId is required');
-      if (!Array.isArray(categoryIds) || categoryIds.some((id) => typeof id !== 'string')) {
-        throw new Error('categoryIds must be an array of strings');
-      }
-      const paper = store.getPaper(paperId);
-      if (!paper) throw new Error('Paper does not exist');
-      const uniqueIds = [...new Set(categoryIds.map(cleanString).filter(Boolean))];
-      const library = store.load();
-      const categories = new Map(library.categories.map((category) => [category.id, category]));
-      for (const categoryId of uniqueIds) {
-        const category = categories.get(categoryId);
-        if (!category || category.isSystem) throw new Error(`Invalid user category: ${categoryId}`);
-      }
-      paper.categoryIds = uniqueIds;
-      paper.updatedAt = now();
-      store.savePaper(paper);
-      return paper;
     },
 
     async library_record_reading({ request }) {
@@ -1051,46 +625,8 @@ function createLibraryCommands(context) {
     },
 
     async library_update_paper({ request }) {
-      const updatePaperFields = (paper) => {
-        for (const key of UPDATABLE_PAPER_FIELDS) {
-          // authorDetails is an update-only request field. Persist it via the
-          // normalized `authors` collection below, but never expose it on a paper.
-          if (request[key] === undefined || key === 'authorDetails') continue;
-          if (key === 'language') {
-            if (request.language === null) paper.language = null;
-            else {
-              const normalized = canonicalizeBcp47Language(request.language);
-              if (!normalized) throw new Error(`无效的 BCP 47 语言标签：${request.language}`);
-              paper.language = normalized;
-            }
-          } else if (key === 'citationKey') {
-            paper.citationKey = normalizeCitationKey(request.citationKey);
-          } else {
-            paper[key] = request[key];
-          }
-        }
-        if (request.keywords !== undefined) {
-          if (!Array.isArray(request.keywords)) throw new Error('keywords must be an array of strings');
-          paper.keywords = request.keywords.map(cleanString).filter(Boolean);
-        }
-        if (request.authorDetails !== undefined) {
-          if (!Array.isArray(request.authorDetails)) throw new Error('authorDetails must be an array of author objects');
-          paper.authors = request.authorDetails
-            .map((author, index) => normalizeAuthor(author, index))
-            .filter((author) => author.name);
-        } else if (request.authors !== undefined) {
-          if (!Array.isArray(request.authors)) throw new Error('authors must be an array of author names');
-          paper.authors = request.authors
-            .map((author, index) => normalizeAuthor(author, index))
-            .filter((author) => author.name);
-        }
-        if (request.tags !== undefined) {
-          if (!Array.isArray(request.tags)) throw new Error('tags must be an array of tag names');
-          paper.tags = request.tags.map(cleanString).filter(Boolean).map(normalizeTag);
-        }
-        if (request.isFavorite != null) paper.isFavorite = Boolean(request.isFavorite);
-        return paper;
-      };
+      // 与 MCP update_paper 共用同一套字段白名单/规范化；language: '' 与 null 均清空。
+      const updatePaperFields = (paper) => applyPaperMetadataPatch(paper, request);
 
       // 详情表单携带读取时的版本：外部（MCP/其他窗口）已更新则拒绝，由界面提示重载或覆盖。
       const expectedUpdatedAt = request.expectedUpdatedAt;
@@ -1128,6 +664,7 @@ function createLibraryCommands(context) {
       }
 
       store.deletePaper(request.paperId);
+      invalidateAttachmentAvailability();
 
       // 同步清理 RAG 索引；否则已删除论文会继续出现在检索结果中。
       if (ragStore && typeof ragStore.removeDocumentIndex === 'function') {
@@ -1142,223 +679,8 @@ function createLibraryCommands(context) {
       }
     },
 
-    async library_relocate_attachment({ request }) {
-      const paperId = store.getPaperIdByAttachment(request.attachmentId);
-      const paper = paperId ? store.getPaper(paperId) : null;
-      if (!paper) throw new Error('Attachment does not exist');
-
-      const newPath = path.resolve(cleanString(request.newPath));
-      // 附件表是读/写权限的信任锚：只能指向用户已授权的 PDF，
-      // 否则一次 relocate 就能把任意文件变成可读附件。
-      if (!isPdf(newPath)) throw new Error('Only PDF attachments can be relocated');
-      if (pathPolicy && !pathPolicy.isReadAllowed(newPath)) {
-        throw new Error(`Relocating to this path is not allowed: ${newPath}`);
-      }
-      await ensureFile(newPath);
-
-      const attachment = paper.attachments.find((item) => item.id === request.attachmentId);
-      const stat = await fsp.stat(newPath);
-      attachment.storedPath = newPath;
-      const storageDir = cleanString(store.loadSettings().storageDir);
-      attachment.relativePath = storageDir && isSubPath(storageDir, newPath)
-        ? path.relative(storageDir, newPath).replace(/\\/g, '/')
-        : null;
-      attachment.fileName = fileNameFromPath(newPath);
-      attachment.fileSize = stat.size;
-      attachment.contentHash = await hashFile(newPath);
-      attachment.missing = false;
-      paper.updatedAt = now();
-
-      store.savePaper(paper);
-      return attachment;
-    },
-
     async library_get_paper_references({ paperId }) {
       return store.loadReferences(cleanString(paperId));
-    },
-
-    async library_add_attachment({ request }) {
-      const paper = store.getPaper(request.paperId);
-      if (!paper) throw new Error('Paper does not exist');
-
-      const sourcePath = path.resolve(cleanString(request.sourcePath));
-      if (!isPdf(sourcePath)) throw new Error('Only PDF attachments can be added');
-      if (pathPolicy && !pathPolicy.isReadAllowed(sourcePath)) {
-        throw new Error(`Adding this attachment path is not allowed: ${sourcePath}`);
-      }
-
-      const settings = store.loadSettings();
-      await addTranslatedPdfAttachment({
-        paper,
-        sourcePath,
-        kind: request.kind,
-        language: request.language,
-        settings,
-        appPaths,
-        persist: async () => {
-          store.savePaper(paper);
-        },
-        listAttachmentsByStoredPath: (storedPath) => store.findAttachmentsByStoredPath(storedPath),
-      });
-      return paper;
-    },
-
-    async library_update_translated_pdf_languages({ request }) {
-      const changes = request?.changes;
-      if (!Array.isArray(changes) || changes.length === 0) {
-        throw new Error('至少需要一个译版语言变更');
-      }
-      const seen = new Set();
-      const normalized = changes.map((change) => {
-        const paperId = cleanString(change?.paperId);
-        const attachmentId = cleanString(change?.attachmentId);
-        if (!paperId || !attachmentId) throw new Error('文献和附件 ID 不能为空');
-        if (seen.has(attachmentId)) throw new Error(`重复的译版附件：${attachmentId}`);
-        seen.add(attachmentId);
-        if (!Object.prototype.hasOwnProperty.call(change, 'expectedLanguage')
-          || !(change.expectedLanguage === null || typeof change.expectedLanguage === 'string')) {
-          throw new Error('预览语言值无效，请刷新后重试');
-        }
-        if (!Object.prototype.hasOwnProperty.call(change, 'language')) {
-          throw new Error('缺少目标语言；清除语言请明确传入 null');
-        }
-        let language = change.language;
-        if (language !== null) {
-          if (typeof language !== 'string' || !language.trim()) throw new Error('语言标签不能为空；清除语言请使用专用操作');
-          try {
-            [language] = Intl.getCanonicalLocales(language.trim());
-          } catch {
-            throw new Error(`无效的 BCP 47 语言标签：${language}`);
-          }
-        }
-        return { paperId, attachmentId, expectedLanguage: change.expectedLanguage, language };
-      });
-      return store.updateTranslatedPdfLanguages(normalized);
-    },
-
-    async library_remove_attachment({ request }) {
-      const settings = store.loadSettings();
-      const paperId = store.getPaperIdByAttachment(request.attachmentId);
-      const paper = paperId ? store.getPaper(paperId) : null;
-      if (!paper) throw new Error('Attachment does not exist');
-
-      await removeTranslatedPdfAttachment({
-        paper,
-        attachmentId: request.attachmentId,
-        deleteFile: request.deleteFile,
-        settings,
-        appPaths,
-        persist: async () => {
-          store.savePaper(paper);
-        },
-        listAttachmentsByStoredPath: (storedPath) => store.findAttachmentsByStoredPath(storedPath),
-      });
-      return paper;
-    },
-
-    async library_fetch_paper_references({ paperId, force = false }) {
-      const targetPaperId = cleanString(paperId);
-      if (!targetPaperId) {
-        throw new Error('Paper id is required');
-      }
-
-      const library = store.load();
-      const paper = library.papers.find((item) => item.id === targetPaperId);
-      if (!paper) {
-        throw new Error('Paper does not exist');
-      }
-
-      if (!paper.doi) {
-        return { paperId: targetPaperId, fetched: 0, skipped: true, references: [] };
-      }
-
-      const cached = store.loadReferences(targetPaperId);
-      if (!force && cached.length > 0) {
-        return { paperId: targetPaperId, fetched: cached.length, skipped: true, references: cached };
-      }
-
-      const refs = await fetchCrossrefReferences(paper.doi, targetPaperId);
-      const saved = store.saveReferences(targetPaperId, refs);
-      return { paperId: targetPaperId, fetched: saved.length, skipped: false, references: saved };
-    },
-
-    async library_fetch_all_references({ force = false } = {}, event) {
-      const papers = store.load().papers.filter((paper) => normalizeDoi(paper.doi));
-      let fetched = 0;
-      let skipped = 0;
-      let failed = 0;
-
-      emitLibraryReferenceProgress(event?.sender, {
-        status: 'running',
-        current: 0,
-        total: papers.length,
-        fetched,
-        skipped,
-        failed,
-      });
-
-      for (const [index, paper] of papers.entries()) {
-        const cached = store.loadReferences(paper.id);
-        if (!force && cached.length > 0) {
-          skipped += 1;
-          emitLibraryReferenceProgress(event?.sender, {
-            status: 'running',
-            current: index + 1,
-            total: papers.length,
-            paperId: paper.id,
-            title: paper.title,
-            fetched,
-            skipped,
-            failed,
-          });
-          await delay(50);
-          continue;
-        }
-
-        try {
-          const refs = await fetchCrossrefReferences(paper.doi, paper.id);
-          store.saveReferences(paper.id, refs);
-          fetched += 1;
-        } catch (error) {
-          failed += 1;
-          console.warn(`[PaperQuay] Failed to fetch Crossref references for ${paper.id}: ${error instanceof Error ? error.message : String(error)}`);
-        }
-
-        emitLibraryReferenceProgress(event?.sender, {
-          status: 'running',
-          current: index + 1,
-          total: papers.length,
-          paperId: paper.id,
-          title: paper.title,
-          fetched,
-          skipped,
-          failed,
-        });
-        await delay(50);
-      }
-
-      const result = { fetched, skipped, failed };
-      emitLibraryReferenceProgress(event?.sender, {
-        status: failed > 0 ? 'error' : 'done',
-        current: papers.length,
-        total: papers.length,
-        ...result,
-      });
-      return result;
-    },
-
-    async lookup_literature_metadata({ request }) {
-      const library = store.load();
-      const doi = normalizeDoi(request?.doi);
-      const title = cleanString(request?.title);
-      if (!doi && !title) return null;
-
-      const [openAlexResult, crossrefResult] = await Promise.all([
-        lookupOpenAlexMetadata({ doi, title, settings: library.settings }).catch(() => null),
-        lookupCrossrefMetadata({ doi, title }).catch(() => null),
-      ]);
-
-      return mergeMetadataResults(openAlexResult, crossrefResult);
     },
   };
 

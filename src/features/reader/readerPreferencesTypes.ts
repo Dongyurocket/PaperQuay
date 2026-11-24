@@ -9,8 +9,9 @@ import type {
 import type { LibrarySettings } from '../../types/library';
 import type { RagIndexOverview } from '../../services/ragIndexStatus';
 import type { BatchProgressState, PreferencesSectionKey } from './readerShared';
+import type { SettingsLocalizer } from '../../app/settings/settingsTypes';
 
-export type ReaderPreferencesLocalizer = <T>(zh: T, en: T) => T;
+export type ReaderPreferencesLocalizer = SettingsLocalizer;
 
 export type ReaderSettingsChangeHandler = <Key extends keyof ReaderSettings>(
   key: Key,
@@ -43,8 +44,8 @@ export interface ReaderPreferencesWindowProps {
   translatedCount?: number;
   onSettingChange: ReaderSettingsChangeHandler;
   onNativeLibrarySettingsChange: (patch: Partial<LibrarySettings>) => void;
-  onSelectLibraryStorageDir: () => void;
-  onSelectTranslatedPdfStorageDir: () => void;
+  onSelectLibraryStorageDir: () => void | Promise<void>;
+  onSelectTranslatedPdfStorageDir: () => void | Promise<void>;
   onZoteroLocalDataDirChange: (value: string) => void;
   onMineruApiTokenChange: (value: string) => void;
   onRepairMineruCacheImages?: (() => void) | null;
@@ -58,7 +59,7 @@ export interface ReaderPreferencesWindowProps {
   onReloadLocalZotero: () => void;
   onImportLocalZotero: () => void;
   onEnrichAllLibraryMetadata: () => void;
-  onSelectMineruCacheDir: () => void;
+  onSelectMineruCacheDir: () => void | Promise<void>;
   onSelectRemotePdfDownloadDir: () => void;
   onListLlmModels: (preset: QaModelPreset) => Promise<OpenAICompatibleModelListResult>;
   onTestLlmConnection: (preset?: QaModelPreset) => Promise<OpenAICompatibleTestResult>;

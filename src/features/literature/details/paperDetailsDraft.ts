@@ -57,7 +57,7 @@ export function splitAuthorString(value: string): string[] {
 
 export function hasDuplicateCitationKey(
   citationKey: string,
-  papers: LiteraturePaper[],
+  papers: Array<{ id: string; citationKey?: string | null }>,
   currentPaperId: string,
 ): boolean {
   const normalized = citationKey.trim().toLocaleLowerCase();

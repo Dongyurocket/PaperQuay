@@ -1,4 +1,3 @@
-import clsx from 'clsx';
 import {
   useCallback,
   useEffect,
@@ -10,13 +9,8 @@ import {
   type MouseEvent,
   type PointerEvent,
 } from 'react';
-import {
-  BookOpenText,
-  Check,
-  GripVertical,
-  Star,
-} from 'lucide-react';
-import { useAppLocale, useLocaleText } from '../../../i18n/uiLanguage';
+import { BookOpenText } from 'lucide-react';
+import { useLocaleText } from '../../../i18n/uiLanguage';
 import { useWheelScrollDelegate } from '../../../hooks/useWheelScrollDelegate';
 import type { ListPapersRequest, LiteraturePaper } from '../../../types/library';
 import type { PdfReadingHeatmap } from '../../../types/reader';
@@ -24,20 +18,18 @@ import {
   loadPaperHistoryMap,
   PAPER_READING_HEATMAP_UPDATED_EVENT,
 } from '../../../utils/paperHistory';
-import { truncateMiddle } from '../../../utils/text';
 import {
-  paperAuthors,
-  paperPdfPath,
-} from '../literatureUi';
-import {
-  resolvePaperTitleDisplay,
-  type PaperTitleDisplayMode,
-} from '../titleDisplay';
-import LiteratureReadingHeatmapPreview from './LiteratureReadingHeatmapPreview';
+  getVirtualOffset,
+  resolveVirtualWindow,
+  type VirtualWindow,
+} from '../../../utils/virtualWindow';
+import { resolvePaperListNavigation } from '../paperListKeyboard';
+import type { PaperTitleDisplayMode } from '../titleDisplay';
 import type { SelectionCheckState } from '../paperSelection';
 import type { LibraryFilterState } from '../libraryFilters';
 import type { LibraryTagCount } from '../../../types/library';
 import LiteratureToolbar from './LiteratureToolbar';
+import LiteraturePaperRow from './LiteraturePaperRow';
 
 export interface LiteraturePaperListStatus {
   mineruParsed: boolean;
@@ -53,9 +45,36 @@ export type LiteratureRagMembershipFilter = 'all' | 'included' | 'excluded';
 export type LiteraturePaperListSortBy = NonNullable<ListPapersRequest['sortBy']>;
 export type LiteraturePaperListSortDirection = NonNullable<ListPapersRequest['sortDirection']>;
 
+/** 小于该行数时保持原样全量渲染，避免小库引入虚拟列表的测量开销。 */
+export const PAPER_LIST_VIRTUALIZE_AFTER = 60;
+const ROW_GAP = 8;
+const DEFAULT_ROW_HEIGHT = 132;
+const COMPACT_ROW_HEIGHT = 84;
+const VIRTUAL_OVERSCAN = 6;
+/** 焦点跨虚拟窗口时，等目标行挂载的轮询上限（30 帧 / 500ms）。 */
+const FOCUS_POLL_MAX_FRAMES = 30;
+const FOCUS_POLL_TIMEOUT_MS = 500;
+/** 模块级空数组：默认参数不能每次渲染都创建新引用，否则会击穿行 memo。 */
+const EMPTY_MULTI_SELECTED_IDS: string[] = [];
+
+/**
+ * 外部回调稳定化：LiteratureLibraryView 每次渲染都会创建新的普通函数/内联箭头
+ * （onSelectPaper 依赖 selectedPaperId、onPaperContextMenu 是普通函数、onPaperReorder 是内联箭头），
+ * 直接透传会击穿 memo(LiteraturePaperRow) 的浅比较。这里把最新实现写进 ref，
+ * 返回空依赖包装，父组件引用如何变化都不影响行 props 的稳定性；包装内部始终调用最新回调。
+ */
+function useStableCallback<Args extends unknown[], Result>(
+  callback: (...args: Args) => Result,
+): (...args: Args) => Result {
+  const callbackRef = useRef(callback);
+  callbackRef.current = callback;
+  return useCallback((...args: Args) => callbackRef.current(...args), []);
+}
+
 interface LiteraturePaperListProps {
   loading: boolean;
   working: boolean;
+  refreshing?: boolean;
   papers: LiteraturePaper[];
   /** SQL 分页（P2-1）：当前筛选的完整匹配数；papers.length < total 时滚动到底自动加载下一页。 */
   papersTotal?: number;
@@ -113,6 +132,7 @@ interface LiteraturePaperListProps {
 export default function LiteraturePaperList({
   loading,
   working,
+  refreshing = false,
   papers,
   papersTotal,
   loadingMore = false,
@@ -121,7 +141,7 @@ export default function LiteraturePaperList({
   showReadingHeatmap: initialShowReadingHeatmap = true,
   storageDir = '',
   selectedPaper,
-  multiSelectedPaperIds = [],
+  multiSelectedPaperIds = EMPTY_MULTI_SELECTED_IDS,
   selectAllState = 'none',
   onToggleSelectAll,
   searchQuery,
@@ -152,14 +172,22 @@ export default function LiteraturePaperList({
   ragIndexAvailable = false,
 }: LiteraturePaperListProps) {
   const l = useLocaleText();
-  const locale = useAppLocale();
+  // 传给行的外部回调全部经 ref 转发：父组件的闭包引用每次都变，但行 props 保持稳定。
+  const stableSelectPaper = useStableCallback(onSelectPaper);
+  const stableOpenPaper = useStableCallback(onOpenPaper);
+  const stablePaperContextMenu = useStableCallback(onPaperContextMenu);
+  const stablePaperReorder = useStableCallback(onPaperReorder);
+  const stablePaperDragStart = useStableCallback(onPaperDragStart);
+  const stablePaperDropOnCategory = useStableCallback(onPaperDropOnCategory);
+  const stablePaperPointerDragOverCategory = useStableCallback(onPaperPointerDragOverCategory);
   const rootRef = useRef<HTMLElement | null>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
   const handleWheelCapture = useWheelScrollDelegate({ rootRef });
   const [dropIndicator, setDropIndicator] = useState<{
     paperId: string;
     placement: 'before' | 'after';
   } | null>(null);
-  const [draggingPaperId, setDraggingPaperId] = useState<string | null>(null);
+  const draggingPaperIdRef = useRef<string | null>(null);
   const sortDragRef = useRef<{
     paperId: string;
     startX: number;
@@ -183,18 +211,172 @@ export default function LiteraturePaperList({
   const manualSortingEnabled = sortBy === 'manual';
   const multiSelectedSet = useMemo(() => new Set(multiSelectedPaperIds), [multiSelectedPaperIds]);
   const multiSelectActive = multiSelectedPaperIds.length > 0;
+  const selectedPaperId = selectedPaper?.id ?? null;
   const resolvedTotal = typeof papersTotal === 'number' ? Math.max(papersTotal, papers.length) : papers.length;
   const hasMorePapers = papers.length < resolvedTotal;
+
+  // 虚拟列表：滚动偏移与视口高度只驱动窗口重算，不重算整行数据。
+  const [scrollTop, setScrollTop] = useState(0);
+  const [viewportHeight, setViewportHeight] = useState(600);
+  const [measureRevision, setMeasureRevision] = useState(0);
+  const rowHeightsRef = useRef(new Map<string, number>());
+  const measureFrameRef = useRef<number | null>(null);
+  const scrollFrameRef = useRef<number | null>(null);
+  const focusFrameRef = useRef<number | null>(null);
+  const pendingScrollTopRef = useRef(0);
+  const virtualize = papers.length > PAPER_LIST_VIRTUALIZE_AFTER;
+
+  const handleRowMeasure = useCallback((paperId: string, element: HTMLDivElement) => {
+    const height = element.getBoundingClientRect().height;
+    if (!height) return;
+    const next = height + ROW_GAP;
+    const previous = rowHeightsRef.current.get(paperId);
+    if (previous !== undefined && Math.abs(previous - next) <= 1) return;
+    rowHeightsRef.current.set(paperId, next);
+    if (measureFrameRef.current !== null) return;
+    measureFrameRef.current = window.requestAnimationFrame(() => {
+      measureFrameRef.current = null;
+      setMeasureRevision((value) => value + 1);
+    });
+  }, []);
+
+  useEffect(() => {
+    // 紧凑模式改变行高，失效测量缓存。
+    rowHeightsRef.current.clear();
+    setMeasureRevision((value) => value + 1);
+  }, [compact]);
+
+  useEffect(() => () => {
+    if (measureFrameRef.current !== null) window.cancelAnimationFrame(measureFrameRef.current);
+    if (scrollFrameRef.current !== null) window.cancelAnimationFrame(scrollFrameRef.current);
+    if (focusFrameRef.current !== null) window.cancelAnimationFrame(focusFrameRef.current);
+  }, []);
+
+  useEffect(() => {
+    const element = scrollRef.current;
+    if (!element) return undefined;
+    const update = () => setViewportHeight(element.clientHeight || 600);
+    update();
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', update);
+      return () => window.removeEventListener('resize', update);
+    }
+    const observer = new ResizeObserver(update);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+
+  // 行高解析与 resolveVirtualWindow 共用：键盘漫游计算目标偏移时必须用同一套尺寸。
+  const getPaperItemSize = useCallback((index: number) => {
+    const paper = papers[index];
+    const measured = paper ? rowHeightsRef.current.get(paper.id) : undefined;
+    return measured ?? (compact ? COMPACT_ROW_HEIGHT : DEFAULT_ROW_HEIGHT) + ROW_GAP;
+  }, [compact, papers]);
+
+  const virtualWindow = useMemo<VirtualWindow | null>(() => {
+    if (!virtualize) return null;
+    return resolveVirtualWindow({
+      itemCount: papers.length,
+      getItemSize: getPaperItemSize,
+      scrollOffset: scrollTop,
+      viewportSize: viewportHeight,
+      overscan: VIRTUAL_OVERSCAN,
+    });
+  }, [getPaperItemSize, measureRevision, scrollTop, viewportHeight, virtualize]);
+
   const handleListScroll = useCallback(
     (event: React.UIEvent<HTMLDivElement>) => {
-      if (!hasMorePapers || loadingMore || !onLoadMore) return;
       const target = event.currentTarget;
+      pendingScrollTopRef.current = target.scrollTop;
+      if (scrollFrameRef.current === null) {
+        scrollFrameRef.current = window.requestAnimationFrame(() => {
+          scrollFrameRef.current = null;
+          setScrollTop(pendingScrollTopRef.current);
+        });
+      }
+      if (!hasMorePapers || loadingMore || !onLoadMore) return;
       if (target.scrollTop + target.clientHeight >= target.scrollHeight - 400) {
         onLoadMore();
       }
     },
     [hasMorePapers, loadingMore, onLoadMore],
   );
+
+  const findMountedPaperRow = useCallback((index: number): HTMLElement | null => {
+    const container = scrollRef.current;
+    if (!container) return null;
+    return container.querySelector<HTMLElement>(
+      `[data-paper-row-index="${index}"] [data-paper-row-id]`,
+    );
+  }, []);
+
+  // 焦点目标可能在虚拟窗口外：先按与 resolveVirtualWindow 相同的行高滚动到目标偏移，
+  // 再逐帧等待目标行挂载后 focus；超时则放弃，避免无上限轮询。
+  const focusPaperRow = useCallback((index: number) => {
+    if (!papers[index]) return;
+    if (focusFrameRef.current !== null) {
+      window.cancelAnimationFrame(focusFrameRef.current);
+      focusFrameRef.current = null;
+    }
+
+    const mounted = findMountedPaperRow(index);
+    if (mounted) {
+      mounted.focus();
+      return;
+    }
+
+    const container = scrollRef.current;
+    if (!container) return;
+
+    const offset = getVirtualOffset(index, getPaperItemSize);
+    container.scrollTop = offset;
+    pendingScrollTopRef.current = offset;
+    // 直接更新窗口状态；浏览器原生 scroll 事件仍会走 handleListScroll，二者幂等。
+    setScrollTop(offset);
+
+    const startedAt = Date.now();
+    let frames = 0;
+    const poll = () => {
+      frames += 1;
+      const target = findMountedPaperRow(index);
+      if (target) {
+        focusFrameRef.current = null;
+        target.focus();
+        return;
+      }
+      if (frames >= FOCUS_POLL_MAX_FRAMES || Date.now() - startedAt >= FOCUS_POLL_TIMEOUT_MS) {
+        focusFrameRef.current = null;
+        return;
+      }
+      focusFrameRef.current = window.requestAnimationFrame(poll);
+    };
+    focusFrameRef.current = window.requestAnimationFrame(poll);
+  }, [findMountedPaperRow, getPaperItemSize, papers]);
+
+  const handleListKeyDown = useCallback((event: KeyboardEvent<HTMLDivElement>) => {
+    // 不劫持带修饰键的快捷键（Ctrl/Cmd+A、Alt+方向键等）。
+    if (event.altKey || event.ctrlKey || event.metaKey) return;
+    const target = event.target as HTMLElement | null;
+    if (!target) return;
+    if (target.closest('input, textarea, select, [contenteditable="true"]')) return;
+
+    const row = target.closest<HTMLElement>('[data-paper-row-index]');
+    if (!row) return;
+
+    const parsedIndex = Number(row.dataset.paperRowIndex);
+    const nextIndex = resolvePaperListNavigation({
+      currentIndex: Number.isFinite(parsedIndex) ? parsedIndex : -1,
+      total: papers.length,
+      key: event.key,
+    });
+    if (nextIndex === null) return;
+
+    // 方向键只移动焦点，不改变选择；同时阻止浏览器滚动页面。
+    event.preventDefault();
+    if (nextIndex === parsedIndex) return;
+    focusPaperRow(nextIndex);
+  }, [focusPaperRow, papers.length]);
+
   const heatmapsByPaperId = useMemo(() => {
     if (!showReadingHeatmap || papers.length === 0) {
       return {} as Record<string, PdfReadingHeatmap | null>;
@@ -257,12 +439,18 @@ export default function LiteraturePaperList({
     return target?.dataset.paperquayCategoryDropId ?? null;
   };
 
-  const handlePaperDragOver = (
-    event: DragEvent<HTMLDivElement>,
-    paper: LiteraturePaper,
-  ) => {
+  const updateDraggingPaperId = useCallback((paperId: string | null) => {
+    draggingPaperIdRef.current = paperId;
+  }, []);
+
+  const handlePaperDragStart = useCallback((event: DragEvent<HTMLDivElement>, paper: LiteraturePaper) => {
+    updateDraggingPaperId(paper.id);
+    stablePaperDragStart(event, paper);
+  }, [stablePaperDragStart, updateDraggingPaperId]);
+
+  const handlePaperDragOver = useCallback((event: DragEvent<HTMLDivElement>, paper: LiteraturePaper) => {
     const draggedPaperId =
-      draggingPaperId || event.dataTransfer.getData('application/x-paperquay-paper-id');
+      draggingPaperIdRef.current || event.dataTransfer.getData('application/x-paperquay-paper-id');
 
     if (!draggedPaperId || draggedPaperId === paper.id) {
       return;
@@ -274,17 +462,14 @@ export default function LiteraturePaperList({
     const rect = event.currentTarget.getBoundingClientRect();
     const placement = event.clientY < rect.top + rect.height / 2 ? 'before' : 'after';
     setDropIndicator({ paperId: paper.id, placement });
-  };
+  }, []);
 
-  const handlePaperDrop = (
-    event: DragEvent<HTMLDivElement>,
-    paper: LiteraturePaper,
-  ) => {
+  const handlePaperDrop = useCallback((event: DragEvent<HTMLDivElement>, paper: LiteraturePaper) => {
     const draggedPaperId =
-      draggingPaperId || event.dataTransfer.getData('application/x-paperquay-paper-id');
+      draggingPaperIdRef.current || event.dataTransfer.getData('application/x-paperquay-paper-id');
 
     setDropIndicator(null);
-    setDraggingPaperId(null);
+    updateDraggingPaperId(null);
 
     if (!draggedPaperId || draggedPaperId === paper.id) {
       return;
@@ -294,31 +479,31 @@ export default function LiteraturePaperList({
 
     const rect = event.currentTarget.getBoundingClientRect();
     const placement = event.clientY < rect.top + rect.height / 2 ? 'before' : 'after';
-    onPaperReorder(draggedPaperId, paper.id, placement);
-  };
+    stablePaperReorder(draggedPaperId, paper.id, placement);
+  }, [stablePaperReorder, updateDraggingPaperId]);
 
-  const resetSortDrag = () => {
+  const handlePaperDragEnd = useCallback(() => {
+    setDropIndicator(null);
+    updateDraggingPaperId(null);
+  }, [updateDraggingPaperId]);
+
+  const handlePaperDragLeave = useCallback(() => setDropIndicator(null), []);
+
+  const resetSortDrag = useCallback(() => {
     sortDragRef.current = null;
     setDropIndicator(null);
     setSortDraggingPaperId(null);
-    onPaperPointerDragOverCategory(null);
-  };
+    stablePaperPointerDragOverCategory(null);
+  }, [stablePaperPointerDragOverCategory]);
 
-  const resetCategoryDrag = () => {
+  const resetCategoryDrag = useCallback(() => {
     categoryDragRef.current = null;
     setCategoryDraggingPaperId(null);
-    onPaperPointerDragOverCategory(null);
-  };
+    stablePaperPointerDragOverCategory(null);
+  }, [stablePaperPointerDragOverCategory]);
 
-  const handleSortPointerDown = (
-    event: PointerEvent<HTMLElement>,
-    paper: LiteraturePaper,
-  ) => {
-    if (!manualSortingEnabled) {
-      return;
-    }
-
-    if (event.button !== 0) {
+  const handleSortPointerDown = useCallback((event: PointerEvent<HTMLElement>, paper: LiteraturePaper) => {
+    if (!manualSortingEnabled || event.button !== 0) {
       return;
     }
 
@@ -331,9 +516,9 @@ export default function LiteraturePaperList({
       startY: event.clientY,
       active: false,
     };
-  };
+  }, [manualSortingEnabled]);
 
-  const handleSortPointerMove = (event: PointerEvent<HTMLElement>) => {
+  const handleSortPointerMove = useCallback((event: PointerEvent<HTMLElement>) => {
     const dragState = sortDragRef.current;
 
     if (!dragState) {
@@ -356,11 +541,11 @@ export default function LiteraturePaperList({
 
     if (categoryId) {
       setDropIndicator(null);
-      onPaperPointerDragOverCategory(categoryId);
+      stablePaperPointerDragOverCategory(categoryId);
       return;
     }
 
-    onPaperPointerDragOverCategory(null);
+    stablePaperPointerDragOverCategory(null);
 
     const target = findPointerDropTarget(event.clientX, event.clientY);
 
@@ -370,9 +555,9 @@ export default function LiteraturePaperList({
     }
 
     setDropIndicator(target);
-  };
+  }, [stablePaperPointerDragOverCategory]);
 
-  const handleSortPointerUp = (event: PointerEvent<HTMLElement>) => {
+  const handleSortPointerUp = useCallback((event: PointerEvent<HTMLElement>) => {
     const dragState = sortDragRef.current;
 
     if (!dragState) {
@@ -389,18 +574,15 @@ export default function LiteraturePaperList({
     }
 
     if (dragState.active && categoryId) {
-      onPaperDropOnCategory(dragState.paperId, categoryId);
+      stablePaperDropOnCategory(dragState.paperId, categoryId);
     } else if (dragState.active && target && target.paperId !== dragState.paperId) {
-      onPaperReorder(dragState.paperId, target.paperId, target.placement);
+      stablePaperReorder(dragState.paperId, target.paperId, target.placement);
     }
 
     resetSortDrag();
-  };
+  }, [stablePaperDropOnCategory, stablePaperReorder, resetSortDrag]);
 
-  const handleCategoryPointerDown = (
-    event: PointerEvent<HTMLDivElement>,
-    paper: LiteraturePaper,
-  ) => {
+  const handleCategoryPointerDown = useCallback((event: PointerEvent<HTMLDivElement>, paper: LiteraturePaper) => {
     if (event.button !== 0) {
       return;
     }
@@ -417,9 +599,9 @@ export default function LiteraturePaperList({
       startY: event.clientY,
       active: false,
     };
-  };
+  }, []);
 
-  const handleCategoryPointerMove = (event: PointerEvent<HTMLDivElement>) => {
+  const handleCategoryPointerMove = useCallback((event: PointerEvent<HTMLDivElement>) => {
     const dragState = categoryDragRef.current;
 
     if (!dragState) {
@@ -438,10 +620,10 @@ export default function LiteraturePaperList({
     event.preventDefault();
     dragState.active = true;
     setCategoryDraggingPaperId(dragState.paperId);
-    onPaperPointerDragOverCategory(findCategoryDropTarget(event.clientX, event.clientY));
-  };
+    stablePaperPointerDragOverCategory(findCategoryDropTarget(event.clientX, event.clientY));
+  }, [stablePaperPointerDragOverCategory]);
 
-  const handleCategoryPointerUp = (event: PointerEvent<HTMLDivElement>) => {
+  const handleCategoryPointerUp = useCallback((event: PointerEvent<HTMLDivElement>) => {
     const dragState = categoryDragRef.current;
 
     if (!dragState) {
@@ -457,31 +639,111 @@ export default function LiteraturePaperList({
       window.setTimeout(() => setSuppressClickPaperId(null), 0);
 
       if (categoryId) {
-        onPaperDropOnCategory(dragState.paperId, categoryId);
+        stablePaperDropOnCategory(dragState.paperId, categoryId);
       }
     }
 
     resetCategoryDrag();
-  };
+  }, [stablePaperDropOnCategory, resetCategoryDrag]);
 
-  const handleRowKeyDown = (
-    event: KeyboardEvent<HTMLDivElement>,
-    paper: LiteraturePaper,
-  ) => {
-    if (event.key === 'Enter') {
-      onOpenPaper(paper);
-      return;
-    }
+  // 稳定引用：行是 memo 组件，只有真正变化的行才应重渲染。
+  const renderPaperRow = useCallback((paper: LiteraturePaper, index: number) => {
+    const status = paperStatuses[paper.id];
+    const indexingRag = ragIndexingDocumentKey === paper.id;
+    const storedRagStatus = ragBadgeByDocumentKey?.[paper.id];
+    const ragStatus: LiteraturePaperRagStatus = paper.ragEnabled === false
+      ? 'excluded'
+      : storedRagStatus === 'excluded'
+        ? 'none'
+        : storedRagStatus ?? 'none';
 
-    if (event.key === ' ') {
-      event.preventDefault();
-      onSelectPaper(paper.id, {
-        ctrlKey: event.ctrlKey || event.metaKey,
-        metaKey: event.metaKey,
-        shiftKey: event.shiftKey,
-      });
-    }
-  };
+    return (
+      <LiteraturePaperRow
+        key={paper.id}
+        paper={paper}
+        // 全局位置（虚拟窗口外也必须连续）：aria-setsize 固定用已加载的 papers.length
+        // （任务口径，宁可少于分页总数也不改成 resolvedTotal）；分页总数由工具栏
+        // 「全选当前结果（N 篇）」与加载更多提示播报。
+        position={index + 1}
+        setSize={papers.length}
+        active={selectedPaperId === paper.id}
+        multiSelected={multiSelectedSet.has(paper.id)}
+        multiSelectActive={multiSelectActive}
+        showReadingHeatmap={showReadingHeatmap}
+        compact={compact}
+        manualSortingEnabled={manualSortingEnabled}
+        status={status}
+        heatmap={heatmapsByPaperId[paper.id] ?? null}
+        ragStatus={ragStatus}
+        ragIndexing={indexingRag}
+        ragIndexAvailable={ragIndexAvailable}
+        dropPlacement={dropIndicator?.paperId === paper.id ? dropIndicator.placement : null}
+        sortDragging={sortDraggingPaperId === paper.id}
+        categoryDragging={categoryDraggingPaperId === paper.id}
+        titleDisplayMode={titleDisplayMode}
+        storageDir={storageDir}
+        suppressClick={suppressClickPaperId === paper.id}
+        onSelectPaper={stableSelectPaper}
+        onOpenPaper={stableOpenPaper}
+        onContextMenu={stablePaperContextMenu}
+        onDragStart={handlePaperDragStart}
+        onDragOver={handlePaperDragOver}
+        onDragLeave={handlePaperDragLeave}
+        onDragEnd={handlePaperDragEnd}
+        onDrop={handlePaperDrop}
+        onCategoryPointerDown={handleCategoryPointerDown}
+        onCategoryPointerMove={handleCategoryPointerMove}
+        onCategoryPointerUp={handleCategoryPointerUp}
+        onCategoryPointerCancel={resetCategoryDrag}
+        onSortPointerDown={handleSortPointerDown}
+        onSortPointerMove={handleSortPointerMove}
+        onSortPointerUp={handleSortPointerUp}
+        onSortPointerCancel={resetSortDrag}
+        onMeasure={handleRowMeasure}
+      />
+    );
+  }, [
+    categoryDraggingPaperId,
+    compact,
+    dropIndicator,
+    handleCategoryPointerDown,
+    handleCategoryPointerMove,
+    handleCategoryPointerUp,
+    handlePaperDragEnd,
+    handlePaperDragLeave,
+    handlePaperDragOver,
+    handlePaperDragStart,
+    handlePaperDrop,
+    handleRowMeasure,
+    handleSortPointerDown,
+    handleSortPointerMove,
+    handleSortPointerUp,
+    heatmapsByPaperId,
+    manualSortingEnabled,
+    multiSelectActive,
+    multiSelectedSet,
+    papers.length,
+    paperStatuses,
+    ragBadgeByDocumentKey,
+    ragIndexAvailable,
+    ragIndexingDocumentKey,
+    resetCategoryDrag,
+    resetSortDrag,
+    selectedPaperId,
+    showReadingHeatmap,
+    sortDraggingPaperId,
+    stableOpenPaper,
+    stablePaperContextMenu,
+    stableSelectPaper,
+    storageDir,
+    suppressClickPaperId,
+    titleDisplayMode,
+  ]);
+
+  const renderedPapers = virtualWindow
+    ? papers.slice(virtualWindow.startIndex, virtualWindow.endIndex)
+    : papers;
+  const renderedStartIndex = virtualWindow?.startIndex ?? 0;
 
   return (
     <section
@@ -490,7 +752,7 @@ export default function LiteraturePaperList({
       className="pq-library-pane flex h-full min-h-0 flex-col overflow-hidden border-r"
     >
       <LiteratureToolbar
-        working={working} total={resolvedTotal} libraryTotal={libraryTotal}
+        working={working} refreshing={refreshing} total={resolvedTotal} libraryTotal={libraryTotal}
         selectAllState={selectAllState} onToggleSelectAll={onToggleSelectAll}
         search={searchQuery} onSearch={onSearchQueryChange}
         filters={filters} onFilters={onFiltersChange} tags={tags}
@@ -502,17 +764,35 @@ export default function LiteraturePaperList({
         statusMessage={statusMessage} error={error}
       />
 
+      {/* 工具栏批量条已有可见的选中计数（非 live）；这里只补读屏播报，避免视觉重复。 */}
+      <span
+        data-paper-selection-status
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        className="sr-only"
+      >
+        {multiSelectedPaperIds.length > 0
+          ? l(
+            `已选择 ${multiSelectedPaperIds.length} 篇`,
+            `${multiSelectedPaperIds.length} papers selected`,
+          )
+          : ''}
+      </span>
+
       <div
+        ref={scrollRef}
         data-wheel-scroll-target
+        aria-busy={loading || undefined}
         className="pq-paper-list h-0 min-h-0 flex-1 overflow-y-auto overscroll-y-contain p-3"
         onScroll={handleListScroll}
       >
         {loading ? (
-          <div className="pq-card p-6 text-sm text-[var(--pq-text-muted)]">
+          <div role="status" className="pq-card p-6 text-sm text-[var(--pq-text-muted)]">
             {l('正在加载文献库...', 'Loading library...')}
           </div>
         ) : papers.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-[var(--pq-border)] bg-white/60 p-8 text-center dark:bg-white/5">
+          <div role="status" className="rounded-2xl border border-dashed border-[var(--pq-border)] bg-white/60 p-8 text-center dark:bg-white/5">
             <BookOpenText className="mx-auto h-9 w-9 text-[var(--pq-text-faint)] dark:text-[var(--pq-text-muted)]" strokeWidth={1.7} />
             <div className="mt-4 text-lg font-semibold">
               {l('还没有文献', 'No papers yet')}
@@ -525,259 +805,42 @@ export default function LiteraturePaperList({
             </div>
           </div>
         ) : (
-          <div className="space-y-2">
-            {papers.map((paper) => {
-              const active = selectedPaper?.id === paper.id;
-              const multiSelected = multiSelectedSet.has(paper.id);
-              const titleDisplay = resolvePaperTitleDisplay(paper, titleDisplayMode);
-              const pdfPath = paperPdfPath(paper, storageDir);
-              const showBeforeIndicator =
-                dropIndicator?.paperId === paper.id && dropIndicator.placement === 'before';
-              const showAfterIndicator =
-                dropIndicator?.paperId === paper.id && dropIndicator.placement === 'after';
-              const status = paperStatuses[paper.id];
-              const mineruParsed = status?.mineruParsed ?? false;
-              const overviewGenerated =
-                status?.overviewGenerated ?? Boolean(paper.aiSummary?.trim());
-              const indexingRag = ragIndexingDocumentKey === paper.id;
-              const storedRagStatus = ragBadgeByDocumentKey?.[paper.id];
-              const ragStatus: LiteraturePaperRagStatus = paper.ragEnabled === false
-                ? 'excluded'
-                : storedRagStatus === 'excluded'
-                  ? 'none'
-                  : storedRagStatus ?? 'none';
-
-              return (
-                <div key={paper.id} className="pq-paper-row relative">
-                  {showBeforeIndicator ? (
-                    <div className="pointer-events-none absolute -top-1 left-3 right-3 z-10 h-0.5 rounded-full bg-[var(--pq-accent)]" />
-                  ) : null}
-                  <div
-                    role="button"
-                    tabIndex={0}
-                    data-paper-row-id={paper.id}
-                    draggable={false}
-                    onPointerDown={(event) => handleCategoryPointerDown(event, paper)}
-                    onPointerMove={handleCategoryPointerMove}
-                    onPointerUp={handleCategoryPointerUp}
-                    onPointerCancel={resetCategoryDrag}
-                    onDragStart={(event) => {
-                      setDraggingPaperId(paper.id);
-                      onPaperDragStart(event, paper);
-                    }}
-                    onDragOver={(event) => handlePaperDragOver(event, paper)}
-                    onDragLeave={() => setDropIndicator(null)}
-                    onDragEnd={() => {
-                      setDropIndicator(null);
-                      setDraggingPaperId(null);
-                    }}
-                    onDrop={(event) => handlePaperDrop(event, paper)}
-                    onContextMenu={(event) => onPaperContextMenu(event, paper)}
-                    onClick={(event) => {
-                      if (suppressClickPaperId === paper.id) {
-                        return;
-                      }
-
-                      onSelectPaper(paper.id, {
-                        ctrlKey: event.ctrlKey,
-                        metaKey: event.metaKey,
-                        shiftKey: event.shiftKey,
-                      });
-                    }}
-                    onDoubleClick={() => onOpenPaper(paper)}
-                    onKeyDown={(event) => handleRowKeyDown(event, paper)}
-                    className={clsx(
-                      'pq-card pq-paper-row-card grid w-full gap-3 px-3 py-3 text-left transition',
-                      compact && '!py-1.5',
-                      showReadingHeatmap && 'pq-paper-row-card--heatmap',
-                      manualSortingEnabled ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer',
-                      active
-                        ? 'border-[var(--pq-accent-border-strong)] bg-[var(--pq-accent-soft)] ring-1 ring-[var(--pq-accent-ring)]'
-                        : multiSelected
-                          ? 'border-[var(--pq-accent-border)] bg-[var(--pq-accent-soft)]/60'
-                          : dropIndicator?.paperId === paper.id
-                            ? 'border-[var(--pq-accent-border-strong)] bg-[var(--pq-accent-soft)]'
-                            : 'hover:border-[var(--pq-accent-border)] hover:bg-[var(--pq-surface-2)]',
-                      sortDraggingPaperId === paper.id && 'opacity-60 ring-2 ring-[color-mix(in_srgb,var(--pq-accent)_30%,transparent)]',
-                      categoryDraggingPaperId === paper.id && 'opacity-70 ring-2 ring-[color-mix(in_srgb,var(--pq-accent)_35%,transparent)]',
-                    )}
-                  >
-                    {multiSelectActive ? (
-                      <span
-                        role="checkbox"
-                        aria-checked={multiSelected}
-                        aria-label={multiSelected ? l('取消选中该文献', 'Deselect this paper') : l('选中该文献', 'Select this paper')}
-                        title={multiSelected ? l('取消选中', 'Deselect') : l('选中', 'Select')}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          onSelectPaper(paper.id, { ctrlKey: true });
-                        }}
-                        className={clsx(
-                          'mt-0.5 flex h-8 w-7 cursor-pointer items-center justify-center rounded-lg border transition',
-                          multiSelected
-                            ? 'border-[var(--pq-accent-border-strong)] bg-[var(--pq-accent)] text-[var(--pq-accent-button-text)]'
-                            : 'border-[var(--pq-border)] bg-[var(--pq-surface-2)] text-transparent hover:border-[var(--pq-accent-border)]',
-                        )}
-                      >
-                        <Check className="h-4 w-4" strokeWidth={2.4} />
-                      </span>
-                    ) : (
-                      <span
-                        data-paper-sort-handle
-                        draggable={false}
-                        title={
-                          manualSortingEnabled
-                            ? l('拖拽排序', 'Drag to reorder')
-                            : l('切换到手动排序后可拖拽排序', 'Switch to manual order to drag-sort')
-                        }
-                        onPointerDown={(event) => handleSortPointerDown(event, paper)}
-                        onPointerMove={handleSortPointerMove}
-                        onPointerUp={handleSortPointerUp}
-                        onPointerCancel={resetSortDrag}
-                        className={clsx(
-                          'mt-0.5 flex h-8 w-7 items-center justify-center rounded-lg text-[var(--pq-text-faint)] transition',
-                          manualSortingEnabled
-                            ? 'cursor-grab hover:bg-[var(--pq-accent-soft)] hover:text-[var(--pq-accent)] active:cursor-grabbing'
-                            : 'cursor-not-allowed opacity-45',
-                        )}
-                      >
-                        <GripVertical className="h-4 w-4" strokeWidth={1.8} />
-                      </span>
-                    )}
-                    <span className="min-w-0">
-                      <span className="flex min-w-0 items-center gap-2">
-                        {paper.isFavorite ? (
-                          <Star className="h-3.5 w-3.5 shrink-0 text-[var(--pq-warning)] " fill="currentColor" strokeWidth={1.8} />
-                        ) : null}
-                        <span className="block truncate text-sm font-semibold">
-                          {titleDisplay.primary}
-                        </span>
-                      </span>
-                      {titleDisplay.secondary ? (
-                        <span className="mt-0.5 block truncate text-xs text-[var(--pq-text-muted)] dark:text-[var(--pq-text-muted)]">
-                          {titleDisplay.secondary}
-                        </span>
-                      ) : null}
-                      <span className="mt-1 block truncate text-xs text-[var(--pq-text-muted)] dark:text-[var(--pq-text-muted)]">
-                        {paperAuthors(paper, locale)}
-                      </span>
-                      <span className="pq-card-badges mt-2 flex flex-wrap gap-1.5">
-                        <span
-                          className={clsx(
-                            'rounded-full border px-2 py-0.5 text-[11px] font-semibold',
-                            status?.checkingMineru
-                              ? 'border-[var(--pq-border-strong)] bg-[var(--pq-surface-2)] text-[var(--pq-text-muted)] dark:border-white/10 dark:bg-white/[0.06] dark:text-[var(--pq-text-muted)]'
-                              : mineruParsed
-                                ? 'border-[color-mix(in_srgb,var(--pq-success)_28%,transparent)] bg-[var(--pq-success-bg)] text-[var(--pq-success)] '
-                                : 'border-[color-mix(in_srgb,var(--pq-warning)_28%,transparent)] bg-[var(--pq-warning-bg)] text-[var(--pq-warning)] ',
-                          )}
-                        >
-                          {status?.checkingMineru
-                            ? l('MinerU 检测中', 'Checking MinerU')
-                            : mineruParsed
-                              ? l('MinerU 已解析', 'MinerU Parsed')
-                              : l('MinerU 未解析', 'MinerU Not Parsed')}
-                        </span>
-                        {ragIndexAvailable || ragStatus === 'excluded' ? (
-                          <span
-                            title={
-                              indexingRag
-                                ? l('正在建立 RAG 索引', 'Building RAG index')
-                                : ragStatus === 'failed'
-                                  ? l('RAG 索引失败，可在设置中重建', 'RAG indexing failed; rebuild it in settings')
-                                  : ragStatus === 'excluded'
-                                    ? l('该文献已移出本地知识库', 'This paper is excluded from the local knowledge base')
-                                    : undefined
-                            }
-                            className={clsx(
-                              'rounded-full border px-2 py-0.5 text-[11px] font-semibold',
-                              indexingRag && ragStatus !== 'excluded'
-                                ? 'border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-[var(--pq-accent-bg)] text-[var(--pq-accent)] '
-                                : ragStatus === 'ready'
-                                  ? 'border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-[var(--pq-accent-bg)] text-[var(--pq-accent)] '
-                                  : ragStatus === 'failed'
-                                    ? 'border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-error-bg)] text-[var(--pq-danger)] '
-                                    : 'border-[var(--pq-border-strong)] bg-[var(--pq-surface-2)] text-[var(--pq-text-muted)] dark:border-white/10 dark:bg-white/[0.06] dark:text-[var(--pq-text-muted)]',
-                            )}
-                          >
-                            {indexingRag && ragStatus !== 'excluded'
-                              ? l('RAG 索引中', 'RAG Indexing')
-                              : ragStatus === 'excluded'
-                                ? l('已排除', 'Excluded')
-                                : ragStatus === 'ready'
-                                  ? l('RAG 已索引', 'RAG Indexed')
-                                  : ragStatus === 'failed'
-                                    ? l('RAG 索引失败', 'RAG Index Failed')
-                                    : ragStatus === 'pending'
-                                      ? l('RAG 待索引', 'RAG Pending')
-                                      : l('RAG 未索引', 'RAG Not Indexed')}
-                          </span>
-                        ) : null}
-                        <span
-                          className={clsx(
-                            'rounded-full border px-2 py-0.5 text-[11px] font-semibold',
-                            overviewGenerated
-                              ? 'border-[color-mix(in_srgb,var(--pq-info)_28%,transparent)] bg-[var(--pq-info-bg)] text-[var(--pq-info)] '
-                              : 'border-[var(--pq-border-strong)] bg-[var(--pq-surface-2)] text-[var(--pq-text-muted)] dark:border-white/10 dark:bg-white/[0.06] dark:text-[var(--pq-text-muted)]',
-                          )}
-                        >
-                          {overviewGenerated
-                            ? l('概览已生成', 'Overview Ready')
-                            : l('概览未生成', 'No Overview')}
-                        </span>
-                      </span>
-                      {paper.tags.length > 0 ? (
-                        <span className="pq-card-badges mt-2 flex flex-wrap gap-1.5">
-                          {paper.tags.slice(0, 3).map((tag) => (
-                            <span
-                              key={tag.id}
-                              className="rounded-full border border-[color-mix(in_srgb,var(--pq-info)_28%,transparent)] bg-[var(--pq-info-bg)] px-2 py-0.5 text-[11px] font-semibold text-[var(--pq-info)] "
-                            >
-                              {tag.name}
-                            </span>
-                          ))}
-                          {paper.tags.length > 3 ? (
-                            <span className="rounded-full bg-[var(--pq-surface-2)] px-2 py-0.5 text-[11px] font-semibold text-[var(--pq-text-muted)] dark:bg-white/[0.06] dark:text-[var(--pq-text-muted)]">
-                              +{paper.tags.length - 3}
-                            </span>
-                          ) : null}
-                        </span>
-                      ) : null}
-                      <span className="mt-2 block truncate text-[11px] text-[var(--pq-text-faint)] dark:text-[var(--pq-text-faint)]">
-                        {pdfPath ? truncateMiddle(pdfPath, 68) : l('缺少 PDF 附件', 'Missing PDF attachment')}
-                      </span>
-                    </span>
-                    {showReadingHeatmap ? (
-                      <span className="pq-card-heatmap min-w-0 self-center">
-                        <LiteratureReadingHeatmapPreview
-                          heatmap={heatmapsByPaperId[paper.id] ?? null}
-                        />
-                      </span>
-                    ) : null}
-                    <span className="pq-card-year text-sm text-[var(--pq-text-muted)]">
-                      {paper.year ?? 'n.d.'}
-                    </span>
-                    <span className="pq-card-date text-right text-xs text-[var(--pq-text-faint)]">
-                      {new Date(paper.importedAt).toLocaleDateString()}
-                    </span>
-                  </div>
-                  {showAfterIndicator ? (
-                    <div className="pointer-events-none absolute -bottom-1 left-3 right-3 z-10 h-0.5 rounded-full bg-[var(--pq-accent)]" />
-                  ) : null}
-                </div>
-              );
-            })}
+          <>
+            <div
+              role="list"
+              aria-label={l('文献列表', 'Paper list')}
+              onKeyDown={handleListKeyDown}
+            >
+              {/* 虚拟窗口上下高度占位：role=list 的内容模型只允许 listitem，
+                  占位元素用 presentation + aria-hidden 保留高度但不进入可访问树。 */}
+              {virtualWindow ? (
+                <div
+                  role="presentation"
+                  aria-hidden="true"
+                  style={{ height: virtualWindow.paddingStart }}
+                />
+              ) : null}
+              {renderedPapers.map((paper, offset) => (
+                renderPaperRow(paper, renderedStartIndex + offset)
+              ))}
+              {virtualWindow ? (
+                <div
+                  role="presentation"
+                  aria-hidden="true"
+                  style={{ height: virtualWindow.paddingEnd }}
+                />
+              ) : null}
+            </div>
             {hasMorePapers || loadingMore ? (
-              <div className="py-2 text-center text-xs text-[var(--pq-text-muted)]">
+              <div role="status" aria-live="polite" className="py-2 text-center text-xs text-[var(--pq-text-muted)]">
                 {loadingMore
                   ? l('正在加载更多…', 'Loading more…')
                   : l(`已加载 ${papers.length} / ${resolvedTotal} 条，滚动加载更多`, `Loaded ${papers.length} / ${resolvedTotal}; scroll for more`)}
               </div>
             ) : null}
-          </div>
+          </>
         )}
       </div>
     </section>
   );
 }
-

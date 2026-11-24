@@ -26,6 +26,8 @@ import {
 } from './NotesContextMenu';
 import { NotesList } from './NotesList';
 import { buildQuoteMarkdown, noteMatchesFilter } from './noteUtils';
+import { noteAnchorDisplayText, noteDisplayTitle } from './notesDisplay';
+import { noteErrorMessage, noteSearchWarningText } from './notesText';
 
 type NotesFilterKey = 'all' | 'highlight' | 'ai-chat' | 'standalone' | NotePageKind;
 type DrawerTab = 'anchors' | 'notes';
@@ -81,13 +83,14 @@ function anchorPageLabel(anchor: NoteAnchor, l: Localizer) {
   const pageMatch = normalized.match(/\bP\s*(\d+)\b/i);
   if (pageMatch) return `P${pageMatch[1]}`;
 
-  return normalized || l('定位', 'Location');
+  return noteAnchorDisplayText(normalized, l) || l('定位', 'Location');
 }
 
 function anchorSourceTitle(anchor: NoteAnchor, fallbackTitle: string | undefined, l: Localizer) {
   const explicitTitle = anchor.sourceTitle?.replace(/\s+/g, ' ').trim();
   if (explicitTitle && !/^PDF\b/i.test(explicitTitle) && !/^P\s*\d+\b/i.test(explicitTitle)) {
-    return explicitTitle;
+    // 旧数据把「文献」写进 sourceTitle；它和 fallback 一样是语义标签，不是论文标题。
+    return noteAnchorDisplayText(explicitTitle, l);
   }
 
   const fallback = fallbackTitle?.replace(/\s+/g, ' ').trim();
@@ -162,6 +165,8 @@ export function NotesSidebar({
   const channelsById = useMemo(() => Object.fromEntries((currentSearch?.result?.notes ?? [])
     .map((note) => [note.id, note.channels])), [currentSearch]);
   const filteredNotes = query ? scopedNotes.filter((note) => channelsById[note.id]) : scopedNotes;
+  // 后端 warning 是中文原文，只拼接映射后的固定双语提示。
+  const searchWarningText = noteSearchWarningText(currentSearch?.result?.warning, l);
 
   useEffect(() => {
     if (!drawerOpen || drawerTab !== 'notes') return;
@@ -177,7 +182,7 @@ export function NotesSidebar({
     const timer = setTimeout(() => {
       void searchNotes({ query, noteIds: JSON.parse(scopeIds) as string[], limit: 50 })
         .then((result) => { if (!cancelled) setSearchResult({ key: searchKey, result }); })
-        .catch((error: unknown) => { if (!cancelled) setSearchResult({ key: searchKey, error: error instanceof Error ? error.message : l('笔记检索失败', 'Note search failed') }); });
+        .catch((error: unknown) => { if (!cancelled) setSearchResult({ key: searchKey, error: noteErrorMessage(error, l) }); });
     }, 250);
     return () => { cancelled = true; clearTimeout(timer); };
   }, [drawerOpen, drawerTab, query, scopeIds, searchKey, l]);
@@ -267,7 +272,7 @@ export function NotesSidebar({
           id: 'copy-title',
           label: l('复制标题', 'Copy title'),
           icon: <Copy className="h-4 w-4" strokeWidth={1.8} />,
-          onSelect: () => copyTextToClipboard(note.title || l('未命名笔记', 'Untitled note')),
+          onSelect: () => copyTextToClipboard(noteDisplayTitle(note.title, l)),
         },
         {
           id: 'copy-content',
@@ -339,7 +344,7 @@ export function NotesSidebar({
           <span className="rounded-md bg-[var(--pq-bg-secondary)] px-1.5 py-0.5 text-[11px] text-[var(--pq-text-faint)]">
             {activeAnchors.length}
           </span>
-          {error ? <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--pq-error)]" title={error} /> : null}
+          {error ? <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--pq-error)]" title={noteErrorMessage(error, l)} /> : null}
         </button>
 
         <div className="flex items-center gap-1.5">
@@ -401,7 +406,7 @@ export function NotesSidebar({
 
           {error ? (
             <div className="mt-2 shrink-0 rounded-[var(--pq-radius-sm)] border border-[var(--pq-error-bg)] bg-[var(--pq-error-bg)] px-2.5 py-1.5 text-xs text-[var(--pq-error)]">
-              {error}
+              {noteErrorMessage(error, l)}
             </div>
           ) : null}
 
@@ -507,8 +512,8 @@ export function NotesSidebar({
             ? l('正在检索…', 'Searching…')
             : currentSearch.error
               || l(
-                `${currentSearch.result?.retrievalMode === 'hybrid' ? '混合检索' : '关键词检索'} · 当前文档 ${scopedNotes.length} 篇${currentSearch.result?.notes.length === 50 ? ' · 最多显示 50 条' : ''}${currentSearch.result?.warning ? ` · ${currentSearch.result.warning}` : ''}`,
-                `${currentSearch.result?.retrievalMode === 'hybrid' ? 'Hybrid search' : 'Keyword search'} · ${scopedNotes.length} in this document${currentSearch.result?.notes.length === 50 ? ' · showing up to 50' : ''}${currentSearch.result?.warning ? ` · ${currentSearch.result.warning}` : ''}`,
+                `${currentSearch.result?.retrievalMode === 'hybrid' ? '混合检索' : '关键词检索'} · 当前文档 ${scopedNotes.length} 篇${currentSearch.result?.notes.length === 50 ? ' · 最多显示 50 条' : ''}${searchWarningText ? ` · ${searchWarningText}` : ''}`,
+                `${currentSearch.result?.retrievalMode === 'hybrid' ? 'Hybrid search' : 'Keyword search'} · ${scopedNotes.length} in this document${currentSearch.result?.notes.length === 50 ? ' · showing up to 50' : ''}${searchWarningText ? ` · ${searchWarningText}` : ''}`,
               )}
               </div> : null}
               <div className="mt-1 flex shrink-0 items-center gap-1 overflow-x-auto">
@@ -578,9 +583,9 @@ export function NotesSidebar({
           y={contextMenu.y}
           title={
             contextMenu.kind === 'anchor'
-              ? contextMenu.anchor.label || l('摘录', 'Excerpt')
+              ? noteAnchorDisplayText(contextMenu.anchor.label, l) || l('摘录', 'Excerpt')
               : contextMenu.kind === 'note'
-                ? contextMenu.note.title || l('未命名笔记', 'Untitled note')
+                ? noteDisplayTitle(contextMenu.note.title, l)
                 : l('笔记', 'Notes')
           }
           entries={contextMenuEntries}

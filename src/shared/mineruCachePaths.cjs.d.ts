@@ -27,3 +27,4 @@ export function buildTitleMineruCachePaths(rootDir: string, item: MineruCacheIte
 export function buildLegacyMineruCachePaths(rootDir: string, item: MineruCacheItemLike): MineruCachePaths;
 export function getMineruJsonPathCandidates(cachePaths: MineruCachePaths): string[];
 export function buildMineruCachePathCandidates(rootDir: string, item: MineruCacheItemLike): MineruCachePaths[];
+export function sanitizeMineruAssetReference(value: unknown): string | null;

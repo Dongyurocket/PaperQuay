@@ -262,7 +262,7 @@ export function normalizeRawLatexExpression(value: string) {
         .replace(/\s+\}/g, '}')
         .replace(/\\\s*end\{array\}/g, '\\end{array}')
         .replace(/\\\\end\{array\}/g, '\\end{array}')
-        .replace(/\\\s+(?=\\(?:sum|boldsymbol|forall))/g, ' \\\ ')
+        .replace(/\\\s+(?=\\(?:sum|boldsymbol|forall))/g, ' \\ ')
         .replace(/\\\s+(?=\\tag)/g, ' ')
         .replace(/\\\s+(?=[A-Za-z])/g, ' \\\\ ')
         .replace(/[ \t]{2,}/g, ' ')
@@ -498,21 +498,17 @@ export function sanitizeFakeSuperscripts(text: string): string {
 
   return result
     // 5. 还原误打为上标的连字符、破折号、撇号、单双引号
-    .replace(/<sup>([–—\-'’"“”])<\/sup>/gi, '$1')
+    .replace(/<sup>([–—'’"“”-])<\/sup>/gi, '$1')
     // 6. 词中伪上标（前后紧邻英文字母或连字符，如 signi<sup>fi</sup>cant, high-<sup>fi</sup>delity, ef-<sup>fi</sup>ciency）
-    .replace(/([a-zA-Z\-])<sup>([a-zA-Z]{1,4})<\/sup>([a-zA-Z\-])/gi, '$1$2$3')
+    .replace(/([a-zA-Z-])<sup>([a-zA-Z]{1,4})<\/sup>([a-zA-Z-])/gi, '$1$2$3')
     // 7. 词首连字伪上标（fi, fl, ff, ffi, ffl：紧接英文字母，如 <sup>fi</sup>ndings, <sup>fl</sup>ight）
-    .replace(/(^|[\s"'(\[])<sup>(fi|fl|ff|ffi|ffl)<\/sup>([a-zA-Z])/gi, '$1$2$3')
+    .replace(/(^|[\s"'([])<sup>(fi|fl|ff|ffi|ffl)<\/sup>([a-zA-Z])/gi, '$1$2$3')
     // 8. 词尾连字伪上标（fi, fl, ff, ffi, ffl：前接英文字母且后跟非字母或行尾）
     .replace(/([a-zA-Z])<sup>(fi|fl|ff|ffi|ffl)<\/sup>(?=[^a-zA-Z]|$)/gi, '$1$2')
     // 9. 首字母大写连字（如 Fi, Fl）
-    .replace(/(^|[\s"'(\[])<sup>(Fi|Fl|Ff|Ffi|Ffl)<\/sup>([a-zA-Z])/g, '$1$2$3');
-
-  // 10. 修复学术论文首字下沉（Drop Cap）在 OCR 中被误识别为 <sup> 上标的缺陷
-  // 案例：U<sup>RBAN air mobility (UAM)...</sup> -> Urban air mobility (UAM)...
-  result = sanitizeDropCapArtifacts(result);
-
-  return result;
+    .replace(/(^|[\s"'([])<sup>(Fi|Fl|Ff|Ffi|Ffl)<\/sup>([a-zA-Z])/g, '$1$2$3');
+  // Drop Cap 清洗由调用方显式执行（markdown.ts 渲染管线与 mineru 文本各自调用
+  // sanitizeDropCapArtifacts），不在伪上标通用清洗里隐式改写作者缩写。
 }
 
 /**
@@ -793,9 +789,18 @@ export function normalizeGluedLatex(value: string): string {
 // remark 插件：兜底清洗所有 remark-math 节点（math / inlineMath）中的粘连控制序列。
 // 已正确分隔的 $...$ 行内公式受 PROTECTED_MATH_PATTERN 保护、不会经过
 // normalizeRawLatexExpression，因此需要在渲染前对 AST 中的 math 节点统一修复。
+// remark/mdast 节点在本文件只做透传与局部改写，用最小结构类型描述即可。
+type RemarkNode = {
+  type?: string;
+  value?: unknown;
+  children?: RemarkNode[];
+  data?: Record<string, unknown>;
+  [key: string]: unknown;
+};
+
 export function remarkFixGluedLatex() {
-  return (tree: any) => {
-    const visit = (node: any) => {
+  return (tree: RemarkNode) => {
+    const visit = (node: RemarkNode) => {
       if (!node || typeof node !== 'object') {
         return;
       }
@@ -814,16 +819,21 @@ export function remarkFixGluedLatex() {
 }
 
 export function remarkSuperscriptPlugin() {
-  return (tree: any) => {
-    function processChildren(children: any[]): any[] {
+  return (tree: RemarkNode) => {
+    function processChildren(children: RemarkNode[]): RemarkNode[] {
       if (!Array.isArray(children)) return children;
-      const newChildren: any[] = [];
+      const newChildren: RemarkNode[] = [];
       for (let i = 0; i < children.length; i++) {
         const child = children[i];
-        if (child.type === 'html' && /^<sup\b[^>]*>/i.test(child.value)) {
+        if (child.type === 'html' && typeof child.value === 'string' && /^<sup\b[^>]*>/i.test(child.value)) {
           let closeIndex = -1;
           for (let j = i + 1; j < children.length; j++) {
-            if (children[j].type === 'html' && /<\/sup>/i.test(children[j].value)) {
+            const candidate = children[j];
+            if (
+              candidate.type === 'html' &&
+              typeof candidate.value === 'string' &&
+              /<\/sup>/i.test(candidate.value)
+            ) {
               closeIndex = j;
               break;
             }
@@ -844,10 +854,15 @@ export function remarkSuperscriptPlugin() {
             continue;
           }
         }
-        if (child.type === 'html' && /^<sub\b[^>]*>/i.test(child.value)) {
+        if (child.type === 'html' && typeof child.value === 'string' && /^<sub\b[^>]*>/i.test(child.value)) {
           let closeIndex = -1;
           for (let j = i + 1; j < children.length; j++) {
-            if (children[j].type === 'html' && /<\/sub>/i.test(children[j].value)) {
+            const candidate = children[j];
+            if (
+              candidate.type === 'html' &&
+              typeof candidate.value === 'string' &&
+              /<\/sub>/i.test(candidate.value)
+            ) {
               closeIndex = j;
               break;
             }
@@ -868,9 +883,13 @@ export function remarkSuperscriptPlugin() {
             continue;
           }
         }
-        if (child.type === 'text' && child.value && (child.value.includes('<sup>') || child.value.includes('<sub>'))) {
+        if (
+          child.type === 'text' &&
+          typeof child.value === 'string' &&
+          (child.value.includes('<sup>') || child.value.includes('<sub>'))
+        ) {
           const tagRegex = /<(sup|sub)\b[^>]*>([\s\S]*?)<\/\1>/gi;
-          const textChildren: any[] = [];
+          const textChildren: RemarkNode[] = [];
           let lastIdx = 0;
           let m: RegExpExecArray | null;
           while ((m = tagRegex.exec(child.value)) !== null) {
@@ -908,7 +927,9 @@ export function remarkSuperscriptPlugin() {
       return newChildren;
     }
 
-    tree.children = processChildren(tree.children);
+    if (tree.children) {
+      tree.children = processChildren(tree.children);
+    }
   };
 }
 

@@ -11,6 +11,12 @@ const PAPER_NODE_PREFIX = 'paper:';
 const RELATION_STORE_FILE = 'paperquay-knowledge-graph-relations.json';
 const MAX_REFERENCE_NODES_PER_PAPER = 48;
 const MAX_CO_AUTHOR_EDGES_PER_PAPER = 5;
+// S5-GRAPH-2：图谱规模上限。节点用 top-degree 抽样，边按每个节点保留权重最高者。
+// 默认 10k 节点 × 每节点 250 条边 → 输出无向边最坏 10,000 × 250 / 2 = 1.25M。
+const DEFAULT_GRAPH_NODE_LIMIT = 10000;
+const MAX_GRAPH_NODE_LIMIT = 50000;
+const DEFAULT_GRAPH_EDGE_LIMIT_PER_NODE = 250;
+const MAX_GRAPH_EDGE_LIMIT_PER_NODE = 1000;
 
 function normalizeBoolean(value, fallback = true) {
   if (value === undefined || value === null) {
@@ -106,15 +112,56 @@ function readRelationStore(appPaths) {
       retiredAiRelationMigrationInFlight = false;
     }
   }
+  const filePath = relationStorePath(appPaths);
+  let rawText;
   try {
-    const raw = JSON.parse(fs.readFileSync(relationStorePath(appPaths), 'utf8'));
-    return {
-      version: 1,
-      relations: Array.isArray(raw?.relations) ? raw.relations : [],
-    };
-  } catch {
-    return { version: 1, relations: [] };
+    rawText = fs.readFileSync(filePath, 'utf8');
+  } catch (error) {
+    if (error?.code === 'ENOENT') {
+      return { version: 1, relations: [] };
+    }
+    throw Object.assign(
+      new Error(`Unable to read the knowledge graph relation store: ${filePath}.`),
+      { code: 'GRAPH_RELATION_STORE_UNREADABLE', cause: error },
+    );
   }
+
+  let raw;
+  try {
+    raw = JSON.parse(rawText);
+  } catch {
+    throw corruptedRelationStoreError(filePath);
+  }
+
+  return {
+    version: 1,
+    relations: Array.isArray(raw?.relations) ? raw.relations : [],
+  };
+}
+
+/**
+ * Keep the damaged bytes for manual recovery and surface an error instead of
+ * silently treating the store as empty (a later write would erase every relation).
+ * The first backup is never overwritten, so repeated reads do not stack copies.
+ */
+function corruptedRelationStoreError(filePath) {
+  const backupPath = `${filePath}.corrupt.json`;
+  let keptBackup = backupPath;
+  try {
+    if (!fs.existsSync(backupPath)) {
+      fs.copyFileSync(filePath, backupPath);
+    }
+  } catch (error) {
+    keptBackup = null;
+    console.warn('[paperquay] Failed to back up the corrupted knowledge graph relation store.', error);
+  }
+  const message = keptBackup
+    ? `Knowledge graph relation store is corrupted: ${filePath}. The damaged file was kept at ${keptBackup}.`
+    : `Knowledge graph relation store is corrupted: ${filePath}. A backup could not be created.`;
+  return Object.assign(new Error(message), {
+    code: 'GRAPH_RELATION_STORE_CORRUPT',
+    backupPath: keptBackup,
+  });
 }
 
 function writeRelationStore(appPaths, store) {
@@ -347,7 +394,7 @@ function referenceCandidatesFromCache(store, papers) {
   return grouped;
 }
 
-function findReferencedPaper(candidate, paper, papers, paperByDoi, paperByTitle) {
+function findReferencedPaper(candidate, paper, paperTitleEntries, paperByDoi, paperByTitle) {
   if (candidate.doi) {
     const target = paperByDoi.get(candidate.doi);
     if (target && target.id !== paper.id) return target;
@@ -358,11 +405,12 @@ function findReferencedPaper(candidate, paper, papers, paperByDoi, paperByTitle)
     const exact = paperByTitle.get(titleKey);
     if (exact && exact.id !== paper.id) return exact;
 
-    for (const target of papers) {
+    // paperTitleEntries 预先规范化，避免每个候选引用都重新规范化全部标题。
+    for (const target of paperTitleEntries) {
       if (target.id === paper.id) continue;
-      const targetKey = normalizeTitleKey(target.title);
+      const targetKey = target.key;
       if (targetKey.length >= 18 && titleKey.length >= 18 && (targetKey.includes(titleKey) || titleKey.includes(targetKey))) {
-        return target;
+        return target.paper;
       }
     }
   }
@@ -496,6 +544,115 @@ function filterLocalGraph(snapshot, localNodeId, depth) {
   };
 }
 
+/**
+ * S5-GRAPH-2：把最终快照限制在可控规模内。
+ *
+ * 1. 节点超过 nodeLimit 时按度数降序（度数相同按 id 升序）抽样，只保留
+ *    最高度数节点及其两端都存活的边；抽样结果确定。
+ * 2. 每个节点保留权重最高的 edgeLimitPerNode 条边（权重相同按 id 升序），
+ *    避免标签/分类 hub 把前端布局与交互拖垮。
+ *
+ * 默认上限（见文件头常量）：nodeLimit = 10,000，edgeLimitPerNode = 250。
+ * 最坏输出规模是无向边 10,000 × 250 / 2 = 1.25M 条；输入边数在裁剪前没有上限，
+ * 这里只保证输出的节点/边规模可控。合成 hub 夹具基准（10k 节点、单测默认档
+ * 125k 边，重档需 PAPERQUAY_PERF=1）实测：125k 输入边 → 110k 输出边约 84–109ms，
+ * 500k → 425k 约 652ms，1.25M → 1.06M 约 1.67s（Node 24，2026-11-24 本机，
+ * 见 tests/graphSnapshotScale.test.mjs）。热点是 O(E) 的 incident/keptEdges 扫描与
+ * 每个超限节点的 O(deg log deg) 排序，没有 O(E·deg) 结构，故保持现有顺序与实现。
+ *
+ * 没有发生裁剪时原样返回，保证普通规模文献库的输出与旧版一致。
+ */
+function applyGraphBounds(snapshot, { nodeLimit, edgeLimitPerNode }) {
+  const totalNodes = snapshot.nodes.length;
+  const totalEdges = snapshot.edges.length;
+  let nodes = snapshot.nodes;
+  let edges = snapshot.edges;
+  let sampled = false;
+
+  if (Number.isFinite(nodeLimit) && nodes.length > nodeLimit) {
+    const degree = new Map();
+    for (const edge of edges) {
+      degree.set(edge.source, (degree.get(edge.source) ?? 0) + 1);
+      degree.set(edge.target, (degree.get(edge.target) ?? 0) + 1);
+    }
+
+    const keptNodes = new Set(
+      nodes
+        .slice()
+        .sort((left, right) => {
+          const degreeDelta = (degree.get(right.id) ?? 0) - (degree.get(left.id) ?? 0);
+          if (degreeDelta !== 0) return degreeDelta;
+          return left.id < right.id ? -1 : left.id > right.id ? 1 : 0;
+        })
+        .slice(0, nodeLimit)
+        .map((node) => node.id),
+    );
+
+    nodes = nodes.filter((node) => keptNodes.has(node.id));
+    edges = edges.filter((edge) => keptNodes.has(edge.source) && keptNodes.has(edge.target));
+    sampled = true;
+  }
+
+  let edgesCapped = false;
+  if (Number.isFinite(edgeLimitPerNode) && edgeLimitPerNode > 0 && edges.length > 0) {
+    const incident = new Map();
+    const edgeById = new Map();
+    for (const edge of edges) {
+      edgeById.set(edge.id, edge);
+      if (!incident.has(edge.source)) incident.set(edge.source, []);
+      if (!incident.has(edge.target)) incident.set(edge.target, []);
+      incident.get(edge.source).push(edge.id);
+      incident.get(edge.target).push(edge.id);
+    }
+
+    const keptEdges = new Set(edges.map((edge) => edge.id));
+    const nodeIds = nodes.map((node) => node.id).sort();
+    const weightOf = (edgeId) => {
+      const weight = Number(edgeById.get(edgeId)?.weight);
+      return Number.isFinite(weight) ? weight : 0;
+    };
+
+    for (const nodeId of nodeIds) {
+      const liveEdges = (incident.get(nodeId) ?? []).filter((edgeId) => keptEdges.has(edgeId));
+      if (liveEdges.length <= edgeLimitPerNode) continue;
+
+      liveEdges.sort((left, right) => {
+        const weightDelta = weightOf(right) - weightOf(left);
+        if (weightDelta !== 0) return weightDelta;
+        return left < right ? -1 : left > right ? 1 : 0;
+      });
+      for (const edgeId of liveEdges.slice(edgeLimitPerNode)) {
+        keptEdges.delete(edgeId);
+      }
+      edgesCapped = true;
+    }
+
+    if (edgesCapped) {
+      edges = edges.filter((edge) => keptEdges.has(edge.id));
+    }
+  }
+
+  if (!sampled && !edgesCapped) {
+    return snapshot;
+  }
+
+  return {
+    ...snapshot,
+    nodes,
+    edges,
+    metadata: {
+      sampled,
+      truncated: true,
+      nodeLimit,
+      edgeLimitPerNode,
+      totalNodes,
+      returnedNodes: nodes.length,
+      totalEdges,
+      returnedEdges: edges.length,
+    },
+  };
+}
+
 async function createKnowledgeGraphSnapshot(context, request = {}) {
   const { appPaths, noteStore, ragStore, store } = context;
   const includePapers = normalizeBoolean(request.includePapers, true);
@@ -513,6 +670,18 @@ async function createKnowledgeGraphSnapshot(context, request = {}) {
   const search = cleanString(request.search).toLowerCase();
   const localNodeId = cleanString(request.localNodeId);
   const localDepth = normalizeLimit(request.localDepth, 1, 0, 4);
+  const graphNodeLimit = normalizeLimit(
+    request.graphNodeLimit,
+    DEFAULT_GRAPH_NODE_LIMIT,
+    1,
+    MAX_GRAPH_NODE_LIMIT,
+  );
+  const graphEdgeLimitPerNode = normalizeLimit(
+    request.graphEdgeLimitPerNode,
+    DEFAULT_GRAPH_EDGE_LIMIT_PER_NODE,
+    1,
+    MAX_GRAPH_EDGE_LIMIT_PER_NODE,
+  );
   const library = store.load();
   const notes = includeNotes ? noteStore.listNotes({ limit: 5000 }) : [];
   const nodes = new Map();
@@ -523,10 +692,11 @@ async function createKnowledgeGraphSnapshot(context, request = {}) {
       .map((paper) => [normalizeDoi(paper.doi), paper])
       .filter(([doi]) => doi),
   );
+  const paperTitleEntries = library.papers
+    .map((paper) => ({ id: paper.id, key: normalizeTitleKey(paper.title), paper }))
+    .filter((entry) => entry.key);
   const paperByTitle = new Map(
-    library.papers
-      .map((paper) => [normalizeTitleKey(paper.title), paper])
-      .filter(([title]) => title),
+    paperTitleEntries.map((entry) => [entry.key, entry.paper]),
   );
   const paperIdByReference = new Map();
 
@@ -561,7 +731,8 @@ async function createKnowledgeGraphSnapshot(context, request = {}) {
       nodes.set(noteNodeId(note.id), {
         id: noteNodeId(note.id),
         type: 'note',
-        label: note.title || 'Untitled Note',
+        // 空标题保持空串，由界面按语言显示未命名笔记；不把英文哨兵写进共享数据。
+        label: note.title || '',
         subtitle: notePreview(note),
         noteId: note.id,
         paperId: resolvePaperReference(note.linkedPaperId || note.paperId) || undefined,
@@ -716,7 +887,7 @@ async function createKnowledgeGraphSnapshot(context, request = {}) {
 
       const references = referencesByPaperId.get(paper.id) ?? extractPaperReferenceCandidates(paper);
       for (const reference of references) {
-        const targetPaper = findReferencedPaper(reference, paper, library.papers, paperByDoi, paperByTitle);
+        const targetPaper = findReferencedPaper(reference, paper, paperTitleEntries, paperByDoi, paperByTitle);
 
         if (targetPaper) {
           const target = paperNodeId(targetPaper.id);
@@ -817,7 +988,10 @@ async function createKnowledgeGraphSnapshot(context, request = {}) {
     };
   }
 
-  return filterLocalGraph(snapshot, localNodeId, localDepth);
+  return applyGraphBounds(filterLocalGraph(snapshot, localNodeId, localDepth), {
+    nodeLimit: graphNodeLimit,
+    edgeLimitPerNode: graphEdgeLimitPerNode,
+  });
 }
 
 function createKnowledgeGraphCommands(context) {
@@ -912,8 +1086,13 @@ function createKnowledgeGraphCommands(context) {
 }
 
 module.exports = {
+  DEFAULT_GRAPH_EDGE_LIMIT_PER_NODE,
+  DEFAULT_GRAPH_NODE_LIMIT,
+  MAX_GRAPH_EDGE_LIMIT_PER_NODE,
+  MAX_GRAPH_NODE_LIMIT,
   MAX_RELATION_DESCRIPTION_LENGTH,
   MAX_RELATION_LABEL_LENGTH,
+  applyGraphBounds,
   createKnowledgeGraphCommands,
   createKnowledgeGraphSnapshot,
   extractPaperReferenceCandidates,

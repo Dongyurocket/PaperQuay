@@ -12,6 +12,7 @@ import LiteratureFilterPopover from './LiteratureFilterPopover';
 
 interface Props {
   working: boolean;
+  refreshing?: boolean;
   total: number;
   libraryTotal: number;
   selectAllState: SelectionCheckState;
@@ -98,10 +99,11 @@ export default function LiteratureToolbar(props: Props) {
   return <header className="pq-toolbar min-w-0 px-3 py-2 [container-type:inline-size]">
     <div className="flex min-w-0 flex-nowrap items-center gap-2 whitespace-nowrap">
       <button type="button" role="checkbox" aria-checked={props.selectAllState === 'all' ? true : props.selectAllState === 'partial' ? 'mixed' : false}
-        aria-label={l(`全选当前结果（${props.total} 篇）`, `Select all results (${props.total})`)}
+        aria-label={l(`全选 ${props.total}`, `Select all ${props.total}`)}
+        title={l('全选当前结果', 'Select all results')}
         disabled={props.working || props.total === 0 || !props.onToggleSelectAll} onClick={props.onToggleSelectAll}
         className="pq-button !h-8 w-8 shrink-0 px-0 text-xs [@container(min-width:480px)]:w-auto [@container(min-width:480px)]:px-2">
-        <span aria-hidden="true">{props.selectAllState === 'all' ? '☑' : props.selectAllState === 'partial' ? '◩' : '□'}</span><span className="hidden [@container(min-width:480px)]:inline">{props.total}</span>
+        <span aria-hidden="true">{props.selectAllState === 'all' ? '☑' : props.selectAllState === 'partial' ? '◩' : '□'}</span><span className="hidden [@container(min-width:480px)]:inline">{l('全选', 'Select all')}&nbsp;</span><span className="hidden [@container(min-width:480px)]:inline">{props.total}</span>
       </button>
       <div className="relative min-w-0 flex-1">
         <Search className="pointer-events-none absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--pq-text-faint)]" />
@@ -110,8 +112,11 @@ export default function LiteratureToolbar(props: Props) {
           className="pq-input !h-8 w-full pl-8 pr-8 text-sm" />
         {props.search && <button type="button" onClick={() => { props.onSearch(''); searchRef.current?.focus(); }} aria-label={l('清除搜索', 'Clear search')} className="absolute right-1 top-1/2 -translate-y-1/2 rounded-[var(--pq-radius-sm)] p-1 text-[var(--pq-text-muted)] hover:bg-[var(--pq-hover)]"><X className="h-4 w-4" /></button>}
       </div>
+      <span role="status" aria-live="polite" aria-atomic="true" className="shrink-0 text-xs text-[var(--pq-text-muted)]">
+        {props.refreshing ? l('正在刷新…', 'Refreshing…') : ''}
+      </span>
       <button ref={filterRef} type="button" aria-label={active.length ? l(`筛选（已生效 ${active.length} 项）`, `Filter (${active.length} active)`) : l('筛选', 'Filter')} aria-haspopup="dialog" aria-controls={filterOpen ? filterId : undefined} aria-expanded={filterOpen} onClick={() => { setMenu(null); setFilterOpen(!filterOpen); }} className="pq-button relative !h-8 w-8 shrink-0 px-0 text-xs [@container(min-width:480px)]:w-auto [@container(min-width:480px)]:px-2" title={l('筛选', 'Filter')}><Filter className="h-4 w-4" /><span className="hidden [@container(min-width:640px)]:inline">{l('筛选', 'Filter')}</span>{active.length > 0 && <span className="pointer-events-none absolute -right-1 -top-1 min-w-4 rounded-[var(--pq-radius-sm)] bg-[var(--pq-surface-1)] px-1 text-center text-[11px] leading-4 text-[var(--pq-accent-strong)] ring-1 ring-[var(--pq-border)] [@container(min-width:480px)]:static [@container(min-width:480px)]:bg-[var(--pq-accent-soft)] [@container(min-width:480px)]:text-xs [@container(min-width:480px)]:ring-0">{active.length}</span>}</button>
-      <button type="button" aria-label={l('排序', 'Sort')} aria-haspopup="menu" aria-expanded={menu?.kind === 'sort'} onClick={(event) => showMenu(event, sortEntries, 'sort')} className="pq-button !h-8 w-8 shrink-0 px-0 text-xs [@container(min-width:800px)]:w-auto [@container(min-width:800px)]:px-2" title={l('排序', 'Sort')}><ArrowDownUp className="h-4 w-4" /><span className="hidden max-w-[120px] truncate [@container(min-width:800px)]:inline">{sortLabel}</span></button>
+      <button type="button" aria-label={l(`排序：${sortLabel}`, `Sort: ${sortLabel}`)} aria-haspopup="menu" aria-expanded={menu?.kind === 'sort'} onClick={(event) => showMenu(event, sortEntries, 'sort')} className="pq-button !h-8 w-8 shrink-0 px-0 text-xs [@container(min-width:800px)]:w-auto [@container(min-width:800px)]:px-2" title={l('排序', 'Sort')}><ArrowDownUp className="h-4 w-4" /><span className="hidden max-w-[120px] truncate [@container(min-width:800px)]:inline">{sortLabel}</span></button>
       <button ref={viewRef} type="button" aria-haspopup="menu" aria-expanded={menu?.kind === 'view'} onClick={(event) => showMenu(event, viewEntries, 'view')} className="pq-icon-button !hidden !h-8 !w-8 shrink-0 [@container(min-width:480px)]:!inline-flex" title={l('视图', 'View')} aria-label={l('视图', 'View')}><LayoutGrid className="h-4 w-4" /></button>
       <button type="button" disabled={props.working} onClick={props.onImport} className="pq-button-primary !h-8 w-8 shrink-0 px-0 text-xs [@container(min-width:640px)]:w-auto [@container(min-width:640px)]:px-2" title={l('导入 PDF', 'Import PDF')}><FilePlus2 className="h-4 w-4" /><span className="hidden [@container(min-width:640px)]:inline">{l('导入 PDF', 'Import PDF')}</span></button>
       <button type="button" aria-haspopup="menu" aria-expanded={menu?.kind === 'more'} onClick={(event) => showMenu(event, viewRef.current?.getClientRects().length ? moreEntries : [...viewEntries, { type: 'separator', id: 'more-view-separator' }, ...moreEntries], 'more')} className="pq-icon-button !h-8 !w-8 shrink-0" title={l('更多', 'More')} aria-label={l('更多', 'More')}><MoreHorizontal className="h-4 w-4" /></button>

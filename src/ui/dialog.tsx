@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { AlertTriangle, X } from 'lucide-react';
 import { cn } from '../utils/cn';
 import { useLocaleText } from '../i18n/uiLanguage';
+import { IconButton } from './button';
 
 /**
  * 统一浮层原语。
@@ -43,7 +44,7 @@ interface DialogProps {
 
 const FOCUSABLE = [
   'a[href]',
-  'button:not([disabled])',
+  'button:not([disabled]):not([tabindex="-1"])',
   'textarea:not([disabled])',
   'input:not([disabled]):not([type="hidden"])',
   'select:not([disabled])',
@@ -264,15 +265,14 @@ export function ConfirmDialog({
               <h2 id="pq-confirm-title" className="text-lg font-semibold text-[var(--pq-text)]">
                 {title}
               </h2>
-              <button
-                type="button"
+              <IconButton
                 onClick={onClose}
                 disabled={busy}
-                className="pq-icon-button h-8 w-8 shrink-0 disabled:opacity-60"
+                className="shrink-0 disabled:opacity-60"
                 aria-label={l('关闭对话框', 'Close dialog')}
               >
                 <X className="h-4 w-4" strokeWidth={1.9} />
-              </button>
+              </IconButton>
             </div>
             <p id="pq-confirm-description" className="mt-2 text-sm leading-6 text-[var(--pq-text-muted)]">
               {description}

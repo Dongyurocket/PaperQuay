@@ -1,4 +1,6 @@
 const { createAiCommands } = require('./backend/aiCommands.cjs');
+const { createAppSettingsCommands } = require('./backend/appSettingsCommands.cjs');
+const { createAppSettingsStore } = require('./backend/appSettings.cjs');
 const { createBackupCommands } = require('./backend/backupCommands.cjs');
 const { cleanupLegacyBackupSettings } = require('./backend/legacyBackupCleanup.cjs');
 const { createAppPaths, createLibraryStore } = require('./backend/libraryStore.cjs');
@@ -11,11 +13,13 @@ const { createMineruCacheCommands } = require('./backend/mineruCacheCommands.cjs
 const { createNoteCommands } = require('./backend/noteCommands.cjs');
 const { createNoteStore } = require('./backend/noteStore.cjs');
 const { createNoteVault } = require('./backend/noteVault.cjs');
+const { createPdfMetadataCommands } = require('./backend/pdfMetadataCommands.cjs');
 const { createRetainPdfIntegration } = require('./backend/retainPdfIntegration.cjs');
 const { cleanupRetiredAgentData } = require('./backend/agentRetiredCleanup.cjs');
 const { createUpdateCommands } = require('./backend/updateCommands.cjs');
 const { externalWriteRevisions, readExternalWriteMarker } = require('./backend/externalWriteMarker.cjs');
 const { perfMark, perfMeasure } = require('./perfTrace.cjs');
+const { validateIpcArgs, validateIpcResult } = require('./ipcCommandRegistry.cjs');
 const {
   createPaperRagLock,
   guardRagIndexCommands,
@@ -25,6 +29,32 @@ const {
 
 function toErrorMessage(error) {
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * 单一 `paperquay:invoke` 通道的调用包装（D1-14）：先查 handler，再按注册表
+ * 校验 args，最后才执行。result 校验默认关闭，只在 PAPERQUAY_VALIDATE_IPC_RESULTS=1
+ * 时启用，避免历史命令的宽松返回形状把线上调用变成硬失败。
+ */
+function createCommandInvoker(commands) {
+  return async function invoke(command, args, event) {
+    const handler = commands[command];
+
+    if (!handler) {
+      throw new Error(`Unsupported Electron command: ${command}`);
+    }
+
+    const normalizedArgs = args ?? {};
+    validateIpcArgs(command, normalizedArgs);
+
+    const result = await handler(normalizedArgs, event);
+
+    if (process.env.PAPERQUAY_VALIDATE_IPC_RESULTS === '1') {
+      validateIpcResult(command, result);
+    }
+
+    return result;
+  };
 }
 
 function createUnavailableRagStore(error) {
@@ -101,6 +131,10 @@ function createBackend({ app }) {
   const appPaths = createAppPaths(app);
   cleanupLegacyBackupSettings(appPaths.libraryDatabasePath);
   const store = createLibraryStore(appPaths);
+  const appSettings = createAppSettingsStore({
+    appPaths,
+    legacyZoteroDir: () => store.loadSettings().zoteroLocalDataDir,
+  });
   perfMeasure('backend:init library-store', 'backend:init-start');
   const { createPathPolicy } = require('./backend/pathPolicy.cjs');
   const approvedReadPaths = new Set();
@@ -148,6 +182,7 @@ function createBackend({ app }) {
   const context = {
     app,
     appPaths,
+    appSettings,
     noteStore,
     approvedReadPaths,
     approvedWritePaths,
@@ -166,11 +201,35 @@ function createBackend({ app }) {
   context.fileCommands = fileCommands;
 
   const paperRagLock = createPaperRagLock();
+  let closePromise = null;
+  function closeBackend({ ragCloseTimeoutMs = null } = {}) {
+    if (closePromise) return closePromise;
+    context.noteIndexer.close();
+    noteStore.close();
+    store.close();
+    // RAG 执行单元可能是 worker 线程：在剩余退出预算内等待它关闭，
+    // 超时由 ragWorkerHost 直接终止线程，避免只靠外层 3 秒强制退出。
+    closePromise = Promise.resolve()
+      .then(() => (
+        ragCloseTimeoutMs === null
+          ? ragStore.close()
+          : ragStore.close({ timeoutMs: ragCloseTimeoutMs })
+      ))
+      .then((result) => ({ timedOut: Boolean(result?.timedOut) }))
+      .catch((error) => {
+        console.warn('[paperquay] RAG store close failed.', error);
+        return { timedOut: false, failed: true };
+      });
+    return closePromise;
+  }
+
   const commands = {
     ...fileCommands,
+    ...createAppSettingsCommands(context),
     ...createMineruCacheCommands(context),
     ...createLibraryCommands(context),
     ...createNoteCommands(context),
+    ...createPdfMetadataCommands(context),
     ...createAiCommands(context),
     ...createKnowledgeGraphCommands(context),
     ...createBackupCommands(context),
@@ -205,24 +264,30 @@ function createBackend({ app }) {
     approveReadPath(filePath) {
       pathPolicy.approveReadPath(filePath);
     },
-    close() {
-      context.noteIndexer.close();
-      noteStore.close();
-      void Promise.resolve(ragStore.close()).catch((error) => {
-        console.warn('[paperquay] RAG store close failed.', error);
-      });
-      store.close();
-    },
-    async invoke(command, args, event) {
-      const handler = commands[command];
-
-      if (!handler) {
-        throw new Error(`Unsupported Electron command: ${command}`);
+    close: closeBackend,
+    /**
+     * Quit path: stop accepting note work, wait (bounded) for the queue to drain,
+     * then tear down the stores. Returns the drain summary for logging.
+     */
+    async shutdown({ timeoutMs = 2500 } = {}) {
+      const budget = Math.max(0, Number(timeoutMs) || 0);
+      const deadline = budget > 0 ? Date.now() + budget : Number.POSITIVE_INFINITY;
+      let drained = { drained: true, timedOut: false, pending: 0 };
+      try {
+        drained = await context.noteIndexer.closeWhenIdle({ timeoutMs: budget });
+      } catch (error) {
+        console.warn('[paperquay] Note index drain before shutdown failed.', error);
       }
-
-      return handler(args ?? {}, event);
+      const remaining = Number.isFinite(deadline) ? Math.max(0, deadline - Date.now()) : null;
+      const closeResult = await closeBackend({ ragCloseTimeoutMs: remaining });
+      return {
+        ...drained,
+        ragStoreClosed: !closeResult?.timedOut && !closeResult?.failed,
+        ragStoreCloseTimedOut: Boolean(closeResult?.timedOut),
+      };
     },
+    invoke: createCommandInvoker(commands),
   };
 }
 
-module.exports = { createBackend };
+module.exports = { createBackend, createCommandInvoker };

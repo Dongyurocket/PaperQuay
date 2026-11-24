@@ -28,6 +28,35 @@ function isTrustedRendererUrl(url, options) {
   );
 }
 
+/**
+ * will-navigate 的放行规则比 IPC 更窄：
+ *   - 生产版只允许应用自身的 dist/index.html（可带 query/hash），
+ *     不能让整棵 dist/ 或任意 file:// 页面在主窗口加载并继承 preload 能力；
+ *   - 开发版仍只信任 dev server 同源页面。
+ * URL 解析会规范化 `..`，所以这里比较解析后的 pathname，
+ * 而不是原始字符串前缀，避免 `dist/../evil.html` 绕过。
+ */
+function isTrustedRendererNavigation(url, options) {
+  if (!isTrustedRendererUrl(url, options)) return false;
+
+  let candidate;
+  let allowed;
+  try {
+    candidate = new URL(url);
+    allowed = new URL(resolveAppRendererUrl(options));
+  } catch {
+    return false;
+  }
+
+  if (candidate.protocol !== 'file:') return true;
+  if (allowed.protocol !== 'file:') return false;
+  if (candidate.username || candidate.password) return false;
+  if (candidate.host && candidate.host !== 'localhost') return false;
+
+  const normalize = (value) => (process.platform === 'win32' ? value.toLowerCase() : value);
+  return normalize(candidate.pathname) === normalize(allowed.pathname);
+}
+
 function createIpcSenderGuard(options) {
   return function assertTrustedIpcSender(event) {
     const frame = event?.senderFrame;
@@ -43,6 +72,7 @@ function createIpcSenderGuard(options) {
 
 module.exports = {
   createIpcSenderGuard,
+  isTrustedRendererNavigation,
   isTrustedRendererUrl,
   resolveAppRendererUrl,
 };

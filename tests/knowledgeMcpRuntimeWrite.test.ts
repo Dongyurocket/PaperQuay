@@ -326,3 +326,51 @@ test('desktop metadata save detects a stale form snapshot after an MCP write', a
     cleanupDir(dir);
   }
 });
+
+test('preview delete: missing library database returns an empty preview without creating it', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'paperquay-mcp-preview-missing-'));
+  const service = new PaperQuayKnowledgeService({ dataDir: dir, isAppRunning: () => false });
+  const dbPath = path.join(dir, 'paperquay-library.sqlite');
+  try {
+    assert.equal(existsSync(dbPath), false);
+    const preview = service.previewDeletePapers({ paperIds: ['paper-x'] });
+    assert.equal(preview.papers.length, 0);
+    assert.equal(preview.files.length, 0);
+    assert.equal(preview.summary.paperCount, 0);
+    assert.equal(existsSync(dbPath), false);
+  } finally {
+    cleanupDir(dir);
+  }
+});
+
+test('preview delete: opens the library read-only and never migrates or writes it', () => {
+  const { dir, service } = setupFixture();
+  try {
+    const imported = service.importPdfs({
+      paths: [writeFakePdf(dir, 'preview.pdf')],
+      allowWhileAppRunning: true,
+    }).imported[0];
+    const dbPath = path.join(dir, 'paperquay-library.sqlite');
+    const { DatabaseSync } = require('node:sqlite');
+
+    // 可写连接会补建 schema；删掉 initialized 标记后，只有只读路径才能保持这张表缺失。
+    const raw = new DatabaseSync(dbPath);
+    raw.exec('DROP TABLE library_meta');
+    raw.close();
+
+    const before = readFileSync(dbPath);
+    const preview = service.previewDeletePapers({ paperIds: [imported.id] });
+    assert.equal(preview.summary.paperCount, 1);
+    assert.ok(readFileSync(dbPath).equals(before));
+    assert.equal(existsSync(`${dbPath}-journal`), false);
+
+    const check = new DatabaseSync(dbPath, { readOnly: true });
+    const meta = check.prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'library_meta'",
+    ).get();
+    check.close();
+    assert.equal(meta, undefined);
+  } finally {
+    cleanupDir(dir);
+  }
+});

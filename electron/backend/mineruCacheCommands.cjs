@@ -17,10 +17,15 @@ const {
   mapContentListBlocks,
   remapStringValuesDeep,
 } = require('./mineruContentList.cjs');
-const { cleanString, readJson } = require('./utils.cjs');
+const { cleanString } = require('./utils.cjs');
+const { resolveMineruAssetPath } = require('./mineruAssetPaths.cjs');
+const { hasUnsafePathSyntax, isUncPath, isWithinRoot } = require('./pathPolicy.cjs');
+const { resolveTranslatedPdfStorageDir } = require('./translatedPdfAttachments.cjs');
 
 const CONTENT_LIST_FILE_NAMES = ['content_list_v2.json', 'content_list.json'];
 const PARSE_OUTPUT_FILE_NAMES = ['content_list_v2.json', 'content_list.json', 'middle.json', 'full.md'];
+const CACHE_MARKER_FILE_NAMES = [...PARSE_OUTPUT_FILE_NAMES];
+const MAX_MINERU_ASSET_BYTES = 64 * 1024 * 1024;
 const BACKUP_TARGET_NAMES = ['translations', 'summaries', 'images'];
 const BACKUP_SUFFIX_PATTERN = /\.bak-\d+$/;
 
@@ -253,28 +258,25 @@ async function finishMineruCacheReparse({ directory, success = true }) {
   return { directory: resolvedDirectory, removed };
 }
 
-/** 与 fileCommands.assertWriteAllowed 同口径：只允许在 MinerU 缓存根内改动。 */
-function createCacheDirectoryGuard(appPaths) {
-  const configuredCacheDir = cleanString(
-    readJson(appPaths.configPath, null)?.settings?.mineruCacheDir,
-  );
-  const roots = [appPaths.mineruCacheDir, configuredCacheDir]
-    .filter(Boolean)
-    .map((root) => path.resolve(root));
-
-  const comparable = (value) => (process.platform === 'win32' ? value.toLowerCase() : value);
+/**
+ * 写/删/修复/重解析只允许：
+ *   1. 默认 MinerU 缓存根（appPaths.mineruCacheDir，主进程决定）；
+ *   2. 目录对话框 approveWritePath 登记过的目录。
+ * 不再读取 configPath 里的 settings.mineruCacheDir：那是渲染层可写值，
+ * 升级后必须由用户在设置页重新选择目录才能获得写权限。
+ */
+function createCacheDirectoryGuard({ appPaths, pathPolicy }) {
+  const defaultRoot = appPaths.mineruCacheDir ? path.resolve(appPaths.mineruCacheDir) : '';
 
   return (directory) => {
     const target = path.resolve(cleanString(directory));
     if (!target) throw new Error('MinerU cache directory cannot be empty');
 
-    const allowed = roots.some((root) => {
-      const left = comparable(target);
-      const right = comparable(root);
-      return left === right || left.startsWith(`${right}${path.sep}`);
-    });
+    const withinDefaultRoot = Boolean(defaultRoot) && isWithinRoot(target, defaultRoot);
+    const approved = typeof pathPolicy?.isApprovedPath === 'function'
+      && pathPolicy.isApprovedPath(target, 'write');
 
-    if (!allowed) {
+    if (!withinDefaultRoot && !approved) {
       throw new Error(`Refusing to modify a directory outside the MinerU cache root: ${target}`);
     }
 
@@ -282,11 +284,126 @@ function createCacheDirectoryGuard(appPaths) {
   };
 }
 
-function createMineruCacheCommands(context) {
-  const { appPaths } = context;
-  const assertAllowedCacheDirectory = createCacheDirectoryGuard(appPaths);
+function readReaderSettings(appSettings) {
+  try {
+    const settings = appSettings?.getPublic?.()?.settings;
+    return settings && typeof settings === 'object' ? settings : {};
+  } catch {
+    return {};
+  }
+}
+
+function readLibrarySettings(store) {
+  try {
+    return (typeof store?.loadSettings === 'function' ? store.loadSettings() : null) ?? {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * 只读授权状态：返回三类目录的 { path, exists, authorized, reason }。
+ *
+ * 只用于设置页提示“已配置但未授权/目录不存在”，不授予任何权限；写权限仍由
+ * pathPolicy 与目录对话框决定。
+ */
+function buildPathAuthorizationStatus({ appPaths, appSettings, store, pathPolicy }) {
+  const readerSettings = readReaderSettings(appSettings);
+  const librarySettings = readLibrarySettings(store);
+  const dataDir = cleanString(appPaths.dataDir);
+  const defaultStorageDir = dataDir ? path.join(dataDir, 'paperquay-data') : '';
+  const hasTranslatedBase = Boolean(
+    cleanString(librarySettings.translatedPdfDir)
+    || cleanString(librarySettings.storageDir)
+    || dataDir,
+  );
+  const translatedPdfDir = hasTranslatedBase
+    ? resolveTranslatedPdfStorageDir(librarySettings, appPaths)
+    : '';
+  const defaultTranslatedPdfDir = hasTranslatedBase
+    ? resolveTranslatedPdfStorageDir({ ...librarySettings, translatedPdfDir: '' }, appPaths)
+    : '';
+  const defaultMineruCacheDir = cleanString(appPaths.mineruCacheDir);
+
+  const describe = (value, { defaultPaths = [], trustedRoots = [] }) => {
+    const target = cleanString(value);
+    if (!target) {
+      return { path: '', exists: false, authorized: false, reason: 'missing' };
+    }
+    if (typeof pathPolicy?.getAuthorizationStatus !== 'function') {
+      return { path: path.resolve(target), exists: false, authorized: false, reason: 'unavailable' };
+    }
+
+    return pathPolicy.getAuthorizationStatus(target, {
+      mode: 'write',
+      defaultPaths,
+      trustedRoots,
+    });
+  };
 
   return {
+    storageDir: describe(cleanString(librarySettings.storageDir) || defaultStorageDir, {
+      defaultPaths: [defaultStorageDir],
+      // storageDir 沿用既有语义：pathPolicy 的写根直接信任该设置值。
+      trustedRoots: [dataDir, cleanString(librarySettings.storageDir)].filter(Boolean),
+    }),
+    translatedPdfDir: describe(translatedPdfDir, {
+      defaultPaths: [defaultTranslatedPdfDir],
+      // 与 pathPolicy 共用同一套信任根：dataDir 与 storageDir 覆盖默认位置；
+      // 自定义译版目录必须经目录对话框授权，状态才能和 isReadAllowed/isWriteAllowed 一致。
+      trustedRoots: [dataDir, cleanString(librarySettings.storageDir) || defaultStorageDir].filter(Boolean),
+    }),
+    mineruCacheDir: describe(
+      cleanString(readerSettings.mineruCacheDir) || defaultMineruCacheDir,
+      {
+        defaultPaths: [defaultMineruCacheDir],
+        // 自定义 MinerU 目录没有 dataDir 例外：必须经目录对话框授权。
+        trustedRoots: [],
+      },
+    ),
+  };
+}
+
+function createMineruCacheCommands(context) {
+  const { appPaths, pathPolicy } = context;
+  const assertAllowedCacheDirectory = createCacheDirectoryGuard({ appPaths, pathPolicy });
+
+  /**
+   * 读取 asset 的目录必须是 MinerU 缓存目录（至少含一个解析产物），且仍在
+   * pathPolicy 的读根内。UNC/设备路径在 pathPolicy 做 realpath 之前拒绝，
+   * 避免 SMB 探测。
+   */
+  function assertReadableCacheDirectory(directory) {
+    const raw = cleanString(directory);
+    if (!raw || !path.isAbsolute(raw) || isUncPath(raw) || hasUnsafePathSyntax(raw)) {
+      throw new Error('MinerU cache directory is not allowed');
+    }
+    if (typeof pathPolicy?.isReadAllowed === 'function' && !pathPolicy.isReadAllowed(raw)) {
+      throw new Error('MinerU cache directory is not allowed');
+    }
+
+    const resolved = path.resolve(raw);
+    let stat;
+    try {
+      stat = fs.statSync(resolved);
+    } catch {
+      throw new Error('MinerU cache directory is not a MinerU cache directory');
+    }
+    if (!stat.isDirectory()) {
+      throw new Error('MinerU cache directory is not a MinerU cache directory');
+    }
+    if (!CACHE_MARKER_FILE_NAMES.some((name) => fs.existsSync(path.join(resolved, name)))) {
+      throw new Error('MinerU cache directory is not a MinerU cache directory');
+    }
+
+    return resolved;
+  }
+
+  return {
+    async path_authorization_status() {
+      return buildPathAuthorizationStatus(context);
+    },
+
     async repair_mineru_cache_images({ directory }) {
       return repairMineruCacheImages({ directory: assertAllowedCacheDirectory(directory) });
     },
@@ -300,6 +417,29 @@ function createMineruCacheCommands(context) {
         directory: assertAllowedCacheDirectory(directory),
         success: success !== false,
       });
+    },
+
+    async read_mineru_asset_base64({ cacheDir, assetPath } = {}) {
+      const directory = assertReadableCacheDirectory(cacheDir);
+      const resolved = resolveMineruAssetPath(directory, assetPath);
+
+      if (!resolved.path) {
+        throw new Error(
+          resolved.reason === 'missing'
+            ? 'MinerU asset file is missing'
+            : 'Invalid MinerU asset path',
+        );
+      }
+      if (typeof pathPolicy?.isReadAllowed === 'function' && !pathPolicy.isReadAllowed(resolved.path)) {
+        throw new Error('Reading this path is not allowed');
+      }
+
+      const stat = await fsp.stat(resolved.path);
+      if (!stat.isFile()) throw new Error('Invalid MinerU asset path');
+      if (stat.size > MAX_MINERU_ASSET_BYTES) throw new Error('MinerU asset is too large');
+      if (stat.size <= 0) throw new Error('MinerU asset is empty');
+
+      return (await fsp.readFile(resolved.path)).toString('base64');
     },
   };
 }

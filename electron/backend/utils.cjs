@@ -67,9 +67,57 @@ async function writeJson(filePath, value) {
   await fsp.writeFile(filePath, JSON.stringify(value, null, 2), 'utf8');
 }
 
+const TRANSIENT_RENAME_CODES = new Set(['EPERM', 'EBUSY', 'EACCES']);
+
+function sleepSyncMilliseconds(milliseconds) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
+}
+
+// Windows MoveFileEx fails with EPERM/EBUSY while another process briefly holds
+// the destination open (antivirus, indexer, a concurrent reader). Retry a few
+// times instead of falling back to a non-atomic overwrite. Concurrent writers
+// on busy CI/Windows machines can hold the destination longer than 300ms, so
+// allow up to ~1.5s before surfacing the error.
+function renameSyncWithRetry(from, to, attempts = 60) {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      fs.renameSync(from, to);
+      return;
+    } catch (error) {
+      if (attempt + 1 >= attempts || !TRANSIENT_RENAME_CODES.has(error?.code)) throw error;
+      sleepSyncMilliseconds(25);
+    }
+  }
+}
+
+/**
+ * Atomic JSON write: write a sibling temp file, fsync it, then rename over the
+ * target. Readers see either the previous file or the complete new one; a crash
+ * or concurrent writer can no longer leave a truncated JSON document behind.
+ */
 function writeJsonSync(filePath, value) {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, JSON.stringify(value, null, 2), 'utf8');
+  const directory = path.dirname(filePath);
+  fs.mkdirSync(directory, { recursive: true });
+  const data = JSON.stringify(value, null, 2);
+  const tempPath = path.join(
+    directory,
+    `.${path.basename(filePath)}.${process.pid}.${crypto.randomBytes(6).toString('hex')}.tmp`,
+  );
+  let descriptor;
+  try {
+    descriptor = fs.openSync(tempPath, 'wx', 0o600);
+    fs.writeFileSync(descriptor, data, 'utf8');
+    fs.fsyncSync(descriptor);
+    fs.closeSync(descriptor);
+    descriptor = undefined;
+    renameSyncWithRetry(tempPath, filePath);
+  } catch (error) {
+    if (descriptor !== undefined) {
+      try { fs.closeSync(descriptor); } catch {}
+    }
+    try { fs.rmSync(tempPath, { force: true }); } catch {}
+    throw error;
+  }
 }
 
 async function pathExists(filePath) {

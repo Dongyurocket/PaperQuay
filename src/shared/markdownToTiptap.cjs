@@ -5,7 +5,7 @@ function parseMarkdownToTiptap(markdown, options = {}) {
   const notes = options.notes || [];
   const lines = String(markdown || '').replace(/\r\n?/g, '\n').split('\n');
   const refs = new Map();
-  const refHeading = lines.findIndex((line) => /^#{1,6}\s+参考文献\s*$/.test(line));
+  const refHeading = lines.findIndex((line) => /^#{1,6}\s+(?:参考文献|References)\s*$/i.test(line));
   if (refHeading >= 0) {
     for (const line of lines.slice(refHeading + 1)) {
       if (!line.trim()) continue;

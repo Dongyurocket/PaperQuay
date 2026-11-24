@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -20,6 +20,52 @@ function cleanupDir(dir: string) {
 
 function setup(isAppRunning: () => boolean | null = () => false) {
   const dir = mkdtempSync(path.join(tmpdir(), 'paperquay-mcp-notes-test-'));
+  // 笔记目标校验要求 paper 真实存在；为既有 paperId 用例建立最小文库。
+  const { createLibraryStore } = require('../electron/backend/libraryStore.cjs');
+  const libraryStore = createLibraryStore({
+    dataDir: dir,
+    libraryDatabasePath: path.join(dir, 'paperquay-library.sqlite'),
+  });
+  const library = libraryStore.load();
+  const timestamp = Date.now();
+  for (const [paperId, title] of [['paper-1', 'Paper One'], ['paper-2', 'Paper Two']]) {
+    library.papers.push({
+      id: paperId,
+      title,
+      titleZh: null,
+      year: '2024',
+      publication: null,
+      doi: null,
+      url: null,
+      abstractText: null,
+      itemType: 'journalArticle',
+      publisher: null,
+      institution: null,
+      reportNumber: null,
+      volume: null,
+      issue: null,
+      pages: null,
+      isbn: null,
+      issn: null,
+      keywords: [],
+      importedAt: timestamp,
+      updatedAt: timestamp,
+      lastReadAt: null,
+      readingProgress: 0,
+      isFavorite: false,
+      userNote: null,
+      aiSummary: null,
+      citation: null,
+      source: 'local',
+      sortOrder: 0,
+      authors: [],
+      tags: [],
+      categoryIds: [],
+      attachments: [],
+    });
+  }
+  libraryStore.save(library);
+  libraryStore.close();
   const service = new PaperQuayKnowledgeService({ dataDir: dir, isAppRunning });
   return { dir, service };
 }
@@ -225,6 +271,71 @@ test('delete_note 软删除并移出 FTS 与搜索', () => {
     assert.equal(found.total, 0);
 
     assert.throws(() => service.deleteNote({ noteId: created.noteId }), /does not exist/);
+  } finally {
+    cleanupDir(dir);
+  }
+});
+
+test('list_note_tags/list_note_folders 在 notes 库缺失时返回空结果且不创建数据库', () => {
+  const { dir, service } = setup();
+  const notesDbPath = path.join(dir, 'paperquay-notes.sqlite');
+  try {
+    assert.equal(existsSync(notesDbPath), false);
+    assert.deepEqual(service.listNoteTags(), { tags: [], total: 0 });
+    assert.deepEqual(service.listNoteTags({ paperId: 'paper-1' }), { tags: [], total: 0 });
+    assert.deepEqual(service.listNoteFolders(), { folders: [], total: 0 });
+    assert.equal(existsSync(notesDbPath), false);
+    assert.equal(existsSync(`${notesDbPath}-wal`), false);
+    assert.equal(existsSync(`${notesDbPath}-shm`), false);
+  } finally {
+    cleanupDir(dir);
+  }
+});
+
+test('create_note/update_note 在校验事务内拒绝不存在的 paper 与 folder', () => {
+  const { dir, service } = setup();
+  try {
+    assert.throws(
+      () => service.createNote({ title: 'bad paper', paperId: 'missing-paper' }),
+      (error: any) => error.code === 'PAPER_NOT_FOUND'
+        && /Paper does not exist: missing-paper/.test(error.message),
+    );
+    assert.throws(
+      () => service.createNote({ title: 'bad folder', folderId: 'missing-folder' }),
+      (error: any) => error.code === 'FOLDER_NOT_FOUND'
+        && /Folder does not exist: missing-folder/.test(error.message),
+    );
+    assert.equal(service.searchNotes({ query: 'bad' }).total, 0);
+
+    const globalNote = service.createNote({ title: 'global ok', paperId: 'global-notes' });
+    assert.equal(globalNote.note.paperId, 'global-notes');
+    const paperNote = service.createNote({ title: 'paper ok', paperId: 'paper-1' });
+    assert.equal(paperNote.note.paperId, 'paper-1');
+
+    const folder = service.createNoteFolder({ name: 'Valid folder' });
+    const inFolder = service.createNote({ title: 'folder ok', folderId: folder.folderId });
+    assert.equal(inFolder.note.folderId, folder.folderId);
+
+    assert.throws(
+      () => service.updateNote({ noteId: paperNote.noteId, folderId: 'missing-folder' }),
+      (error: any) => error.code === 'FOLDER_NOT_FOUND',
+    );
+    assert.equal(service.getNote({ noteId: paperNote.noteId }).note.folderId, null);
+  } finally {
+    cleanupDir(dir);
+  }
+});
+
+test('create_note rejects a paper target when the library database is missing', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'paperquay-mcp-notes-bare-'));
+  const service = new PaperQuayKnowledgeService({ dataDir: dir, isAppRunning: () => false });
+  try {
+    assert.throws(
+      () => service.createNote({ title: 'no library', paperId: 'paper-1' }),
+      (error: any) => error.code === 'PAPER_NOT_FOUND',
+    );
+    // global-notes 是唯一不需要文库目标存在的合法值。
+    assert.equal(service.createNote({ title: 'global' }).note.paperId, 'global-notes');
   } finally {
     cleanupDir(dir);
   }

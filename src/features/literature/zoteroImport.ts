@@ -1,11 +1,8 @@
 import type { ZoteroLibraryItem } from '../../types/reader';
+import { zoteroItemIdentity } from '../../shared/zoteroItemMetadata.cjs';
 
 export function zoteroItemImportIdentity(item: ZoteroLibraryItem): string {
-  return (
-    item.attachmentKey?.trim()
-    || item.localPdfPath?.trim()
-    || item.itemKey.trim()
-  );
+  return zoteroItemIdentity(item);
 }
 
 export function uniqueZoteroItems(items: ZoteroLibraryItem[]): ZoteroLibraryItem[] {

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createSelectionFilterGuard, type SelectionFilterSnapshot } from '../src/features/literature/selectionFilterGuard.ts';
 
 const initialSnapshot = (): SelectionFilterSnapshot => ({
-  categoryId: 'category A', search: '', filters: { source: 'all' }, mineruIdKey: '[]',
+  categoryId: 'category A', search: '', filters: { source: 'all' },
 });
 
 test('discard an in-flight select-all after the filter changes, even if it changes back', async () => {
@@ -25,13 +25,12 @@ test('discard an in-flight select-all after the filter changes, even if it chang
   assert.equal(guard.isCurrent(latest), true);
 });
 
-test('category, search, filter identity and MinerU IDs each invalidate a pending select-all', () => {
+test('category, search and filter identity each invalidate a pending select-all', () => {
   const initial = initialSnapshot();
   const changes: Partial<SelectionFilterSnapshot>[] = [
     { categoryId: null },
     { search: 'new search' },
     { filters: { source: 'all' } },
-    { mineruIdKey: '["parsed-paper"]' },
   ];
   for (const change of changes) {
     const guard = createSelectionFilterGuard(initial);
@@ -39,6 +38,15 @@ test('category, search, filter identity and MinerU IDs each invalidate a pending
     guard.update({ ...initial, ...change });
     assert.equal(guard.isCurrent(token), false, JSON.stringify(change));
   }
+});
+
+test('MinerU status discovery does not invalidate a pending select-all', () => {
+  const initial = initialSnapshot();
+  const guard = createSelectionFilterGuard(initial);
+  const token = guard.capture();
+  // 状态发现只更新 paperStatuses / mineruPaperIds，不改变用户筛选对象。
+  guard.update({ ...initial });
+  assert.equal(guard.isCurrent(token), true);
 });
 
 test('unrelated renders keep the snapshot valid and only the latest request may apply', () => {

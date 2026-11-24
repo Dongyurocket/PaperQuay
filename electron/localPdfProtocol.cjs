@@ -2,7 +2,7 @@ const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const path = require('node:path');
 const { Readable } = require('node:stream');
-const { app, protocol } = require('electron');
+const { protocol } = require('electron');
 const {
   PDFJS_ASSET_DIRS,
   resolvePdfJsAssetRoot,

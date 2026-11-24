@@ -86,7 +86,7 @@ function HeaderStageTabs({
           aria-label={tab.label}
           className={cn(
             'pq-nav-item !h-8 !min-w-8 gap-1.5 px-2 text-[11px] font-medium',
-            workspaceStage === tab.key && 'active !text-[var(--pq-accent)]',
+            workspaceStage === tab.key && 'active !text-[var(--pq-accent-strong)]',
           )}
         >
           {tab.icon}
@@ -131,7 +131,7 @@ function HeaderReadingModeTabs({
           aria-label={mode.label}
           className={cn(
             'pq-nav-item !h-8 !min-w-8 gap-1.5 px-2 text-[11px] font-medium disabled:cursor-not-allowed disabled:opacity-45',
-            readingViewMode === mode.key && 'active !text-[var(--pq-accent)]',
+            readingViewMode === mode.key && 'active !text-[var(--pq-accent-strong)]',
           )}
         >
           {mode.icon}

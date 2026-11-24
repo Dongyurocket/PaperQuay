@@ -50,13 +50,17 @@ test('native reader records open and scroll, then flushes on deactivation', asyn
   const oldWindow = globalThis.window;
   const windowStub = new EventTarget() as any;
   const requests: any[] = [];
+  const details: any[] = [];
   let updates = 0;
   windowStub.paperquay = { invoke: async (command: string, args: any) => {
     assert.equal(command, 'library_record_reading');
     requests.push(args.request);
     return true;
   } };
-  windowStub.addEventListener('paperquay:library-reading-updated', () => { updates += 1; });
+  windowStub.addEventListener('paperquay:library-reading-updated', (event: Event) => {
+    updates += 1;
+    details.push((event as CustomEvent).detail);
+  });
   Object.defineProperty(globalThis, 'window', { configurable: true, value: windowStub });
   const harness = new HookHarness();
   try {
@@ -77,6 +81,8 @@ test('native reader records open and scroll, then flushes on deactivation', asyn
     assert.equal(requests.length, 2);
     assert.equal(requests[1].readingProgress, 0.625);
     assert.equal(updates, 2);
+    assert.deepEqual(details[0], requests[0], 'reading event carries the recorded update for incremental refresh');
+    assert.deepEqual(details[1], requests[1]);
 
     harness.render({ ...options, document: { ...document, source: 'standalone' } });
     harness.render({ ...options, expectedWorkspaceId: 'native-library:other' });

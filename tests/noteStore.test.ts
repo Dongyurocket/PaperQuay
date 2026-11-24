@@ -19,6 +19,148 @@ function createStore() {
   return { dataDir, store };
 }
 
+test('listNotes and listAllNotes use id as a deterministic tiebreaker', () => {
+  const { dataDir, store } = createStore();
+
+  try {
+    for (const id of ['note-c', 'note-a', 'note-b']) {
+      store.createNote({ id, title: id, content: id });
+    }
+
+    // 强制三条笔记的排序键完全相同；没有 id tiebreaker 时 SQLite 会按 rowid 返回。
+    const db = new DatabaseSync(path.join(dataDir, 'paperquay-notes.sqlite'));
+    try {
+      db.prepare('UPDATE notes SET is_pinned = 0, updated_at = 1, created_at = 1').run();
+    } finally {
+      db.close();
+    }
+
+    assert.deepEqual(store.listNotes().map((note: any) => note.id), ['note-a', 'note-b', 'note-c']);
+    assert.deepEqual(store.listAllNotes().map((note: any) => note.id), ['note-a', 'note-b', 'note-c']);
+  } finally {
+    store.close();
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('updateNote validates a changed linkedPaperId like paperId', () => {
+  const { dataDir, store } = createStore();
+
+  try {
+    const note = store.createNote({ id: 'note-linked', title: 'Linked', content: '' });
+    const assertPaperExists = (paperId: string) => paperId === 'paper-1';
+
+    assert.throws(
+      () => store.updateNote({
+        id: note.id,
+        patch: { linkedPaperId: 'missing-paper' },
+        assertPaperExists,
+      }),
+      (error: any) => error?.code === 'PAPER_NOT_FOUND' && /Paper does not exist/.test(error.message),
+    );
+
+    const updated = store.updateNote({
+      id: note.id,
+      patch: { linkedPaperId: 'paper-1' },
+      assertPaperExists,
+    });
+    assert.equal(updated.linkedPaperId, 'paper-1');
+  } finally {
+    store.close();
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('createNote validates linkedPaperId and rolls back when the paper is missing', () => {
+  const { dataDir, store } = createStore();
+
+  try {
+    const assertPaperExists = (paperId: string) => paperId === 'paper-1';
+
+    // 不存在的 linkedPaperId 与 paperId 同等校验：带 code 拒绝并整体回滚。
+    assert.throws(
+      () => store.createNote({
+        id: 'note-orphan-linked',
+        title: '指向不存在文献',
+        content: '正文',
+        linkedPaperId: 'missing-paper',
+        assertPaperExists,
+      }),
+      (error: any) => error?.code === 'PAPER_NOT_FOUND'
+        && /Paper does not exist: missing-paper/.test(error.message),
+    );
+    assert.equal(store.getNote({ id: 'note-orphan-linked' }), null);
+    assert.equal(store.listNotes().length, 0);
+
+    const created = store.createNote({
+      id: 'note-valid-linked',
+      title: '指向存在的文献',
+      content: '正文',
+      linkedPaperId: 'paper-1',
+      assertPaperExists,
+    });
+    assert.equal(created.linkedPaperId, 'paper-1');
+    assert.equal(store.getNote({ id: 'note-valid-linked' }).linkedPaperId, 'paper-1');
+  } finally {
+    store.close();
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('createNote keeps an empty title instead of persisting a localized sentinel', () => {
+  const { dataDir, store } = createStore();
+
+  try {
+    const note = store.createNote({ id: 'note-untitled', content: '正文', tags: [] });
+    assert.equal(note.title, '');
+    assert.equal(store.getNote({ id: 'note-untitled' }).title, '');
+  } finally {
+    store.close();
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('createNote validates linkedPaperId independently when paperId is already valid', () => {
+  const { dataDir, store } = createStore();
+
+  try {
+    const assertPaperExists = (paperId: string) => paperId === 'paper-1';
+
+    // paperId 合法时，缺省回退不会再拿 linkedPaperId 当 paperId 校验；
+    // linkedPaperId 必须被单独校验，否则会落库一条指向不存在文献的关联。
+    assert.throws(
+      () => store.createNote({
+        id: 'note-linked-orphan-with-paper',
+        title: '合法文献 + 非法关联',
+        content: '正文',
+        paperId: 'paper-1',
+        linkedPaperId: 'missing-paper',
+        assertPaperExists,
+      }),
+      (error: any) => error?.code === 'PAPER_NOT_FOUND'
+        && /^PAPER_NOT_FOUND: /.test(error.message)
+        && /Paper does not exist: missing-paper/.test(error.message),
+    );
+    assert.equal(store.getNote({ id: 'note-linked-orphan-with-paper' }), null);
+    assert.equal(store.listNotes().length, 0);
+
+    const created = store.createNote({
+      id: 'note-linked-valid-with-paper',
+      title: '合法文献 + 合法关联',
+      content: '正文',
+      paperId: 'paper-1',
+      linkedPaperId: 'paper-1',
+      assertPaperExists,
+    });
+    assert.equal(created.paperId, 'paper-1');
+    assert.equal(created.linkedPaperId, 'paper-1');
+    assert.equal(store.getNote({ id: 'note-linked-valid-with-paper' }).linkedPaperId, 'paper-1');
+  } finally {
+    store.close();
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
 test('anchors keep blockId/pageIndex across a save and reload', () => {
   const { dataDir, store } = createStore();
 
@@ -257,6 +399,57 @@ test('wiki links remain ID-stable across target renames and re-saves', () => {
     store.updateNote({ id: target.id, patch: { title: '新标题' } });
     const afterCycle = store.getNote({ id: source.id });
     assert.deepEqual(afterCycle.linkedNoteIds, [target.id]);
+  } finally {
+    store.close();
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('note create/update validate paper and folder targets inside the write transaction', () => {
+  const { dataDir, store } = createStore();
+
+  try {
+    assert.throws(
+      () => store.createNote({ title: '孤儿', content: '', folderId: 'missing-folder' }),
+      (error: any) => error.code === 'FOLDER_NOT_FOUND' && /Folder does not exist: missing-folder/.test(error.message),
+    );
+    assert.throws(
+      () => store.createNote({ title: 'MCP 目标', paperId: 'paper-missing', assertPaperExists: () => false }),
+      (error: any) => error.code === 'PAPER_NOT_FOUND' && /Paper does not exist: paper-missing/.test(error.message),
+    );
+    // 校验失败必须整体回滚，不能留下笔记行。
+    assert.equal(store.listNotes().length, 0);
+
+    const globalNote = store.createNote({
+      title: 'global',
+      paperId: 'global-notes',
+      assertPaperExists: () => false,
+    });
+    assert.equal(globalNote.paperId, 'global-notes');
+
+    const paperNote = store.createNote({
+      title: 'paper',
+      paperId: 'paper-1',
+      assertPaperExists: (paperId: string) => paperId === 'paper-1',
+    });
+    assert.equal(paperNote.paperId, 'paper-1');
+
+    const folder = store.createFolder({ name: 'Folder' });
+    const inFolder = store.createNote({ title: 'folder note', content: '', folderId: folder.id });
+    assert.equal(inFolder.folderId, folder.id);
+
+    assert.throws(
+      () => store.updateNote({ id: paperNote.id, patch: { folderId: 'missing-folder' } }),
+      (error: any) => error.code === 'FOLDER_NOT_FOUND',
+    );
+    assert.equal(store.getNote({ id: paperNote.id }).folderId, null);
+
+    // 历史数据可能已经绑定了不存在的 folder；不改 folder 的更新不应被它阻塞。
+    const rawDb = new DatabaseSync(path.join(dataDir, 'paperquay-notes.sqlite'));
+    rawDb.prepare('UPDATE notes SET folder_id = ? WHERE id = ?').run('legacy-folder', paperNote.id);
+    rawDb.close();
+    const updated = store.updateNote({ id: paperNote.id, patch: { title: 'still editable' } });
+    assert.equal(updated.title, 'still editable');
   } finally {
     store.close();
     rmSync(dataDir, { recursive: true, force: true });

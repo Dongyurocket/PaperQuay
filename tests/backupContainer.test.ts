@@ -27,6 +27,7 @@ const {
   DATA_START,
   extractBackupPackage,
   inspectBackupPackage,
+  publishExtractedFile,
   validateEntryPath,
   verifyBackupPackage,
   writeBackupPackage,
@@ -359,6 +360,51 @@ test('rejects overwrite by default, checks cancellation at entry boundaries, and
       manifest: createManifest(),
       entries: [],
     }), { code: 'OUTPUT_EXISTS' });
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('publishExtractedFile falls back to rename when the filesystem rejects hard links', async () => {
+  const directory = createTempDir('paperquay-publish-link-');
+
+  try {
+    const temporaryPath = path.join(directory, 'entry.publish-tmp');
+    const outputPath = path.join(directory, 'entry.bin');
+    writeFileSync(temporaryPath, 'payload');
+
+    const mode = await publishExtractedFile(temporaryPath, outputPath, {
+      link: async () => {
+        throw Object.assign(new Error('operation not permitted'), { code: 'EPERM' });
+      },
+    });
+
+    assert.equal(mode, 'rename');
+    assert.equal(readFileSync(outputPath, 'utf8'), 'payload');
+    assert.equal(existsSync(temporaryPath), false);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('publishExtractedFile does not hide real destination conflicts', async () => {
+  const directory = createTempDir('paperquay-publish-conflict-');
+
+  try {
+    const temporaryPath = path.join(directory, 'entry.publish-tmp');
+    const outputPath = path.join(directory, 'entry.bin');
+    writeFileSync(temporaryPath, 'payload');
+
+    await assert.rejects(
+      () => publishExtractedFile(temporaryPath, outputPath, {
+        link: async () => {
+          throw Object.assign(new Error('file exists'), { code: 'EEXIST' });
+        },
+      }),
+      { code: 'EEXIST' },
+    );
+    assert.equal(existsSync(outputPath), false);
+    assert.equal(existsSync(temporaryPath), true);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

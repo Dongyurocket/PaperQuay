@@ -1,4 +1,4 @@
-import type { Note, NoteFolder, UpdateNoteRequest } from '../../types/notes';
+import type { Note, UpdateNoteRequest } from '../../types/notes';
 
 export type NoteListSort = 'updatedAt' | 'createdAt' | 'title';
 

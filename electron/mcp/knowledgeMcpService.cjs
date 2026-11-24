@@ -4,15 +4,35 @@ const os = require('node:os');
 const sqliteVec = require('sqlite-vec');
 const { DatabaseSync } = require('../backend/nodeSqlite.cjs');
 const { embedTexts } = require('../backend/utils.cjs');
-const { rrfFuse } = require('../backend/ragStore.cjs');
 const {
   buildFtsMatchQuery,
-  extractFormulaNumbers,
-  extractReferenceNumbers,
-  extractShortSymbolTokens,
-  scoreChunkByExactQuerySignals,
-  stripRagQueryTemplateNoise,
 } = require('../../src/shared/ragQueryUtils.cjs');
+const {
+  buildEmbeddingModelKey,
+  resolveEmbeddingConfigFromDocument,
+} = require('../../src/shared/embeddingConfig.cjs');
+const {
+  rrfFuse,
+  ragResultKey,
+  searchFtsChunks,
+  searchExactSignalChunks,
+  mergeRankedRows,
+  searchVectorChunks,
+  searchLikeChunks,
+  assembleNeighborSnippets,
+} = require('../shared/ragSearch.cjs');
+const {
+  applyPaperMetadataPatch,
+  buildImportedAttachmentFileName,
+  buildImportedPaperRecord,
+  findDuplicatePaper,
+} = require('../shared/libraryDomain.cjs');
+const {
+  buildZoteroItemMetadata,
+  zoteroItemIdentity,
+  buildZoteroImportPlan,
+  zoteroCategoryPathKey,
+} = require('../shared/zoteroDomain.cjs');
 const {
   detectLocalZoteroDataDir,
   listLocalCollections,
@@ -22,13 +42,17 @@ const {
   searchLocalLibraryItems,
 } = require('../backend/zoteroLocal.cjs');
 const { execFileSync } = require('node:child_process');
-const { createLibraryStore, normalizeAuthor, normalizeTag } = require('../backend/libraryStore.cjs');
+const { createLibraryStore } = require('../backend/libraryStore.cjs');
 const {
-  canonicalizeBcp47Language,
+  getPaperFromDb,
+  findAttachmentsByStoredPathInDb,
+  loadLibrarySettingsFromDb,
+} = require('../backend/libraryDatabaseStore.cjs');
+const {
   normalizeCitationKey,
 } = require('../backend/metadataValidation.cjs');
 const { UPDATABLE_PAPER_FIELDS } = require('../backend/paperMetadataFields.cjs');
-const { createNoteStore } = require('../backend/noteStore.cjs');
+const { createNoteStore, queryNoteTags, queryNoteFolders, extractNoteAnchorIds } = require('../backend/noteStore.cjs');
 const { parseMarkdownToTiptap } = require('../../src/shared/markdownToTiptap.cjs');
 const {
   buildMineruCachePathCandidates,
@@ -42,9 +66,16 @@ const {
   addTranslatedPdfAttachment,
   removeTranslatedPdfAttachment,
 } = require('../backend/translatedPdfAttachments.cjs');
+const { resolveMineruAssetPath: resolveMineruAssetPathShared } = require('../backend/mineruAssetPaths.cjs');
 
 function cleanString(value) {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function normalizeRetrievalMode(mode) {
+  const value = cleanString(mode).toLowerCase();
+  if (value === 'hybrid' || value === 'keyword') return value;
+  return 'auto';
 }
 
 function isVersionRequiredWrite(guard) {
@@ -113,48 +144,6 @@ function readExpectedVersions(value, paperIds) {
     return map;
   }
   throw new Error('expectedUpdatedAt must be a number or an object mapping paperId to updatedAt');
-}
-
-/** 应用 update_paper 的字段白名单；未知字段在进入存储前已拒绝。 */
-function applyPaperMetadataPatch(paper, patch) {
-  const specialFields = ['keywords', 'authors', 'tags', 'isFavorite'];
-
-  for (const key of UPDATABLE_PAPER_FIELDS) {
-    if (patch[key] === undefined || key === 'authorDetails') continue;
-    if (key === 'language') {
-      if (patch.language === null || patch.language === '') {
-        paper.language = null;
-      } else {
-        const normalized = canonicalizeBcp47Language(patch.language);
-        if (!normalized) throw new Error(`无效的 BCP 47 语言标签：${patch.language}`);
-        paper.language = normalized;
-      }
-    } else if (key === 'citationKey') {
-      paper.citationKey = normalizeCitationKey(patch.citationKey);
-    } else {
-      paper[key] = patch[key];
-    }
-  }
-  if (patch.keywords !== undefined) {
-    if (!Array.isArray(patch.keywords)) throw new Error('keywords must be an array of strings');
-    paper.keywords = patch.keywords.map(cleanString).filter(Boolean);
-  }
-  if (patch.authorDetails !== undefined) {
-    if (!Array.isArray(patch.authorDetails)) throw new Error('authorDetails must be an array of author objects');
-    paper.authors = patch.authorDetails
-      .map((author, index) => normalizeAuthor(author, index))
-      .filter((author) => author.name);
-  } else if (patch.authors !== undefined) {
-    if (!Array.isArray(patch.authors)) throw new Error('authors must be an array of author names');
-    paper.authors = patch.authors.map(cleanString).filter(Boolean).map(normalizeAuthor);
-  }
-  if (patch.tags !== undefined) {
-    if (!Array.isArray(patch.tags)) throw new Error('tags must be an array of tag names');
-    paper.tags = patch.tags.map(cleanString).filter(Boolean).map(normalizeTag);
-  }
-  if (patch.isFavorite != null) paper.isFavorite = Boolean(patch.isFavorite);
-
-  return paper;
 }
 
 /**
@@ -341,6 +330,16 @@ function blockAssetPath(block) {
   return '';
 }
 
+/**
+ * content_list.json is external MinerU output: its asset reference must stay
+ * inside the cache directory that owns the JSON. Reject absolute paths, UNC,
+ * drive letters, alternate data streams and `..` traversal before touching the
+ * filesystem, then verify the real path so a symlink cannot escape the cache.
+ */
+function resolveMineruFigureAsset(cacheDir, assetPath) {
+  return resolveMineruAssetPathShared(cacheDir, assetPath);
+}
+
 function imageMimeType(filePath) {
   const extension = path.extname(filePath).toLowerCase();
   if (extension === '.png') return 'image/png';
@@ -390,26 +389,6 @@ function slimNote(note) {
     createdAt: note.createdAt,
     updatedAt: note.updatedAt,
   };
-}
-
-function buildPaperAuthors(item) {
-  const detailedAuthors = Array.isArray(item.authorDetails)
-    ? item.authorDetails
-    : Array.isArray(item.authors) ? item.authors : [];
-  if (detailedAuthors.length > 0) {
-    return detailedAuthors
-      .map((author, index) => normalizeAuthor(author, index))
-      .filter((author) => author.name);
-  }
-  const creators = cleanString(item.creators);
-  if (!creators) return [];
-  return creators.split(/,\s*|;\s*|\s+and\s+/).map((name, index) => ({
-    id: id('auth'),
-    name: cleanString(name),
-    givenName: null,
-    familyName: null,
-    sortOrder: index,
-  })).filter((a) => a.name);
 }
 
 function resolveDefaultDataDir() {
@@ -505,10 +484,6 @@ function openReadOnlyDb(databasePath, { allowExtension = false } = {}) {
   }
 }
 
-function escapeFtsQuery(query) {
-  return buildFtsMatchQuery(query);
-}
-
 function getTableColumns(db, tableName) {
   try {
     return new Set(db.prepare(`PRAGMA table_info(${tableName})`).all().map((c) => c.name));
@@ -517,151 +492,7 @@ function getTableColumns(db, tableName) {
   }
 }
 
-function isBridgeableNeighborText(text) {
-  const trimmed = cleanString(text);
-  if (!trimmed) return false;
-  return trimmed.length < 120 || /\\tag\{|\$\$/.test(trimmed);
-}
-
-// 命中后补上同一代次、同一章节的前后邻接切片；遇到短图注/连续公式时适当跨步，避免被碎片挡断。
-function snippetWithNeighbors(ragDb, row) {
-  const text = typeof row?.text === 'string' ? row.text : '';
-  const columns = getTableColumns(ragDb, 'rag_chunks');
-  if (!columns.has('chunk_index') || !row?.paperId || !row?.sourceType || !row?.chunkId) {
-    return text;
-  }
-
-  const hasGeneration = columns.has('generation_id');
-  const hasSection = columns.has('section_id');
-  const current = ragDb.prepare(`
-    SELECT chunk_index AS chunkIndex,
-           ${hasGeneration ? 'generation_id' : "''"} AS generationId,
-           ${hasSection ? 'section_id' : 'NULL'} AS sectionId
-    FROM rag_chunks
-    WHERE document_key = ? AND source_type = ? AND chunk_id = ?
-  `).get(row.paperId, row.sourceType, row.chunkId);
-
-  if (!current) {
-    return text;
-  }
-
-  const hitChunkIndex = Number(current.chunkIndex);
-  const params = [row.paperId, row.sourceType, hitChunkIndex - 3, hitChunkIndex + 4];
-  let generationClause = '';
-  let sectionClause = '';
-  if (hasGeneration) {
-    generationClause = 'AND generation_id = ?';
-    params.push(current.generationId ?? '');
-  }
-  if (hasSection && current.sectionId) {
-    sectionClause = 'AND section_id = ?';
-    params.push(current.sectionId);
-  }
-
-  const neighbors = ragDb.prepare(`
-    SELECT chunk_index AS chunkIndex, text
-    FROM rag_chunks
-    WHERE document_key = ? AND source_type = ?
-      AND chunk_index BETWEEN ? AND ?
-      ${generationClause}
-      ${sectionClause}
-    ORDER BY chunk_index
-  `).all(...params);
-
-  const hitPos = neighbors.findIndex((item) => Number(item.chunkIndex) === hitChunkIndex);
-  if (hitPos < 0) {
-    const combined = neighbors.map((item) => item.text).filter((item) => item).join('\n\n');
-    return combined || text;
-  }
-
-  const picked = [neighbors[hitPos]];
-  let totalChars = (neighbors[hitPos].text || '').length;
-
-  for (let i = hitPos - 1; i >= 0; i -= 1) {
-    const candidate = neighbors[i];
-    const dist = hitPos - i;
-    const prevAdded = picked[0];
-    if (dist > 1 && !isBridgeableNeighborText(prevAdded?.text) && !isBridgeableNeighborText(candidate.text)) {
-      break;
-    }
-    const nextLen = (candidate.text || '').length;
-    if (dist > 1 && totalChars + nextLen > 1600) {
-      break;
-    }
-    picked.unshift(candidate);
-    totalChars += nextLen;
-    if (dist === 1 && !isBridgeableNeighborText(candidate.text) && !isBridgeableNeighborText(neighbors[hitPos].text)) {
-      break;
-    }
-  }
-
-  for (let i = hitPos + 1; i < neighbors.length; i += 1) {
-    const candidate = neighbors[i];
-    const dist = i - hitPos;
-    const prevAdded = picked[picked.length - 1];
-    if (dist > 1 && !isBridgeableNeighborText(prevAdded?.text) && !isBridgeableNeighborText(candidate.text)) {
-      break;
-    }
-    const nextLen = (candidate.text || '').length;
-    if (dist > 1 && totalChars + nextLen > 1600) {
-      break;
-    }
-    picked.push(candidate);
-    totalChars += nextLen;
-    if (dist === 1 && !isBridgeableNeighborText(candidate.text) && !isBridgeableNeighborText(neighbors[hitPos].text)) {
-      break;
-    }
-  }
-
-  const combined = picked.map((item) => item.text).filter((item) => item).join('\n\n');
-  return combined || text;
-}
-
 // ---- 向量混合检索（与桌面端 ragStore.cjs 的混合检索逻辑对齐） ----
-
-// 与 src/services/rag.ts 的 normalizeBaseUrl 保持一致，用于比对 embedding_model_key。
-function normalizeEmbeddingBaseUrl(baseUrl) {
-  const trimmed = cleanString(baseUrl);
-  if (!trimmed) return '';
-
-  const normalized = trimmed
-    .replace(/\/embeddings\/?$/i, '')
-    .replace(/\/+$/, '');
-
-  if (/\/v\d+$/i.test(normalized)) {
-    return normalized;
-  }
-
-  return `${normalized}/v1`;
-}
-
-// 与 src/services/rag.ts 的 buildRagEmbeddingModelKey 保持一致。
-function buildEmbeddingModelKey(config) {
-  return `${normalizeEmbeddingBaseUrl(config.baseUrl)}::${cleanString(config.model)}::${config.dimensions ?? 'default'}`;
-}
-
-// 与 ragStore.cjs 的 vectorTableName 保持一致。
-function vectorTableName(dimension) {
-  return `rag_vec_${dimension}`;
-}
-
-function toFloat32Array(vector) {
-  const output = new Float32Array(vector.length);
-  for (let index = 0; index < vector.length; index += 1) {
-    output[index] = Number(vector[index]);
-  }
-  return output;
-}
-
-function normalizeRetrievalMode(mode) {
-  const value = cleanString(mode).toLowerCase();
-  if (value === 'hybrid' || value === 'keyword') return value;
-  return 'auto';
-}
-
-function ragResultKey(row) {
-  return JSON.stringify([row.paperId, row.sourceType, row.chunkId]);
-}
 
 // ---- 写工具运行护栏 ----
 // 桌面应用将文献库缓存在内存中，且 store.save() 是全量重写：应用运行时的任何保存
@@ -727,10 +558,53 @@ class PaperQuayKnowledgeService {
         if (markerState !== false) return markerState;
         return detectDesktopAppRunning();
       };
+    // 测试可注入 store 工厂，验证 library store 只创建一次并被复用。
+    this.libraryStoreFactory = typeof options.libraryStoreFactory === 'function'
+      ? options.libraryStoreFactory
+      : createLibraryStore;
+    // 懒创建的进程级 library store：跨 MCP 调用复用，服务关闭时释放。
+    this.libraryStore = null;
+    // Zotero 读取可在测试中注入，默认走本机 Zotero SQLite 只读快照。
+    this.zotero = {
+      detectLocalZoteroDataDir,
+      listLocalCollections,
+      listLocalCollectionItems,
+      listLocalLibraryItems,
+      getLocalItemsByKeys,
+      searchLocalLibraryItems,
+      ...(options.zotero && typeof options.zotero === 'object' ? options.zotero : {}),
+    };
   }
 
   getLibraryDb() {
     return openReadOnlyDb(this.appPaths.libraryDatabasePath);
+  }
+
+  /**
+   * 懒创建并复用同一个 library store。此前每个工具调用都 createLibraryStore()，
+   * 既重复打开/迁移数据库，也有路径忘记 close() 泄漏句柄。
+   * MCP 宿主进程退出时应调用 close()/dispose()。
+   */
+  getLibraryStore() {
+    if (!this.libraryStore) {
+      this.libraryStore = this.libraryStoreFactory(this.appPaths);
+    }
+    return this.libraryStore;
+  }
+
+  close() {
+    if (this.libraryStore) {
+      try {
+        this.libraryStore.close();
+      } catch {
+        // 关闭幂等：已关闭/半初始化的 store 不阻塞退出。
+      }
+      this.libraryStore = null;
+    }
+  }
+
+  dispose() {
+    this.close();
   }
 
   getRagDb({ withVec = false } = {}) {
@@ -739,6 +613,20 @@ class PaperQuayKnowledgeService {
 
   getNotesDb() {
     return openReadOnlyDb(this.appPaths.notesDatabasePath);
+  }
+
+  /** 笔记写入目标校验：只读查询文库，库缺失即视为 paper 不存在。 */
+  paperExists(paperId) {
+    const db = this.getLibraryDb();
+    if (!db) return false;
+    try {
+      return Boolean(db.prepare('SELECT 1 FROM papers WHERE id = ?').get(cleanString(paperId)));
+    } catch {
+      // 旧库/半初始化库没有 papers 表时同样视为目标不存在。
+      return false;
+    } finally {
+      db.close();
+    }
   }
 
   getExcludedPaperIds() {
@@ -822,11 +710,12 @@ class PaperQuayKnowledgeService {
           OR lower(COALESCE(p.abstract_text, '')) LIKE ?
           OR p.id IN (SELECT paper_id FROM authors WHERE lower(name) LIKE ?)
           OR p.id IN (SELECT paper_id FROM paper_keywords WHERE lower(keyword) LIKE ?)
+          OR p.id IN (SELECT paper_id FROM tags WHERE lower(name) LIKE ?)
         )`);
         const pattern = `%${cleanQuery}%`;
         params.push(pattern);
         if (paperCols.has('title_zh')) params.push(pattern);
-        params.push(pattern, pattern, pattern, pattern, pattern);
+        params.push(pattern, pattern, pattern, pattern, pattern, pattern);
       }
 
       const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -1002,19 +891,13 @@ class PaperQuayKnowledgeService {
       const raw = JSON.parse(fs.readFileSync(this.appPaths.configPath, 'utf8'));
       const settings = raw?.settings ?? {};
       const secrets = resolveReaderConfigSecrets(raw, this.appPaths) ?? {};
-      const baseUrl = normalizeEmbeddingBaseUrl(settings.embeddingBaseUrl);
-      const model = cleanString(settings.embeddingModel);
-      const apiKey = cleanString(secrets.embeddingApiKey);
 
-      if (!baseUrl || !model) {
-        return null;
-      }
-
-      const dimensions = Number.isInteger(settings.embeddingDimensions) && settings.embeddingDimensions > 0
-        ? settings.embeddingDimensions
-        : null;
-
-      return { baseUrl, model, dimensions, apiKey, timeoutSeconds: 60 };
+      // MCP 允许 apiKey 为空（模型键只取决于 baseUrl/model/dimensions），
+      // 默认超时保持 60s，但用户在设置中显式配置时以设置为准。
+      return resolveEmbeddingConfigFromDocument({ settings, secrets }, {
+        requireApiKey: false,
+        defaultTimeoutSeconds: 60,
+      });
     } catch {
       return null;
     }
@@ -1056,49 +939,20 @@ class PaperQuayKnowledgeService {
     return { dimension: null, modelKeyMatched: false };
   }
 
+  // 单条 KNN 查询（可按 document_key/source_type 约束），不再按索引源逐篇查询。
+  // 保留既有 `{ rows, truncated }` 返回契约，便于调用方/测试覆盖。
   retrieveVectorChunks(ragDb, { queryVector, dimension, modelKey, paperId, candidateLimit, excludedPaperIds }) {
-    const table = vectorTableName(dimension);
-    const queryVec = toFloat32Array(queryVector);
-    const sources = ragDb.prepare(`
-      SELECT document_key, source_type FROM rag_indexes
-      WHERE status = 'ready' AND embedding_dimension = ? AND embedding_model_key = ?
-        AND source_type IN ('mineru-markdown', 'pdf-text')
-        AND (? = '' OR document_key = ?)
-    `).all(dimension, modelKey, paperId, paperId)
-      .filter((source) => !excludedPaperIds?.has(source.document_key));
-
-    const search = ragDb.prepare(`
-      SELECT
-        c.document_key AS paperId,
-        c.chunk_id AS chunkId,
-        c.source_type AS sourceType,
-        c.page_index AS pageIndex,
-        c.block_id AS blockId,
-        c.text,
-        v.distance
-      FROM ${table} v
-      JOIN rag_chunks c ON c.id = v.rowid
-      WHERE v.embedding MATCH ?
-        AND k = ?
-        AND v.document_key = ?
-        AND v.source_type = ?
-      ORDER BY v.distance
-    `);
-
-    const rows = sources.flatMap((source) =>
-      search.all(queryVec, candidateLimit, source.document_key, source.source_type));
-    return {
-      rows: rows.map((row) => ({
-        paperId: row.paperId,
-        chunkId: row.chunkId,
-        sourceType: row.sourceType,
-        pageIndex: row.pageIndex ?? null,
-        blockId: row.blockId ?? null,
-        text: row.text,
-        score: Number(row.distance) || 0,
-      })).sort((left, right) => left.score - right.score).slice(0, candidateLimit),
-      truncated: false,
-    };
+    const rows = searchVectorChunks(ragDb, {
+      queryVector,
+      dimension,
+      limit: candidateLimit,
+      documentKey: paperId || null,
+      sourceType: null,
+      modelKey,
+      excludedDocumentKeys: excludedPaperIds,
+      requireReady: true,
+    });
+    return { rows, truncated: false };
   }
 
   async embedQuery(queryText, config) {
@@ -1143,114 +997,42 @@ class PaperQuayKnowledgeService {
       const safeLimit = Math.max(1, Math.min(30, Number(limit) || 8));
       const candidateLimit = Math.min(100, Math.max(safeLimit, safeLimit * 2));
       const hasIndexStatus = getTableColumns(ragDb, 'rag_indexes').has('status');
-      const readySource = "EXISTS (SELECT 1 FROM rag_indexes i WHERE i.document_key = c.document_key AND i.source_type = c.source_type AND i.status = 'ready')";
+      const readyMode = hasIndexStatus ? 'exists' : 'none';
       const targetPaperId = cleanString(paperId);
       let excludedPaperIds = this.getExcludedPaperIds();
-      const ftsQuery = escapeFtsQuery(cleanQuery);
+      const matchQuery = buildFtsMatchQuery(cleanQuery);
+      const channelLimit = wantsHybrid ? candidateLimit : safeLimit;
       let warning;
       let embeddingModel;
       let vectorExecuted = false;
 
-      const toResult = (row, channels) => ({
-        paperId: row.paperId,
-        paperTitle: paperTitles.get(row.paperId) || row.paperId,
-        pageIndex: row.pageIndex !== null && row.pageIndex !== undefined ? Number(row.pageIndex) : null,
-        pageNumber: row.pageIndex !== null && row.pageIndex !== undefined ? Number(row.pageIndex) + 1 : null,
-        blockId: row.blockId || null,
-        sourceType: row.sourceType,
-        snippet: snippetWithNeighbors(ragDb, row),
-        score: row.score,
-        channels,
-      });
-
-      // 1. FTS5 全文搜索（关键词通道）+ 单篇范围精确公式/文献信号补召回
+      // 1. FTS5 全文搜索（关键词通道）+ 单篇范围精确公式/文献信号补召回。
       let ftsRows = [];
-      if (ftsQuery) {
-        try {
-          const conditions = ['rag_chunks_fts MATCH ?', "c.source_type != 'note'"];
-          if (hasIndexStatus) conditions.push(readySource);
-          const params = [ftsQuery];
-
-          if (excludedPaperIds.size) {
-            conditions.push('c.document_key NOT IN (SELECT value FROM json_each(?))');
-            params.push(JSON.stringify([...excludedPaperIds]));
-          }
-
-          if (targetPaperId) {
-            conditions.push('c.document_key = ?');
-            params.push(targetPaperId);
-          }
-
-          params.push(wantsHybrid ? candidateLimit : safeLimit);
-
-          const ftsSql = `
-            SELECT
-              c.document_key AS paperId,
-              c.chunk_id AS chunkId,
-              c.source_type AS sourceType,
-              c.page_index AS pageIndex,
-              c.block_id AS blockId,
-              c.text,
-              bm25(rag_chunks_fts) AS rank
-            FROM rag_chunks_fts
-            JOIN rag_chunks c ON c.id = rag_chunks_fts.rowid
-            WHERE ${conditions.join(' AND ')}
-            ORDER BY rank
-            LIMIT ?
-          `;
-
-          ftsRows = ragDb.prepare(ftsSql).all(...params).map((row) => ({
-            paperId: row.paperId,
-            chunkId: row.chunkId,
-            sourceType: row.sourceType,
-            pageIndex: row.pageIndex,
-            blockId: row.blockId,
-            text: row.text,
-            score: Number(row.rank) || 0,
-          }));
-        } catch (ftsError) {
-          // FTS5 失败时后续降级到 LIKE
-        }
+      if (matchQuery) {
+        const fts = searchFtsChunks(ragDb, {
+          matchQuery,
+          documentKey: targetPaperId || null,
+          limit: channelLimit,
+          excludedDocumentKeys: excludedPaperIds,
+          readyMode,
+        });
+        if (fts.status === 'searched') ftsRows = fts.rows;
       }
 
       if (targetPaperId && !excludedPaperIds.has(targetPaperId)) {
-        const { question, combined } = stripRagQueryTemplateNoise(cleanQuery);
-        const hasSignals =
-          extractFormulaNumbers(combined).length > 0 ||
-          extractReferenceNumbers(combined).length > 0 ||
-          extractShortSymbolTokens(question || combined).length > 0;
-        if (hasSignals) {
-          const exactConditions = ['c.document_key = ?', "c.source_type != 'note'"];
-          if (hasIndexStatus) exactConditions.push(readySource);
-          const candidateChunks = ragDb.prepare(`
-            SELECT
-              c.document_key AS paperId,
-              c.chunk_id AS chunkId,
-              c.source_type AS sourceType,
-              c.page_index AS pageIndex,
-              c.block_id AS blockId,
-              c.text
-            FROM rag_chunks c
-            WHERE ${exactConditions.join(' AND ')}
-          `).all(targetPaperId);
-          const exactMatches = candidateChunks
-            .map((row) => ({ ...row, exactScore: scoreChunkByExactQuerySignals(row.text, cleanQuery) }))
-            .filter((row) => row.exactScore > 0)
-            .sort((left, right) => right.exactScore - left.exactScore)
-            .slice(0, wantsHybrid ? candidateLimit : safeLimit)
-            .map(({ exactScore, ...row }) => ({ ...row, score: -100 - exactScore }));
-
-          if (exactMatches.length > 0) {
-            const seenKeys = new Set(exactMatches.map(ragResultKey));
-            ftsRows = [
-              ...exactMatches,
-              ...ftsRows.filter((row) => !seenKeys.has(ragResultKey(row))),
-            ].slice(0, wantsHybrid ? candidateLimit : safeLimit);
-          }
+        const exactRows = searchExactSignalChunks(ragDb, {
+          queryText: cleanQuery,
+          documentKey: targetPaperId,
+          limit: channelLimit,
+          excludedDocumentKeys: excludedPaperIds,
+          readyMode,
+        });
+        if (exactRows.length > 0) {
+          ftsRows = mergeRankedRows(exactRows, ftsRows, channelLimit);
         }
       }
 
-      // 2. 向量通道：查询向量化 + 逐文档 KNN，与桌面端混合检索对齐
+      // 2. 向量通道：查询向量化 + 单条 KNN 查询。
       let vectorRows = [];
       if (wantsHybrid) {
         const config = this.resolveEmbeddingConfig();
@@ -1262,7 +1044,9 @@ class PaperQuayKnowledgeService {
         } else {
           try {
             embeddingModel = config.model;
-            const pick = this.pickVectorDimension(ragDb, buildEmbeddingModelKey(config));
+            // 签名只计算一次：维度探测与 KNN 复用同一个 model key。
+            const embeddingModelKey = buildEmbeddingModelKey(config);
+            const pick = this.pickVectorDimension(ragDb, embeddingModelKey);
 
             if (!pick) {
               warning = 'RAG 知识库中没有已完成的向量索引，已降级为关键词检索。';
@@ -1272,23 +1056,24 @@ class PaperQuayKnowledgeService {
               const queryVector = await this.embedQuery(cleanQuery, config);
 
               excludedPaperIds = this.getExcludedPaperIds();
-              ftsRows = ftsRows.filter((row) => !excludedPaperIds.has(row.paperId));
+              ftsRows = ftsRows.filter((row) => !excludedPaperIds.has(row.documentKey));
 
               if (queryVector.length !== pick.dimension) {
                 warning = `查询向量维度 (${queryVector.length}) 与索引维度 (${pick.dimension}) 不一致，已降级为关键词检索。`;
               } else {
-                const modelKey = buildEmbeddingModelKey(config);
                 const vectorResult = this.retrieveVectorChunks(ragDb, {
                   queryVector,
                   dimension: pick.dimension,
-                  modelKey,
+                  modelKey: embeddingModelKey,
                   paperId: targetPaperId,
                   candidateLimit,
                   excludedPaperIds,
                 });
-                vectorRows = vectorResult.rows.filter((row) => !excludedPaperIds.has(row.paperId)).slice(0, candidateLimit);
+                vectorRows = (vectorResult?.rows ?? [])
+                  .map((row) => ({ ...row, documentKey: row.documentKey || row.paperId }))
+                  .filter((row) => !excludedPaperIds.has(row.documentKey))
+                  .slice(0, candidateLimit);
                 vectorExecuted = true;
-
               }
             }
           } catch (error) {
@@ -1298,98 +1083,113 @@ class PaperQuayKnowledgeService {
       }
 
       excludedPaperIds = this.getExcludedPaperIds();
-      ftsRows = ftsRows.filter((row) => !excludedPaperIds.has(row.paperId));
-      vectorRows = vectorRows.filter((row) => !excludedPaperIds.has(row.paperId));
-      const currentChunk = ragDb.prepare(`
-        SELECT text, page_index AS pageIndex, block_id AS blockId
-        FROM rag_chunks WHERE document_key = ? AND source_type = ? AND chunk_id = ?
-      `);
-      ftsRows = ftsRows.filter((row) => {
-        const current = currentChunk.get(row.paperId, row.sourceType, row.chunkId);
-        return current && current.text === row.text
-          && current.pageIndex === row.pageIndex && current.blockId === row.blockId;
-      });
-      if (hasIndexStatus) {
-        const ready = ragDb.prepare("SELECT 1 FROM rag_indexes WHERE document_key = ? AND source_type = ? AND status = 'ready'");
-        ftsRows = ftsRows.filter((row) => ready.get(row.paperId, row.sourceType));
-        vectorRows = vectorRows.filter((row) => ready.get(row.paperId, row.sourceType));
+      ftsRows = ftsRows.filter((row) => !excludedPaperIds.has(row.documentKey));
+      vectorRows = vectorRows.filter((row) => !excludedPaperIds.has(row.documentKey));
+
+      // 关键词命中可能在异步 embedding 期间被替换：一次批量查询校验当前分块，
+      // 不再为每个结果单独 get（避免 O(结果数) 的 SQL 往返）。
+      if (ftsRows.length > 0) {
+        const chunkConditions = [];
+        const chunkParams = [];
+        for (const row of ftsRows) {
+          chunkConditions.push('(document_key = ? AND source_type = ? AND chunk_id = ?)');
+          chunkParams.push(row.documentKey, row.sourceType, row.chunkId);
+        }
+        const currentRows = ragDb.prepare(`
+          -- mcp:validate-chunks
+          SELECT document_key AS documentKey, source_type AS sourceType, chunk_id AS chunkId,
+                 text, page_index AS pageIndex, block_id AS blockId
+          FROM rag_chunks
+          WHERE ${chunkConditions.join(' OR ')}
+        `).all(...chunkParams);
+        const currentByKey = new Map(currentRows.map((row) => [ragResultKey(row), row]));
+        ftsRows = ftsRows.filter((row) => {
+          const current = currentByKey.get(ragResultKey(row));
+          return current && current.text === row.text
+            && current.pageIndex === row.pageIndex && current.blockId === row.blockId;
+        });
       }
 
-      // 3. 融合排序：向量 + FTS 双通道走 RRF（与桌面端 rrfFuse 相同）；
-      //    chunk_id 仅在 (document_key, source_type) 内唯一，跨库融合前用 paperId 前缀合成全局键。
+      if (hasIndexStatus && (ftsRows.length > 0 || vectorRows.length > 0)) {
+        const readyConditions = [];
+        const readyParams = [];
+        for (const row of [...ftsRows, ...vectorRows]) {
+          readyConditions.push('(document_key = ? AND source_type = ?)');
+          readyParams.push(row.documentKey, row.sourceType);
+        }
+        const readyRows = ragDb.prepare(`
+          -- mcp:ready-check
+          SELECT DISTINCT document_key AS documentKey, source_type AS sourceType
+          FROM rag_indexes
+          WHERE status = 'ready' AND (${readyConditions.join(' OR ')})
+        `).all(...readyParams);
+        const readyKeys = new Set(readyRows.map((row) => JSON.stringify([row.documentKey, row.sourceType])));
+        const isReady = (row) => readyKeys.has(JSON.stringify([row.documentKey, row.sourceType]));
+        ftsRows = ftsRows.filter(isReady);
+        vectorRows = vectorRows.filter(isReady);
+      }
+
+      // 3. 融合排序：向量 + FTS 双通道走共享 RRF。
       let results = [];
       if (vectorExecuted) {
         if (vectorRows.length > 0 && ftsRows.length > 0) {
-          const wrap = (rows) => rows.map((row) => ({
-            ...row,
-            chunkId: `${row.paperId}::${row.chunkId}`,
-          }));
-          const fused = rrfFuse(wrap(vectorRows), wrap(ftsRows)).slice(0, safeLimit);
+          const fused = rrfFuse(vectorRows, ftsRows).slice(0, safeLimit);
           const vectorKeys = new Set(vectorRows.map(ragResultKey));
           const ftsKeys = new Set(ftsRows.map(ragResultKey));
-
           results = fused.map((row) => {
-            const chunkId = row.chunkId.slice(row.paperId.length + 2);
-            const key = ragResultKey({ paperId: row.paperId, sourceType: row.sourceType, chunkId });
+            const key = ragResultKey(row);
             const channels = [];
             if (vectorKeys.has(key)) channels.push('vector');
             if (ftsKeys.has(key)) channels.push('fts');
-            return toResult({ ...row, chunkId }, channels);
+            return { ...row, channels };
           });
         } else if (vectorRows.length > 0) {
-          results = vectorRows.slice(0, safeLimit).map((row) => toResult(row, ['vector']));
+          results = vectorRows.slice(0, safeLimit).map((row) => ({ ...row, channels: ['vector'] }));
         } else {
-          results = ftsRows.slice(0, safeLimit).map((row) => toResult(row, ['fts']));
+          results = ftsRows.slice(0, safeLimit).map((row) => ({ ...row, channels: ['fts'] }));
         }
       } else {
-        results = ftsRows.slice(0, safeLimit).map((row) => toResult(row, ['fts']));
+        results = ftsRows.slice(0, safeLimit).map((row) => ({ ...row, channels: ['fts'] }));
       }
 
-      // 4. 如果 FTS/向量均未命中，使用 LIKE 降级
+      // 4. 如果 FTS/向量均未命中，使用 LIKE 降级。
       let likeFallbackUsed = false;
       if (results.length === 0) {
         likeFallbackUsed = true;
-        const likeConditions = ['lower(c.text) LIKE ?', "c.source_type != 'note'"];
-        if (hasIndexStatus) likeConditions.push(readySource);
-        const likeParams = [`%${cleanQuery.toLowerCase()}%`];
-
-        if (excludedPaperIds.size) {
-          likeConditions.push('c.document_key NOT IN (SELECT value FROM json_each(?))');
-          likeParams.push(JSON.stringify([...excludedPaperIds]));
-        }
-
-        if (targetPaperId) {
-          likeConditions.push('c.document_key = ?');
-          likeParams.push(targetPaperId);
-        }
-
-        likeParams.push(safeLimit);
-
-        const likeSql = `
-          SELECT
-            c.document_key AS paperId,
-            c.chunk_id AS chunkId,
-            c.source_type AS sourceType,
-            c.page_index AS pageIndex,
-            c.block_id AS blockId,
-            c.text
-          FROM rag_chunks c
-          WHERE ${likeConditions.join(' AND ')}
-          ORDER BY c.chunk_index
-          LIMIT ?
-        `;
-
-        const rows = ragDb.prepare(likeSql).all(...likeParams);
-        results = rows.map((row) => toResult({ ...row, score: 1.0 }, ['like']));
+        const likeRows = searchLikeChunks(ragDb, {
+          query: cleanQuery,
+          documentKey: targetPaperId || null,
+          limit: safeLimit,
+          excludedDocumentKeys: excludedPaperIds,
+          readyMode,
+        });
+        results = likeRows.map((row) => ({ ...row, channels: ['like'] }));
       }
+
+      // 5. 一次性补齐邻接片段，并同时暴露规范字段与既有别名。
+      const snippets = assembleNeighborSnippets(ragDb, results);
+      const mappedResults = results.map((row) => ({
+        documentKey: row.documentKey,
+        paperId: row.documentKey,
+        paperTitle: paperTitles.get(row.documentKey) || row.documentKey,
+        chunkId: row.chunkId,
+        text: row.text,
+        snippet: snippets.get(ragResultKey(row)) ?? row.text,
+        score: row.score,
+        pageIndex: row.pageIndex ?? null,
+        pageNumber: row.pageIndex !== null && row.pageIndex !== undefined ? Number(row.pageIndex) + 1 : null,
+        sourceType: row.sourceType,
+        blockId: row.blockId || null,
+        channels: row.channels,
+      }));
 
       return {
         query: cleanQuery,
         retrievalMode: vectorExecuted && !likeFallbackUsed ? 'hybrid' : 'keyword',
         ...(embeddingModel && vectorExecuted && !likeFallbackUsed ? { embeddingModel } : {}),
         ...(warning ? { warning } : {}),
-        results,
-        total: results.length,
+        results: mappedResults,
+        total: mappedResults.length,
       };
     } finally {
       ragDb.close();
@@ -1484,10 +1284,29 @@ class PaperQuayKnowledgeService {
       const tags = db.prepare('SELECT tag FROM note_tags WHERE note_id = ? ORDER BY tag').all(id).map((item) => item.tag);
       const rawLinks = db.prepare('SELECT target_note_id AS noteId, link_text AS label FROM note_links WHERE source_note_id = ? ORDER BY target_note_id LIMIT 101').all(id);
       const links = rawLinks.slice(0, 100);
+      // 结构化正文是笔记的唯一事实源；Markdown/纯文本只是交换格式。返回完整
+      // Tiptap JSON 供 update_note 原样往返，超大文档降级为分页文本。
+      let contentJson = null;
+      let contentJsonTruncated = false;
+      if (row.content_json) {
+        try {
+          const parsed = JSON.parse(row.content_json);
+          if (parsed && typeof parsed === 'object') {
+            if (JSON.stringify(parsed).length <= 2_000_000) {
+              contentJson = parsed;
+            } else {
+              contentJsonTruncated = true;
+            }
+          }
+        } catch {}
+      }
       const nextOffset = offset + limit < text.length ? offset + limit : null;
       return { note: { id: row.id, title: row.title, paperId: row.paper_id, pageKind: row.page_kind ?? null,
         folderId: row.folder_id ?? null, tags, links, anchors,
         updatedAt: Number(row.updated_at) || 0,
+        contentFormat: contentJson ? 'tiptap-json' : 'text',
+        contentJson,
+        contentJsonTruncated,
         contentText: text.slice(offset, offset + limit),
         offset, nextOffset, truncated: nextOffset !== null, totalCharacters: text.length,
         anchorsTruncated: Array.isArray(rawAnchors) && rawAnchors.length > anchors.length,
@@ -1553,7 +1372,16 @@ class PaperQuayKnowledgeService {
     return run();
   }
 
-  searchNotesKeyword({ query = '', paperId = '', pageKind = '', limit = 10 } = {}) {
+  searchNotesKeyword({
+    query = '',
+    paperId = '',
+    pageKind = '',
+    tag = '',
+    type = '',
+    noteIds = [],
+    linkedPaperId = '',
+    limit = 10,
+  } = {}) {
     const db = this.getNotesDb();
     if (!db) {
       return {
@@ -1567,6 +1395,12 @@ class PaperQuayKnowledgeService {
       const cleanQuery = cleanString(query).toLowerCase();
       const targetPaperId = cleanString(paperId);
       const targetPageKind = cleanString(pageKind);
+      const targetTag = cleanString(tag).replace(/^#/, '');
+      const targetType = cleanString(type);
+      const targetLinkedPaperId = cleanString(linkedPaperId);
+      const targetNoteIds = Array.isArray(noteIds)
+        ? [...new Set(noteIds.map(cleanString).filter(Boolean))]
+        : [];
       const safeLimit = Math.max(1, Math.min(50, Number(limit) || 10));
       const noteColumns = new Set(db.prepare('PRAGMA table_info(notes)').all().map((row) => row.name));
       const hasPageKind = noteColumns.has('page_kind');
@@ -1574,9 +1408,28 @@ class PaperQuayKnowledgeService {
       const conditions = ['deleted_at IS NULL'];
       const params = [];
 
+      if (targetNoteIds.length > 0) {
+        conditions.push('id IN (SELECT value FROM json_each(?))');
+        params.push(JSON.stringify(targetNoteIds));
+      }
       if (targetPaperId) {
         conditions.push('(paper_id = ? OR linked_paper_id = ?)');
         params.push(targetPaperId, targetPaperId);
+      }
+      if (targetLinkedPaperId) {
+        conditions.push('linked_paper_id = ?');
+        params.push(targetLinkedPaperId);
+      }
+      if (targetType) {
+        if (!['highlight', 'area', 'standalone', 'ai-chat'].includes(targetType)) {
+          throw new Error(`Unsupported note type: ${targetType}`);
+        }
+        conditions.push('type = ?');
+        params.push(targetType);
+      }
+      if (targetTag) {
+        conditions.push('id IN (SELECT note_id FROM note_tags WHERE lower(tag) = lower(?))');
+        params.push(targetTag);
       }
       if (targetPageKind) {
         if (!['paper-card', 'concept', 'synthesis', 'qa', 'excerpt', 'index', 'log', 'overview'].includes(targetPageKind)) {
@@ -1632,7 +1485,7 @@ class PaperQuayKnowledgeService {
           }
         }
 
-        if (!rows) {
+        if (!rows || rows.length === 0) {
           const pattern = `%${cleanQuery}%`;
           const likeConditions = [...conditions, `(
             lower(title) LIKE ?
@@ -1668,16 +1521,16 @@ class PaperQuayKnowledgeService {
   }
 
   async zoteroListCollections({ dataDir = '' } = {}) {
-    const collections = await listLocalCollections({ dataDir });
+    const collections = await this.zotero.listLocalCollections({ dataDir });
     return {
       collections,
       total: collections.length,
-      dataDir: dataDir || (await detectLocalZoteroDataDir()),
+      dataDir: dataDir || (await this.zotero.detectLocalZoteroDataDir()),
     };
   }
 
   async zoteroSearchItems({ dataDir = '', query = '', collectionKey = '', limit = 50 } = {}) {
-    const items = await searchLocalLibraryItems({
+    const items = await this.zotero.searchLocalLibraryItems({
       dataDir,
       query,
       collectionKey,
@@ -1713,11 +1566,11 @@ class PaperQuayKnowledgeService {
 
     let candidates = [];
     if (targetKeys.length > 0) {
-      candidates = await getLocalItemsByKeys({ dataDir, itemKeys: targetKeys });
+      candidates = await this.zotero.getLocalItemsByKeys({ dataDir, itemKeys: targetKeys });
     } else if (targetCollection) {
-      candidates = await listLocalCollectionItems({ dataDir, collectionKey: targetCollection });
+      candidates = await this.zotero.listLocalCollectionItems({ dataDir, collectionKey: targetCollection });
     } else {
-      candidates = await listLocalLibraryItems({ dataDir, limit: 100 });
+      candidates = await this.zotero.listLocalLibraryItems({ dataDir, limit: 100 });
     }
 
     const db = this.getLibraryDb();
@@ -1838,9 +1691,9 @@ class PaperQuayKnowledgeService {
 
     let candidates = [];
     if (targetKeys.length > 0) {
-      candidates = await getLocalItemsByKeys({ dataDir, itemKeys: targetKeys });
+      candidates = await this.zotero.getLocalItemsByKeys({ dataDir, itemKeys: targetKeys });
     } else if (targetCollection) {
-      candidates = await listLocalCollectionItems({ dataDir, collectionKey: targetCollection });
+      candidates = await this.zotero.listLocalCollectionItems({ dataDir, collectionKey: targetCollection });
     } else {
       throw new Error('Must provide either itemKeys or collectionKey to sync');
     }
@@ -1862,53 +1715,132 @@ class PaperQuayKnowledgeService {
       };
     }
 
-    const store = createLibraryStore(this.appPaths);
+    const store = this.getLibraryStore();
     try {
       const snapshot = store.load();
       const settings = snapshot.settings || {};
       const storageDir = settings.storageDir || path.join(this.appPaths.dataDir, 'paperquay-data');
       fs.mkdirSync(storageDir, { recursive: true });
 
-      let resolvedCategoryId = cleanString(targetCategoryId) || null;
-
-      if (resolvedCategoryId) {
-        const target = snapshot.categories.find((item) => item.id === resolvedCategoryId);
-        if (!target) throw new Error(`Category does not exist: ${resolvedCategoryId}`);
+      const wantedCategoryId = cleanString(targetCategoryId);
+      if (wantedCategoryId) {
+        const target = snapshot.categories.find((item) => item.id === wantedCategoryId);
+        if (!target) throw new Error(`Category does not exist: ${wantedCategoryId}`);
         if (target.isSystem) throw new Error(`系统分类不能作为同步目标分类: ${target.name}`);
-      } else if (targetCollection && createCollectionCategory !== false) {
-        const collections = await listLocalCollections({ dataDir });
-        const matched = collections.find((c) => c.collectionKey === targetCollection);
-        const collectionName = cleanString(matched?.name) || 'Zotero Collection';
+      }
 
-        const existingCat = snapshot.categories.find(
-          (c) => !c.isSystem && c.parentId === null && c.name.toLowerCase() === collectionName.toLowerCase(),
-        );
-
-        if (existingCat) {
-          resolvedCategoryId = existingCat.id;
+      // Resolve Zotero collection membership so the MCP sync assigns the same
+      // nested categories (and unfiled category) as the desktop import.
+      let collections = [];
+      const collectionKeysByIdentity = new Map();
+      if (!wantedCategoryId && createCollectionCategory !== false) {
+        collections = await this.zotero.listLocalCollections({ dataDir });
+        if (targetCollection) {
+          for (const item of candidates) {
+            collectionKeysByIdentity.set(zoteroItemIdentity(item), [targetCollection]);
+          }
         } else {
-          const newCat = store.saveCategory({
+          for (const collection of collections) {
+            const items = await this.zotero.listLocalCollectionItems({
+              dataDir,
+              collectionKey: collection.collectionKey,
+            });
+            for (const item of items) {
+              const identity = zoteroItemIdentity(item);
+              if (!identity) continue;
+              const keys = collectionKeysByIdentity.get(identity) ?? [];
+              if (!keys.includes(collection.collectionKey)) keys.push(collection.collectionKey);
+              collectionKeysByIdentity.set(identity, keys);
+            }
+          }
+        }
+      }
+
+      const candidatesWithMembership = candidates.map((item) => ({
+        ...item,
+        collectionKeys: collectionKeysByIdentity.get(zoteroItemIdentity(item)) ?? [],
+      }));
+
+      const categoryIdByCollectionKey = new Map();
+      const categoryIdByPath = new Map();
+      let unfiledCategoryId = null;
+
+      if (!wantedCategoryId && createCollectionCategory !== false) {
+        const plan = buildZoteroImportPlan({
+          collections,
+          items: candidatesWithMembership,
+          existingCategories: snapshot.categories,
+        });
+        for (const [collectionKey, categoryId] of Object.entries(plan.categoryIdByCollectionKey)) {
+          if (categoryId) categoryIdByCollectionKey.set(collectionKey, categoryId);
+        }
+        for (const [pathKey, categoryId] of Object.entries(plan.existingCategoryIdByPath)) {
+          categoryIdByPath.set(pathKey, categoryId);
+        }
+
+        for (const entry of plan.categoriesToCreate) {
+          const parentPathKey = zoteroCategoryPathKey(entry.parentPath);
+          const parentId = entry.parentPath.length > 0 ? categoryIdByPath.get(parentPathKey) : null;
+          if (entry.parentPath.length > 0 && !parentId) {
+            throw new Error(`Zotero category parent does not exist: ${entry.parentPath.join(' / ')}`);
+          }
+          const existing = snapshot.categories.find((category) => (
+            !category.isSystem
+            && (category.parentId ?? null) === (parentId ?? null)
+            && category.name.trim().toLowerCase() === entry.name.trim().toLowerCase()
+          ));
+          const category = existing ?? store.saveCategory({
             id: id('cat'),
-            name: collectionName,
-            parentId: null,
-            sortOrder: snapshot.categories.length,
+            name: entry.name,
+            parentId,
+            sortOrder: snapshot.categories.filter((item) => (item.parentId ?? null) === (parentId ?? null)).length,
             isSystem: false,
             systemKey: null,
             createdAt: now(),
             updatedAt: now(),
           });
-          snapshot.categories.push(newCat);
-          resolvedCategoryId = newCat.id;
+          if (!existing) snapshot.categories.push(category);
+          const pathKey = zoteroCategoryPathKey([...entry.parentPath, entry.name]);
+          categoryIdByPath.set(pathKey, category.id);
+          if (entry.collectionKey) categoryIdByCollectionKey.set(entry.collectionKey, category.id);
+        }
+
+        if (plan.unfiledCategory) {
+          unfiledCategoryId = plan.unfiledCategory.existingCategoryId
+            ?? categoryIdByPath.get(zoteroCategoryPathKey([plan.unfiledCategory.name]))
+            ?? null;
+        }
+
+        // Collections with identical names under the same parent share one category.
+        for (const collection of collections) {
+          if (categoryIdByCollectionKey.has(collection.collectionKey)) continue;
+          const path = plan.categoryPathByCollectionKey[collection.collectionKey];
+          const categoryId = path ? categoryIdByPath.get(zoteroCategoryPathKey(path)) : null;
+          if (categoryId) categoryIdByCollectionKey.set(collection.collectionKey, categoryId);
         }
       }
+
+      const resolvedCategoryId = wantedCategoryId
+        || (targetCollection ? categoryIdByCollectionKey.get(targetCollection) ?? null : null);
+
+      const categoryIdsForItem = (item) => {
+        if (wantedCategoryId) return [wantedCategoryId];
+        const keys = Array.isArray(item.collectionKeys) ? item.collectionKeys : [];
+        const ids = keys
+          .map((collectionKey) => categoryIdByCollectionKey.get(collectionKey))
+          .filter(Boolean);
+        if (ids.length > 0) return [...new Set(ids)];
+        return unfiledCategoryId ? [unfiledCategoryId] : [];
+      };
 
       const papers = [...snapshot.papers];
       const importedPapers = [];
       const duplicates = [];
       const missingPdfs = [];
       const errors = [];
+      let assignmentsChanged = false;
 
-      for (const item of candidates) {
+      for (const item of candidatesWithMembership) {
         if (!item.localPdfPath || !fs.existsSync(item.localPdfPath)) {
           missingPdfs.push({
             itemKey: item.itemKey,
@@ -1928,82 +1860,67 @@ class PaperQuayKnowledgeService {
 
           const bytes = fs.readFileSync(sourcePath);
           const contentHash = hashBytes(bytes);
+          const metadata = buildZoteroItemMetadata(item);
+          const categoryIds = categoryIdsForItem(item);
+          const duplicate = findDuplicatePaper({
+            papers,
+            contentHash,
+            doi: metadata.doi,
+            title: metadata.title,
+          });
 
-          const existingPaper = papers.find((p) =>
-            p.attachments?.some((att) => att.contentHash === contentHash) ||
-            (item.doi && p.doi && p.doi.toLowerCase() === item.doi.toLowerCase()) ||
-            (item.title && p.title && p.title.trim().toLowerCase() === item.title.trim().toLowerCase()),
-          );
-
-          if (existingPaper) {
-            // 重复文献只报告已有 ID；分类改动走独立的带版本检查工具。
+          if (duplicate) {
+            const addedCategoryIds = categoryIds.filter(
+              (categoryId) => !(duplicate.paper.categoryIds ?? []).includes(categoryId),
+            );
+            if (addedCategoryIds.length > 0) {
+              duplicate.paper.categoryIds = [...(duplicate.paper.categoryIds ?? []), ...addedCategoryIds];
+              duplicate.paper.updatedAt = Math.max(now(), Number(duplicate.paper.updatedAt || 0) + 1);
+              store.savePaper(duplicate.paper);
+              assignmentsChanged = true;
+            }
             duplicates.push({
               itemKey: item.itemKey,
               title: item.title,
-              existingPaperId: existingPaper.id,
+              existingPaperId: duplicate.paper.id,
               reason: '文献已在文库中存在',
+              ...(addedCategoryIds.length > 0 ? { assignedCategoryIds: addedCategoryIds } : {}),
             });
             continue;
           }
 
           const paperId = id('paper');
+          const attachmentId = id('att');
           const fileName = safeFileName(item.attachmentFilename || fileNameFromPath(sourcePath));
-          storedPath = path.join(storageDir, `${paperId}-${fileName}`);
+          const storedName = buildImportedAttachmentFileName({
+            settings,
+            paperId,
+            attachmentId,
+            fileName,
+            metadata,
+          });
+          storedPath = path.join(storageDir, storedName);
           fs.copyFileSync(sourcePath, storedPath);
 
           const relativePath = path.relative(storageDir, storedPath);
           const stat = fs.statSync(storedPath);
-          const authors = buildPaperAuthors(item);
 
-          const paper = {
-            id: paperId,
-            title: cleanString(item.title) || path.basename(fileName, path.extname(fileName)),
-            titleZh: null,
-            year: item.year || null,
-            publication: item.publication || null,
-            doi: item.doi || null,
-            url: item.url || null,
-            abstractText: item.abstractNote || null,
-            itemType: item.itemType || 'journalArticle',
-            publisher: null,
-            institution: null,
-            reportNumber: null,
-            volume: null,
-            issue: null,
-            pages: null,
-            isbn: null,
-            issn: null,
-            language: canonicalizeBcp47Language(item.language) || null,
-            citationKey: citationKeyFromZoteroExtra(item.extra),
-            keywords: [],
-            importedAt: now(),
-            updatedAt: now(),
-            lastReadAt: null,
-            readingProgress: 0,
-            isFavorite: false,
-            userNote: null,
-            aiSummary: null,
-            citation: null,
+          const paper = buildImportedPaperRecord({
+            paperId,
+            attachmentId,
+            metadata,
             source: 'zotero',
-            sortOrder: Math.min(0, ...papers.map((p) => p.sortOrder ?? 0)) - 1,
-            authors,
-            tags: [],
-            categoryIds: resolvedCategoryId ? [resolvedCategoryId] : [],
-            attachments: [{
-              id: id('att'),
-              paperId,
-              kind: 'pdf',
+            sortOrder: Math.min(0, ...papers.map((entry) => entry.sortOrder ?? 0)) - 1,
+            categoryIds,
+            attachment: {
               originalPath: sourcePath,
               storedPath,
               relativePath,
               fileName,
-              mimeType: 'application/pdf',
               fileSize: stat.size,
               contentHash,
-              createdAt: now(),
-              missing: false,
-            }],
-          };
+            },
+          });
 
           store.savePaper(paper);
           papers.push(paper);
@@ -2013,7 +1930,7 @@ class PaperQuayKnowledgeService {
             year: paper.year,
             doi: paper.doi,
             zoteroItemKey: item.itemKey,
-            categoryId: resolvedCategoryId,
+            categoryId: categoryIds[0] ?? null,
             updatedAt: paper.updatedAt,
           });
         } catch (err) {
@@ -2030,7 +1947,7 @@ class PaperQuayKnowledgeService {
         }
       }
 
-      if (importedPapers.length > 0) this.markExternalWrite('library');
+      if (importedPapers.length > 0 || assignmentsChanged) this.markExternalWrite('library');
 
       return {
         summary: {
@@ -2048,7 +1965,7 @@ class PaperQuayKnowledgeService {
         ...(guard.warning ? { warning: guard.warning } : {}),
       };
     } finally {
-      store.close();
+      // 复用服务级 store：由 close()/dispose() 统一释放。
     }
   }
 
@@ -2154,13 +2071,15 @@ class PaperQuayKnowledgeService {
       throw new Error(`Unsupported note page kind: ${pageKind}`);
     }
     return this.withWritableNoteStore((store) => {
-      const library = createLibraryStore(this.appPaths).load();
+      const library = this.getLibraryStore().load();
       const notes = store.listNotes({ includeDeleted: false });
       const note = store.createNote({
         paperId: cleanString(paperId) || 'global-notes',
         type: noteType || 'standalone',
         pageKind: pageKind || null,
-        title: cleanTitle || 'Untitled Note',
+        // 空标题保持空串，由 PaperQuay 界面按语言显示未命名笔记；
+        // 不再把英文哨兵写进共享笔记库。
+        title: cleanTitle || '',
         content: cleanContent,
         contentText: cleanContent,
         contentJson: parseMarkdownToTiptap(cleanContent, {
@@ -2170,6 +2089,7 @@ class PaperQuayKnowledgeService {
         contentHtml: null,
         tags: cleanTags,
         folderId: cleanString(folderId) || null,
+        assertPaperExists: (targetPaperId) => this.paperExists(targetPaperId),
       });
       this.markExternalWrite('notes');
       return { note: slimNote(note), noteId: note.id, updatedAt: note.updatedAt };
@@ -2180,20 +2100,40 @@ class PaperQuayKnowledgeService {
     noteId = '',
     title,
     content,
+    contentJson,
     tags,
     pageKind,
     folderId,
+    paperId,
     expectedUpdatedAt,
     allowWhileAppRunning = false,
   } = {}) {
     const idValue = cleanString(noteId);
     if (!idValue) throw new Error('update_note requires noteId');
+    if (typeof content === 'string' && contentJson !== undefined) {
+      throw new Error('update_note accepts either content (Markdown) or contentJson (structured Tiptap JSON), not both');
+    }
+    if (contentJson !== undefined && (
+      !contentJson
+      || typeof contentJson !== 'object'
+      || contentJson.type !== 'doc'
+      || !Array.isArray(contentJson.content)
+    )) {
+      throw new Error('update_note contentJson must be a Tiptap doc object with a content array');
+    }
     const patch = {};
     if (typeof title === 'string') patch.title = title;
     if (typeof content === 'string') {
       patch.content = content;
       patch.contentText = content;
       // Markdown is parsed at the write boundary so the stored JSON remains authoritative.
+      patch.contentHtml = null;
+    }
+    if (contentJson !== undefined) {
+      // 结构化正文直接写入；contentText 由 noteStore 从 JSON 派生，避免两份正文漂移。
+      patch.contentJson = contentJson;
+      patch.content = '';
+      patch.contentText = null;
       patch.contentHtml = null;
     }
     if (Array.isArray(tags)) {
@@ -2209,19 +2149,25 @@ class PaperQuayKnowledgeService {
     if (typeof folderId === 'string') {
       patch.folderId = cleanString(folderId) || null;
     }
+    if (typeof paperId === 'string') {
+      patch.paperId = cleanString(paperId) || 'global-notes';
+    }
     if (Object.keys(patch).length === 0) {
-      throw new Error('update_note requires at least one of title, content, tags, pageKind, folderId');
+      throw new Error('update_note requires at least one of title, content, contentJson, tags, pageKind, folderId, paperId');
     }
     return this.withWritableNoteStore((store, guard) => {
       const existing = store.getNote({ id: idValue });
       if (!existing) throw new Error(`Note does not exist: ${idValue}`);
       assertRecordVersion('note', idValue, expectedUpdatedAt, existing.updatedAt, isVersionRequiredWrite(guard));
 
-      if (typeof content === 'string' && Array.isArray(existing.anchors) && existing.anchors.length > 0) {
+      const existingAnchorIds = (Array.isArray(existing.anchors) ? existing.anchors : [])
+        .map((anchor) => cleanString(anchor?.id))
+        .filter(Boolean);
+
+      if (typeof content === 'string' && existingAnchorIds.length > 0) {
         // 锚点块和原文快照无法从 Markdown 重建：正文更新必须保留每个已有锚点链接。
-        const missingAnchorIds = existing.anchors
-          .map((anchor) => cleanString(anchor?.id))
-          .filter((anchorId) => anchorId && !content.includes(`paperquay://anchor/${anchorId}`));
+        const missingAnchorIds = existingAnchorIds
+          .filter((anchorId) => !content.includes(`paperquay://anchor/${anchorId}`));
         if (missingAnchorIds.length > 0) {
           const error = new Error(
             `NOTE_ANCHOR_MISSING: content is missing anchors ${missingAnchorIds.join(', ')}. `
@@ -2233,7 +2179,21 @@ class PaperQuayKnowledgeService {
         }
       }
 
-      const library = createLibraryStore(this.appPaths).load();
+      if (contentJson !== undefined && existingAnchorIds.length > 0) {
+        const nextAnchorIds = extractNoteAnchorIds(contentJson);
+        const missingAnchorIds = existingAnchorIds.filter((anchorId) => !nextAnchorIds.has(anchorId));
+        if (missingAnchorIds.length > 0) {
+          const error = new Error(
+            `NOTE_ANCHOR_MISSING: contentJson is missing anchors ${missingAnchorIds.join(', ')}. `
+            + 'Keep every noteAnchorBlock/noteAnchorLink, or update only title/tags/folder/pageKind.',
+          );
+          error.code = 'NOTE_ANCHOR_MISSING';
+          error.details = { noteId: idValue, missingAnchorIds, retry: 'preserve-anchors' };
+          throw error;
+        }
+      }
+
+      const library = this.getLibraryStore().load();
       if (typeof content === 'string') {
         patch.contentJson = parseMarkdownToTiptap(content, {
           papers: Array.isArray(library?.papers) ? library.papers : [],
@@ -2247,6 +2207,7 @@ class PaperQuayKnowledgeService {
         ...(expectedUpdatedAt !== undefined && expectedUpdatedAt !== null
           ? { expectedUpdatedAt: Number(expectedUpdatedAt) }
           : {}),
+        assertPaperExists: (targetPaperId) => this.paperExists(targetPaperId),
       });
       this.markExternalWrite('notes');
       return { note: slimNote(note), noteId: note.id, updatedAt: note.updatedAt };
@@ -2357,9 +2318,23 @@ class PaperQuayKnowledgeService {
       };
     }
 
-    const absolutePath = path.isAbsolute(assetPath)
-      ? assetPath
-      : path.join(cacheDir, assetPath);
+    const resolvedAsset = resolveMineruFigureAsset(cacheDir, assetPath);
+    if (resolvedAsset.reason === 'invalid') {
+      return {
+        ...base,
+        imageAvailable: false,
+        note: 'The MinerU image asset path is invalid or outside the MinerU cache directory; only the caption and metadata are available.',
+      };
+    }
+    if (resolvedAsset.reason === 'missing') {
+      return {
+        ...base,
+        imageAvailable: false,
+        note: 'The cached MinerU image file is missing; only the caption and metadata are available.',
+      };
+    }
+
+    const absolutePath = resolvedAsset.path;
     let stat;
     try {
       stat = fs.statSync(absolutePath);
@@ -2401,12 +2376,14 @@ class PaperQuayKnowledgeService {
   }
 
   listNoteTags({ paperId = '' } = {}) {
-    const store = createNoteStore(this.appPaths);
+    // 读工具不建库：notes 库缺失时按空结果返回，避免 MCP 探测改变磁盘状态。
+    const db = this.getNotesDb();
+    if (!db) return { tags: [], total: 0 };
     try {
-      const tags = store.listTags({ paperId: cleanString(paperId) });
+      const tags = queryNoteTags(db, { paperId: cleanString(paperId) });
       return { tags, total: tags.length };
     } finally {
-      store.close();
+      db.close();
     }
   }
 
@@ -2414,12 +2391,13 @@ class PaperQuayKnowledgeService {
   // 文件夹树已入库（note_folders 表），外部 agent 可与桌面端维护同一套组织结构。
 
   listNoteFolders() {
-    const store = createNoteStore(this.appPaths);
+    const db = this.getNotesDb();
+    if (!db) return { folders: [], total: 0 };
     try {
-      const folders = store.listFolders();
+      const folders = queryNoteFolders(db);
       return { folders, total: folders.length };
     } finally {
-      store.close();
+      db.close();
     }
   }
 
@@ -2509,7 +2487,7 @@ class PaperQuayKnowledgeService {
         message: `Library database not found at: ${this.appPaths.libraryDatabasePath}`,
       };
     }
-    const store = createLibraryStore(this.appPaths);
+    const store = this.getLibraryStore();
     try {
       const categories = store.listCategoriesWithCounts().map((category) => ({
         id: category.id,
@@ -2523,7 +2501,7 @@ class PaperQuayKnowledgeService {
       }));
       return { categories, total: categories.length };
     } finally {
-      store.close();
+      // 复用服务级 store：由 close()/dispose() 统一释放。
     }
   }
 
@@ -2554,7 +2532,7 @@ class PaperQuayKnowledgeService {
     }
 
     const guard = this.assertWritable(allowWhileAppRunning);
-    const store = createLibraryStore(this.appPaths);
+    const store = this.getLibraryStore();
     try {
       const snapshot = store.load();
       const settings = snapshot.settings || {};
@@ -2612,97 +2590,60 @@ class PaperQuayKnowledgeService {
           const itemMeta = metadataByPath[sourcePath] && typeof metadataByPath[sourcePath] === 'object'
             ? metadataByPath[sourcePath]
             : {};
-          const metaDoi = cleanString(itemMeta.doi);
-          const metaTitle = cleanString(itemMeta.title);
 
-          const existing = papers.find((paper) =>
-            paper.attachments?.some((attachment) => attachment.contentHash === contentHash)
-            || (metaDoi && paper.doi && String(paper.doi).toLowerCase() === metaDoi.toLowerCase())
-            || (metaTitle && paper.title && paper.title.trim().toLowerCase() === metaTitle.toLowerCase()));
+          const duplicate = findDuplicatePaper({
+            papers,
+            contentHash,
+            doi: itemMeta.doi,
+            title: itemMeta.title,
+          });
 
-          if (existing) {
+          if (duplicate) {
             // 分类变更必须走带版本检查的 set_paper_categories，这里不隐式补挂。
             duplicates.push({
               sourcePath,
-              existingPaperId: existing.id,
-              title: existing.title,
+              existingPaperId: duplicate.paper.id,
+              title: duplicate.paper.title,
               reason: '文献已在文库中存在（内容哈希/DOI/标题匹配）',
             });
             continue;
           }
 
           const paperId = id('paper');
+          const attachmentId = id('att');
           const fileName = safeFileName(fileNameFromPath(sourcePath));
           storedPath = sourcePath;
           let relativePath = null;
           if (effectiveMode !== 'keep') {
-            storedPath = path.join(storageDir, `${paperId}-${fileName}`);
+            const storedName = buildImportedAttachmentFileName({
+              settings,
+              paperId,
+              attachmentId,
+              fileName,
+              metadata: itemMeta,
+            });
+            storedPath = path.join(storageDir, storedName);
             fs.copyFileSync(sourcePath, storedPath);
+            relativePath = path.relative(storageDir, storedPath);
           }
           const stat = fs.statSync(storedPath);
-          const rawAuthors = Array.isArray(itemMeta.authorDetails)
-            ? itemMeta.authorDetails
-            : Array.isArray(itemMeta.authors) ? itemMeta.authors : [];
-          const authors = rawAuthors.map((author, index) => normalizeAuthor(author, index)).filter((author) => author.name);
-          const tags = Array.isArray(itemMeta.tags)
-            ? itemMeta.tags.map(cleanString).filter(Boolean).map(normalizeTag)
-            : [];
-          let language = null;
-          if (itemMeta.language !== undefined && itemMeta.language !== null && cleanString(itemMeta.language)) {
-            language = canonicalizeBcp47Language(itemMeta.language);
-            if (!language) throw new Error(`无效的 BCP 47 语言标签：${itemMeta.language}`);
-          }
-          const citationKey = normalizeCitationKey(itemMeta.citationKey);
 
-          const paper = {
-            id: paperId,
-            title: metaTitle || path.basename(fileName, path.extname(fileName)),
-            titleZh: cleanString(itemMeta.titleZh) || null,
-            year: itemMeta.year ?? null,
-            publication: itemMeta.publication ?? null,
-            doi: itemMeta.doi ?? null,
-            url: itemMeta.url ?? null,
-            abstractText: itemMeta.abstractText ?? null,
-            itemType: itemMeta.itemType || 'journalArticle',
-            publisher: itemMeta.publisher ?? null,
-            institution: itemMeta.institution ?? null,
-            reportNumber: itemMeta.reportNumber ?? null,
-            volume: itemMeta.volume ?? null,
-            issue: itemMeta.issue ?? null,
-            pages: itemMeta.pages ?? null,
-            isbn: itemMeta.isbn ?? null,
-            issn: itemMeta.issn ?? null,
-            language,
-            citationKey,
-            keywords: Array.isArray(itemMeta.keywords) ? itemMeta.keywords.map(cleanString).filter(Boolean) : [],
-            importedAt: now(),
-            updatedAt: now(),
-            lastReadAt: null,
-            readingProgress: 0,
-            isFavorite: false,
-            userNote: null,
-            aiSummary: null,
-            citation: null,
+          const paper = buildImportedPaperRecord({
+            paperId,
+            attachmentId,
+            metadata: itemMeta,
             source: 'local',
             sortOrder: Math.min(0, ...papers.map((item) => item.sortOrder ?? 0)) - 1,
-            authors,
-            tags,
             categoryIds: resolvedCategoryId ? [resolvedCategoryId] : [],
-            attachments: [{
-              id: id('att'),
-              paperId,
-              kind: 'pdf',
+            attachment: {
               originalPath: sourcePath,
               storedPath,
               relativePath,
               fileName,
-              mimeType: 'application/pdf',
               fileSize: stat.size,
               contentHash,
-              createdAt: now(),
-              missing: false,
-            }],
-          };
+            },
+          });
 
           store.savePaper(paper);
           papers.push(paper);
@@ -2759,7 +2700,7 @@ class PaperQuayKnowledgeService {
         ...(guard.warning ? { warning: guard.warning } : {}),
       };
     } finally {
-      store.close();
+      // 复用服务级 store：由 close()/dispose() 统一释放。
     }
   }
 
@@ -2781,7 +2722,7 @@ class PaperQuayKnowledgeService {
     if (Object.keys(patch).length === 0) throw new Error('No fields to update');
 
     const guard = this.assertWritable(allowWhileAppRunning);
-    const store = createLibraryStore(this.appPaths);
+    const store = this.getLibraryStore();
     try {
       const updated = store.applyPaperChange({
         paperId: targetId,
@@ -2806,7 +2747,7 @@ class PaperQuayKnowledgeService {
         ...(guard.warning ? { warning: guard.warning } : {}),
       };
     } finally {
-      store.close();
+      // 复用服务级 store：由 close()/dispose() 统一释放。
     }
   }
 
@@ -2836,7 +2777,7 @@ class PaperQuayKnowledgeService {
 
     const guard = this.assertWritable(allowWhileAppRunning);
     const expectedVersions = readExpectedVersions(expectedUpdatedAt, ids);
-    const store = createLibraryStore(this.appPaths);
+    const store = this.getLibraryStore();
     try {
       const categories = store.listCategoriesWithCounts();
       const requestedIds = [...new Set(replaceIds ?? [...addIds, ...removeIds])];
@@ -2872,7 +2813,7 @@ class PaperQuayKnowledgeService {
 
       return { updated, total: updated.length, ...(guard.warning ? { warning: guard.warning } : {}) };
     } finally {
-      store.close();
+      // 复用服务级 store：由 close()/dispose() 统一释放。
     }
   }
 
@@ -2896,7 +2837,7 @@ class PaperQuayKnowledgeService {
 
     const guard = this.assertWritable(allowWhileAppRunning);
     const requireVersion = isVersionRequiredWrite(guard);
-    const store = createLibraryStore(this.appPaths);
+    const store = this.getLibraryStore();
     try {
       const categories = store.listCategoriesWithCounts();
 
@@ -3011,7 +2952,7 @@ class PaperQuayKnowledgeService {
         ...(guard.warning ? { warning: guard.warning } : {}),
       };
     } finally {
-      store.close();
+      // 复用服务级 store：由 close()/dispose() 统一释放。
     }
   }
 
@@ -3029,23 +2970,41 @@ class PaperQuayKnowledgeService {
       throw new Error(`deleteFilePaperIds must be a subset of paperIds: ${unknownFileIds.join(', ')}`);
     }
 
-    const store = createLibraryStore(this.appPaths);
+    // 预览是只读操作：库缺失时返回空预览，存在时用只读连接，绝不触发建库/迁移。
+    const db = openReadOnlyDb(this.appPaths.libraryDatabasePath);
+    if (!db) {
+      return {
+        previewVersion: '',
+        papers: [],
+        summary: {
+          paperCount: 0,
+          attachmentCount: 0,
+          fileCount: 0,
+          sharedFileCount: 0,
+          unmanagedFileCount: 0,
+        },
+        files: [],
+        sharedFiles: [],
+        unmanagedFiles: [],
+        message: `Library database not found at: ${this.appPaths.libraryDatabasePath}`,
+      };
+    }
     try {
-      const settings = store.loadSettings();
+      const settings = loadLibrarySettingsFromDb(db);
       const papers = ids.map((paperId) => {
-        const paper = store.getPaper(paperId);
+        const paper = getPaperFromDb(db, paperId);
         if (!paper) throw new Error(`Paper does not exist: ${paperId}`);
         return paper;
       });
       return this.describeDeletePreview({
         papers,
         settings,
-        findAttachmentsByStoredPath: (storedPath) => store.findAttachmentsByStoredPath(storedPath),
+        findAttachmentsByStoredPath: (storedPath) => findAttachmentsByStoredPathInDb(db, storedPath),
         deleteFiles: deleteFiles === true,
         deleteFilePaperIds: explicitFileIds,
       });
     } finally {
-      store.close();
+      db.close();
     }
   }
 
@@ -3181,7 +3140,7 @@ class PaperQuayKnowledgeService {
       throw error;
     }
 
-    const store = createLibraryStore(this.appPaths);
+    const store = this.getLibraryStore();
     try {
       const description = store.deletePapersWithPreview({
         paperIds: ids,
@@ -3218,7 +3177,7 @@ class PaperQuayKnowledgeService {
         ...(guard.warning ? { warning: guard.warning } : {}),
       };
     } finally {
-      store.close();
+      // 复用服务级 store：由 close()/dispose() 统一释放。
     }
   }
 
@@ -3234,7 +3193,7 @@ class PaperQuayKnowledgeService {
     const cleanSource = cleanString(sourcePath);
     if (!cleanSource) throw new Error('sourcePath is required');
 
-    const store = createLibraryStore(this.appPaths);
+    const store = this.getLibraryStore();
     try {
       const paper = store.getPaper(targetId);
       if (!paper) throw new Error(`Paper does not exist: ${targetId}`);
@@ -3275,7 +3234,7 @@ class PaperQuayKnowledgeService {
         ...(guard.warning ? { warning: guard.warning } : {}),
       };
     } finally {
-      store.close();
+      // 复用服务级 store：由 close()/dispose() 统一释放。
     }
   }
 
@@ -3289,7 +3248,7 @@ class PaperQuayKnowledgeService {
     const targetId = cleanString(paperId);
     if (!targetId) throw new Error('paperId is required');
 
-    const store = createLibraryStore(this.appPaths);
+    const store = this.getLibraryStore();
     try {
       const paper = store.getPaper(targetId);
       if (!paper) throw new Error(`Paper does not exist: ${targetId}`);
@@ -3331,7 +3290,7 @@ class PaperQuayKnowledgeService {
         ...(guard.warning ? { warning: guard.warning } : {}),
       };
     } finally {
-      store.close();
+      // 复用服务级 store：由 close()/dispose() 统一释放。
     }
   }
 }

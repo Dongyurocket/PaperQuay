@@ -94,6 +94,8 @@ export interface RenderableMineruBlock {
   tableHtml?: string;
   captionText?: string;
   assetPath?: string;
+  assetCacheDir?: string;
+  assetReference?: string;
   isInteractive: boolean;
 }
 

@@ -1,0 +1,38 @@
+{
+  "extends": "./tsconfig.electron.json",
+  "compilerOptions": {
+    "checkJs": true,
+    "noEmit": true
+  },
+  "include": [
+    "electron/afterPack.cjs",
+    "electron/backend/desktopRunMarker.cjs",
+    "electron/backend/externalWriteMarker.cjs",
+    "electron/backend/externalWriteWatch.cjs",
+    "electron/backend/legacyBackupCleanup.cjs",
+    "electron/backend/libraryAttachmentAvailability.cjs",
+    "electron/backend/mcpClientConfig.cjs",
+    "electron/backend/metadataValidation.cjs",
+    "electron/backend/mineruAssetPaths.cjs",
+    "electron/backend/mineruContentList.cjs",
+    "electron/backend/mineruMerge.cjs",
+    "electron/backend/nodeSqlite.cjs",
+    "electron/backend/noteVectors.cjs",
+    "electron/backend/paperMetadataFields.cjs",
+    "electron/backend/pdfAssetGovernance.cjs",
+    "electron/backend/pdfSplitter.cjs",
+    "electron/backend/ragMembership.cjs",
+    "electron/backend/updateCommands.cjs",
+    "electron/ipcAllowlist.cjs",
+    "electron/ipcSecurity.cjs",
+    "electron/mcp/mcpTools.cjs",
+    "electron/mcpBundleManifest.cjs",
+    "electron/packagingDependencies.cjs",
+    "electron/pdfJsAssets.cjs",
+    "electron/perfTrace.cjs",
+    "electron/preload.cjs",
+    "electron/shared/zoteroDomain.cjs",
+    "src/shared/mineruCachePaths.cjs",
+    "src/shared/zoteroItemMetadata.cjs"
+  ]
+}

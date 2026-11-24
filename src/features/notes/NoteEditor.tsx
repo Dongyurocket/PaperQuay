@@ -6,64 +6,11 @@ import {
   useState,
   type KeyboardEvent,
   type MouseEvent as ReactMouseEvent,
-  type ReactNode,
 } from 'react';
-import { mergeAttributes, Node as TiptapNode, type Editor, type Range } from '@tiptap/core';
-import {
-  EditorContent,
-  NodeViewContent,
-  NodeViewWrapper,
-  ReactNodeViewRenderer,
-  useEditor,
-  type NodeViewProps,
-} from '@tiptap/react';
-import StarterKit from '@tiptap/starter-kit';
-import Highlight from '@tiptap/extension-highlight';
-import Link from '@tiptap/extension-link';
-import Image from '@tiptap/extension-image';
-import { Table } from '@tiptap/extension-table';
-import TableRow from '@tiptap/extension-table-row';
-import TableCell from '@tiptap/extension-table-cell';
-import TableHeader from '@tiptap/extension-table-header';
-import TaskList from '@tiptap/extension-task-list';
-import TaskItem from '@tiptap/extension-task-item';
-import Placeholder from '@tiptap/extension-placeholder';
-import CharacterCount from '@tiptap/extension-character-count';
-import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
-import { BlockMath, InlineMath } from '@tiptap/extension-mathematics';
-import type { ResolvedPos } from '@tiptap/pm/model';
-import { TextSelection } from '@tiptap/pm/state';
-import { cellAround, cellNear, tableEditingKey } from '@tiptap/pm/tables';
-import type { EditorView } from '@tiptap/pm/view';
-import { all, createLowlight } from 'lowlight';
-import {
-  Bold,
-  Code2,
-  ClipboardPaste,
-  Copy,
-  FileText,
-  Heading1,
-  Heading2,
-  Heading3,
-  Highlighter,
-  Italic,
-  List,
-  ListChecks,
-  ListOrdered,
-  Pilcrow,
-  Plus,
-  Quote,
-  RefreshCw,
-  RemoveFormatting,
-  Save,
-  Scissors,
-  Strikethrough,
-  Table2,
-  Tag,
-  Trash2,
-} from 'lucide-react';
+import { EditorContent, useEditor } from '@tiptap/react';
+import type { Editor } from '@tiptap/core';
 import { NOTE_CHANGED_EVENT, type NoteChangedEventDetail } from '../../app/appEvents';
-import { useLocaleText } from '../../i18n/uiLanguage';
+import { useAppLocale, useLocaleText } from '../../i18n/uiLanguage';
 import type { LiteraturePaper } from '../../types/library';
 import type {
   Note,
@@ -75,17 +22,7 @@ import type {
 } from '../../types/notes';
 import { cn } from '../../utils/cn';
 import { confirmAction } from '../../ui/confirmHost';
-import { HashTag } from './extensions/HashTag';
-import { NoteAnchorLink } from './extensions/NoteAnchorLink';
-import { PaperReference, type PaperReferenceLocation } from './extensions/PaperReference';
-import { SlashCommand } from './extensions/SlashCommand';
-import { WikiLink } from './extensions/WikiLink';
-import type { NoteSuggestionItem } from './extensions/suggestionMenu';
-import {
-  copyTextToClipboard,
-  NotesContextMenu,
-  type NotesContextMenuEntry,
-} from './NotesContextMenu';
+import { NotesContextMenu, type NotesContextMenuEntry } from './NotesContextMenu';
 import {
   collectText,
   extractNoteAnchorIds,
@@ -95,553 +32,72 @@ import {
   titleFromNoteContent,
 } from './notesTiptap';
 import { NoteBlockControls } from './NoteBlockControls';
-import { NoteMathText } from './NoteMathText';
 import { NoteEditorToolbar } from './NoteEditorToolbar';
-import { extractNoteReferences, upsertNoteReferenceList } from './noteReferences';
+import { UNTITLED_NOTE_TITLE } from './notesText';
+import type { PaperReferenceLocation } from './extensions/PaperReference';
 import {
   loadNoteCitationStyle,
   normalizeNoteCitationStyle,
   saveNoteCitationStyle,
   type NoteCitationStyle,
 } from './bibliography';
+import {
+  getAppSettingsSnapshot,
+  subscribeAppSettings,
+} from '../../app/settings/appSettingsCache';
 import { getNote, type NoteMutationOptions } from '../../services/notes';
 import {
   clampDocPosition,
-  deleteNoteBlock,
-  duplicateNoteBlock,
-  focusNoteBlock,
-  focusTextPosition,
   getBlockLabelFromNode,
   getEditorContextAtPoint,
-  insertComponentBelowBlock,
-  insertParagraphBelowBlock,
   type NoteEditorContextMenuState,
-} from './noteEditorBlockUtils.ts';
+} from './noteEditorBlockUtils';
+import { normalizeTagInput, noteAnchorBlockFromAnchor } from './noteUtils';
 import {
-  isAiEnhancedAnchor,
-  normalizeTagInput,
-  noteAnchorBlockFromAnchor,
-  noteAnchorProvenanceLabel,
-} from './noteUtils';
-import {
-  componentBlockNode,
   clearNoteEditorDraft,
-  getImageFilesFromDataTransfer,
-  headingNode,
-  insertImageFilesIntoView,
-  isImageFile,
+  contentHash,
+  contentSnapshotFromSource,
+  createEditorSnapshotSource,
+  createNoteEditorSnapshotTracker,
+  fastContentSignature,
+  fastSignature,
+  fastSignatureFromContent,
   isNoteRecord,
+  legacyFastSignatureV2,
   mergeAnchors,
-  normalizeAnchorPageLabel,
-  normalizeAnchorSourceTitle,
-  normalizeSuggestionQuery,
-  NOTE_TEMPLATES,
+  NOTE_EDITOR_SNAPSHOT_THROTTLE_MS,
   paragraphNode,
+  readEditorWordCount,
+  readNoteEditorDraft,
   signature,
-  slashCommandItems,
   snapshotFromEditor,
   snapshotFromNote,
-  readNoteEditorDraft,
-  writeNoteEditorDraft,
+  type ContentSnapshot,
   type EditorSnapshot,
-  type NoteSlashCommandItem,
+  type NoteEditorDraft,
+  type NoteEditorSnapshotTracker,
 } from './noteEditorUtils';
+import { createNoteEditorExtensions } from './editor/extensions';
+import { useNoteEditorDraftPersistence } from './editor/draft';
+import { createImageEditorProps } from './editor/images';
+import {
+  buildEditorContextMenuEntries,
+  localizeNoteText,
+  NoteEditorFooter,
+  NoteEditorHeader,
+} from './editor/toolbar';
+import { slashCommandItems } from './editor/slashMenu';
+import { createTableCellEditorProps } from './editor/tableCell';
 import 'katex/dist/katex.min.css';
-
-const lowlight = createLowlight(all);
-
-const EditableTable = Table.extend({
-  selectable: false,
-});
-
-type TableCellPointer = {
-  cell: HTMLTableCellElement;
-  clientX: number;
-  clientY: number;
-};
-
-function isTableCellEditClick(event: MouseEvent) {
-  if (event.button !== 0) return false;
-
-  const target = event.target;
-  if (!(target instanceof Element)) return false;
-  if (target.closest('.column-resize-handle')) return false;
-  if (target.closest('button, input, textarea, select, a, .pq-tiptap-token, [contenteditable="false"]')) return false;
-
-  return Boolean(target.closest('td, th'));
-}
-
-function getClickedTableCell(event: MouseEvent) {
-  const target = event.target;
-  if (!(target instanceof Element)) return null;
-  const cell = target.closest('td, th');
-  return cell instanceof HTMLTableCellElement ? cell : null;
-}
-
-function getTableCellStartFromResolvedPosition($pos: ResolvedPos) {
-  for (let depth = $pos.depth; depth > 0; depth -= 1) {
-    const name = $pos.node(depth).type.name;
-    if (name === 'tableCell' || name === 'tableHeader') return $pos.before(depth);
-  }
-
-  return null;
-}
-
-function getTableCellStartNearPosition(view: EditorView, position: number) {
-  const safePosition = Math.max(0, Math.min(position, view.state.doc.content.size));
-  const $pos = view.state.doc.resolve(safePosition);
-  const directCellStart = getTableCellStartFromResolvedPosition($pos);
-  if (directCellStart !== null) return directCellStart;
-
-  const nearbyCell = cellAround($pos) ?? cellNear($pos);
-  return nearbyCell?.pos ?? null;
-}
-
-function createTextSelectionInsideTableCell(view: EditorView, cellStart: number, preferredPosition?: number) {
-  const { doc } = view.state;
-  const cellNode = doc.nodeAt(cellStart);
-  if (!cellNode) return null;
-
-  const cellEnd = cellStart + cellNode.nodeSize;
-  const positions: number[] = [];
-
-  if (typeof preferredPosition === 'number') {
-    positions.push(Math.max(cellStart + 1, Math.min(preferredPosition, cellEnd - 1)));
-  }
-
-  cellNode.descendants((node, offset) => {
-    if (!node.isTextblock) return true;
-
-    positions.push(cellStart + 1 + offset + 1);
-    return false;
-  });
-
-  positions.push(cellStart + 1);
-
-  for (const position of positions) {
-    try {
-      const safePosition = Math.max(cellStart + 1, Math.min(position, cellEnd - 1));
-      const selection = TextSelection.near(doc.resolve(safePosition), 1);
-      const selectionCellStart = getTableCellStartFromResolvedPosition(selection.$from);
-
-      if (selectionCellStart === cellStart) {
-        return selection;
-      }
-    } catch {
-      // Ignore invalid cursor candidates and try the next table-cell textblock.
-    }
-  }
-
-  return null;
-}
-
-function createTableCellTextSelection(view: EditorView, pointer: TableCellPointer) {
-  const positions: number[] = [];
-  const positionAtCoords = view.posAtCoords({ left: pointer.clientX, top: pointer.clientY });
-
-  if (positionAtCoords?.inside !== undefined && positionAtCoords.inside >= 0) {
-    positions.push(positionAtCoords.inside);
-  }
-
-  if (positionAtCoords) {
-    positions.push(positionAtCoords.pos);
-  }
-
-  try {
-    positions.push(view.posAtDOM(pointer.cell, 0));
-    positions.push(view.posAtDOM(pointer.cell, 0) + 1);
-  } catch {
-    // Some browser/table DOM positions cannot be mapped directly.
-  }
-
-  for (const position of positions) {
-    const cellStart = getTableCellStartNearPosition(view, position);
-    if (cellStart === null) continue;
-
-    const selection = createTextSelectionInsideTableCell(view, cellStart, positionAtCoords?.pos);
-    if (selection) return selection;
-  }
-
-  return null;
-}
-
-function setTableCellTextSelection(view: EditorView, pointer: TableCellPointer) {
-  window.requestAnimationFrame(() => {
-    if (!view.dom.isConnected) return;
-
-    const selection = createTableCellTextSelection(view, pointer);
-    if (!selection) return;
-
-    view.dispatch(
-      view.state.tr
-        .setSelection(selection)
-        .setMeta(tableEditingKey, -1)
-        .scrollIntoView(),
-    );
-    view.focus();
-  });
-}
-
-const NOTE_TEXT = {
-  editorLoading: ['加载编辑器…', 'Loading editor...'],
-  linkPrompt: ['输入链接地址', 'Enter link URL'],
-  imagePrompt: ['输入图片地址或本地 data URL', 'Enter an image URL or a local data URL'],
-  mathPrompt: ['输入 LaTeX 公式', 'Enter a LaTeX formula'],
-  headingPlaceholder: ['输入标题...', 'Enter a heading...'],
-  bodyPlaceholder: ['开始写作...', 'Start writing...'],
-  noNote: ['未选择笔记', 'No note selected'],
-  untitled: ['未命名笔记', 'Untitled note'],
-  tagsPlaceholder: ['标签', 'Tags'],
-  saving: ['保存中…', 'Saving...'],
-  dirty: ['未保存', 'Unsaved'],
-  saved: ['已保存', 'Saved'],
-  save: ['保存', 'Save'],
-  externalUpdate: ['有外部更新', 'External update available'],
-  externalUpdateDescription: ['这条笔记已在其他位置保存。刷新后会加载最新版本。', 'This note was saved elsewhere. Refresh to load the latest version.'],
-  externalUpdateDirtyDescription: ['这条笔记已在其他位置保存。当前编辑器还有未保存内容，刷新会用最新版本覆盖当前编辑器。', 'This note was saved elsewhere and the editor still has unsaved changes. Refreshing overwrites the editor with the latest version.'],
-  refresh: ['刷新', 'Refresh'],
-} satisfies Record<string, [string, string]>;
-
-type NoteTextKey = keyof typeof NOTE_TEXT;
-
-function localizeNoteText(l: <T,>(zh: T, en: T) => T): Record<NoteTextKey, string> {
-  const entries = Object.entries(NOTE_TEXT) as Array<[NoteTextKey, [string, string]]>;
-
-  return Object.fromEntries(entries.map(([key, value]) => [key, l(value[0], value[1])])) as Record<NoteTextKey, string>;
-}
-
-const CJK_PATTERN = /[\u3400-\u4dbf\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]/;
-
-// 中文按字数报计量，西文按词数；原先统一显示 “N words” 对中文笔记没有意义。
-function formatNoteLength(wordCount: number, text: string, l: <T,>(zh: T, en: T) => T) {
-  const trimmed = text.trim();
-
-  if (!trimmed) {
-    return l('0 字', '0 words');
-  }
-
-  if (CJK_PATTERN.test(trimmed)) {
-    const characters = Array.from(trimmed.replace(/\s+/g, '')).length;
-
-    return l(`${characters} 字`, `${characters} characters`);
-  }
-
-  return l(`${wordCount} words`, `${wordCount} words`);
-}
 
 function createNoteEditorSourceId() {
   return `note-editor-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
 }
 
-function NoteComponentBlockView({ node, selected, updateAttributes }: NodeViewProps) {
-  const title = typeof node.attrs.title === 'string' && node.attrs.title.trim()
-    ? node.attrs.title
-    : 'Component';
-
-  return (
-    <NodeViewWrapper
-      as="section"
-      className={cn('pq-note-component-block', selected ? 'is-selected' : '')}
-    >
-      <div className="pq-note-component-header" contentEditable={false}>
-        <div className="pq-note-component-kicker">Component</div>
-        <input
-          value={title}
-          onChange={(event) => updateAttributes({ title: event.target.value })}
-          onMouseDown={(event) => event.stopPropagation()}
-          onClick={(event) => event.stopPropagation()}
-          className="pq-note-component-title-input"
-          aria-label="Component title"
-        />
-      </div>
-      <NodeViewContent className="pq-note-component-content" />
-    </NodeViewWrapper>
-  );
-}
-
-const NoteComponentBlock = TiptapNode.create({
-  name: 'noteComponentBlock',
-  group: 'block',
-  content: 'block+',
-  defining: true,
-  draggable: true,
-
-  addAttributes() {
-    return {
-      title: {
-        default: 'Component',
-      },
-      variant: {
-        default: 'note',
-      },
-    };
-  },
-
-  parseHTML() {
-    return [{ tag: 'section[data-type="note-component-block"]' }];
-  },
-
-  renderHTML({ HTMLAttributes }) {
-    return [
-      'section',
-      mergeAttributes(HTMLAttributes, { 'data-type': 'note-component-block' }),
-      0,
-    ];
-  },
-
-  addNodeView() {
-    return ReactNodeViewRenderer(NoteComponentBlockView);
-  },
-});
-
-interface NoteAnchorBlockOptions {
-  HTMLAttributes: Record<string, unknown>;
-  onClick: ((anchorId: string) => void) | null;
-}
-
-function NoteAnchorBlockView({ node, selected, extension }: NodeViewProps) {
-  const anchorId = String(node.attrs.anchorId || '');
-  const label = normalizeAnchorPageLabel(String(node.attrs.label || '定位'));
-  const sourceLabel = String(node.attrs.sourceLabel || '摘录');
-  const sourceTitle = normalizeAnchorSourceTitle(String(node.attrs.sourceTitle || ''), sourceLabel);
-  const excerpt = String(node.attrs.excerpt || '');
-  const aiEnhanced = isAiEnhancedAnchor({ aiEnhanced: node.attrs.aiEnhanced === true });
-  const provenanceLabel = noteAnchorProvenanceLabel({ aiEnhanced });
-  const onClick = (extension.options as NoteAnchorBlockOptions).onClick;
-
-  return (
-    <NodeViewWrapper
-      as="figure"
-      className={cn('pq-note-anchor-card', selected ? 'is-selected' : '')}
-      data-type="note-anchor-block"
-      spellCheck={false}
-    >
-      <blockquote className="pq-note-anchor-card-quote" contentEditable={false}>
-        <span aria-hidden="true">“</span>
-        {excerpt ? <NoteMathText value={excerpt} /> : '无摘录文本'}
-        <span aria-hidden="true">”</span>
-      </blockquote>
-      <figcaption className="pq-note-anchor-card-meta" contentEditable={false}>
-        <span className="pq-note-anchor-card-source" title={sourceTitle}>{sourceTitle}</span>
-        {provenanceLabel ? (
-          <span className="pq-note-anchor-card-provenance" title="原文快照经用户确认的 AI 重识别">
-            {provenanceLabel}
-          </span>
-        ) : null}
-        <button
-          type="button"
-          className="pq-note-anchor-card-page"
-          onMouseDown={(event) => event.preventDefault()}
-          onClick={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            if (anchorId) onClick?.(anchorId);
-          }}
-          title="点击定位到原文"
-          aria-label={`点击定位到原文 ${label}`}
-        >
-          {label}
-        </button>
-      </figcaption>
-    </NodeViewWrapper>
-  );
-}
-
-const NoteAnchorBlock = TiptapNode.create<NoteAnchorBlockOptions>({
-  name: 'noteAnchorBlock',
-  group: 'block',
-  atom: true,
-  selectable: true,
-  draggable: true,
-
-  addOptions() {
-    return {
-      HTMLAttributes: {},
-      onClick: null,
-    };
-  },
-
-  addAttributes() {
-    return {
-      anchorId: {
-        default: null,
-        parseHTML: (element) => element.getAttribute('data-note-anchor-id'),
-        renderHTML: (attributes) =>
-          attributes.anchorId ? { 'data-note-anchor-id': attributes.anchorId } : {},
-      },
-      label: {
-        default: '定位',
-        parseHTML: (element) => element.getAttribute('data-note-anchor-label') || '定位',
-        renderHTML: (attributes) =>
-          attributes.label ? { 'data-note-anchor-label': attributes.label } : {},
-      },
-      sourceLabel: {
-        default: '摘录',
-        parseHTML: (element) => element.getAttribute('data-note-anchor-source') || '摘录',
-        renderHTML: (attributes) =>
-          attributes.sourceLabel ? { 'data-note-anchor-source': attributes.sourceLabel } : {},
-      },
-      sourceTitle: {
-        default: '',
-        parseHTML: (element) =>
-          element.getAttribute('data-note-anchor-source-title') ||
-          element.querySelector('[data-note-anchor-source-title]')?.textContent ||
-          '',
-        renderHTML: (attributes) =>
-          attributes.sourceTitle ? { 'data-note-anchor-source-title': attributes.sourceTitle } : {},
-      },
-      excerpt: {
-        default: '',
-        parseHTML: (element) =>
-          element.getAttribute('data-note-anchor-excerpt') ||
-          element.querySelector('[data-note-anchor-excerpt]')?.textContent ||
-          '',
-        renderHTML: (attributes) =>
-          attributes.excerpt ? { 'data-note-anchor-excerpt': attributes.excerpt } : {},
-      },
-      aiEnhanced: {
-        default: false,
-        parseHTML: (element) => element.getAttribute('data-note-anchor-ai-enhanced') === 'true',
-        renderHTML: (attributes) =>
-          attributes.aiEnhanced ? { 'data-note-anchor-ai-enhanced': 'true' } : {},
-      },
-    };
-  },
-
-  parseHTML() {
-    return [{ tag: 'figure[data-type="note-anchor-block"]' }];
-  },
-
-  renderHTML({ node, HTMLAttributes }) {
-    const label = normalizeAnchorPageLabel(String(node.attrs.label || '定位'));
-    const sourceLabel = String(node.attrs.sourceLabel || '摘录');
-    const sourceTitle = normalizeAnchorSourceTitle(String(node.attrs.sourceTitle || ''), sourceLabel);
-    const excerpt = String(node.attrs.excerpt || '');
-    const provenanceLabel = noteAnchorProvenanceLabel({ aiEnhanced: node.attrs.aiEnhanced === true });
-
-    return [
-      'figure',
-      mergeAttributes(
-        this.options.HTMLAttributes,
-        HTMLAttributes,
-        { 'data-type': 'note-anchor-block', class: 'pq-note-anchor-card' },
-      ),
-      ['blockquote', { 'data-note-anchor-excerpt': 'true', class: 'pq-note-anchor-card-quote' }, [
-        'span',
-        { 'aria-hidden': 'true' },
-        '“',
-      ], excerpt || '无摘录文本', [
-        'span',
-        { 'aria-hidden': 'true' },
-        '”',
-      ]],
-      [
-        'figcaption',
-        { 'data-note-anchor-meta': 'true', class: 'pq-note-anchor-card-meta' },
-        ['span', {
-          'data-note-anchor-source-title': 'true',
-          class: 'pq-note-anchor-card-source',
-          title: sourceTitle,
-        }, sourceTitle],
-        ...(provenanceLabel
-          ? [['span', {
-              class: 'pq-note-anchor-card-provenance',
-              title: '原文快照经用户确认的 AI 重识别',
-            }, provenanceLabel]]
-          : []),
-        [
-          'span',
-          {
-            'data-type': 'noteAnchorLink',
-            'data-note-anchor-id': node.attrs.anchorId,
-            'data-note-anchor-label': label,
-            class: 'pq-note-anchor-card-page pq-tiptap-note-anchor',
-            title: '点击定位到原文',
-          },
-          label,
-        ],
-      ],
-    ];
-  },
-
-  addNodeView() {
-    return ReactNodeViewRenderer(NoteAnchorBlockView);
-  },
-});
-
-function runSlashCommand(editor: Editor, range: Range, item: NoteSlashCommandItem, onPageKind?: (pageKind: NotePageKind) => void) {
-  const chain = editor.chain().focus().deleteRange(range);
-
-  if (item.id === 'paragraph') {
-    chain.setParagraph().run();
-    return;
-  }
-
-  if (item.id === 'heading-1') {
-    chain.setNode('heading', { level: 1 }).run();
-    return;
-  }
-
-  if (item.id === 'heading-2') {
-    chain.setNode('heading', { level: 2 }).run();
-    return;
-  }
-
-  if (item.id === 'heading-3') {
-    chain.setNode('heading', { level: 3 }).run();
-    return;
-  }
-
-  if (item.id === 'bullet-list') {
-    chain.toggleBulletList().run();
-    return;
-  }
-
-  if (item.id === 'ordered-list') {
-    chain.toggleOrderedList().run();
-    return;
-  }
-
-  if (item.id === 'task-list') {
-    chain.toggleTaskList().run();
-    return;
-  }
-
-  if (item.id === 'quote') {
-    chain.toggleBlockquote().run();
-    return;
-  }
-
-  if (item.id === 'code-block') {
-    chain.toggleCodeBlock().run();
-    return;
-  }
-
-  if (item.id === 'table') {
-    chain.insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run();
-    return;
-  }
-
-  if (item.id === 'component') {
-    const insertAt = range.from;
-    chain.insertContent(componentBlockNode('Component'), { updateSelection: false }).run();
-    focusTextPosition(editor, insertAt + 2);
-    return;
-  }
-
-  if (item.id === 'math') {
-    chain.insertInlineMath({ latex: 'E = mc^2' }).insertContent(' ').run();
-    return;
-  }
-
-  if (item.id.startsWith('template:')) {
-    const templateId = item.id.slice('template:'.length);
-    const template = NOTE_TEMPLATES.find((entry) => entry.id === templateId);
-    if (template) {
-      chain.insertContent([...template.content, paragraphNode()]).run();
-      if (template.pageKind) onPageKind?.(template.pageKind);
-    }
-  }
+/** 旧版把中文「未命名笔记」或英文「Untitled Note」哨兵写进数据层；编辑器统一视为空标题。 */
+function normalizeEditableNoteTitle(value: string | null | undefined): string {
+  const title = value ?? '';
+  return title === UNTITLED_NOTE_TITLE || title.trim() === 'Untitled Note' ? '' : title;
 }
 
 interface NoteEditorProps {
@@ -670,22 +126,6 @@ interface NoteEditorProps {
   onPageKindChange?: (pageKind: NotePageKind) => void;
 }
 
-function iconNode(node: ReactNode) {
-  return node;
-}
-
-async function readTextFromClipboard() {
-  const bridgeText = window.paperquay?.clipboard?.readText?.();
-  const normalizedBridgeText = bridgeText?.trim() ?? '';
-  if (normalizedBridgeText) return normalizedBridgeText;
-
-  try {
-    return (await navigator.clipboard?.readText?.())?.trim() ?? '';
-  } catch {
-    return '';
-  }
-}
-
 export function NoteEditor({
   note,
   saving,
@@ -708,8 +148,10 @@ export function NoteEditor({
   onPageKindChange,
 }: NoteEditorProps) {
   const l = useLocaleText();
+  const locale = useAppLocale();
   const TEXT = useMemo(() => localizeNoteText(l), [l]);
-  const [title, setTitle] = useState(note?.title ?? '');
+  const initialTitle = normalizeEditableNoteTitle(note?.title);
+  const [title, setTitle] = useState(initialTitle);
   const [loadedStateNoteId, setLoadedStateNoteId] = useState<string | null>(note?.id ?? null);
   const [tagText, setTagText] = useState(note?.tags.join(', ') ?? '');
   const [tagEditorOpen, setTagEditorOpen] = useState(false);
@@ -720,12 +162,22 @@ export function NoteEditor({
   const [referencePickerOpen, setReferencePickerOpen] = useState(false);
   const [editorContextMenu, setEditorContextMenu] = useState<NoteEditorContextMenuState | null>(null);
   const snapshotRef = useRef<EditorSnapshot>(snapshotFromNote(note));
+  // 廉价内容快照（JSON + 纯文本），供按键期间的签名/脏标记使用，不含 HTML。
+  const contentRef = useRef<ContentSnapshot>({
+    contentJson: snapshotRef.current.contentJson,
+    contentText: snapshotRef.current.contentText,
+  });
+  const snapshotTrackerRef = useRef<NoteEditorSnapshotTracker | null>(null);
+  const editorRef = useRef<Editor | null>(null);
+  // 当前编辑器实例持有的笔记 id；切换笔记时用于把草稿写回正确的笔记。
+  const editorNoteIdRef = useRef<string | null>(note?.id ?? null);
   const editorSourceIdRef = useRef(editorSourceId ?? createNoteEditorSourceId());
-  const lastSavedSignatureRef = useRef(signature({
-    title: note?.title ?? '',
+  const lastSavedSignatureRef = useRef(fastSignature({
+    title: initialTitle,
     tagText: note?.tags.join(', ') ?? '',
     color: note?.color ?? '#fef3c7',
-    snapshot: snapshotRef.current,
+    contentJson: snapshotRef.current.contentJson,
+    contentText: snapshotRef.current.contentText,
   }));
   const latestCandidatesRef = useRef({ notes, tags, papers });
   const latestAnchorsRef = useRef<NoteAnchor[]>(note?.anchors ?? []);
@@ -736,8 +188,12 @@ export function NoteEditor({
   const loadedNoteIdRef = useRef<string | null>(note?.id ?? null);
   const appliedUpdatedAtRef = useRef<number | null>(note?.updatedAt ?? null);
   const dirtyRef = useRef(false);
+  // 正文首键后 120ms 节流窗口内 currentSignature 还没推进；用 liveDirty 立即
+  // 点亮保存按钮/Ctrl+S，节流提交或保存成功后清除。
+  const [liveDirty, setLiveDirty] = useState(false);
   const restoringDraftRef = useRef(false);
-  const pendingDraftRef = useRef<Parameters<typeof writeNoteEditorDraft>[1] | null>(null);
+  const draftContentSyncPendingRef = useRef(false);
+  const pendingDraftRef = useRef<NoteEditorDraft | null>(null);
   const externalUpdateAvailableRef = useRef(false);
   const externalUpdateGenerationRef = useRef(0);
   const noteSessionRef = useRef({ noteId: note?.id ?? null, generation: 0 });
@@ -750,6 +206,30 @@ export function NoteEditor({
   const pendingAnchorsRef = useRef(new Map<string, NoteAnchor>());
   const [citationStyle, setCitationStyle] = useState<NoteCitationStyle>(() => loadNoteCitationStyle());
   const latestCitationStyleRef = useRef<NoteCitationStyle>(citationStyle);
+  // 切换/卸载时由 flushLiveEditor 调用的草稿冲刷入口（hook 在下方声明，运行期已就绪）。
+  const draftFlushRef = useRef<((snapshot: EditorSnapshot, hasPendingContent: boolean) => void) | null>(null);
+
+  // 切换笔记或卸载前同步冲刷：声明在 useEditor 之前，确保 Tiptap 销毁编辑器前还能读到最新内容。
+  useEffect(() => {
+    const flushLiveEditor = () => {
+      const instance = editorRef.current;
+      if (!instance || instance.isDestroyed) return;
+      // 草稿正文尚未回填到编辑器时，编辑器内容落后于草稿，不能拿它覆盖草稿快照。
+      if (draftContentSyncPendingRef.current) return;
+      const tracker = snapshotTrackerRef.current;
+      const hasPendingContent = Boolean(tracker?.hasPending()) || dirtyRef.current;
+      const full = snapshotFromEditor(instance);
+      snapshotRef.current = full;
+      contentRef.current = {
+        contentJson: full.contentJson,
+        contentText: full.contentText,
+      };
+      // 首个正文按键后 120ms 节流窗口内切换/卸载时，草稿 effect 还没生成 payload；
+      // 这里用完整实时快照补建并落盘，保证刚输入的正文不会丢。
+      draftFlushRef.current?.(full, hasPendingContent);
+    };
+    return () => flushLiveEditor();
+  }, [note?.id]);
 
   useEffect(() => {
     if (editorSourceId && editorSourceIdRef.current !== editorSourceId) {
@@ -768,6 +248,15 @@ export function NoteEditor({
   useEffect(() => {
     latestCitationStyleRef.current = citationStyle;
   }, [citationStyle]);
+
+  // Reader 设置页或另一个笔记实例改引用样式后，同步到当前编辑器并重建编号。
+  useEffect(() => subscribeAppSettings(() => {
+    const snapshot = getAppSettingsSnapshot();
+    if (!snapshot) return;
+
+    const nextStyle = normalizeNoteCitationStyle(snapshot.settings.noteCitationStyle);
+    setCitationStyle((current) => (current === nextStyle ? current : nextStyle));
+  }), []);
 
   useEffect(() => {
     if (!tagEditorOpen) return undefined;
@@ -803,125 +292,22 @@ export function NoteEditor({
     }
   }, [onJumpToNoteAnchor]);
 
-  const extensions = useMemo(() => [
-    StarterKit.configure({
-      codeBlock: false,
-      link: false,
-      dropcursor: {
-        color: 'rgba(13, 148, 136, 0.72)',
-        width: 2,
-      },
-    }),
-    Highlight.configure({ multicolor: true }),
-    Link.configure({ openOnClick: false, autolink: true, linkOnPaste: true }),
-    Image.configure({ allowBase64: true }),
-    EditableTable.configure({ resizable: true, allowTableNodeSelection: false }),
-    TableRow,
-    TableCell,
-    TableHeader,
-    TaskList,
-    TaskItem.configure({ nested: true }),
-    Placeholder.configure({
-      placeholder: ({ node }) =>
-        node.type.name === 'heading' ? TEXT.headingPlaceholder : TEXT.bodyPlaceholder,
-    }),
-    CharacterCount,
-    CodeBlockLowlight.configure({ lowlight }),
-    // Block formulas need display mode for constructs such as `\tag{4.24}`.
-    // Keep inline formulas in the default inline mode so their layout is not changed.
-    BlockMath.configure({ katexOptions: { displayMode: true, throwOnError: false } }),
-    InlineMath.configure({ katexOptions: { displayMode: false, throwOnError: false } }),
-    NoteComponentBlock,
-    NoteAnchorBlock.configure({
-      onClick: jumpToAnchorId,
-    }),
-    SlashCommand.configure({
-      items: slashCommandItems,
-      command: ({ editor, range, item }) => {
-        if (item.id === 'paper-reference') {
-          // 打开工具栏的参考文献选择器（由 NoteEditor 状态驱动，与工具栏按钮共用）。
-          editor.chain().focus().deleteRange(range).run();
-          setReferencePickerOpen(true);
-          return;
-        }
-        if (item.id === 'reference-list') {
-          editor.chain().focus().deleteRange(range).run();
-          upsertNoteReferenceList(
-            editor,
-            extractNoteReferences(editor.getJSON(), latestAnchorsRef.current),
-            latestCandidatesRef.current.papers ?? [],
-            latestCitationStyleRef.current,
-          );
-          return;
-        }
-        runSlashCommand(editor, range, item, (nextPageKind) => {
-          setPageKind(nextPageKind);
-          onPageKindChange?.(nextPageKind);
-        });
-      },
-    }),
-    NoteAnchorLink.configure({
-      HTMLAttributes: { class: 'pq-tiptap-token pq-tiptap-note-anchor' },
-      onClick: jumpToAnchorId,
-    }),
-    WikiLink.configure({
-      HTMLAttributes: { class: 'pq-tiptap-token pq-tiptap-wiki-link' },
-      items: (query) => {
-        const normalized = normalizeSuggestionQuery(query, ['[[']);
-        return latestCandidatesRef.current.notes
-          .filter((item) => item.id !== note?.id)
-          .filter((item) => !normalized || item.title.toLocaleLowerCase().includes(normalized))
-          .slice(normalized ? 0 : undefined, normalized ? 8 : undefined)
-          .map((item): NoteSuggestionItem => ({
-            id: item.id,
-            label: item.title || TEXT.untitled,
-            description: item.contentText || item.excerpt || item.content || '',
-          }));
-      },
-      onClick: (noteId) => onOpenNote?.(noteId),
-    }),
-    HashTag.configure({
-      HTMLAttributes: { class: 'pq-tiptap-token pq-tiptap-hash-tag' },
-      items: (query) => {
-        const normalized = normalizeSuggestionQuery(query, ['#']);
-        const values = new Map<string, number>();
-        for (const item of latestCandidatesRef.current.tags) values.set(item.tag, item.count);
-        for (const item of latestCandidatesRef.current.notes) {
-          for (const tag of item.tags) values.set(tag, values.get(tag) ?? 0);
-        }
-        return Array.from(values.entries())
-          .filter(([tag]) => !normalized || tag.toLocaleLowerCase().includes(normalized))
-          .slice(0, 8)
-          .map(([tag, count]) => ({
-            id: tag,
-            label: tag,
-            description: `${count || 0} notes`,
-          }));
-      },
-      onClick: (tag) => onTagClick?.(tag),
-    }),
-    PaperReference.configure({
-      HTMLAttributes: { class: 'pq-tiptap-token pq-tiptap-paper-ref' },
-      citationStyle: () => latestCitationStyleRef.current,
-      papers: () => latestCandidatesRef.current.papers ?? [],
-      items: (query) => {
-        const normalized = normalizeSuggestionQuery(query, ['@']);
-        return latestCandidatesRef.current.papers
-          .filter((paper) =>
-            !normalized ||
-            paper.id.toLocaleLowerCase().includes(normalized) ||
-            paper.title.toLocaleLowerCase().includes(normalized),
-          )
-          .slice(0, 8)
-          .map((paper) => ({
-            id: paper.id,
-            label: paper.title || paper.id,
-            description: paper.authors.map((author) => author.name).join(', ') || paper.year || paper.id,
-          }));
-      },
-      onClick: (paperId, location) => onPaperClick?.(paperId, location),
-    }),
-  ], [jumpToAnchorId, note?.id, onOpenNote, onPaperClick, onTagClick]);
+  const extensions = useMemo(() => createNoteEditorExtensions({
+    text: TEXT,
+    noteId: note?.id ?? null,
+    locale,
+    slashCommandItems,
+    latestCandidatesRef,
+    latestAnchorsRef,
+    latestCitationStyleRef,
+    jumpToAnchorId,
+    onOpenNote,
+    onTagClick,
+    onPaperClick,
+    setReferencePickerOpen,
+    setPageKind,
+    onPageKindChange,
+  }), [jumpToAnchorId, locale, note?.id, onOpenNote, onPaperClick, onTagClick]);
 
   const editor = useEditor({
     extensions,
@@ -929,55 +315,33 @@ export function NoteEditor({
     immediatelyRender: false,
     shouldRerenderOnTransaction: false,
     editorProps: {
-      handleDOMEvents: {
-        mousedown: (view, event) => {
-          if (!(event instanceof MouseEvent) || !isTableCellEditClick(event)) return false;
-
-          const cell = getClickedTableCell(event);
-          if (!cell) return false;
-
-          setTableCellTextSelection(view, {
-            cell,
-            clientX: event.clientX,
-            clientY: event.clientY,
-          });
-
-          return true;
-        },
-      },
-      handleClick: (view, _position, event) => {
-        if (!isTableCellEditClick(event)) return false;
-
-        const cell = getClickedTableCell(event);
-        if (!cell) return false;
-
-        setTableCellTextSelection(view, {
-          cell,
-          clientX: event.clientX,
-          clientY: event.clientY,
-        });
-        return false;
-      },
-      handlePaste: (view, event) => {
-        const files = getImageFilesFromDataTransfer(event.clipboardData);
-        if (files.length === 0) return false;
-
-        event.preventDefault();
-        return insertImageFilesIntoView(view, files);
-      },
-      handleDrop: (view, event, _slice, moved) => {
-        if (moved) return false;
-
-        const files = getImageFilesFromDataTransfer(event.dataTransfer);
-        if (files.length === 0) return false;
-
-        event.preventDefault();
-        const position = view.posAtCoords({ left: event.clientX, top: event.clientY });
-        return insertImageFilesIntoView(view, files, position?.pos ?? null);
+      ...createTableCellEditorProps(),
+      ...createImageEditorProps(),
+      // contenteditable 默认没有可访问名称；axe 的 label-content-name-mismatch
+      // 会把它当成未标注控件。显式 textbox 角色让 aria-label 合法，标签随界面语言切换。
+      attributes: {
+        role: 'textbox',
+        'aria-multiline': 'true',
+        'aria-label': l('笔记正文', 'Note body'),
       },
     },
-    onUpdate: ({ editor }) => {
-      snapshotRef.current = snapshotFromEditor(editor);
+    onUpdate: ({ editor: instance }) => {
+      const tracker = snapshotTrackerRef.current;
+      if (tracker) {
+        // S5：按键只标记脏，快照按 120ms 节流合并，避免每次按键 getJSON+getHTML。
+        // liveDirty 让保存入口在节流窗口内立即可用。
+        setLiveDirty(true);
+        tracker.markDirty();
+        return;
+      }
+      const content = contentSnapshotFromSource(createEditorSnapshotSource(instance));
+      contentRef.current = content;
+      snapshotRef.current = {
+        ...snapshotRef.current,
+        contentJson: content.contentJson,
+        contentText: content.contentText,
+        wordCount: readEditorWordCount(instance),
+      };
       setRevision((value) => value + 1);
     },
     onSelectionUpdate: ({ editor }) => {
@@ -986,7 +350,77 @@ export function NoteEditor({
     },
   }, [note?.id]);
 
-  // 引用样式切换：持久化到 localStorage，并通过 meta 事务触发编号 decoration 重建。
+  const commitContentSnapshot = useCallback((content: ContentSnapshot, instance: Editor | null) => {
+    // 草稿正文尚未回填到编辑器时，编辑器内容落后于草稿，不能覆盖权威快照。
+    if (draftContentSyncPendingRef.current) return;
+    contentRef.current = content;
+    snapshotRef.current = {
+      ...snapshotRef.current,
+      contentJson: content.contentJson,
+      contentText: content.contentText,
+      wordCount: instance && !instance.isDestroyed
+        ? readEditorWordCount(instance)
+        : snapshotRef.current.wordCount,
+    };
+    setRevision((value) => value + 1);
+    // 节流提交后 currentSignature 已包含最新正文，dirty 回到签名比较。
+    setLiveDirty(false);
+  }, []);
+
+  // 编辑器实例（切换笔记时）重建 tracker；旧 tracker 的挂起计时器一并取消。
+  useEffect(() => {
+    if (!editor || editor.isDestroyed) {
+      snapshotTrackerRef.current?.dispose();
+      snapshotTrackerRef.current = null;
+      editorNoteIdRef.current = null;
+      return undefined;
+    }
+    editorNoteIdRef.current = note?.id ?? null;
+    const tracker = createNoteEditorSnapshotTracker(createEditorSnapshotSource(editor), {
+      intervalMs: NOTE_EDITOR_SNAPSHOT_THROTTLE_MS,
+      onCommit: (content) => commitContentSnapshot(content, editor),
+    });
+    snapshotTrackerRef.current = tracker;
+    return () => {
+      tracker.dispose();
+      if (snapshotTrackerRef.current === tracker) snapshotTrackerRef.current = null;
+      editorNoteIdRef.current = null;
+    };
+  }, [commitContentSnapshot, editor, note?.id]);
+
+  /** 立即提交挂起的廉价快照，用于外部更新比较。 */
+  const flushContentSnapshot = useCallback((): ContentSnapshot => {
+    // 恢复草稿后、编辑器回填前，以草稿内容为准，避免读到旧编辑器内容。
+    if (draftContentSyncPendingRef.current) return contentRef.current;
+    if (!editor || editor.isDestroyed) return contentRef.current;
+    const tracker = snapshotTrackerRef.current;
+    if (!tracker) {
+      const content = contentSnapshotFromSource(createEditorSnapshotSource(editor));
+      contentRef.current = content;
+      return content;
+    }
+    const content = tracker.flushContent();
+    contentRef.current = content;
+    return content;
+  }, [editor]);
+
+  /** 立即读取完整快照（含 HTML/字数），用于保存、草稿与切换笔记。 */
+  const flushSnapshot = useCallback((): EditorSnapshot => {
+    // 草稿刚恢复、编辑器尚未回填时，以草稿快照为准。
+    if (draftContentSyncPendingRef.current) return snapshotRef.current;
+    if (!editor || editor.isDestroyed) return snapshotRef.current;
+    const tracker = snapshotTrackerRef.current;
+    const full = tracker ? tracker.flush() : snapshotFromEditor(editor);
+    snapshotRef.current = full;
+    contentRef.current = {
+      contentJson: full.contentJson,
+      contentText: full.contentText,
+    };
+    return full;
+  }, [editor]);
+  editorRef.current = editor;
+
+  // 引用样式切换：通过单一设置文档的 patch 持久化，并用 meta 事务触发编号 decoration 重建。
   const handleCitationStyleChange = useCallback(
     (style: NoteCitationStyle) => {
       const normalized = normalizeNoteCitationStyle(style);
@@ -999,289 +433,47 @@ export function NoteEditor({
     [editor],
   );
 
-  const runContextCommand = useCallback((
-    context: NoteEditorContextMenuState,
-    command: () => void,
-    options: { preserveSelection?: boolean } = {},
-  ) => {
-    if (!editor || editor.isDestroyed) return;
-
-    if (!options.preserveSelection) {
-      focusNoteBlock(editor, context.block, context.position);
-    } else {
-      editor.commands.focus();
+  const lastAppliedCitationStyleRef = useRef<NoteCitationStyle>(citationStyle);
+  useEffect(() => {
+    if (lastAppliedCitationStyleRef.current === citationStyle) {
+      return;
     }
 
-    command();
-  }, [editor]);
+    lastAppliedCitationStyleRef.current = citationStyle;
+    if (editor && !editor.isDestroyed) {
+      editor.view.dispatch(editor.state.tr.setMeta('noteCitationStyleChanged', true));
+    }
+  }, [citationStyle, editor]);
 
   const editorContextMenuEntries = useMemo<NotesContextMenuEntry[]>(() => {
     if (!editor || editor.isDestroyed || !editorContextMenu) return [];
 
-    const context = editorContextMenu;
-    const { from, to } = editor.state.selection;
-    const hasSelection = from !== to && context.position >= from && context.position <= to;
-    const blockTitle = getBlockLabelFromNode(context.block.node);
-    const run = (command: () => void, preserveSelection = false) => () =>
-      runContextCommand(context, command, { preserveSelection });
-    const getSelectedText = () => editor.state.doc.textBetween(
-      editor.state.selection.from,
-      editor.state.selection.to,
-      '\n',
-    );
-    const copySelectionOrBlock = async () => {
-      const selectedText = hasSelection ? getSelectedText() : '';
-      await copyTextToClipboard(selectedText || context.block.node.textContent);
-    };
-    const cutSelection = async () => {
-      const selectedText = getSelectedText();
+    return buildEditorContextMenuEntries(editor, editorContextMenu, l);
+  }, [editor, editorContextMenu, l]);
 
-      if (!selectedText.trim()) return;
-
-      await copyTextToClipboard(selectedText);
-      editor.chain().focus().deleteSelection().run();
-    };
-    const pasteClipboardText = async () => {
-      const text = await readTextFromClipboard();
-
-      if (!text || editor.isDestroyed) return;
-
-      if (hasSelection) {
-        editor.chain().focus().insertContent(text).run();
-        return;
-      }
-
-      focusNoteBlock(editor, context.block, context.position);
-      editor.commands.insertContent(text);
-    };
-
-    const tableEntries: NotesContextMenuEntry[] = context.inTable
-      ? [
-          {
-            id: 'table-add-row-before',
-            label: '在上方插入行',
-            icon: iconNode(<Plus className="h-4 w-4" strokeWidth={1.8} />),
-            onSelect: run(() => editor.chain().focus().addRowBefore().run()),
-          },
-          {
-            id: 'table-add-row-after',
-            label: '在下方插入行',
-            icon: iconNode(<Plus className="h-4 w-4" strokeWidth={1.8} />),
-            onSelect: run(() => editor.chain().focus().addRowAfter().run()),
-          },
-          {
-            id: 'table-add-column-before',
-            label: '在左侧插入列',
-            icon: iconNode(<Table2 className="h-4 w-4" strokeWidth={1.8} />),
-            onSelect: run(() => editor.chain().focus().addColumnBefore().run()),
-          },
-          {
-            id: 'table-add-column-after',
-            label: '在右侧插入列',
-            icon: iconNode(<Table2 className="h-4 w-4" strokeWidth={1.8} />),
-            onSelect: run(() => editor.chain().focus().addColumnAfter().run()),
-          },
-          { type: 'separator', id: 'table-separator-structure' },
-          {
-            id: 'table-toggle-header-row',
-            label: '切换表头行',
-            icon: iconNode(<Table2 className="h-4 w-4" strokeWidth={1.8} />),
-            onSelect: run(() => editor.chain().focus().toggleHeaderRow().run()),
-          },
-          {
-            id: 'table-toggle-header-column',
-            label: '切换表头列',
-            icon: iconNode(<Table2 className="h-4 w-4" strokeWidth={1.8} />),
-            onSelect: run(() => editor.chain().focus().toggleHeaderColumn().run()),
-          },
-          {
-            id: 'table-merge-cells',
-            label: '合并单元格',
-            icon: iconNode(<Table2 className="h-4 w-4" strokeWidth={1.8} />),
-            disabled: !editor.can().mergeCells(),
-            onSelect: run(() => editor.chain().focus().mergeCells().run()),
-          },
-          {
-            id: 'table-split-cell',
-            label: '拆分单元格',
-            icon: iconNode(<Table2 className="h-4 w-4" strokeWidth={1.8} />),
-            disabled: !editor.can().splitCell(),
-            onSelect: run(() => editor.chain().focus().splitCell().run()),
-          },
-          { type: 'separator', id: 'table-separator-delete' },
-          {
-            id: 'table-delete-row',
-            label: '删除当前行',
-            icon: iconNode(<Trash2 className="h-4 w-4" strokeWidth={1.8} />),
-            tone: 'danger',
-            onSelect: run(() => editor.chain().focus().deleteRow().run()),
-          },
-          {
-            id: 'table-delete-column',
-            label: '删除当前列',
-            icon: iconNode(<Trash2 className="h-4 w-4" strokeWidth={1.8} />),
-            tone: 'danger',
-            onSelect: run(() => editor.chain().focus().deleteColumn().run()),
-          },
-          {
-            id: 'table-delete-table',
-            label: '删除表格',
-            icon: iconNode(<Trash2 className="h-4 w-4" strokeWidth={1.8} />),
-            tone: 'danger',
-            onSelect: run(() => editor.chain().focus().deleteTable().run()),
-          },
-          { type: 'separator', id: 'table-separator-block' },
-        ]
-      : [];
-
-    return [
-      ...tableEntries,
-      {
-        id: 'context-title',
-        label: hasSelection ? '复制选中文本' : `复制${blockTitle}`,
-        icon: iconNode(<Copy className="h-4 w-4" strokeWidth={1.8} />),
-        onSelect: copySelectionOrBlock,
-      },
-      {
-        id: 'cut',
-        label: '剪切',
-        icon: iconNode(<Scissors className="h-4 w-4" strokeWidth={1.8} />),
-        disabled: !hasSelection,
-        onSelect: cutSelection,
-      },
-      {
-        id: 'paste',
-        label: '粘贴',
-        icon: iconNode(<ClipboardPaste className="h-4 w-4" strokeWidth={1.8} />),
-        onSelect: pasteClipboardText,
-      },
-      { type: 'separator', id: 'context-separator-inline' },
-      {
-        id: 'bold',
-        label: '加粗',
-        icon: iconNode(<Bold className="h-4 w-4" strokeWidth={1.8} />),
-        onSelect: run(() => editor.chain().focus().toggleBold().run(), hasSelection),
-      },
-      {
-        id: 'italic',
-        label: '斜体',
-        icon: iconNode(<Italic className="h-4 w-4" strokeWidth={1.8} />),
-        onSelect: run(() => editor.chain().focus().toggleItalic().run(), hasSelection),
-      },
-      {
-        id: 'strike',
-        label: '删除线',
-        icon: iconNode(<Strikethrough className="h-4 w-4" strokeWidth={1.8} />),
-        onSelect: run(() => editor.chain().focus().toggleStrike().run(), hasSelection),
-      },
-      {
-        id: 'highlight',
-        label: '高亮',
-        icon: iconNode(<Highlighter className="h-4 w-4" strokeWidth={1.8} />),
-        onSelect: run(() => editor.chain().focus().toggleHighlight({ color: '#fef3c7' }).run(), hasSelection),
-      },
-      {
-        id: 'clear-marks',
-        label: '清除文字样式',
-        icon: iconNode(<RemoveFormatting className="h-4 w-4" strokeWidth={1.8} />),
-        onSelect: run(() => editor.chain().focus().unsetAllMarks().run(), hasSelection),
-      },
-      { type: 'separator', id: 'context-separator-block-style' },
-      {
-        id: 'paragraph',
-        label: '设为正文',
-        icon: iconNode(<Pilcrow className="h-4 w-4" strokeWidth={1.8} />),
-        onSelect: run(() => editor.chain().focus().setParagraph().run()),
-      },
-      {
-        id: 'heading-1',
-        label: '设为一级标题',
-        icon: iconNode(<Heading1 className="h-4 w-4" strokeWidth={1.8} />),
-        onSelect: run(() => editor.chain().focus().toggleHeading({ level: 1 }).run()),
-      },
-      {
-        id: 'heading-2',
-        label: '设为二级标题',
-        icon: iconNode(<Heading2 className="h-4 w-4" strokeWidth={1.8} />),
-        onSelect: run(() => editor.chain().focus().toggleHeading({ level: 2 }).run()),
-      },
-      {
-        id: 'heading-3',
-        label: '设为三级标题',
-        icon: iconNode(<Heading3 className="h-4 w-4" strokeWidth={1.8} />),
-        onSelect: run(() => editor.chain().focus().toggleHeading({ level: 3 }).run()),
-      },
-      {
-        id: 'bullet-list',
-        label: '转换为无序列表',
-        icon: iconNode(<List className="h-4 w-4" strokeWidth={1.8} />),
-        onSelect: run(() => editor.chain().focus().toggleBulletList().run()),
-      },
-      {
-        id: 'ordered-list',
-        label: '转换为有序列表',
-        icon: iconNode(<ListOrdered className="h-4 w-4" strokeWidth={1.8} />),
-        onSelect: run(() => editor.chain().focus().toggleOrderedList().run()),
-      },
-      {
-        id: 'task-list',
-        label: '转换为任务列表',
-        icon: iconNode(<ListChecks className="h-4 w-4" strokeWidth={1.8} />),
-        onSelect: run(() => editor.chain().focus().toggleTaskList().run()),
-      },
-      {
-        id: 'quote',
-        label: '转换为引用',
-        icon: iconNode(<Quote className="h-4 w-4" strokeWidth={1.8} />),
-        onSelect: run(() => editor.chain().focus().toggleBlockquote().run()),
-      },
-      {
-        id: 'code-block',
-        label: '转换为代码块',
-        icon: iconNode(<Code2 className="h-4 w-4" strokeWidth={1.8} />),
-        onSelect: run(() => editor.chain().focus().toggleCodeBlock().run()),
-      },
-      { type: 'separator', id: 'context-separator-block-actions' },
-      {
-        id: 'insert-below',
-        label: '在下方插入一行',
-        icon: iconNode(<Plus className="h-4 w-4" strokeWidth={1.8} />),
-        onSelect: run(() => insertParagraphBelowBlock(editor, context.block)),
-      },
-      {
-        id: 'insert-component',
-        label: '在下方插入组件块',
-        icon: iconNode(<FileText className="h-4 w-4" strokeWidth={1.8} />),
-        onSelect: run(() => insertComponentBelowBlock(editor, context.block)),
-      },
-      {
-        id: 'duplicate-block',
-        label: '复制并插入当前块',
-        icon: iconNode(<FileText className="h-4 w-4" strokeWidth={1.8} />),
-        onSelect: run(() => duplicateNoteBlock(editor, context.block)),
-      },
-      {
-        id: 'delete-block',
-        label: '删除当前块',
-        icon: iconNode(<Trash2 className="h-4 w-4" strokeWidth={1.8} />),
-        tone: 'danger',
-        onSelect: run(() => deleteNoteBlock(editor, context.block)),
-      },
-    ];
-  }, [editor, editorContextMenu, runContextCommand]);
-
+  // S5：内容签名只在正文 revision 变化时重算；标题/标签/颜色按键复用缓存，
+  // 不再重新遍历 contentJson（8 张 base64 截图约 11ms/键）。
+  const contentSignature = useMemo(
+    () => fastContentSignature(contentRef.current.contentJson, contentRef.current.contentText),
+    [revision],
+  );
   const currentSignature = useMemo(
-    () => signature({ title, tagText, color, snapshot: snapshotRef.current }),
-    [color, revision, tagText, title],
+    () => fastSignatureFromContent({ title, tagText, color }, contentSignature),
+    [color, contentSignature, tagText, title],
   );
   const currentSignatureRef = useRef(currentSignature);
   currentSignatureRef.current = currentSignature;
-  const dirty = Boolean(note && currentSignature !== lastSavedSignatureRef.current);
+  const dirty = Boolean(note && (liveDirty || currentSignature !== lastSavedSignatureRef.current));
   const currentTags = useMemo(() => normalizeTagInput(tagText), [tagText]);
 
   useEffect(() => {
     dirtyRef.current = dirty;
   }, [dirty]);
+
+  // 切换笔记时编辑器实例重建，节流窗口的脏标记不能带到下一篇。
+  useEffect(() => {
+    setLiveDirty(false);
+  }, [note?.id]);
 
   useEffect(() => {
     externalUpdateAvailableRef.current = externalUpdateAvailable;
@@ -1315,17 +507,20 @@ export function NoteEditor({
       if (isNoteRecord(detail.note, note.id)) {
         const incomingNote = detail.note;
         const incomingSnapshot = snapshotFromNote(incomingNote);
-        const incomingSignature = signature({
-          title: incomingNote.title ?? '',
+        const incomingSignature = fastSignature({
+          title: normalizeEditableNoteTitle(incomingNote.title),
           tagText: incomingNote.tags.join(', '),
           color: incomingNote.color ?? '#fef3c7',
-          snapshot: incomingSnapshot,
+          contentJson: incomingSnapshot.contentJson,
+          contentText: incomingSnapshot.contentText,
         });
-        const localSignature = signature({
+        const localContent = flushContentSnapshot();
+        const localSignature = fastSignature({
           title,
           tagText,
           color,
-          snapshot: snapshotRef.current,
+          contentJson: localContent.contentJson,
+          contentText: localContent.contentText,
         });
 
         if (incomingSignature === localSignature) {
@@ -1346,23 +541,26 @@ export function NoteEditor({
 
     window.addEventListener(NOTE_CHANGED_EVENT, handleNoteChanged);
     return () => window.removeEventListener(NOTE_CHANGED_EVENT, handleNoteChanged);
-  }, [color, note, setExternalUpdateState, tagText, title]);
+  }, [color, flushContentSnapshot, note, setExternalUpdateState, tagText, title]);
 
   useEffect(() => {
     if (!note || !isNoteRecord(externalUpdateNote, note.id)) return;
 
     const incomingSnapshot = snapshotFromNote(externalUpdateNote);
-    const incomingSignature = signature({
-      title: externalUpdateNote.title ?? '',
+    const incomingSignature = fastSignature({
+      title: normalizeEditableNoteTitle(externalUpdateNote.title),
       tagText: externalUpdateNote.tags.join(', '),
       color: externalUpdateNote.color ?? '#fef3c7',
-      snapshot: incomingSnapshot,
+      contentJson: incomingSnapshot.contentJson,
+      contentText: incomingSnapshot.contentText,
     });
-    const localSignature = signature({
+    const localContent = flushContentSnapshot();
+    const localSignature = fastSignature({
       title,
       tagText,
       color,
-      snapshot: snapshotRef.current,
+      contentJson: localContent.contentJson,
+      contentText: localContent.contentText,
     });
     const appliedUpdatedAt = appliedUpdatedAtRef.current ?? 0;
 
@@ -1370,14 +568,31 @@ export function NoteEditor({
       externalNoteRef.current = externalUpdateNote;
       setExternalUpdateState(true, note.id);
     }
-  }, [color, externalUpdateNote, note, setExternalUpdateState, tagText, title]);
+  }, [color, externalUpdateNote, flushContentSnapshot, note, setExternalUpdateState, tagText, title]);
 
   useEffect(() => {
     const incomingSnapshot = snapshotFromNote(note);
-    const nextTitle = note?.title ?? '';
+    const nextTitle = normalizeEditableNoteTitle(note?.title);
     const nextTagText = note?.tags.join(', ') ?? '';
     const nextColor = note?.color ?? '#fef3c7';
-    const incomingSignature = signature({
+    const incomingContentSignature = fastContentSignature(
+      incomingSnapshot.contentJson,
+      incomingSnapshot.contentText,
+    );
+    const incomingSignature = fastSignatureFromContent({
+      title: nextTitle,
+      tagText: nextTagText,
+      color: nextColor,
+    }, incomingContentSignature);
+    // 兼容旧版本写入的草稿（v2 快速签名 / v1 完整 JSON.stringify 签名），避免升级后误报冲突。
+    const incomingLegacyFastSignature = legacyFastSignatureV2({
+      title: nextTitle,
+      tagText: nextTagText,
+      color: nextColor,
+      contentJson: incomingSnapshot.contentJson,
+      contentText: incomingSnapshot.contentText,
+    });
+    const incomingLegacySignature = signature({
       title: nextTitle,
       tagText: nextTagText,
       color: nextColor,
@@ -1389,31 +604,46 @@ export function NoteEditor({
     forceApplyIncomingRef.current = false;
     const incomingUpdatedAt = note?.updatedAt ?? 0;
     const appliedUpdatedAt = appliedUpdatedAtRef.current ?? 0;
-    const localSignature = signature({
+    const localContent = flushContentSnapshot();
+    const localSignature = fastSignature({
       title,
       tagText,
       color,
-      snapshot: snapshotRef.current,
+      contentJson: localContent.contentJson,
+      contentText: localContent.contentText,
     });
     const draft = !forceApplyIncoming && noteId
       ? readNoteEditorDraft(editorSourceIdRef.current, noteId)
       : null;
+    const draftSignatureMatches = (stored: string) =>
+      stored === incomingSignature ||
+      stored === incomingLegacyFastSignature ||
+      stored === incomingLegacySignature;
     const canRestoreDraft =
       draft &&
-      draft.draftSignature !== incomingSignature &&
+      !draftSignatureMatches(draft.draftSignature) &&
       (!sameNote || !dirtyRef.current || localSignature === incomingSignature);
 
     if (canRestoreDraft) {
       restoringDraftRef.current = true;
-      setTitle(draft.title);
+      draftContentSyncPendingRef.current = true;
+      setTitle(normalizeEditableNoteTitle(draft.title));
       setTagText(draft.tagText);
       setColor(draft.color);
 
       snapshotRef.current = draft.snapshot;
+      contentRef.current = {
+        contentJson: draft.snapshot.contentJson,
+        contentText: draft.snapshot.contentText,
+      };
+      // 编辑器已就绪时立即回填草稿正文；未就绪则由下方 sync effect 在编辑器创建后补上。
+      if (editor && !editor.isDestroyed) {
+        editor.commands.setContent(draft.snapshot.contentJson, { emitUpdate: false });
+      }
       pendingAnchorsRef.current = new Map(draft.pendingAnchors.map((anchor) => [anchor.id, anchor]));
       loadedNoteIdRef.current = noteId;
       setLoadedStateNoteId(noteId);
-      const hasConflict = draft.savedSignature !== incomingSignature;
+      const hasConflict = !draftSignatureMatches(draft.savedSignature);
       appliedUpdatedAtRef.current = hasConflict ? draft.baseUpdatedAt : note?.updatedAt ?? null;
       lastSavedSignatureRef.current = hasConflict ? draft.savedSignature : incomingSignature;
       externalNoteRef.current = hasConflict ? note : null;
@@ -1422,7 +652,7 @@ export function NoteEditor({
       return;
     }
 
-    if (draft && noteId && draft.draftSignature === incomingSignature) {
+    if (draft && noteId && draftSignatureMatches(draft.draftSignature)) {
       clearNoteEditorDraft(editorSourceIdRef.current, noteId);
     }
 
@@ -1464,9 +694,17 @@ export function NoteEditor({
       if (shouldApplyContent) {
         editor.commands.setContent(incomingSnapshot.contentJson, { emitUpdate: false });
         snapshotRef.current = incomingSnapshot;
+        contentRef.current = {
+          contentJson: incomingSnapshot.contentJson,
+          contentText: incomingSnapshot.contentText,
+        };
       }
     } else {
       snapshotRef.current = incomingSnapshot;
+      contentRef.current = {
+        contentJson: incomingSnapshot.contentJson,
+        contentText: incomingSnapshot.contentText,
+      };
     }
 
     loadedNoteIdRef.current = noteId;
@@ -1478,72 +716,63 @@ export function NoteEditor({
       setExternalUpdateState(false, noteId ?? undefined);
     }
     setRevision((value) => value + 1);
-  }, [color, editor, note, note?.id, note?.updatedAt, setExternalUpdateState, tagText, title]);
+    // S5：标题/标签/颜色不列入依赖——它们只影响本地签名比较，按当前渲染的闭包取值即可；
+    // 若列入依赖，每次元数据按键都会重跑本 effect 并推进 revision，导致内容签名缓存失效。
+  }, [editor, flushContentSnapshot, note, note?.id, note?.updatedAt, setExternalUpdateState]);
 
   useEffect(() => {
+    // 只有恢复草稿后才需要把草稿正文补进编辑器；其余按键提交不走这里。
+    if (!draftContentSyncPendingRef.current) return;
     if (!editor || editor.isDestroyed || !note || loadedNoteIdRef.current !== note.id) return;
     const draft = readNoteEditorDraft(editorSourceIdRef.current, note.id);
-    if (!draft || draft.draftSignature !== currentSignature) return;
-    if (JSON.stringify(editor.getJSON()) !== JSON.stringify(draft.snapshot.contentJson)) {
+    if (!draft) {
+      draftContentSyncPendingRef.current = false;
+      return;
+    }
+    const draftFastSignature = fastSignature({
+      title: draft.title,
+      tagText: draft.tagText,
+      color: draft.color,
+      contentJson: draft.snapshot.contentJson,
+      contentText: draft.snapshot.contentText,
+    });
+    if (currentSignatureRef.current !== draftFastSignature) return;
+    if (contentHash(editor.getJSON()) !== contentHash(draft.snapshot.contentJson)) {
       let cancelled = false;
       queueMicrotask(() => {
-        if (cancelled || editor.isDestroyed || noteSessionRef.current.noteId !== note.id || currentSignatureRef.current !== draft.draftSignature) return;
+        if (cancelled || editor.isDestroyed || noteSessionRef.current.noteId !== note.id || currentSignatureRef.current !== draftFastSignature) return;
         editor.commands.setContent(draft.snapshot.contentJson, { emitUpdate: false });
+        draftContentSyncPendingRef.current = false;
       });
       return () => { cancelled = true; };
     }
+    draftContentSyncPendingRef.current = false;
   }, [currentSignature, editor, note?.id]);
 
-  useEffect(() => {
-    if (!note || loadedStateNoteId !== note.id || loadedNoteIdRef.current !== note.id || !lastSavedSignatureRef.current) {
-      return;
-    }
-
-    if (restoringDraftRef.current) {
-      restoringDraftRef.current = false;
-      return;
-    }
-
-    if (!dirty) {
-      clearNoteEditorDraft(editorSourceIdRef.current, note.id);
-      return;
-    }
-
-    const previousDraft = readNoteEditorDraft(editorSourceIdRef.current, note.id);
-    const contentAnchorIds = extractNoteAnchorIds(snapshotRef.current.contentJson);
-    const draftAnchors = mergeAnchors(note.anchors, [
-      ...(previousDraft?.pendingAnchors ?? []),
-      ...pendingAnchorsRef.current.values(),
-    ]).filter((anchor) => contentAnchorIds.has(anchor.id));
-
-    // S5：每次按键都全量序列化 + 写 localStorage 会拖慢输入；
-    // 草稿写入防抖 300ms，切换笔记或卸载时立即冲刷（见下方 effect）。
-    pendingDraftRef.current = {
-      noteId: note.id,
-      baseUpdatedAt: appliedUpdatedAtRef.current ?? note.updatedAt ?? null,
-      savedSignature: lastSavedSignatureRef.current,
-      draftSignature: currentSignature,
-      title,
-      tagText,
-      color,
-      snapshot: snapshotRef.current,
-      pendingAnchors: draftAnchors,
-      updatedAt: Date.now(),
-    };
-
-    const timer = window.setTimeout(() => {
-      const payload = pendingDraftRef.current;
-      if (payload) writeNoteEditorDraft(editorSourceIdRef.current, payload);
-    }, 300);
-
-    return () => window.clearTimeout(timer);
-  }, [color, currentSignature, dirty, loadedStateNoteId, note, note?.id, note?.updatedAt, revision, tagText, title]);
-
-  // 卸载或切换笔记时立即冲刷未落盘的草稿，避免防抖窗口内丢失编辑。
-  useEffect(() => () => {
-    const payload = pendingDraftRef.current;
-    if (payload) writeNoteEditorDraft(editorSourceIdRef.current, payload);
-  }, [note?.id]);
+  const draftPersistence = useNoteEditorDraftPersistence({
+    note,
+    loadedStateNoteId,
+    currentSignature,
+    dirty,
+    revision,
+    title,
+    tagText,
+    color,
+    editorSourceIdRef,
+    loadedNoteIdRef,
+    snapshotRef,
+    pendingDraftRef,
+    pendingAnchorsRef,
+    appliedUpdatedAtRef,
+    lastSavedSignatureRef,
+    restoringDraftRef,
+    editorNoteIdRef,
+    snapshotProvider: flushSnapshot,
+    // 正文首键后 120ms 内切换/卸载时 revision 还没推进，靠这里判断要补建草稿。
+    hasPendingContent: () => Boolean(snapshotTrackerRef.current?.hasPending()),
+  });
+  // flushLiveEditor 的 cleanup 先于 tracker 销毁执行，届时通过这个入口补建草稿。
+  draftFlushRef.current = draftPersistence.flushDraft;
 
   useEffect(() => {
     if (!editor || editor.isDestroyed || !note || !pendingAnchorInsert) return;
@@ -1571,11 +800,11 @@ export function NoteEditor({
       if (editor.isDestroyed) return;
       const endPosition = editor.state.selection.to;
       lastSelectionRef.current = { from: endPosition, to: endPosition };
-      snapshotRef.current = snapshotFromEditor(editor);
+      flushSnapshot();
       setRevision((value) => value + 1);
       onPendingAnchorInsertHandled?.(pendingAnchorInsert.requestId);
     });
-  }, [editor, note, onPendingAnchorInsertHandled, pendingAnchorInsert]);
+  }, [editor, flushSnapshot, note, onPendingAnchorInsertHandled, pendingAnchorInsert]);
 
   const save = useCallback(async () => {
     if (!note || saving) return;
@@ -1589,9 +818,15 @@ export function NoteEditor({
       danger: true,
     }))) return;
 
-    const snapshot = editor ? snapshotFromEditor(editor) : snapshotRef.current;
-    snapshotRef.current = snapshot;
-    const savedInputSignature = signature({ title, tagText, color, snapshot });
+    // 保存前同步冲刷节流快照，确保写入的是最新正文与 HTML。
+    const snapshot = flushSnapshot();
+    const savedInputSignature = fastSignature({
+      title,
+      tagText,
+      color,
+      contentJson: snapshot.contentJson,
+      contentText: snapshot.contentText,
+    });
     const noteSession = noteSessionRef.current.generation;
     const externalGeneration = externalUpdateGenerationRef.current;
     const contentText = snapshot.contentText || collectText(snapshot.contentJson);
@@ -1646,13 +881,20 @@ export function NoteEditor({
     if (externalUpdateGenerationRef.current === externalGeneration) {
       setExternalUpdateState(false, note.id);
     }
-    lastSavedSignatureRef.current = signature({ title: nextTitle, tagText, color, snapshot });
+    lastSavedSignatureRef.current = fastSignature({
+      title: nextTitle,
+      tagText,
+      color,
+      contentJson: snapshot.contentJson,
+      contentText: snapshot.contentText,
+    });
     if (currentSignatureRef.current === savedInputSignature) {
       clearNoteEditorDraft(editorSourceIdRef.current, note.id);
       setTitle(nextTitle);
     }
+    setLiveDirty(false);
     setRevision((value) => value + 1);
-  }, [color, editor, l, note, onUpdate, pageKind, saving, setExternalUpdateState, tagText, title]);
+  }, [color, editor, flushSnapshot, l, note, onUpdate, pageKind, saving, setExternalUpdateState, tagText, title]);
 
   const refreshFromExternalUpdate = useCallback(async () => {
     if (dirty && !(await confirmAction({
@@ -1667,7 +909,7 @@ export function NoteEditor({
     if (!incomingNote) return;
 
     const incomingSnapshot = snapshotFromNote(incomingNote);
-    const nextTitle = incomingNote.title ?? '';
+    const nextTitle = normalizeEditableNoteTitle(incomingNote.title);
     const nextTagText = incomingNote.tags.join(', ');
     const nextColor = incomingNote.color ?? '#fef3c7';
 
@@ -1678,13 +920,18 @@ export function NoteEditor({
       editor.commands.setContent(incomingSnapshot.contentJson, { emitUpdate: false });
     }
     snapshotRef.current = incomingSnapshot;
+    contentRef.current = {
+      contentJson: incomingSnapshot.contentJson,
+      contentText: incomingSnapshot.contentText,
+    };
     loadedNoteIdRef.current = incomingNote.id;
     appliedUpdatedAtRef.current = incomingNote.updatedAt ?? null;
-    lastSavedSignatureRef.current = signature({
+    lastSavedSignatureRef.current = fastSignature({
       title: nextTitle,
       tagText: nextTagText,
       color: nextColor,
-      snapshot: incomingSnapshot,
+      contentJson: incomingSnapshot.contentJson,
+      contentText: incomingSnapshot.contentText,
     });
     pendingAnchorsRef.current.clear();
     externalNoteRef.current = null;
@@ -1773,136 +1020,23 @@ export function NoteEditor({
       )}
       onKeyDown={handleEditorKeyDown}
     >
-      <div className={cn('border-b border-[var(--pq-border)]', compact ? 'px-3 py-2.5' : 'px-4 py-3')}>
-        <div className="flex min-w-0 items-start gap-3">
-          <input
-            value={title}
-            onChange={(event) => setTitle(event.target.value)}
-            placeholder={TEXT.untitled}
-            className={cn(
-              'min-w-0 flex-1 bg-transparent font-semibold leading-tight text-[var(--pq-text)] outline-none placeholder:text-[var(--pq-text-faint)]',
-              compact ? 'text-base' : 'text-xl',
-            )}
-          />
-
-          <div className="flex shrink-0 items-center gap-2 pt-1 text-xs text-[var(--pq-text-faint)]">
-            {externalUpdateAvailable ? (
-              <span className="inline-flex items-center gap-1.5 text-[var(--pq-accent)]">
-                <span className="h-1.5 w-1.5 rounded-full bg-current" />
-                {TEXT.externalUpdate}
-              </span>
-            ) : null}
-            <span>{saving ? TEXT.saving : dirty ? TEXT.dirty : ''}</span>
-
-            <div ref={tagEditorRef} className="relative">
-              <button
-                type="button"
-                onClick={() => setTagEditorOpen((value) => !value)}
-                className={cn(
-                  'pq-icon-button relative h-8 w-8 border',
-                  currentTags.length > 0
-                    ? 'border-[var(--pq-accent-border)] bg-[var(--pq-accent-bg)] text-[var(--pq-accent)]'
-                    : 'border-[var(--pq-border)] bg-[var(--pq-bg-secondary)] text-[var(--pq-text-muted)] hover:border-[var(--pq-border-strong)] hover:text-[var(--pq-text)]',
-                )}
-                aria-expanded={tagEditorOpen}
-                aria-label={TEXT.tagsPlaceholder}
-                title={currentTags.length > 0 ? currentTags.map((item) => `#${item}`).join(' ') : TEXT.tagsPlaceholder}
-              >
-                <Tag className="h-3.5 w-3.5 shrink-0" strokeWidth={1.8} />
-                {currentTags.length > 0 ? (
-                  <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--pq-accent)] px-1 text-[11px] font-semibold leading-none text-[var(--pq-accent-button-text)]">
-                    {currentTags.length > 9 ? '9+' : currentTags.length}
-                  </span>
-                ) : null}
-              </button>
-
-              {tagEditorOpen ? (
-                <div className="pq-card absolute right-0 top-full z-40 mt-1.5 w-[min(320px,calc(100vw-48px))] p-3 shadow-[var(--pq-shadow-dialog)]">
-                  <label className="block">
-                    <span className="mb-1.5 block text-[11px] font-medium uppercase tracking-[0.08em] text-[var(--pq-text-faint)]">
-                      Tags
-                    </span>
-                    <input
-                      value={tagText}
-                      onChange={(event) => setTagText(event.target.value)}
-                      placeholder="tag1, tag2"
-                      autoFocus
-                      className="pq-input h-8 w-full px-3 text-xs"
-                    />
-                  </label>
-
-                  {currentTags.length > 0 ? (
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      {currentTags.map((item) => (
-                        <button
-                          key={item}
-                          type="button"
-                          onClick={() => setTagText(currentTags.filter((tag) => tag !== item).join(', '))}
-                          className="rounded-full bg-[var(--pq-accent-bg)] px-2 py-1 text-[11px] font-medium text-[var(--pq-accent)] transition hover:bg-[var(--pq-active)]"
-                          title="移除此标签"
-                        >
-                          #{item}
-                        </button>
-                      ))}
-                    </div>
-                  ) : null}
-
-                  {tags.length > 0 ? (
-                    <div className="mt-3 border-t border-[var(--pq-border-subtle)] pt-2">
-                      <div className="mb-1.5 text-[11px] text-[var(--pq-text-faint)]">常用标签</div>
-                      <div className="flex max-h-24 flex-wrap gap-1.5 overflow-y-auto">
-                        {tags.slice(0, 12).map((item) => {
-                          const active = currentTags.includes(item.tag);
-
-                          return (
-                            <button
-                              key={item.tag}
-                              type="button"
-                              onClick={() => {
-                                if (active) return;
-                                setTagText([...currentTags, item.tag].join(', '));
-                              }}
-                              disabled={active}
-                              className={cn(
-                                'rounded-full border px-2 py-1 text-[11px] transition disabled:opacity-60',
-                                active
-                                  ? 'border-[var(--pq-accent-bg)] bg-[var(--pq-accent-bg)] text-[var(--pq-accent)]'
-                                  : 'border-[var(--pq-border)] bg-[var(--pq-bg-secondary)] text-[var(--pq-text-muted)] hover:border-[var(--pq-border-strong)] hover:text-[var(--pq-text)]',
-                              )}
-                            >
-                              #{item.tag}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {externalUpdateAvailable ? (
-        <div className="flex items-start gap-3 border-b border-[var(--pq-border)] bg-[var(--pq-accent-bg)] px-4 py-2.5 text-xs text-[var(--pq-text)]">
-          <RefreshCw className="mt-0.5 h-4 w-4 shrink-0 text-[var(--pq-accent)]" strokeWidth={1.8} />
-          <div className="min-w-0 flex-1">
-            <div className="font-medium text-[var(--pq-text)]">{TEXT.externalUpdate}</div>
-            <div className="mt-0.5 leading-5 text-[var(--pq-text-muted)]">
-              {dirty ? TEXT.externalUpdateDirtyDescription : TEXT.externalUpdateDescription}
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={() => void refreshFromExternalUpdate()}
-            className="pq-button h-7 shrink-0 px-2.5 text-xs"
-          >
-            <RefreshCw className="h-3.5 w-3.5" strokeWidth={1.8} />
-            {TEXT.refresh}
-          </button>
-        </div>
-      ) : null}
+      <NoteEditorHeader
+        compact={compact}
+        text={TEXT}
+        title={title}
+        onTitleChange={setTitle}
+        saving={saving}
+        dirty={dirty}
+        externalUpdateAvailable={externalUpdateAvailable}
+        onRefresh={() => void refreshFromExternalUpdate()}
+        tagText={tagText}
+        onTagTextChange={setTagText}
+        tagEditorOpen={tagEditorOpen}
+        onTagEditorToggle={() => setTagEditorOpen((value) => !value)}
+        tagEditorRef={tagEditorRef}
+        currentTags={currentTags}
+        tags={tags}
+      />
 
       <NoteEditorToolbar
         editor={editor}
@@ -1928,42 +1062,24 @@ export function NoteEditor({
         <NotesContextMenu
           x={editorContextMenu.x}
           y={editorContextMenu.y}
-          title={getBlockLabelFromNode(editorContextMenu.block.node)}
+          title={getBlockLabelFromNode(editorContextMenu.block.node, l)}
           entries={editorContextMenuEntries}
           onClose={() => setEditorContextMenu(null)}
           width={244}
         />
       ) : null}
 
-      <div className="flex items-center justify-between gap-3 border-t border-[var(--pq-border)] px-3 py-2 text-xs text-[var(--pq-text-faint)]">
-        <span>{formatNoteLength(snapshotRef.current.wordCount || 0, snapshotRef.current.contentText, l)}</span>
-        <div className="flex items-center gap-2">
-          {externalUpdateAvailable ? (
-            <button
-              type="button"
-              onClick={() => void refreshFromExternalUpdate()}
-              className="pq-button h-8 px-3 text-sm"
-              title={TEXT.refresh}
-            >
-              <RefreshCw className="h-4 w-4" strokeWidth={1.8} />
-              {TEXT.refresh}
-            </button>
-          ) : null}
-          <button
-            type="button"
-            onClick={() => void save()}
-            disabled={!dirty || saving}
-            className={cn(
-              'pq-button-primary h-8 px-3 text-sm disabled:opacity-50',
-              !dirty && !saving ? 'hidden' : '',
-            )}
-            title="Ctrl / Cmd + S"
-          >
-            <Save className="h-4 w-4" strokeWidth={1.8} />
-            {saving ? TEXT.saving : TEXT.save}
-          </button>
-        </div>
-      </div>
+      <NoteEditorFooter
+        l={l}
+        text={TEXT}
+        wordCount={snapshotRef.current.wordCount || 0}
+        contentText={snapshotRef.current.contentText}
+        externalUpdateAvailable={externalUpdateAvailable}
+        onRefresh={() => void refreshFromExternalUpdate()}
+        dirty={dirty}
+        saving={saving}
+        onSave={() => void save()}
+      />
     </div>
   );
 }

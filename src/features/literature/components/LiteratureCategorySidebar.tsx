@@ -288,9 +288,9 @@ export default function LiteratureCategorySidebar({
           className={clsx(
             'flex min-w-0 flex-1 items-center justify-between rounded-xl px-2.5 py-2 text-left text-[13px] transition',
             dragOver
-              ? 'bg-[var(--pq-accent-soft)] text-[var(--pq-accent)] ring-1 ring-[var(--pq-accent-ring)]'
+              ? 'bg-[var(--pq-accent-soft)] text-[var(--pq-accent-strong)] ring-1 ring-[var(--pq-accent-ring)]'
               : selectedCategoryId === category.id
-              ? 'bg-[var(--pq-accent-soft)] text-[var(--pq-accent)] shadow-[0_8px_20px_var(--pq-accent-shadow)] ring-1 ring-[var(--pq-accent-ring)]'
+              ? 'bg-[var(--pq-accent-soft)] text-[var(--pq-accent-strong)] shadow-[0_8px_20px_var(--pq-accent-shadow)] ring-1 ring-[var(--pq-accent-ring)]'
               : category.isSystem
                 ? 'text-[var(--pq-text)] hover:bg-[var(--pq-hover)]'
                 : 'text-[var(--pq-text-muted)] hover:bg-[var(--pq-hover)] hover:text-[var(--pq-text)]',

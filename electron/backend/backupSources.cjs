@@ -4,6 +4,10 @@ const fsp = require('node:fs/promises');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { DatabaseSync } = require('./nodeSqlite.cjs');
+const {
+  DEFAULT_SNAPSHOT_TIMEOUT_MS,
+  snapshotDatabaseInWorker,
+} = require('./backupDatabaseSnapshot.cjs');
 
 const MAX_ENTRIES = 200_000;
 const MAX_WARNINGS = 1_000;
@@ -22,6 +26,7 @@ function pushWarning(warnings, warning) {
 function safeSegment(value, fallback = 'file') {
   let segment = String(value ?? '')
     .normalize('NFC')
+    // eslint-disable-next-line no-control-regex -- 需要匹配并剔除不可见控制字符，保持原有字节级语义
     .replace(/[<>:"/\\|?*\x00-\x1f]/g, '_')
     .replace(/[. ]+$/g, '')
     .trim();
@@ -204,20 +209,6 @@ function openReadOnly(databasePath, { rag = false } = {}) {
   return db;
 }
 
-function checkDatabase(databasePath, { rag = false, deep = true } = {}) {
-  const db = openReadOnly(databasePath, { rag });
-  try {
-    const rows = db.prepare(deep ? 'PRAGMA integrity_check' : 'PRAGMA quick_check').all();
-    const value = rows[0] ? Object.values(rows[0])[0] : '';
-    if (value !== 'ok') throw Object.assign(new Error('Database integrity check failed'), { code: 'DB_INTEGRITY_FAILED' });
-    const userVersion = Number(db.prepare('PRAGMA user_version').get()?.user_version) || 0;
-    return { db, userVersion };
-  } catch (error) {
-    db.close();
-    throw error;
-  }
-}
-
 function readCountsFast(databasePath, kind) {
   const db = openReadOnly(databasePath, { rag: kind === 'rag' });
   try {
@@ -237,51 +228,6 @@ function readCountsFast(databasePath, kind) {
   } finally { db.close(); }
 }
 
-function readCounts(databasePath, kind) {
-  const { db } = checkDatabase(databasePath, { rag: kind === 'rag', deep: kind !== 'rag' });
-  try {
-    if (kind === 'library') {
-      return {
-        papers: Number(db.prepare('SELECT COUNT(*) AS n FROM papers').get().n) || 0,
-        attachments: Number(db.prepare('SELECT COUNT(*) AS n FROM attachments').get().n) || 0,
-      };
-    }
-    if (kind === 'notes') {
-      return {
-        notes: Number(db.prepare('SELECT COUNT(*) AS n FROM notes').get().n) || 0,
-        noteFolders: Number(db.prepare('SELECT COUNT(*) AS n FROM note_folders').get().n) || 0,
-      };
-    }
-    return {
-      ragIndexes: Number(db.prepare('SELECT COUNT(*) AS n FROM rag_indexes').get().n) || 0,
-      ragDocuments: Number(db.prepare('SELECT COUNT(DISTINCT document_key) AS n FROM rag_chunks').get().n) || 0,
-      ragChunks: Number(db.prepare('SELECT COUNT(*) AS n FROM rag_chunks').get().n) || 0,
-    };
-  } finally {
-    db.close();
-  }
-}
-
-function updateUserVersion(databasePath, { rag = false } = {}) {
-  const db = new DatabaseSync(databasePath, { allowExtension: rag });
-  if (rag) {
-    const sqliteVec = require('sqlite-vec');
-    db.enableLoadExtension(true);
-    try {
-      const loadablePath = typeof sqliteVec.getLoadablePath === 'function' ? sqliteVec.getLoadablePath() : '';
-      if (loadablePath) db.loadExtension(loadablePath.replace(/\.asar([\\/])/, '.asar.unpacked$1'));
-      else sqliteVec.load(db);
-    } finally {
-      db.enableLoadExtension(false);
-    }
-  }
-  try {
-    db.exec('PRAGMA user_version = 1');
-  } finally {
-    db.close();
-  }
-}
-
 function makeEntry({ kind, sourcePath, data, sourceRoot, relativePath, packagePath, name, stat, metadata = {}, compression = 'none' }) {
   const size = stat ? stat.size : Buffer.byteLength(data ?? Buffer.alloc(0));
   return {
@@ -296,6 +242,19 @@ function makeEntry({ kind, sourcePath, data, sourceRoot, relativePath, packagePa
     ...(sourcePath ? { sourcePath } : {}),
     ...(data !== undefined ? { data: Buffer.isBuffer(data) ? data : Buffer.from(data) } : {}),
     ...metadata,
+  };
+}
+
+function workerSnapshotOptions(context, signal) {
+  const configured = Number(context.backupSnapshotTimeoutMs);
+  return {
+    signal,
+    timeoutMs: Number.isFinite(configured) && configured > 0
+      ? Math.trunc(configured)
+      : DEFAULT_SNAPSHOT_TIMEOUT_MS,
+    createWorker: typeof context.createBackupSnapshotWorker === 'function'
+      ? context.createBackupSnapshotWorker
+      : undefined,
   };
 }
 
@@ -362,18 +321,22 @@ async function collectBackupSources(context, {
   if (snapshots) {
     await fsp.mkdir(stagingDir, { recursive: true });
     const snapshotsToCreate = [
-      ['library', context.store, context.appPaths.libraryDatabasePath, 'paperquay-library.sqlite'],
-      ['notes', context.noteStore, context.appPaths.notesDatabasePath, 'paperquay-notes.sqlite'],
+      ['library', context.appPaths.libraryDatabasePath, 'paperquay-library.sqlite'],
+      ['notes', context.appPaths.notesDatabasePath, 'paperquay-notes.sqlite'],
     ];
-    for (const [kind, store, sourcePath, fileName] of snapshotsToCreate) {
+    for (const [kind, sourcePath, fileName] of snapshotsToCreate) {
       if (signal?.aborted) throw Object.assign(new Error('Backup source scan cancelled'), { code: 'CANCELLED' });
       const targetPath = path.join(stagingDir, fileName);
-      store.snapshotTo(targetPath);
-      updateUserVersion(targetPath);
-      const result = checkDatabase(targetPath, { deep: true });
-      result.db.close();
-      const tableCounts = readCounts(targetPath, kind);
-      counts = { ...counts, ...tableCounts };
+      // VACUUM + integrity_check 在 worker 线程执行；只读连接产出的快照
+      // 同时包含 WAL 中尚未 checkpoint 的最新数据。
+      const snapshot = await snapshotDatabaseInWorker({
+        sourcePath,
+        targetPath,
+        kind,
+        deep: true,
+        ...workerSnapshotOptions(context, signal),
+      });
+      counts = { ...counts, ...snapshot.counts };
       const stat = await fsp.stat(targetPath);
       const entry = makeEntry({
         kind: 'database', sourcePath: targetPath, sourceRoot: 'dataDir', relativePath: fileName,
@@ -384,11 +347,14 @@ async function collectBackupSources(context, {
     }
     if (options.includeRag && context.ragStore?.available && typeof context.ragStore.snapshotTo === 'function') {
       const targetPath = path.join(stagingDir, 'paperquay-rag.sqlite');
-      await context.ragStore.snapshotTo(targetPath);
-      updateUserVersion(targetPath, { rag: true });
-      const result = checkDatabase(targetPath, { rag: true, deep: false });
-      result.db.close();
-      counts = { ...counts, ...readCounts(targetPath, 'rag') };
+      const snapshot = await snapshotDatabaseInWorker({
+        sourcePath: context.appPaths.ragDatabasePath,
+        targetPath,
+        kind: 'rag',
+        deep: false,
+        ...workerSnapshotOptions(context, signal),
+      });
+      counts = { ...counts, ...snapshot.counts };
       const stat = await fsp.stat(targetPath);
       entries.push(makeEntry({
         kind: 'database', sourcePath: targetPath, sourceRoot: 'dataDir', relativePath: 'paperquay-rag.sqlite',
@@ -477,7 +443,7 @@ async function collectBackupSources(context, {
         const dedupeKey = `${kind}:${path.resolve(sourcePath).toLowerCase()}`;
         if (attachmentSeen.has(dedupeKey)) continue;
         attachmentSeen.add(dedupeKey);
-        const entry = await addPathEntry(kind, sourcePath, `${targetRoot}/${entryName}`, {
+        await addPathEntry(kind, sourcePath, `${targetRoot}/${entryName}`, {
           paperId: String(paper.id), attachmentId: String(attachment.id), fileName: safeSegment(attachment.fileName || path.basename(sourcePath)),
           sourceAbsolutePath: path.resolve(sourcePath),
           originalSourcePath: cleanString(attachment.originalPath) ? path.resolve(attachment.originalPath) : null,

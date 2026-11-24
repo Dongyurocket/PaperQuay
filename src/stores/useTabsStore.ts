@@ -153,7 +153,7 @@ export const useTabsStore = create<TabsState>()((set, get) => ({
   },
   openNoteTab: (noteId, title) => {
     const nextTabId = createNoteTabId(noteId);
-    const normalizedTitle = title.trim() || '未命名笔记';
+    const normalizedTitle = title.trim();
     const existingTab = get().tabs.find((tab) => tab.id === nextTabId);
 
     if (existingTab) {
@@ -182,7 +182,7 @@ export const useTabsStore = create<TabsState>()((set, get) => ({
   },
   updateNoteTabTitle: (noteId, title) => {
     const tabId = createNoteTabId(noteId);
-    const normalizedTitle = title.trim() || '未命名笔记';
+    const normalizedTitle = title.trim();
 
     set((state) => ({
       tabs: state.tabs.map((tab) =>

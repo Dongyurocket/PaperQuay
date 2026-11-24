@@ -5,7 +5,7 @@ import { build } from 'esbuild';
 import { JSDOM } from 'jsdom';
 
 const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://localhost/', pretendToBeVisual: true });
-for (const name of ['window', 'document', 'navigator', 'Node', 'Element', 'HTMLElement', 'HTMLInputElement', 'HTMLTableCellElement', 'ShadowRoot', 'MutationObserver', 'DOMParser', 'CustomEvent', 'Event', 'MouseEvent', 'getComputedStyle']) {
+for (const name of ['window', 'document', 'navigator', 'Node', 'Element', 'HTMLElement', 'HTMLInputElement', 'HTMLTableCellElement', 'ShadowRoot', 'MutationObserver', 'DOMParser', 'CustomEvent', 'Event', 'MouseEvent', 'getComputedStyle', 'localStorage']) {
   Object.defineProperty(globalThis, name, { value: dom.window[name], configurable: true, writable: true });
 }
 globalThis.requestAnimationFrame = dom.window.requestAnimationFrame.bind(dom.window);
@@ -163,6 +163,34 @@ test('failed or unconfirmed saves keep the draft dirty and retryable', async () 
     assert.equal(calls, 3);
   } finally {
     await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
+test('beforeunload flushes the pending draft into persistent storage', async () => {
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  const editorSourceId = 'beforeunload-test';
+  const storageKey = `paperquay.note-editor-draft.v1:${editorSourceId}::unload`;
+  try {
+    await act(async () => root.render(React.createElement(NoteEditor, {
+      note: note('unload', 'Original'),
+      saving: false,
+      onUpdate: async () => undefined,
+      editorSourceId,
+    })));
+    await setTitle(container, 'Unsaved exit draft');
+    await act(async () => {
+      window.dispatchEvent(new dom.window.Event('beforeunload'));
+    });
+
+    const serialized = window.localStorage.getItem(storageKey);
+    assert.ok(serialized, 'the draft must be flushed before the window exits');
+    assert.equal(JSON.parse(serialized).title, 'Unsaved exit draft');
+  } finally {
+    await act(async () => root.unmount());
+    window.localStorage.clear();
     container.remove();
   }
 });

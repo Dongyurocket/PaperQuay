@@ -2,7 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  extractMineruOutlineIndex,
   splitMineruPagesIntoParts,
   type MineruOutlineIndexItem,
 } from '../src/features/reader/mineruSegments.ts';

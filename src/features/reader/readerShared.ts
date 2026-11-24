@@ -22,6 +22,7 @@ import { getFileNameFromPath } from '../../utils/text.ts';
 
 export const SETTINGS_STORAGE_KEY = 'paper-reader-settings-v3';
 export const SECRETS_STORAGE_KEY = 'paper-reader-secrets-v1';
+export const NOTE_CITATION_STYLE_STORAGE_KEY = 'paperquay:note-citation-style:v1';
 export const CONFIG_WRITE_DEBOUNCE_MS = 350;
 
 export type PreferencesSectionKey =
@@ -894,7 +895,10 @@ export function loadSecrets(): ReaderSecrets {
 }
 
 export function mergeReaderConfigWithDefaults(
-  value: Partial<ReaderConfigFile> | null | undefined,
+  value: (Omit<Partial<ReaderConfigFile>, 'settings' | 'secrets'> & {
+    settings?: Partial<ReaderSettings> | null;
+    secrets?: Partial<ReaderSecrets> | null;
+  }) | null | undefined,
   fallbackSettings: ReaderSettings,
   fallbackSecrets: ReaderSecrets,
   defaultPaths: AppDefaultPaths,
@@ -971,6 +975,7 @@ function looksLikeCorruptedGeneratedPath(path: string): boolean {
     '\ufffd',
   ];
   const hasMojibakeMarker =
+    // eslint-disable-next-line no-control-regex -- 需要匹配并剔除不可见控制字符，保持原有字节级语义
     /[\u0000-\u001f]/.test(normalizedPath) ||
     commonMojibakeMarkers.some((marker) => normalizedPath.includes(marker));
   const isGeneratedAppPath = /(?:paperdock-data|paperquay-data|\.mineru-cache|\.downloads|mineru-cache|pdfs)/i.test(

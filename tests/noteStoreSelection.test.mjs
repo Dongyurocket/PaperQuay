@@ -20,7 +20,8 @@ const bundle = await build({
           export const listNoteTags = async () => [];
           export const createNote = (...args) => globalThis.__testCreateNote(...args);
           export const deleteNote = async () => {};
-          export const listNotes = async () => [];`,
+          export const listNotes = async () => [];
+          export const listAllNotes = async () => [];`,
         loader: 'js',
       }));
     },

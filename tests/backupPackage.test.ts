@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -286,6 +286,7 @@ test('real encrypted container and temporary SQLite round-trip stages, applies, 
       packagePath,
       password: 'correct horse battery staple',
       targets: { libraryStorageDir: libraryDir },
+      authorizedTargets: [libraryDir],
       currentRendererState: { 'paperquay-agent-history-v1': 'local pre-import state' },
     });
     assert.equal(staged.ok, true);

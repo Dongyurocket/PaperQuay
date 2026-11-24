@@ -6,8 +6,10 @@ import {
   buildReferenceListNodes,
   extractNoteReferences,
   formatReferenceListEntryText,
+  isReferenceListHeading,
   paperIdFromNotePolishAnchorId,
   REFERENCE_LIST_HEADING,
+  referenceListHeadingForLocale,
   upsertNoteReferenceList,
 } from '../src/features/notes/noteReferences.ts';
 
@@ -219,4 +221,23 @@ test('buildReferenceListNodes builds a heading plus ordered list', () => {
 
 test('upsertNoteReferenceList is a no-op without references', () => {
   assert.equal(upsertNoteReferenceList({} as never, [], papers), false);
+});
+
+test('英文参考文献列表使用 References 标题并可被识别', () => {
+  assert.equal(referenceListHeadingForLocale('en-US'), 'References');
+  assert.equal(referenceListHeadingForLocale('zh-CN'), REFERENCE_LIST_HEADING);
+  assert.equal(isReferenceListHeading('参考文献'), true);
+  assert.equal(isReferenceListHeading('References'), true);
+  assert.equal(isReferenceListHeading(' references '), true);
+  assert.equal(isReferenceListHeading('参考文献与注释'), false);
+
+  const entries = extractNoteReferences({
+    type: 'doc',
+    content: [{
+      type: 'paragraph',
+      content: [{ type: 'paperReference', attrs: { paperId: 'paper-1', label: 'A' } }],
+    }],
+  });
+  const nodes = buildReferenceListNodes(entries, papers, 'apa7', referenceListHeadingForLocale('en-US'));
+  assert.equal((nodes[0] as any).content[0].text, 'References');
 });

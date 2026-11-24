@@ -2,6 +2,7 @@ const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
+const { bundlePreload } = require('../scripts/bundle-preload.cjs');
 
 const mirrorEnv = {
   ELECTRON_MIRROR: process.env.ELECTRON_MIRROR || 'https://npmmirror.com/mirrors/electron/',
@@ -59,6 +60,9 @@ const WATCH_START_GRACE_MS = 1200;
 function isWatchedElectronFile(fileName) {
   const normalized = String(fileName || '').replace(/\\/g, '/');
 
+  // preload.bundle.cjs 是 esbuild 生成物；若把它纳入监听，重新打包会触发无限重启。
+  if (normalized === 'preload.bundle.cjs') return false;
+
   return normalized.endsWith('.cjs') || normalized === 'package.json';
 }
 
@@ -92,7 +96,16 @@ function snapshotWatchedElectronFiles(rootDir) {
   return snapshots;
 }
 
-function startElectron() {
+async function startElectron() {
+  // main.cjs 只引用 preload.bundle.cjs；重启前重建，保证 preload 改动生效。
+  try {
+    await bundlePreload();
+  } catch (error) {
+    console.error(`[paperquay] Failed to build the preload bundle: ${error.message}`);
+    stopAll(1);
+    return;
+  }
+
   electronProcess = spawn(ELECTRON, ['.'], {
     stdio: 'inherit',
     env: {
@@ -107,7 +120,7 @@ function startElectron() {
 
     if (restartingElectron) {
       restartingElectron = false;
-      startElectron();
+      void startElectron();
       return;
     }
 
@@ -187,7 +200,7 @@ viteProcess.on('exit', (code) => {
 waitForServer(DEV_URL)
   .then(() => {
     watchElectronMainFiles();
-    startElectron();
+    void startElectron();
   })
   .catch((error) => {
     console.error(error);

@@ -361,8 +361,8 @@ test('forward-slash attachment paths cannot match unrelated directories', { skip
     }));
 
     assert.equal(store.isKnownAttachmentLocation('C:/paperquay-forward-not-real/content.json'), true);
-    assert.equal(store.isKnownAttachmentLocation('C:\Windows\win.ini'), false);
-    assert.equal(store.isKnownAttachmentDirectory('C:\Windows'), false);
+    assert.equal(store.isKnownAttachmentLocation('C:\\Windows\\win.ini'), false);
+    assert.equal(store.isKnownAttachmentDirectory('C:\\Windows'), false);
   } finally {
     store.close();
     rmSync(appPaths.dataDir, { recursive: true, force: true });

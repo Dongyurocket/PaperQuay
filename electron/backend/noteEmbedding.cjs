@@ -2,27 +2,32 @@ const fs = require('node:fs');
 const { embedTexts } = require('./utils.cjs');
 const { chunkNote, noteSignature } = require('./noteSearch.cjs');
 const { resolveReaderConfigSecrets } = require('./secretStorage.cjs');
+const {
+  buildEmbeddingModelKey,
+  resolveEmbeddingConfigFromDocument,
+  clampEmbeddingBatchSize,
+} = require('../../src/shared/embeddingConfig.cjs');
 
 function resolveNoteEmbedding(appPaths) {
   try {
     const raw = JSON.parse(fs.readFileSync(appPaths.configPath, 'utf8'));
-    const settings = raw.settings || {};
-    const secrets = resolveReaderConfigSecrets(raw, appPaths) || {};
-    const baseUrl = String(settings.embeddingBaseUrl || '').trim().replace(/\/embeddings\/?$/i, '').replace(/\/+$/, '');
-    const model = String(settings.embeddingModel || '').trim();
-    const apiKey = String(secrets.embeddingApiKey || '').trim();
-    if (!baseUrl || !model || !apiKey) return null;
+    const config = resolveEmbeddingConfigFromDocument({
+      settings: raw.settings || {},
+      secrets: resolveReaderConfigSecrets(raw, appPaths) || {},
+    }, {
+      requireApiKey: true,
+      defaultTimeoutSeconds: 60,
+    });
+    if (!config) return null;
     return {
-      baseUrl: /\/v\d+$/i.test(baseUrl) ? baseUrl : `${baseUrl}/v1`, model, apiKey,
-      dimensions: Number.isInteger(settings.embeddingDimensions) && settings.embeddingDimensions > 0 ? settings.embeddingDimensions : null,
-      timeoutSeconds: Math.max(5, Math.min(600, Number(settings.embeddingRequestTimeoutSeconds) || 60)),
-      batchSize: Math.max(1, Math.min(100, Number(settings.embeddingBatchSize) || 24)),
+      ...config,
+      batchSize: clampEmbeddingBatchSize(raw.settings?.embeddingBatchSize, 24),
     };
   } catch { return null; }
 }
 
 function noteModelKey(config) {
-  return `${config.baseUrl}::${config.model}::${config.dimensions ?? 'default'}`;
+  return buildEmbeddingModelKey(config);
 }
 
 async function indexNote(store, { note, embedding, force = false }, embed = embedTexts) {
@@ -61,14 +66,29 @@ function createNoteIndexer({ noteStore, ragStore, appPaths, resolveEmbedding = (
   let scheduled = false;
   let running = false;
   let closed = false;
+  let accepting = true;
   const state = { completed: 0, failed: 0, lastError: null };
   let idleResolve;
   let idle = Promise.resolve();
+  // 退出超时时取消在途 embedding 请求（fetch 由 utils.embedTexts 透传 signal）。
+  // Worker 执行单元的 embedding 在另一个线程内，signal 不可结构化克隆；
+  // 该路径由 shutdown 预算到点后终止 worker 来取消。
+  const shutdownAbort = new AbortController();
+  const canAbortEmbedding = ragStore?.execution !== 'worker';
+
+  function embeddingWithShutdownSignal(embedding) {
+    if (!canAbortEmbedding) return embedding;
+    if (!embedding.signal) return { ...embedding, signal: shutdownAbort.signal };
+    if (typeof AbortSignal.any === 'function') {
+      return { ...embedding, signal: AbortSignal.any([embedding.signal, shutdownAbort.signal]) };
+    }
+    return embedding;
+  }
 
   async function drain() {
     scheduled = false;
     running = true;
-    while (!closed && pending.size) {
+    while (pending.size) {
       const [id, force] = pending.entries().next().value;
       pending.delete(id);
       try {
@@ -76,7 +96,7 @@ function createNoteIndexer({ noteStore, ragStore, appPaths, resolveEmbedding = (
         const embedding = resolveEmbedding();
         if (!note) continue;
         if (note.deletedAt) await ragStore.removeNoteIndex({ id });
-        else if (embedding) await ragStore.indexNote({ note, embedding, force });
+        else if (embedding) await ragStore.indexNote({ note, embedding: embeddingWithShutdownSignal(embedding), force });
         else continue;
         state.completed += 1;
       } catch (error) {
@@ -88,14 +108,20 @@ function createNoteIndexer({ noteStore, ragStore, appPaths, resolveEmbedding = (
     idleResolve?.();
   }
 
+  function scheduleDrain() {
+    if (scheduled || running || pending.size === 0) return;
+    scheduled = true;
+    idle = new Promise((resolve) => { idleResolve = resolve; });
+    setImmediate(() => {
+      if (pending.size) void drain();
+      else { scheduled = false; idleResolve?.(); }
+    });
+  }
+
   function enqueue(note, force = false) {
-    if (closed || (!note.deletedAt && !resolveEmbedding())) return;
+    if (closed || !accepting || (!note.deletedAt && !resolveEmbedding())) return;
     pending.set(note.id, force || pending.get(note.id) === true);
-    if (!scheduled && !running) {
-      scheduled = true;
-      idle = new Promise((resolve) => { idleResolve = resolve; });
-      setImmediate(() => { if (!closed) void drain(); else idleResolve?.(); });
-    }
+    scheduleDrain();
   }
 
   return {
@@ -111,7 +137,43 @@ function createNoteIndexer({ noteStore, ragStore, appPaths, resolveEmbedding = (
     },
     status: () => ({ ...state, pending: pending.size, running: scheduled || running }),
     whenIdle: () => idle,
-    close() { closed = true; pending.clear(); },
+    /**
+     * Stop accepting new work and wait for the queued note indexing to finish.
+     * Returns a summary instead of throwing so the quit path can always proceed.
+     */
+    async closeWhenIdle({ timeoutMs = 0 } = {}) {
+      accepting = false;
+      scheduleDrain();
+      const isIdle = () => !scheduled && !running && pending.size === 0;
+      // Count the job that has already left the queue but is still in flight.
+      const outstanding = () => pending.size + (running ? 1 : 0);
+      if (isIdle()) {
+        return { drained: true, timedOut: false, pending: 0 };
+      }
+      const waiting = idle;
+      if (!(Number(timeoutMs) > 0)) {
+        await waiting;
+        return { drained: isIdle(), timedOut: false, pending: outstanding() };
+      }
+      let timer;
+      const timedOut = await Promise.race([
+        waiting.then(() => false),
+        new Promise((resolve) => { timer = setTimeout(() => resolve(true), timeoutMs); timer.unref?.(); }),
+      ]);
+      clearTimeout(timer);
+      if (timedOut) {
+        // 停止等待后取消在途请求，避免退出流程一直占着网络/worker 资源。
+        shutdownAbort.abort();
+      }
+      return { drained: isIdle(), timedOut, pending: outstanding() };
+    },
+    close() {
+      closed = true;
+      accepting = false;
+      pending.clear();
+      shutdownAbort.abort();
+      if (!scheduled && !running) idleResolve?.();
+    },
   };
 }
 

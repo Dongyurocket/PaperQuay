@@ -24,9 +24,25 @@ export async function reidentifyExcerptImage(request: {
   });
 }
 
-function toErrorMessage(error: unknown, fallback: string) {
-  if (error instanceof Error && error.message) return error.message;
-  return typeof error === 'string' ? error : fallback;
+/**
+ * 提炼错误的稳定码：message 固定为 `CODE: detail`。
+ * detail 可能是后端原始信息，只用于诊断；界面渲染必须走 noteErrorMessage()，
+ * 不能把 message 直接展示给用户（否则英文界面会出现中文原文）。
+ */
+class NoteDistillError extends Error {
+  readonly code: 'NOTE_DISTILL_MODEL_MISSING' | 'NOTE_DISTILL_FAILED';
+
+  constructor(code: 'NOTE_DISTILL_MODEL_MISSING' | 'NOTE_DISTILL_FAILED', detail?: string) {
+    super(detail ? `${code}: ${detail}` : code);
+    this.name = 'NoteDistillError';
+    this.code = code;
+  }
+}
+
+function errorDetail(error: unknown): string | undefined {
+  if (error instanceof Error && error.message.trim()) return error.message.trim();
+  if (typeof error === 'string' && error.trim()) return error.trim();
+  return undefined;
 }
 
 /**
@@ -41,7 +57,7 @@ export async function distillExcerpt(request: {
   const model = await loadQaModelPreset();
 
   if (!model?.apiKey?.trim() || !model.baseUrl?.trim() || !model.model?.trim()) {
-    throw new Error('请先在模型设置中配置可用的问答或 Agent 模型。');
+    throw new NoteDistillError('NOTE_DISTILL_MODEL_MISSING');
   }
 
   try {
@@ -54,6 +70,6 @@ export async function distillExcerpt(request: {
       },
     });
   } catch (error) {
-    throw new Error(toErrorMessage(error, '提炼摘录失败'));
+    throw new NoteDistillError('NOTE_DISTILL_FAILED', errorDetail(error));
   }
 }

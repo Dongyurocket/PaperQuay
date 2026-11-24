@@ -102,6 +102,65 @@ test('event refresh waits for initialization, coalesces bursts and uses the late
   }
 });
 
+test('reading updates can be handled incrementally without a full requery', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const oldWindow = globalThis.window;
+  const windowStub = new EventTarget() as any;
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: windowStub });
+  const harness = new HookHarness();
+  let queries = 0;
+  let categoryUpdates = 0;
+  let handled = 0;
+  let seen: unknown = undefined;
+  const base = {
+    enabled: true,
+    ready: true,
+    refreshPapers: async () => { queries += 1; },
+    listCategories: async () => [],
+    setCategories: () => { categoryUpdates += 1; },
+  };
+  try {
+    harness.render({
+      ...base,
+      handleReadingUpdated: (detail: unknown) => {
+        handled += 1;
+        seen = detail;
+        return true;
+      },
+    });
+
+    windowStub.dispatchEvent(new CustomEvent('paperquay:library-reading-updated', {
+      detail: { paperId: 'paper-1', lastReadAt: 123, readingProgress: 0.4 },
+    }));
+    t.mock.timers.tick(200);
+    await settle();
+    assert.equal(handled, 1);
+    assert.deepEqual(seen, { paperId: 'paper-1', lastReadAt: 123, readingProgress: 0.4 });
+    assert.equal(queries, 0, 'handled reading updates must not trigger a full query');
+    assert.equal(categoryUpdates, 0);
+
+    windowStub.dispatchEvent(new Event('paperquay:library-reading-updated'));
+    t.mock.timers.tick(200);
+    await settle();
+    assert.equal(handled, 2);
+    assert.equal(seen, null);
+    assert.equal(queries, 0);
+
+    harness.render({ ...base, handleReadingUpdated: () => false });
+    windowStub.dispatchEvent(new CustomEvent('paperquay:library-reading-updated', {
+      detail: { paperId: 'paper-1' },
+    }));
+    t.mock.timers.tick(100);
+    await settle();
+    assert.equal(queries, 1);
+    assert.equal(categoryUpdates, 1);
+  } finally {
+    harness.unmount();
+    await settle();
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: oldWindow });
+  }
+});
+
 test('native events requery actual SQLite membership, totals and recent-reading order', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const root = mkdtempSync(path.join(tmpdir(), 'paperquay-query-refresh-'));

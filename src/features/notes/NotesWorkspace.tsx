@@ -31,6 +31,7 @@ import {
 } from '../../app/appEvents';
 import { listAllLibraryPapers } from '../../services/library';
 import { useLocaleText } from '../../i18n/uiLanguage';
+import { noteDisplayTitle } from './notesDisplay';
 import { useNotesStore } from '../../stores/useNotesStore';
 import { shouldNotifyExternalNoteChange } from '../../stores/notesSelection.ts';
 import { normalizeNotePaperTarget } from './notePaperTarget';
@@ -38,6 +39,7 @@ import { useTabsStore, type NoteTab } from '../../stores/useTabsStore';
 import type { LiteraturePaper } from '../../types/library';
 import type { Note, NoteAnchor, NoteFolder } from '../../types/notes';
 import {
+  cancelNotesVaultAutoSync,
   createNoteFolder,
   deleteNoteFolder,
   listNoteFolders,
@@ -52,6 +54,7 @@ import {
 import { EXTERNAL_NOTES_WRITE_EVENT } from '../../services/externalWrite';
 import { selectDirectory } from '../../services/desktop';
 import { loadSettings } from '../reader/readerShared';
+import { useAppSettingsSnapshot } from '../../app/settings/useAppSettings';
 import { shouldRunVaultAutoSync } from './notesQuickWins';
 import { cn } from '../../utils/cn';
 import { NoteEditor } from './NoteEditor';
@@ -64,9 +67,21 @@ import {
   type NotesContextMenuEntry,
 } from './NotesContextMenu';
 import { extractOutline, noteContentToTiptap } from './notesTiptap';
+import { countNotesInFolderTree } from './noteUtils';
 import { resolveNoteAnchorLocation } from './noteAnchorLocation.ts';
 import { extractNoteReferences } from './noteReferences';
 import { confirmAction } from '../../ui/confirmHost';
+import {
+  UNTITLED_NOTE_TITLE,
+  buildFolderDeleteConfirm,
+  buildNotesIndexDoneMessage,
+  buildNotesIndexProgressMessage,
+  buildNotesIndexQueuedMessage,
+  buildVaultRemovalConfirm,
+  buildVaultSyncDeferredMessage,
+  buildVaultSyncMessage,
+  noteErrorMessage,
+} from './notesText';
 
 const NOTE_FOLDERS_STORAGE_KEY = 'paperquay:note-folders:v1';
 const NOTE_FOLDERS_MIGRATION_KEY = 'paperquay:note-folders-migrated:v1';
@@ -167,24 +182,6 @@ function getFolderPath(folder: NoteFolder, folders: NoteFolder[]) {
   return names.join(' / ');
 }
 
-function noteMatchesFolder(note: Note, folders: NoteFolder[], activeFolderId: string | null) {
-  if (!activeFolderId) return true;
-
-  const knownFolderIds = new Set(folders.map((folder) => folder.id));
-  const noteFolderId = note.folderId && knownFolderIds.has(note.folderId) ? note.folderId : null;
-
-  if (activeFolderId === UNCATEGORIZED_FOLDER_ID) {
-    return !noteFolderId;
-  }
-
-  const scopeIds = new Set([activeFolderId, ...getFolderDescendantIds(activeFolderId, folders)]);
-  return Boolean(noteFolderId && scopeIds.has(noteFolderId));
-}
-
-function filterNotesByFolder(notes: Note[], folders: NoteFolder[], activeFolderId: string | null) {
-  return notes.filter((note) => noteMatchesFolder(note, folders, activeFolderId));
-}
-
 function compareTreeNotes(left: Note, right: Note) {
   if (Boolean(left.isPinned) !== Boolean(right.isPinned)) {
     return left.isPinned ? -1 : 1;
@@ -194,7 +191,7 @@ function compareTreeNotes(left: Note, right: Note) {
     return right.updatedAt - left.updatedAt;
   }
 
-  return (left.title || '未命名笔记').localeCompare(right.title || '未命名笔记', 'zh-Hans-CN');
+  return (left.title || UNTITLED_NOTE_TITLE).localeCompare(right.title || UNTITLED_NOTE_TITLE, 'zh-Hans-CN');
 }
 
 function groupNotesByDirectFolder(notes: Note[], folders: NoteFolder[]) {
@@ -261,6 +258,7 @@ function FolderInlineEditor({
   onCommit,
   onCancel,
 }: FolderInlineEditorProps) {
+  const l = useLocaleText();
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -302,8 +300,8 @@ function FolderInlineEditor({
           onMouseDown={(event) => event.preventDefault()}
           onClick={onCommit}
           className="pq-icon-button h-5 w-5 rounded"
-          title="确认"
-          aria-label="确认"
+          title={l('确认', 'Confirm')}
+          aria-label={l('确认', 'Confirm')}
         >
           <Check className="h-3 w-3" strokeWidth={2} />
         </button>
@@ -312,8 +310,8 @@ function FolderInlineEditor({
           onMouseDown={(event) => event.preventDefault()}
           onClick={onCancel}
           className="pq-icon-button h-5 w-5 rounded"
-          title="取消"
-          aria-label="取消"
+          title={l('取消', 'Cancel')}
+          aria-label={l('取消', 'Cancel')}
         >
           <X className="h-3 w-3" strokeWidth={2} />
         </button>
@@ -343,6 +341,8 @@ function FolderNoteTreeItem({
   onDragEnd,
   onContextMenu,
 }: FolderNoteTreeItemProps) {
+  const l = useLocaleText();
+
   return (
     <article
       draggable
@@ -366,7 +366,7 @@ function FolderNoteTreeItem({
         {active ? <span className="absolute inset-y-1.5 left-0 w-0.5 rounded-full bg-[var(--pq-accent)]" /> : null}
         <FileText className="h-3.5 w-3.5 shrink-0 text-[var(--pq-text-faint)]" strokeWidth={1.8} />
         <span className="truncate font-medium">
-          {note.title || '未命名笔记'}
+          {noteDisplayTitle(note.title, l)}
         </span>
       </button>
     </article>
@@ -426,6 +426,7 @@ function FolderTreeItem({
   onFolderEditCancel,
   onContextMenu,
 }: FolderTreeItemProps) {
+  const l = useLocaleText();
   const children = childrenByParent.get(folder.id) ?? [];
   const directNotes = notesByFolder.get(folder.id) ?? [];
   const expanded = expandedFolderIds.has(folder.id);
@@ -441,7 +442,7 @@ function FolderTreeItem({
         <FolderInlineEditor
           depth={depth}
           value={folderEditDraft.value}
-          placeholder="分类名称"
+          placeholder={l('分类名称', 'Category name')}
           mode="rename"
           onChange={onFolderEditChange}
           onCommit={onFolderEditCommit}
@@ -463,7 +464,7 @@ function FolderTreeItem({
               'flex h-6 w-5 shrink-0 items-center justify-center rounded-md text-[var(--pq-text-faint)] transition',
               expandable ? 'hover:bg-[var(--pq-hover)] hover:text-[var(--pq-text)]' : 'opacity-0',
             )}
-            aria-label={expanded ? '折叠分类' : '展开分类'}
+            aria-label={expanded ? l('折叠分类', 'Collapse category') : l('展开分类', 'Expand category')}
             disabled={!expandable}
           >
             {expanded ? (
@@ -513,7 +514,7 @@ function FolderTreeItem({
             <FolderInlineEditor
               depth={depth + 1}
               value={folderEditDraft.value}
-              placeholder="子分类名称"
+              placeholder={l('子分类名称', 'Subcategory name')}
               mode="create"
               onChange={onFolderEditChange}
               onCommit={onFolderEditCommit}
@@ -634,7 +635,7 @@ function NotesRightPanel({
             </div>
           )) : (
             <div className="px-2 py-1 text-xs text-[var(--pq-text-faint)]">
-              No outline
+              {l('暂无大纲', 'No outline')}
             </div>
           )}
         </div>
@@ -642,7 +643,7 @@ function NotesRightPanel({
 
       <section className="border-b border-[var(--pq-border)] p-4">
         <div className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--pq-text-faint)]">
-          参考文献
+          {l('参考文献', 'References')}
         </div>
         <div className="mt-3 space-y-2">
           {references.length > 0 ? references.map((entry, index) => {
@@ -669,7 +670,7 @@ function NotesRightPanel({
                     sourceType: entry.locations[0].sourceType,
                   } : undefined)}
                   className="block w-full text-left"
-                  title="打开文献"
+                  title={l('打开文献', 'Open paper')}
                 >
                   <div className="text-xs font-semibold text-[var(--pq-text)]">
                     <span className="mr-1.5 text-[var(--pq-text-faint)]">[{index + 1}]</span>
@@ -692,9 +693,11 @@ function NotesRightPanel({
                           sourceType: location.sourceType,
                         })}
                         className="rounded-full border border-[var(--pq-border)] px-2 py-0.5 text-[11px] text-[var(--pq-text-muted)] transition hover:border-[var(--pq-accent)] hover:text-[var(--pq-accent)]"
-                        title="跳转到引用位置"
+                        title={l('跳转到引用位置', 'Jump to citation')}
                       >
-                        {location.pageIndex !== null ? `第 ${location.pageIndex + 1} 页` : '定位'}
+                        {location.pageIndex !== null
+                          ? l(`第 ${location.pageIndex + 1} 页`, `Page ${location.pageIndex + 1}`)
+                          : l('定位', 'Location')}
                       </button>
                     ))}
                   </div>
@@ -703,7 +706,7 @@ function NotesRightPanel({
             );
           }) : (
             <div className="px-2 py-1 text-xs text-[var(--pq-text-faint)]">
-              暂无参考文献，使用 @ 或工具栏「引用」插入
+              {l('暂无参考文献，使用 @ 或工具栏「引用」插入', 'No references yet. Use @ or the Cite button in the toolbar.')}
             </div>
           )}
         </div>
@@ -738,6 +741,99 @@ function NotesRightPanel({
         </div>
       </section>
     </aside>
+  );
+}
+
+/**
+ * 定时同步的调度 hook。
+ *
+ * 设置来自应用唯一的设置文档缓存（useAppSettingsSnapshot）：开启/关闭或修改间隔
+ * 会触发重渲染，但 effect 只依赖 enabled + intervalMinutes，所以无关设置变更不会
+ * 重置倒计时。关闭或改间隔时 effect cleanup 会立刻 clearInterval，再按新值重新挂载。
+ * 设置文档尚未 hydrate 时退回旧的 localStorage 快照，保持迁移前行为。
+ *
+ * 导出供 tests/vaultAutosyncReactivity.test.mjs 以假定时器验证订阅/重挂载语义。
+ */
+export function useVaultAutoSyncSchedule({
+  loadNotes,
+  refreshFolders,
+  lastRunAtRef,
+}: {
+  loadNotes: () => Promise<void> | void;
+  refreshFolders: () => Promise<void> | void;
+  lastRunAtRef: { current: number | null };
+}) {
+  const appSettings = useAppSettingsSnapshot();
+  const legacySettings = useMemo(() => (appSettings ? null : loadSettings()), [appSettings]);
+  const enabled = appSettings
+    ? appSettings.settings.notesVaultAutoSyncEnabled
+    : Boolean(legacySettings?.notesVaultAutoSyncEnabled);
+  const intervalMinutes = appSettings
+    ? appSettings.settings.notesVaultAutoSyncIntervalMinutes
+    : (legacySettings?.notesVaultAutoSyncIntervalMinutes ?? 30);
+
+  useEffect(() => {
+    if (!enabled) return undefined;
+
+    let cancelled = false;
+
+    const runVaultSync = async () => {
+      try {
+        const vault = await getNotesVaultSettings();
+        if (!vault.dir || !shouldRunVaultAutoSync({
+          now: Date.now(),
+          lastRunAt: lastRunAtRef.current,
+          intervalMinutes,
+        })) return;
+        lastRunAtRef.current = Date.now();
+        await syncNotesVaultNow({ background: true });
+        if (!cancelled) {
+          await loadNotes();
+          await refreshFolders();
+        }
+      } catch {
+        // Automatic synchronization is intentionally silent.
+      }
+    };
+
+    const timer = window.setInterval(() => void runVaultSync(), intervalMinutes * 60_000);
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) window.clearInterval(timer);
+      // 关闭自动同步或改间隔时中断仍在跑的调度器同步；cleanup 不能 await，
+      // 只发起取消请求，主进程按 background 标记终止本轮并保留 manifest。
+      void cancelNotesVaultAutoSync();
+    };
+  }, [enabled, intervalMinutes, lastRunAtRef, loadNotes, refreshFolders]);
+}
+
+/**
+ * 笔记列表 / 编辑区的空态。导出供 i18n 渲染用例直接断言英文界面文案。
+ */
+export function NotesEmptyState({ variant }: { variant: 'list' | 'editor' }) {
+  const l = useLocaleText();
+
+  if (variant === 'list') {
+    return (
+      <div className="mt-2 rounded-[var(--pq-radius-sm)] border border-dashed border-[var(--pq-border)] px-3 py-4 text-center text-xs text-[var(--pq-text-faint)]">
+        {l('暂无笔记', 'No notes yet')}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex h-full min-h-[260px] flex-col items-center justify-center gap-2 rounded-[var(--pq-radius-md)] border border-dashed border-[var(--pq-border)] bg-[var(--pq-surface-1)] px-4 text-center">
+      <NotebookText className="h-6 w-6 text-[var(--pq-text-faint)]" strokeWidth={1.6} />
+      <div className="text-sm font-medium text-[var(--pq-text-muted)]">
+        {l('未选择笔记', 'No note selected')}
+      </div>
+      <p className="max-w-sm text-xs leading-5 text-[var(--pq-text-faint)]">
+        {l(
+          '从左侧新建笔记，或同步 Markdown vault 后开始整理。',
+          'Create a note from the sidebar, or sync a Markdown vault to get started.',
+        )}
+      </p>
+    </div>
   );
 }
 
@@ -784,30 +880,36 @@ export function NotesWorkspace({ workspaceActive = true }: { workspaceActive?: b
     try {
       const result = await rebuildNotesIndex();
       if (!indexMountedRef.current) return;
-      setVaultMessage(result.warning || `笔记索引已排队：${result.queued} 篇`);
-      if (result.warning || !result.queued) { setIndexRebuilding(false); return; }
+      if (result.warning) {
+        // 后端 warning 可能是原始错误/中文，不直接渲染；给出可行动的双语提示。
+        setVaultMessage(l('笔记索引未能启动，请稍后重试。', 'Note index could not start. Try again later.'));
+        setIndexRebuilding(false);
+        return;
+      }
+      setVaultMessage(buildNotesIndexQueuedMessage(result.queued, l));
+      if (!result.queued) { setIndexRebuilding(false); return; }
       const poll = async () => {
         try {
           const status = await getNotesIndexStatus();
           if (!indexMountedRef.current) return;
           if (status.running) {
-            setVaultMessage(`笔记索引：完成 ${status.completed}，失败 ${status.failed}，待处理 ${status.pending}`);
+            setVaultMessage(buildNotesIndexProgressMessage(status, l));
             indexPollingRef.current = setTimeout(() => void poll(), 1000);
           } else {
             setIndexRebuilding(false);
-            setVaultMessage(`笔记索引完成：${status.completed} 篇，失败 ${status.failed}${status.lastError ? `；${status.lastError}` : ''}`);
+            setVaultMessage(buildNotesIndexDoneMessage(status, l));
           }
         } catch (error) {
           if (!indexMountedRef.current) return;
           setIndexRebuilding(false);
-          setVaultMessage(error instanceof Error ? error.message : '读取笔记索引状态失败');
+          setVaultMessage(noteErrorMessage(error, l));
         }
       };
       indexPollingRef.current = setTimeout(() => void poll(), 1000);
     } catch (error) {
       if (!indexMountedRef.current) return;
       setIndexRebuilding(false);
-      setVaultMessage(error instanceof Error ? error.message : '笔记索引启动失败');
+      setVaultMessage(noteErrorMessage(error, l));
     }
   }
   const [activeFolderId, setActiveFolderId] = useState<string | null>(null);
@@ -868,19 +970,12 @@ export function NotesWorkspace({ workspaceActive = true }: { workspaceActive?: b
 
   const childrenByParent = useMemo(() => buildFolderChildren(folders), [folders]);
   const notesByFolder = useMemo(() => groupNotesByDirectFolder(notes, folders), [folders, notes]);
-  const uncategorizedCount = useMemo(
-    () => filterNotesByFolder(notes, folders, UNCATEGORIZED_FOLDER_ID).length,
+  // 一次遍历算出未分类 + 每个 folder 的后代计数（旧实现每个 folder 过滤一遍，
+  // 5000 条笔记时是 O(folders × notes)）。计数语义与原先逐 folder 过滤完全一致。
+  const { uncategorizedCount, folderCounts: folderNoteCounts } = useMemo(
+    () => countNotesInFolderTree(notes, folders),
     [folders, notes],
   );
-  const folderNoteCounts = useMemo(() => {
-    const counts = new Map<string, number>();
-
-    for (const folder of folders) {
-      counts.set(folder.id, filterNotesByFolder(notes, folders, folder.id).length);
-    }
-
-    return counts;
-  }, [folders, notes]);
   const creatingRootFolder = folderEditDraft?.kind === 'create' && folderEditDraft.parentId === null;
   const uncategorizedExpanded = expandedFolderIds.has(UNCATEGORIZED_FOLDER_ID);
 
@@ -910,41 +1005,12 @@ export function NotesWorkspace({ workspaceActive = true }: { workspaceActive?: b
 
   // Vault 同步只由用户触发：手动入口，或用户显式开启的定时自动同步。
   // 打开笔记页不再隐式同步，避免挂载时的意外磁盘写入。
-  useEffect(() => {
-    const settings = loadSettings();
-    if (!settings.notesVaultAutoSyncEnabled) return undefined;
-
-    let cancelled = false;
-    let timer: number | undefined;
-
-    const runVaultSync = async () => {
-      try {
-        const vault = await getNotesVaultSettings();
-        if (!vault.dir || !shouldRunVaultAutoSync({
-          now: Date.now(),
-          lastRunAt: vaultAutoSyncLastRunRef.current,
-          intervalMinutes: settings.notesVaultAutoSyncIntervalMinutes,
-        })) return;
-        vaultAutoSyncLastRunRef.current = Date.now();
-        await syncNotesVaultNow();
-        if (!cancelled) {
-          await loadNotes();
-          await refreshFolders();
-        }
-      } catch {
-        // Automatic synchronization is intentionally silent.
-      }
-    };
-
-    timer = window.setInterval(
-      () => void runVaultSync(),
-      settings.notesVaultAutoSyncIntervalMinutes * 60_000,
-    );
-    return () => {
-      cancelled = true;
-      if (timer !== undefined) window.clearInterval(timer);
-    };
-  }, [loadNotes, refreshFolders]);
+  // 订阅统一设置文档：关闭/改间隔会即时清理并重挂载定时器（见 useVaultAutoSyncSchedule）。
+  useVaultAutoSyncSchedule({
+    loadNotes,
+    refreshFolders,
+    lastRunAtRef: vaultAutoSyncLastRunRef,
+  });
 
   useEffect(() => {
     if (!activeFolderId || activeFolderId === UNCATEGORIZED_FOLDER_ID) return;
@@ -959,7 +1025,7 @@ export function NotesWorkspace({ workspaceActive = true }: { workspaceActive?: b
 
       setActiveNoteId(noteId);
       if (note) {
-        openNoteTab(note.id, note.title || '未命名笔记');
+        openNoteTab(note.id, noteDisplayTitle(note.title, l));
       }
     },
     [notes, openNoteTab, setActiveNoteId],
@@ -972,9 +1038,9 @@ export function NotesWorkspace({ workspaceActive = true }: { workspaceActive?: b
     try {
       let settings = await getNotesVaultSettings();
       if (!settings.dir) {
-        const dir = await selectDirectory('选择笔记 vault 目录（可指向 Obsidian 库）');
+        const dir = await selectDirectory(l('选择笔记 vault 目录（可指向 Obsidian 库）', 'Choose a notes vault folder (an Obsidian vault works too)'));
         if (!dir) {
-          setVaultMessage('未选择 vault 目录');
+          setVaultMessage(l('未选择 vault 目录', 'No vault folder selected'));
           return;
         }
         settings = await updateNotesVaultSettings({ dir });
@@ -982,35 +1048,24 @@ export function NotesWorkspace({ workspaceActive = true }: { workspaceActive?: b
       let stats = await syncNotesVaultNow();
       if (stats.removalConfirmationRequired) {
         const pendingRemovals = stats.pendingRemovals ?? 0;
-        const confirmed = await confirmAction({
-          title: '确认清理 vault 文件',
-          description:
-            `本次同步检测到 ${pendingRemovals} 个文件对应的笔记已不存在，数量超过安全阈值。` +
-            '继续会从 vault 删除这些 Markdown 文件（PaperQuay 内笔记不受影响）。',
-          confirmLabel: '删除文件',
-          danger: true,
-        });
+        const confirmed = await confirmAction(buildVaultRemovalConfirm(pendingRemovals, l));
         if (!confirmed) {
-          setVaultMessage(
-            `同步完成：导入 ${stats.imported}、导出 ${stats.exported}；已暂缓清理 ${pendingRemovals} 个文件`,
-          );
+          setVaultMessage(buildVaultSyncDeferredMessage(stats, pendingRemovals, l));
           void loadNotes();
           void refreshFolders();
           return;
         }
         stats = await syncNotesVaultNow({ confirmRemoval: true });
       }
-      setVaultMessage(
-        `同步完成：导入 ${stats.imported}（新建 ${stats.created}）、导出 ${stats.exported}、清理 ${stats.removed}、冲突副本 ${stats.conflicts}`,
-      );
+      setVaultMessage(buildVaultSyncMessage(stats, l));
       void loadNotes();
       void refreshFolders();
     } catch (error) {
-      setVaultMessage(error instanceof Error ? error.message : '同步失败');
+      setVaultMessage(noteErrorMessage(error, l));
     } finally {
       setVaultSyncing(false);
     }
-  }, [loadNotes, refreshFolders, vaultSyncing]);
+  }, [l, loadNotes, refreshFolders, vaultSyncing]);
 
   const toggleFolder = useCallback((folderId: string) => {
     setExpandedFolderIds((current) => {
@@ -1085,15 +1140,8 @@ export function NotesWorkspace({ workspaceActive = true }: { workspaceActive?: b
   const deleteFolder = useCallback(async (folder: NoteFolder) => {
     const removedIds = new Set([folder.id, ...getFolderDescendantIds(folder.id, folders)]);
     const hasNotes = notes.some((note) => note.folderId && removedIds.has(note.folderId));
-    const message = hasNotes
-      ? `删除“${folder.name}”及其子分类？其中的笔记会移动到未分类。`
-      : `删除“${folder.name}”及其子分类？`;
 
-    const confirmed = await confirmAction({
-      title: `删除分类「${folder.name}」`,
-      description: message,
-      danger: true,
-    });
+    const confirmed = await confirmAction(buildFolderDeleteConfirm(folder.name, hasNotes, l));
 
     if (!confirmed) return;
 
@@ -1121,7 +1169,7 @@ export function NotesWorkspace({ workspaceActive = true }: { workspaceActive?: b
         if (previousActiveNoteId) setActiveNoteId(previousActiveNoteId);
         void loadNotes();
       });
-  }, [activeFolderId, activeNoteId, folders, loadNotes, notes, refreshFolders, setActiveNoteId]);
+  }, [activeFolderId, activeNoteId, folders, l, loadNotes, notes, refreshFolders, setActiveNoteId]);
 
   useEffect(() => {
     if (!activeNoteTab) {
@@ -1135,9 +1183,9 @@ export function NotesWorkspace({ workspaceActive = true }: { workspaceActive?: b
 
   useEffect(() => {
     if (activeNote) {
-      updateNoteTabTitle(activeNote.id, activeNote.title || '未命名笔记');
+      updateNoteTabTitle(activeNote.id, noteDisplayTitle(activeNote.title, l));
     }
-  }, [activeNote, updateNoteTabTitle]);
+  }, [activeNote, l, updateNoteTabTitle]);
 
   // 文献候选只用于笔记里的文献引用/锚点跳转。工作区未激活时不预取，
   // 避免每次启动都为隐藏的 Notes 分页拉全库。
@@ -1186,7 +1234,7 @@ export function NotesWorkspace({ workspaceActive = true }: { workspaceActive?: b
 
       if (detail.action === 'updated') {
         if (isNoteEventRecord(detail.note)) {
-          updateNoteTabTitle(detail.note.id, detail.note.title || '未命名笔记');
+          updateNoteTabTitle(detail.note.id, noteDisplayTitle(detail.note.title, l));
         }
         // 「外部更新」标记由当前编辑器在比较版本/签名后通过
         // onExternalUpdateChange 设置；这里不再把所有同 id 标签一并标脏。
@@ -1255,12 +1303,13 @@ export function NotesWorkspace({ workspaceActive = true }: { workspaceActive?: b
         : null;
 
     void createWorkspaceNote({
-      title: '未命名笔记',
+      // 新建笔记不再把中文哨兵写进数据层，空标题由展示层本地化。
+      title: '',
       contentText: '',
       tags: tag ? [tag] : [],
       folderId,
     }).then((note) => {
-      openNoteTab(note.id, note.title || '未命名笔记');
+      openNoteTab(note.id, noteDisplayTitle(note.title, l));
     });
   }, [activeFolderId, createWorkspaceNote, openNoteTab, tag]);
 
@@ -1278,7 +1327,7 @@ export function NotesWorkspace({ workspaceActive = true }: { workspaceActive?: b
   const handleNoteDragStart = useCallback((event: DragEvent<HTMLElement>, note: Note) => {
     event.dataTransfer.effectAllowed = 'move';
     event.dataTransfer.setData(NOTE_DRAG_MIME, note.id);
-    event.dataTransfer.setData('text/plain', note.title || '未命名笔记');
+    event.dataTransfer.setData('text/plain', noteDisplayTitle(note.title, l));
     setDraggingNoteId(note.id);
   }, []);
 
@@ -1409,7 +1458,7 @@ export function NotesWorkspace({ workspaceActive = true }: { workspaceActive?: b
       const folderMoveEntries: NotesContextMenuEntry[] = [
         {
           id: 'move-note-uncategorized',
-          label: '移动到未分类',
+          label: l('移动到未分类', 'Move to Uncategorized'),
           disabled: !note.folderId,
           icon: <Folder className="h-4 w-4" strokeWidth={1.8} />,
           onSelect: () => {
@@ -1418,7 +1467,7 @@ export function NotesWorkspace({ workspaceActive = true }: { workspaceActive?: b
         },
         ...folders.map((folder): NotesContextMenuEntry => ({
           id: `move-note-${folder.id}`,
-          label: `移动到 ${getFolderPath(folder, folders)}`,
+          label: l(`移动到 ${getFolderPath(folder, folders)}`, `Move to ${getFolderPath(folder, folders)}`),
           disabled: note.folderId === folder.id,
           icon: <Folder className="h-4 w-4" strokeWidth={1.8} />,
           onSelect: () => {
@@ -1430,20 +1479,20 @@ export function NotesWorkspace({ workspaceActive = true }: { workspaceActive?: b
       return [
         {
           id: 'open-note',
-          label: '打开笔记',
+          label: l('打开笔记', 'Open note'),
           tone: 'accent',
           icon: <FileText className="h-4 w-4" strokeWidth={1.8} />,
           onSelect: () => openNote(note.id),
         },
         {
           id: 'copy-title',
-          label: '复制标题',
+          label: l('复制标题', 'Copy title'),
           icon: <Copy className="h-4 w-4" strokeWidth={1.8} />,
-          onSelect: () => copyTextToClipboard(note.title || '未命名笔记'),
+          onSelect: () => copyTextToClipboard(noteDisplayTitle(note.title, l)),
         },
         {
           id: 'copy-content',
-          label: '复制正文',
+          label: l('复制正文', 'Copy body'),
           disabled: !contentText.trim(),
           icon: <Copy className="h-4 w-4" strokeWidth={1.8} />,
           onSelect: () => copyTextToClipboard(contentText),
@@ -1453,7 +1502,7 @@ export function NotesWorkspace({ workspaceActive = true }: { workspaceActive?: b
         { type: 'separator', id: 'note-state-separator' },
         {
           id: 'toggle-pin',
-          label: note.isPinned ? '取消置顶' : '置顶笔记',
+          label: note.isPinned ? l('取消置顶', 'Unpin note') : l('置顶笔记', 'Pin note'),
           icon: <Pin className="h-4 w-4" fill={note.isPinned ? 'currentColor' : 'none'} strokeWidth={1.8} />,
           onSelect: () => {
             void updateWorkspaceNote(note.id, { isPinned: !note.isPinned });
@@ -1461,7 +1510,7 @@ export function NotesWorkspace({ workspaceActive = true }: { workspaceActive?: b
         },
         {
           id: 'toggle-favorite',
-          label: note.isFavorite ? '取消收藏' : '收藏笔记',
+          label: note.isFavorite ? l('取消收藏', 'Remove favorite') : l('收藏笔记', 'Favorite note'),
           icon: <Star className="h-4 w-4" fill={note.isFavorite ? 'currentColor' : 'none'} strokeWidth={1.8} />,
           onSelect: () => {
             void updateWorkspaceNote(note.id, { isFavorite: !note.isFavorite });
@@ -1470,7 +1519,7 @@ export function NotesWorkspace({ workspaceActive = true }: { workspaceActive?: b
         { type: 'separator', id: 'note-danger-separator' },
         {
           id: 'delete-note',
-          label: '删除笔记',
+          label: l('删除笔记', 'Delete note'),
           tone: 'danger',
           icon: <Trash2 className="h-4 w-4" strokeWidth={1.8} />,
           onSelect: () => deleteWorkspaceNote(note.id),
@@ -1484,27 +1533,27 @@ export function NotesWorkspace({ workspaceActive = true }: { workspaceActive?: b
       return [
         {
           id: 'new-note-in-folder',
-          label: '在此分类新建笔记',
+          label: l('在此分类新建笔记', 'New note in this category'),
           tone: 'accent',
           icon: <Plus className="h-4 w-4" strokeWidth={1.8} />,
           onSelect: () => handleCreateNote(folder.id),
         },
         {
           id: 'new-child-folder',
-          label: '新建子分类',
+          label: l('新建子分类', 'New subcategory'),
           icon: <FolderPlus className="h-4 w-4" strokeWidth={1.8} />,
           onSelect: () => startCreateFolder(folder.id),
         },
         {
           id: 'rename-folder',
-          label: '重命名分类',
+          label: l('重命名分类', 'Rename category'),
           icon: <Pencil className="h-4 w-4" strokeWidth={1.8} />,
           onSelect: () => startRenameFolder(folder),
         },
         { type: 'separator', id: 'folder-danger-separator' },
         {
           id: 'delete-folder',
-          label: '删除分类',
+          label: l('删除分类', 'Delete category'),
           tone: 'danger',
           icon: <Trash2 className="h-4 w-4" strokeWidth={1.8} />,
           onSelect: () => deleteFolder(folder),
@@ -1515,21 +1564,21 @@ export function NotesWorkspace({ workspaceActive = true }: { workspaceActive?: b
     return [
       {
         id: 'new-note',
-        label: '新建笔记',
+        label: l('新建笔记', 'New note'),
         tone: 'accent',
         icon: <Plus className="h-4 w-4" strokeWidth={1.8} />,
         onSelect: handleCreateNoteInCurrentFolder,
       },
       {
         id: 'new-folder',
-        label: '新建一级分类',
+        label: l('新建一级分类', 'New top-level category'),
         tone: 'accent',
         icon: <FolderPlus className="h-4 w-4" strokeWidth={1.8} />,
         onSelect: () => startCreateFolder(null),
       },
       {
         id: 'clear-filter',
-        label: '清除筛选',
+        label: l('清除筛选', 'Clear filters'),
         disabled: !search && !tag && !activeFolderId,
         icon: <Search className="h-4 w-4" strokeWidth={1.8} />,
         onSelect: () => {
@@ -1545,6 +1594,7 @@ export function NotesWorkspace({ workspaceActive = true }: { workspaceActive?: b
     deleteFolder,
     deleteWorkspaceNote,
     folders,
+    l,
     handleCreateNote,
     handleCreateNoteInCurrentFolder,
     openNote,
@@ -1577,9 +1627,9 @@ export function NotesWorkspace({ workspaceActive = true }: { workspaceActive?: b
                 <NotebookText className="h-4 w-4" strokeWidth={1.8} />
               </span>
               <div className="min-w-0">
-                <div className="text-sm font-semibold text-[var(--pq-text)]">Notes</div>
+                <div className="text-sm font-semibold text-[var(--pq-text)]">{l('笔记', 'Notes')}</div>
                 <div className="mt-0.5 text-xs text-[var(--pq-text-faint)]">
-                  {notes.length} notes
+                  {l(`${notes.length} 条笔记`, `${notes.length} notes`)}
                 </div>
               </div>
             </div>
@@ -1589,8 +1639,8 @@ export function NotesWorkspace({ workspaceActive = true }: { workspaceActive?: b
                 onClick={() => void handleIndexRebuild()}
                 disabled={indexRebuilding}
                 className="pq-icon-button flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--pq-bg-secondary)] text-[var(--pq-text-muted)] hover:text-[var(--pq-accent)] disabled:opacity-50"
-                title="重建笔记语义索引"
-                aria-label="重建笔记语义索引"
+                title={l('重建笔记语义索引', 'Rebuild note semantic index')}
+                aria-label={l('重建笔记语义索引', 'Rebuild note semantic index')}
               >
                 <RefreshCw className={cn('h-4 w-4', indexRebuilding && 'animate-spin')} strokeWidth={1.8} />
               </button>
@@ -1599,8 +1649,8 @@ export function NotesWorkspace({ workspaceActive = true }: { workspaceActive?: b
                 onClick={() => void handleVaultSync()}
                 disabled={vaultSyncing}
                 className="pq-icon-button flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--pq-bg-secondary)] text-[var(--pq-text-muted)] transition hover:text-[var(--pq-accent)] disabled:opacity-50"
-                title="同步 Markdown vault（Obsidian 兼容）"
-                aria-label="Sync notes vault"
+                title={l('同步笔记 vault（兼容 Obsidian）', 'Sync notes vault (Obsidian compatible)')}
+                aria-label={l('同步笔记 vault（兼容 Obsidian）', 'Sync notes vault (Obsidian compatible)')}
               >
                 <FolderSync className="h-4 w-4" strokeWidth={1.8} />
               </button>
@@ -1608,8 +1658,8 @@ export function NotesWorkspace({ workspaceActive = true }: { workspaceActive?: b
                 type="button"
                 onClick={handleCreateNoteInCurrentFolder}
                 className="pq-icon-button flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--pq-accent-bg)] text-[var(--pq-accent)]"
-                title="New note"
-                aria-label="New note"
+                title={l('新建笔记', 'New note')}
+                aria-label={l('新建笔记', 'New note')}
               >
                 <Plus className="h-4 w-4" strokeWidth={1.8} />
               </button>
@@ -1628,7 +1678,7 @@ export function NotesWorkspace({ workspaceActive = true }: { workspaceActive?: b
 
           {error ? (
             <div className="mt-3 rounded-[var(--pq-radius-sm)] border border-[var(--pq-error-bg)] bg-[var(--pq-error-bg)] px-2.5 py-1.5 text-xs text-[var(--pq-error)]">
-              {error}
+              {noteErrorMessage(error, l)}
             </div>
           ) : null}
 
@@ -1639,7 +1689,7 @@ export function NotesWorkspace({ workspaceActive = true }: { workspaceActive?: b
                 type="button"
                 onClick={() => setVaultMessage(null)}
                 className="shrink-0 text-[var(--pq-text-faint)] hover:text-[var(--pq-text)]"
-                aria-label="Dismiss"
+                aria-label={l('关闭', 'Dismiss')}
               >
                 <X className="h-3 w-3" strokeWidth={1.8} />
               </button>
@@ -1658,7 +1708,7 @@ export function NotesWorkspace({ workspaceActive = true }: { workspaceActive?: b
             <div className="space-y-4">
               <section className="space-y-1">
                 <div className="px-2 text-[11px] font-medium uppercase tracking-[0.08em] text-[var(--pq-text-faint)]">
-                  Workspace
+                  {l('工作区', 'Workspace')}
                 </div>
 
                 <button
@@ -1673,7 +1723,7 @@ export function NotesWorkspace({ workspaceActive = true }: { workspaceActive?: b
                 >
                   <span className="inline-flex min-w-0 items-center gap-2">
                     <FileText className="h-3.5 w-3.5 shrink-0" strokeWidth={1.8} />
-                    <span className="truncate">全部笔记</span>
+                    <span className="truncate">{l('全部笔记', 'All notes')}</span>
                   </span>
                   <span className="shrink-0 text-[11px] text-[var(--pq-text-faint)]">{notes.length}</span>
                 </button>
@@ -1690,7 +1740,7 @@ export function NotesWorkspace({ workspaceActive = true }: { workspaceActive?: b
                         'flex h-7 w-5 shrink-0 items-center justify-center rounded-md text-[var(--pq-text-faint)] transition',
                         uncategorizedCount > 0 ? 'hover:bg-[var(--pq-hover)] hover:text-[var(--pq-text)]' : 'opacity-0',
                       )}
-                      aria-label={uncategorizedExpanded ? '折叠未分类' : '展开未分类'}
+                      aria-label={uncategorizedExpanded ? l('折叠未分类', 'Collapse uncategorized') : l('展开未分类', 'Expand uncategorized')}
                       disabled={uncategorizedCount === 0}
                     >
                       {uncategorizedExpanded ? (
@@ -1724,7 +1774,7 @@ export function NotesWorkspace({ workspaceActive = true }: { workspaceActive?: b
                         ) : (
                           <Folder className="h-3.5 w-3.5 shrink-0" strokeWidth={1.8} />
                         )}
-                        <span className="truncate">未分类</span>
+                        <span className="truncate">{l('未分类', 'Uncategorized')}</span>
                       </span>
                       <span className="shrink-0 text-[11px] text-[var(--pq-text-faint)]">{uncategorizedCount}</span>
                     </button>
@@ -1753,14 +1803,14 @@ export function NotesWorkspace({ workspaceActive = true }: { workspaceActive?: b
               <section className="space-y-1">
                 <div className="flex h-7 items-center justify-between px-2">
                   <span className="text-[11px] font-medium uppercase tracking-[0.08em] text-[var(--pq-text-faint)]">
-                    Folders
+                    {l('分类', 'Folders')}
                   </span>
                   <button
                     type="button"
                     onClick={() => startCreateFolder(null)}
                     className="inline-flex h-6 w-6 items-center justify-center rounded-md text-[var(--pq-text-faint)] transition hover:bg-[var(--pq-hover)] hover:text-[var(--pq-text)]"
-                    title="新建一级分类"
-                    aria-label="新建一级分类"
+                    title={l('新建一级分类', 'New top-level category')}
+                    aria-label={l('新建一级分类', 'New top-level category')}
                   >
                     <FolderPlus className="h-3.5 w-3.5" strokeWidth={1.8} />
                   </button>
@@ -1770,7 +1820,7 @@ export function NotesWorkspace({ workspaceActive = true }: { workspaceActive?: b
                   <FolderInlineEditor
                     depth={0}
                     value={folderEditDraft.value}
-                    placeholder="分类名称"
+                    placeholder={l('分类名称', 'Category name')}
                     mode="create"
                     onChange={updateFolderEditValue}
                     onCommit={commitFolderEdit}
@@ -1815,10 +1865,12 @@ export function NotesWorkspace({ workspaceActive = true }: { workspaceActive?: b
                     className="flex h-9 w-full items-center gap-2 rounded-lg border border-dashed border-[var(--pq-border)] px-2 text-left text-xs text-[var(--pq-text-faint)] transition hover:border-[var(--pq-border-strong)] hover:bg-[var(--pq-hover)] hover:text-[var(--pq-text-muted)]"
                   >
                     <FolderPlus className="h-3.5 w-3.5" strokeWidth={1.8} />
-                    <span className="truncate">新建分类</span>
+                    <span className="truncate">{l('新建分类', 'New category')}</span>
                   </button>
                 ) : null}
               </section>
+
+              {notes.length === 0 ? <NotesEmptyState variant="list" /> : null}
             </div>
           )}
         </div>
@@ -1855,38 +1907,42 @@ export function NotesWorkspace({ workspaceActive = true }: { workspaceActive?: b
             type="button"
             onClick={() => setRightPanelOpen(true)}
             className="pq-icon-button absolute right-3 top-1/2 z-20 h-9 w-7 -translate-y-1/2 rounded-r-none border border-r-0 border-[var(--pq-border)] bg-[var(--pq-surface-1)] shadow-[var(--pq-shadow-soft)]"
-            title="Show outline"
-            aria-label="Show outline"
+            title={l('显示大纲', 'Show outline')}
+            aria-label={l('显示大纲', 'Show outline')}
           >
             <PanelRightOpen className="h-4 w-4" strokeWidth={1.8} />
           </button>
         ) : null}
 
         {mainView === 'editor' ? (
-          <NoteEditor
-            key={activeNote?.id ?? 'no-note'}
-            note={activeNote}
-            workspaceActive={workspaceActive}
-            saving={saving}
-            notes={notes}
-            tags={tags}
-            papers={papers}
-            onUpdate={async (noteId, patch, options) => {
-              const updated = await updateWorkspaceNote(noteId, patch, {
-                ...options,
-                sourceId: options?.sourceId ?? NOTES_WORKSPACE_EDITOR_SOURCE_ID,
-              });
-              updateNoteTabTitle(updated.id, updated.title || '未命名笔记');
-              setNoteTabExternalUpdate(updated.id, false);
-              return updated;
-            }}
-            editorSourceId={NOTES_WORKSPACE_EDITOR_SOURCE_ID}
-            onExternalUpdateChange={setNoteTabExternalUpdate}
-            onOpenNote={openNote}
-            onTagClick={setTag}
-            onPaperClick={handleOpenPaper}
-            onJumpToNoteAnchor={handleJumpToNoteAnchor}
-          />
+          activeNote ? (
+            <NoteEditor
+              key={activeNote.id}
+              note={activeNote}
+              workspaceActive={workspaceActive}
+              saving={saving}
+              notes={notes}
+              tags={tags}
+              papers={papers}
+              onUpdate={async (noteId, patch, options) => {
+                const updated = await updateWorkspaceNote(noteId, patch, {
+                  ...options,
+                  sourceId: options?.sourceId ?? NOTES_WORKSPACE_EDITOR_SOURCE_ID,
+                });
+                updateNoteTabTitle(updated.id, noteDisplayTitle(updated.title, l));
+                setNoteTabExternalUpdate(updated.id, false);
+                return updated;
+              }}
+              editorSourceId={NOTES_WORKSPACE_EDITOR_SOURCE_ID}
+              onExternalUpdateChange={setNoteTabExternalUpdate}
+              onOpenNote={openNote}
+              onTagClick={setTag}
+              onPaperClick={handleOpenPaper}
+              onJumpToNoteAnchor={handleJumpToNoteAnchor}
+            />
+          ) : (
+            <NotesEmptyState variant="editor" />
+          )
         ) : null}
       </main>
 
@@ -1904,7 +1960,7 @@ export function NotesWorkspace({ workspaceActive = true }: { workspaceActive?: b
         <NotesContextMenu
           x={contextMenu.x}
           y={contextMenu.y}
-          title={contextMenu.kind === 'note' ? contextMenu.note.title || '未命名笔记' : '笔记'}
+          title={contextMenu.kind === 'note' ? noteDisplayTitle(contextMenu.note.title, l) : l('笔记', 'Notes')}
           entries={contextMenuEntries}
           onClose={() => setContextMenu(null)}
         />

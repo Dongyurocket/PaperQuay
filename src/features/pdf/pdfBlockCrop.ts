@@ -1,4 +1,5 @@
 import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist';
+import type { PDFDocumentLoadingTask, PDFDocumentProxy } from 'pdfjs-dist';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { useEffect, useState } from 'react';
 
@@ -19,9 +20,9 @@ if (typeof window !== 'undefined' && GlobalWorkerOptions && workerUrl) {
 }
 
 interface CachedPdfDocEntry {
-  promise: Promise<any>;
-  doc?: any;
-  loadingTask?: any;
+  promise: Promise<PDFDocumentProxy>;
+  doc?: PDFDocumentProxy;
+  loadingTask?: PDFDocumentLoadingTask;
   sourceKey: string;
 }
 
@@ -76,7 +77,7 @@ export async function getPdfBlockCropDataUrl(
         return null;
       }
 
-      const loadingTask = getDocument(documentInit as any);
+      const loadingTask = getDocument(documentInit as Parameters<typeof getDocument>[0]);
       const promise = loadingTask.promise;
       cachedEntry = {
         promise,
@@ -97,7 +98,7 @@ export async function getPdfBlockCropDataUrl(
     }
 
     const releaseBorrow = pdfDocCache.acquire(sourceKey);
-    let pdfDoc: any = null;
+    let pdfDoc: PDFDocumentProxy | null = null;
 
     try {
       pdfDoc = await cachedEntry.promise;

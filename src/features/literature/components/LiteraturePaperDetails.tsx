@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
-  BookOpenText, Check, ChevronDown, Copy, ExternalLink, FileText, Languages,
-  MoreHorizontal, Pencil, Save, Star, Trash2, X,
+  BookOpenText, ChevronDown, Copy, ExternalLink, FileText, Languages,
+  MoreHorizontal, Pencil, Star, Trash2,
 } from 'lucide-react';
-import { useAppLocale, useLocaleText } from '../../../i18n/uiLanguage';
+import { useLocaleText } from '../../../i18n/uiLanguage';
 import { useWheelScrollDelegate } from '../../../hooks/useWheelScrollDelegate';
 import type {
   LibraryTagCount, LiteratureCategory, LiteraturePaper, LiteraturePaperTaskState,
@@ -18,7 +18,6 @@ import { normalizeOrcid } from '../metadataValidation';
 import { paperPdfPath, paperTranslatedPdfAttachment } from '../literatureUi';
 import { resolvePaperTitleDisplay, type PaperTitleDisplayMode } from '../titleDisplay';
 import type { LiteraturePaperListStatus, LiteraturePaperRagStatus } from './LiteraturePaperList';
-import { getPaperTaskProgress } from '../paperTaskProgress';
 import { loadPaperDetailsSections, persistPaperDetailsSections, type PaperDetailsSectionKey, type PaperDetailsSectionState } from '../details/paperDetailsSections';
 import { parsePaperOverviewForDisplay } from '../details/paperOverviewPresentation';
 import { buildPaperDraftUpdateRequest, createPaperDetailsDraft, hasDuplicateCitationKey, paperDraftChanged, validatePaperDraft, normalizeDoi, type PaperDetailsDraft, type PaperDraftErrors } from '../details/paperDetailsDraft';
@@ -27,6 +26,7 @@ import PaperDetailsStatusBar from '../details/PaperDetailsStatusBar';
 import MetadataRecognitionDialog from '../details/MetadataRecognitionDialog';
 import { usePaperFileLocationMenu } from '../usePaperFileLocationMenu';
 import LiteratureReadingTimeChart from './LiteratureReadingTimeChart';
+import RetainPdfTranslationPanel from './RetainPdfTranslationPanel';
 import TranslatedPdfLanguageDialog from './TranslatedPdfLanguageDialog';
 import { ConfirmDialog, Dialog } from '../../../ui/dialog';
 import { Menu, type MenuEntry } from '../../../ui/menu';
@@ -38,7 +38,7 @@ interface LiteraturePaperDetailsProps {
   saving: boolean;
   categories: LiteratureCategory[];
   libraryTags: LibraryTagCount[];
-  allPapers: LiteraturePaper[];
+  citationKeys: Array<{ id: string; citationKey?: string | null }>;
   paperStatus?: LiteraturePaperListStatus;
   storageDir?: string | null;
   mineruCacheDir?: string;
@@ -64,6 +64,55 @@ interface LiteraturePaperDetailsProps {
 
 type InlineFieldKey = 'title' | 'year' | 'doi';
 interface MenuPosition { x: number; y: number; anchor: HTMLButtonElement; entries: MenuEntry[] }
+
+// 详情面板快捷键的可测试 DOM 视图：只依赖 hidden/布局/包含关系，
+// 不要求完整 HTMLElement，测试可用普通对象驱动。
+type DetailsPanelElement = {
+  hidden?: boolean;
+  offsetParent?: unknown;
+  parentElement?: DetailsPanelElement | null;
+  style?: { display?: string } | null;
+  getClientRects?(): { length: number };
+  contains?(other: unknown): boolean;
+};
+
+type DetailsPanelKeyEvent = {
+  target?: unknown;
+  composedPath?(): readonly unknown[];
+};
+
+/**
+ * 工作区切换后文献库面板仍以 [hidden] 保持挂载，草稿与选中态也保留。
+ * 快捷键只在面板真实可见时生效：任意祖先 hidden / display:none 都拒绝，
+ * 并用客户端矩形（或缺省时的 offsetParent）确认元素参与布局。
+ */
+export function isDetailsPanelVisible(root: DetailsPanelElement | null | undefined): boolean {
+  if (!root) return false;
+  for (let node: DetailsPanelElement | null = root; node; node = node.parentElement ?? null) {
+    if (node.hidden === true) return false;
+    if (node.style?.display === 'none') return false;
+  }
+  const rects = root.getClientRects?.();
+  if (rects) return rects.length > 0;
+  return root.offsetParent != null;
+}
+
+/**
+ * Ctrl/Cmd+S 与 Esc 只作用于焦点（事件目标）位于详情面板内的事件，
+ * 避免 Notes/Graph 等其他工作区的按键误保存或丢弃这份草稿。
+ */
+export function isEventInsideDetails(
+  root: DetailsPanelElement | null | undefined,
+  event: DetailsPanelKeyEvent | null | undefined,
+): boolean {
+  if (!root || !event) return false;
+  const path = event.composedPath?.();
+  if (path?.length) return path.includes(root);
+  const target = event.target;
+  if (!target) return false;
+  if (target === root) return true;
+  return root.contains?.(target) === true;
+}
 
 function getLatestHeatmap(paperId: string): PdfReadingHeatmap | null {
   const history = loadPaperHistory(`native-library:${paperId}`);
@@ -129,7 +178,7 @@ export default function LiteraturePaperDetails({
   saving,
   categories,
   libraryTags,
-  allPapers,
+  citationKeys,
   paperStatus,
   storageDir,
   mineruCacheDir = '',
@@ -153,7 +202,6 @@ export default function LiteraturePaperDetails({
   onDeletePaper,
 }: LiteraturePaperDetailsProps) {
   const l = useLocaleText();
-  const locale = useAppLocale();
   const rootRef = useRef<HTMLElement | null>(null);
   const handleWheelCapture = useWheelScrollDelegate({ rootRef });
   const [paper, setPaper] = useState(selectedPaper);
@@ -348,6 +396,10 @@ export default function LiteraturePaperDetails({
   useEffect(() => {
     if (!editing || !paper || !draft) return undefined;
     const onKeyDown = (event: KeyboardEvent) => {
+      // 库工作区在 Notes/Graph 下以 hidden 保持挂载：快捷键只作用于可见且
+      // 焦点位于面板内的详情表单；被忽略时不保存、不关闭，也不改草稿。
+      const root = rootRef.current;
+      if (!isDetailsPanelVisible(root) || !isEventInsideDetails(root, event)) return;
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
         event.preventDefault();
         if (!saving && !recognitionOpen && !languageDialogOpen && !switchDialogOpen) {
@@ -417,7 +469,7 @@ export default function LiteraturePaperDetails({
   }
 
   const authors = paper.authors.length ? paper.authors : [];
-  const duplicateCitationKey = hasDuplicateCitationKey(draft.citationKey, allPapers, paper.id);
+  const duplicateCitationKey = hasDuplicateCitationKey(draft.citationKey, citationKeys, paper.id);
 
   return (
     <aside ref={rootRef} onWheelCapture={handleWheelCapture} className="pq-library-pane relative flex h-full min-h-0 flex-col overflow-hidden border-l">
@@ -497,6 +549,13 @@ export default function LiteraturePaperDetails({
             onAttachTranslatedPdf={onAttachTranslatedPdf}
             onRemoveTranslatedPdf={onRemoveTranslatedPdf}
             onSetTranslatedPdfLanguage={() => setLanguageDialogOpen(true)}
+          />
+
+          <RetainPdfTranslationPanel
+            key={paper.id}
+            paperId={paper.id}
+            hasPdf={Boolean(paperPdfPath(paper, storageDir))}
+            translatedAttachmentId={translatedPdf?.attachment.id ?? null}
           />
 
           {editing ? (

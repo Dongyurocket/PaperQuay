@@ -8,6 +8,7 @@ const WINDOWS_RESERVED_NAME = /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\..*)?$/i;
 function sanitizeSegment(value, fallback) {
   let result = String(value ?? '')
     .normalize('NFC')
+    // eslint-disable-next-line no-control-regex -- 需要匹配并剔除不可见控制字符，保持原有字节级语义
     .replace(/[<>:"/\\|?*\x00-\x1f]/g, '_')
     .replace(/\s+/g, '_')
     .replace(/[. ]+$/g, '')

@@ -1,4 +1,4 @@
-import { Component, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Component, memo, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
 import type { Components } from 'react-markdown';
 import rehypeKatex from 'rehype-katex';
@@ -11,6 +11,7 @@ import type { PaperSummary, SelectedExcerpt } from '../../types/reader';
 import { confirmAction } from '../../ui/confirmHost';
 import { cn } from '../../utils/cn';
 import { normalizeMarkdownMath, remarkFixGluedLatex, remarkSuperscriptPlugin } from '../../utils/markdown';
+import { readerMarkdownNormalizationCache } from './readerAssistantSidebarProps';
 import { getSummarySectionLabel, parseSummarySections, resolveSummaryPanelState, type SummarySectionKey } from './overview/summarySections';
 
 function SectionCard({
@@ -160,22 +161,39 @@ function MarkdownFallback({
   );
 }
 
-function MarkdownPreview({
+const MarkdownPreview = memo(function MarkdownPreview({
   content,
   className,
   normalizeMath = true,
   components,
+  cacheNormalization = true,
 }: {
   content: string;
   className?: string;
   normalizeMath?: boolean;
   components?: Components;
+  /** Completed messages reuse the LRU; the actively streaming prefix must not pollute it. */
+  cacheNormalization?: boolean;
 }) {
   const l = useLocaleText();
   const normalized = useMemo(() => {
+    const cached = normalizeMath && cacheNormalization
+      ? readerMarkdownNormalizationCache.get(content)
+      : undefined;
+
+    if (cached !== undefined) {
+      return { content: cached, error: '' };
+    }
+
     try {
+      const value = normalizeMath ? normalizeMarkdownMath(content) : content;
+
+      if (normalizeMath && cacheNormalization) {
+        readerMarkdownNormalizationCache.set(content, value);
+      }
+
       return {
-        content: normalizeMath ? normalizeMarkdownMath(content) : content,
+        content: value,
         error: '',
       };
     } catch (error) {
@@ -184,7 +202,7 @@ function MarkdownPreview({
         error: formatMarkdownError(error, l('Markdown 渲染失败', 'Markdown rendering failed')),
       };
     }
-  }, [content, normalizeMath, l]);
+  }, [cacheNormalization, content, normalizeMath, l]);
 
   if (normalized.error) {
     return <MarkdownFallback content={content} error={normalized.error} />;
@@ -231,7 +249,7 @@ function MarkdownPreview({
       </ReactMarkdown>
     </MarkdownRenderBoundary>
   );
-}
+});
 
 export interface SummaryPanelProps {
   paperSummary: PaperSummary | null;

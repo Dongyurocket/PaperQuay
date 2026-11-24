@@ -9,6 +9,7 @@ import path from 'node:path';
 const require = createRequire(import.meta.url);
 const { DatabaseSync } = require('../electron/backend/nodeSqlite.cjs');
 const { PaperQuayKnowledgeService } = require('../electron/mcp/knowledgeMcpService.cjs');
+const { hashString } = require('../src/shared/mineruCachePaths.cjs');
 
 // Windows 上杀毒/索引软件可能短暂持有临时目录句柄，重试后仍失败则由 OS 兜底清理，
 // 不让清理失败阻塞测试结果。
@@ -297,6 +298,7 @@ test('paperquay-mcp stdio server handles JSON-RPC 2.0 requests', async () => {
     const updateNoteSchema = listRes.result.tools.find((tool: any) => tool.name === 'update_note').inputSchema;
     assert.equal(updateNoteSchema.properties.pageKind.type, 'string');
     assert.deepEqual(updateNoteSchema.properties.pageKind.enum, [
+      '',
       'paper-card',
       'concept',
       'synthesis',
@@ -841,6 +843,49 @@ test('search_knowledge_base retrieves formula chunks for mixed Chinese-English q
     const eqHit = res.results.find((item: any) => item.blockId === 'p7-6');
     assert.match(eqHit.snippet, /Eqs\. 5-7/);
     assert.match(eqHit.snippet, /\\tag\{6\}/);
+  } finally {
+    cleanupDir(dataDir);
+  }
+});
+
+test('read_paper_figure rejects image assets outside the current MinerU cache directory', () => {
+  const dataDir = setupTestEnvironment();
+  try {
+    const cacheDir = path.join(dataDir, '.mineru-cache', `document-${hashString('paper-1')}`);
+    mkdirSync(path.join(cacheDir, 'images'), { recursive: true });
+    const outside = path.join(dataDir, 'outside.png');
+    writeFileSync(outside, Buffer.from('89504e470d0a1a0a', 'hex'));
+    const png = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex');
+    writeFileSync(path.join(cacheDir, 'images', 'figure.png'), png);
+    const writeContentList = (assetPath: string) => writeFileSync(
+      path.join(cacheDir, 'content_list_v2.json'),
+      JSON.stringify([[
+        { type: 'image', content: { image_source: { path: assetPath }, image_caption: [{ content: 'Figure' }] } },
+      ]]),
+      'utf8',
+    );
+    const service = new PaperQuayKnowledgeService({ dataDir });
+    const rejected = [
+      outside,
+      path.join(cacheDir, 'images', 'figure.png'),
+      String.raw`\\127.0.0.1\nonexistent-share\secret.png`,
+      String.raw`..\outside.png`,
+      'images/../../outside.png',
+      String.raw`C:\Windows\win.ini`,
+      String.raw`images\figure.png:stream`,
+    ];
+    for (const assetPath of rejected) {
+      writeContentList(assetPath);
+      const result = service.readPaperFigure({ paperId: 'paper-1', blockId: 'page-1-block-1' });
+      assert.equal(result.found, true);
+      assert.equal(result.imageAvailable, false, `asset must be rejected: ${assetPath}`);
+      assert.match(result.note, /invalid|outside the MinerU cache directory/i, `rejected=${JSON.stringify(assetPath)} note=${result.note}`);
+    }
+
+    writeContentList('images/figure.png');
+    const valid = service.readPaperFigure({ paperId: 'paper-1', blockId: 'page-1-block-1' });
+    assert.equal(valid.imageAvailable, true);
+    assert.equal(Buffer.from(valid.base64, 'base64').toString('hex'), png.toString('hex'));
   } finally {
     cleanupDir(dataDir);
   }

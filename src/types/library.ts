@@ -162,7 +162,43 @@ export interface LibraryReferenceProgress {
 export interface LibrarySnapshot {
   settings: LibrarySettings;
   categories: LiteratureCategory[];
+}
+
+/**
+ * 列表摘要：单篇增量刷新只返回这些字段，不含 abstract/doi/keywords 等
+ * 正文类大字段。合并进已有行时必须逐字段覆盖，不能整体替换。
+ */
+export type PaperListSummary = Pick<
+  LiteraturePaper,
+  | 'id'
+  | 'title'
+  | 'titleZh'
+  | 'year'
+  | 'publication'
+  | 'itemType'
+  | 'importedAt'
+  | 'updatedAt'
+  | 'lastReadAt'
+  | 'readingProgress'
+  | 'isFavorite'
+  | 'aiSummary'
+  | 'source'
+  | 'sortOrder'
+  | 'ragEnabled'
+  | 'authors'
+  | 'tags'
+  | 'categoryIds'
+  | 'attachments'
+>;
+
+export interface BatchUpdatePapersResult {
   papers: LiteraturePaper[];
+  updated: number;
+}
+
+export interface BatchDeletePapersResult {
+  deleted: number;
+  ragFailures: Array<{ paperId: string; error: string }>;
 }
 
 export interface PdfAssetInventoryEntry {

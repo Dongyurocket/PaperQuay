@@ -1,4 +1,8 @@
-import { invoke } from '../platform/electron/core';
+import { invoke } from '../platform/electron/core.ts';
+import {
+  buildEmbeddingModelKey,
+  normalizeEmbeddingBaseUrl,
+} from '../shared/embeddingConfig.cjs';
 
 import type {
   RagChunkContextResponse,
@@ -47,25 +51,12 @@ function toErrorMessage(error: unknown, fallback: string): string {
 }
 
 function normalizeBaseUrl(baseUrl: string): string | undefined {
-  const trimmed = baseUrl.trim();
-
-  if (!trimmed) {
-    return undefined;
-  }
-
-  const normalized = trimmed
-    .replace(/\/embeddings\/?$/i, '')
-    .replace(/\/+$/, '');
-
-  if (/\/v\d+$/i.test(normalized)) {
-    return normalized;
-  }
-
-  return `${normalized}/v1`;
+  const normalized = normalizeEmbeddingBaseUrl(baseUrl);
+  return normalized || undefined;
 }
 
 export function buildRagEmbeddingModelKey(options: RagEmbeddingOptions): string {
-  return `${normalizeBaseUrl(options.baseUrl) ?? ''}::${options.model.trim()}::${options.dimensions ?? 'default'}`;
+  return buildEmbeddingModelKey(options);
 }
 
 export async function embedRagText(

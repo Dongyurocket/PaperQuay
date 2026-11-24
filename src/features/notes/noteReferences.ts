@@ -5,7 +5,18 @@ import { resolveNoteAnchorLocation } from './noteAnchorLocation.ts';
 import { formatBibliographyEntry, type NoteCitationStyle } from './bibliography.ts';
 
 export const REFERENCE_LIST_HEADING = '参考文献';
+// 英文界面插入的参考文献列表标题；导入/更新时中英两种标题都要能识别。
+export const REFERENCE_LIST_HEADINGS = [REFERENCE_LIST_HEADING, 'References'] as const;
 export const NOTE_POLISH_ANCHOR_PREFIX = 'note-polish:';
+
+export function referenceListHeadingForLocale(locale: string | null | undefined): string {
+  return locale === 'en-US' ? 'References' : REFERENCE_LIST_HEADING;
+}
+
+export function isReferenceListHeading(text: string): boolean {
+  const normalized = text.trim().toLowerCase();
+  return REFERENCE_LIST_HEADINGS.some((heading) => heading.toLowerCase() === normalized);
+}
 
 export interface NoteReferenceLocation {
   anchorId: string | null;
@@ -144,13 +155,14 @@ export function buildReferenceListNodes(
   entries: NoteReferenceEntry[],
   papers: LiteraturePaper[],
   style: NoteCitationStyle = 'gbt7714',
+  heading: string = REFERENCE_LIST_HEADING,
 ) {
   const paperById = new Map(papers.map((paper) => [paper.id, paper]));
   return [
     {
       type: 'heading',
       attrs: { level: 2 },
-      content: [{ type: 'text', text: REFERENCE_LIST_HEADING }],
+      content: [{ type: 'text', text: heading }],
     },
     {
       type: 'orderedList',
@@ -175,12 +187,12 @@ export function buildReferenceListNodes(
   ];
 }
 
-// 在文末插入（或替换已有的）参考文献列表。已存在的列表通过「参考文献」标题块识别。
+// 在文末插入（或替换已有的）参考文献列表。中英文标题块都视为已有列表。
 function findReferenceListHeading(doc: Editor['state']['doc']): { from: number; to: number } | null {
   let found: { from: number; to: number } | null = null;
   doc.forEach((node, offset) => {
     if (found) return;
-    if (node.type.name === 'heading' && node.textContent.trim() === REFERENCE_LIST_HEADING) {
+    if (node.type.name === 'heading' && isReferenceListHeading(node.textContent)) {
       found = { from: offset, to: offset + node.nodeSize };
     }
   });
@@ -192,6 +204,7 @@ export function upsertNoteReferenceList(
   entries: NoteReferenceEntry[],
   papers: LiteraturePaper[],
   style: NoteCitationStyle = 'gbt7714',
+  heading: string = REFERENCE_LIST_HEADING,
 ): boolean {
   if (entries.length === 0) return false;
 
@@ -216,6 +229,6 @@ export function upsertNoteReferenceList(
     editor.chain().deleteRange({ from, to }).run();
   }
 
-  editor.chain().focus('end').insertContent(buildReferenceListNodes(entries, papers, style)).run();
+  editor.chain().focus('end').insertContent(buildReferenceListNodes(entries, papers, style, heading)).run();
   return true;
 }

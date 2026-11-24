@@ -1,144 +1,52 @@
 import {
   memo,
-  useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
 } from 'react';
 import { createPortal } from 'react-dom';
-import { FilePlus2, Images, ListTree } from 'lucide-react';
-import {
-  AnnotationEditorType,
-  AnnotationMode,
-  GlobalWorkerOptions,
-  getDocument,
-} from 'pdfjs-dist';
+import { Images, ListTree } from 'lucide-react';
 import 'pdfjs-dist/web/pdf_viewer.css';
-import { scrollInstantly } from './instantScroll';
-import { isHighlightScrollReady } from './highlightScroll';
-import { createScrollRestoreScheduler } from './scrollRestoreScheduler';
 import EmptyState from '../../components/EmptyState';
-import { ContextMenu, type ContextMenuEntry } from '../../components/ContextMenu';
-import { useWheelScrollDelegate } from '../../hooks/useWheelScrollDelegate';
-import { selectSavePdfPath, writeLocalBinaryFile } from '../../services/desktop';
-import {
-  extractTranslatableMarkdownFromMineruBlock,
-  extractTextFromMineruBlock,
-  resolveMineruBlockContentSource,
-} from '../../services/mineru';
+import { ContextMenu } from '../../components/ContextMenu';
+import type { MineruOutlineIndexItem } from '../reader/mineruSegments.ts';
 import type {
   PaperAnnotation,
-  PdfHighlightTarget,
   PdfBlockSelectContext,
+  PdfHighlightTarget,
   PdfReadingHeatmap,
   PdfScrollPosition,
   PdfSource,
   PositionedMineruBlock,
   TextSelectionPayload,
 } from '../../types/reader';
-import {
-  bboxToRect,
-  isValidBBox,
-  shouldCreateHotspot,
-  type PageSize,
-} from '../../utils/bbox';
 import { cn } from '../../utils/cn';
-import { perfMark, perfMeasure } from '../../utils/perfTrace';
 import { useLocaleText } from '../../i18n/uiLanguage';
 import { emitToast, emitToastDismiss } from '../../ui/toastBridge';
-import { buildPathInDirectory, getParentDirectory, normalizePathForCompare } from '../../utils/path';
-import { getFileNameFromPath } from '../../utils/text';
-import {
-  applyPdfAnnotationToolColors,
-  buildPdfJsHighlightColorOptions,
-  loadPdfAnnotationToolColors,
-  persistPdfAnnotationToolColors,
-  type PdfAnnotationColorTool,
-} from './annotationColors';
-import {
-  buildPdfJsDocumentInit,
-  getPdfSourceSignature,
-  type PdfJsDocumentInit,
-} from './pdfDocumentSource';
+import { loadPdfAnnotationToolColors } from './annotationColors';
+import { buildPdfJsDocumentInit, getPdfSourceSignature } from './pdfDocumentSource';
 import { PdfPageOverlay } from './PdfPageOverlay';
 import { PdfReadingHeatmapBar } from './PdfReadingHeatmapBar';
-import {
-  getPdfReadingProgressRatio,
-  usePdfReadingHeatmap,
-} from './pdfReadingHeatmap';
 import { PdfThumbnailSidebar } from './PdfThumbnailSidebar';
 import { PdfOutlinePanel } from './PdfOutlinePanel';
-import {
-  buildMineruOutline,
-  buildMineruOutlineFromIndex,
-  normalizePdfOutline,
-  type PdfJsOutlineNode,
-  type ReaderOutlineItem,
-} from './pdfOutline.ts';
-import type { MineruOutlineIndexItem } from '../reader/mineruSegments.ts';
-import {
-  arePageHostsEqual,
-  ensurePageOverlayElement,
-  getPageElementHeight,
-  getPageTargetFromElement,
-  getPageTargetFromEvent,
-  getRenderedPageSize,
-  getScopedSelectionPayload,
-  hasActiveTextSelection,
-  isAnnotationUiTarget,
-  isEditableTarget,
-  resolveBlockClientRect,
-  resolvePdfBlockHitByPoint,
-  resolveScrollAnchorPage,
-  selectionBelongsToContainer,
-  type PageHostState,
-} from './pdfPageDomUtils';
-import {
-  buildAnnotatedFileName,
-  buildAnnotatedSiblingPath,
-  buildScrollRestoreKey,
-  buildThumbnailPageIndexes,
-  clampScrollRatio,
-  detachPdfViewerDocument,
-  isPdfDocumentUsable,
-  isPdfLifecycleCancellation,
-  loadStoredBoolean,
-  releaseCanvas,
-  releasePdfDocument,
-  releasePdfDocumentSoon,
-  releasePdfLoadingTask,
-  resolveBBoxBaseSize,
-  suppressPdfLifecycleRejection,
-} from './pdfViewerUtils';
 import {
   PdfViewerToolbar,
   type AnnotationEditorTool,
 } from './PdfViewerToolbar';
 import { getPdfZoomPresetValue, type PdfZoomPreset } from './toolbar/pdfToolbarLogic';
+import { usePdfAnnotations } from './hooks/usePdfAnnotations';
+import { usePdfBlockOverlay } from './hooks/usePdfBlockOverlay';
+import {
+  usePdfDocumentLifecycle,
+  type PdfViewerLayoutApi,
+} from './hooks/usePdfDocumentLifecycle';
+import { usePdfOutline } from './hooks/usePdfOutline';
+import { usePdfScrollRestore } from './hooks/usePdfScrollRestore';
+import { usePdfSelection } from './hooks/usePdfSelection';
+import { usePdfThumbnails } from './hooks/usePdfThumbnails';
 
-GlobalWorkerOptions.workerSrc = new URL(
-  'pdfjs-dist/build/pdf.worker.min.mjs',
-  import.meta.url,
-).toString();
-
-const PDF_THUMBNAILS_COLLAPSED_STORAGE_KEY = 'paperquay-pdf-thumbnails-collapsed-v2';
-const PDF_SIDEBAR_TAB_STORAGE_KEY = 'paperquay-pdf-sidebar-tab-v1';
-const PDF_OUTLINE_COLLAPSED_STORAGE_PREFIX = 'paperquay-pdf-outline-collapsed-v1:';
-const PDF_READING_HEATMAP_BAR_VISIBLE_STORAGE_KEY =
-  'paperquay-pdf-reading-heatmap-bar-visible-v1';
-const USER_SCROLL_RESTORE_GUARD_MS = 700;
 let pdfViewerToastSequence = 0;
-const SCROLL_EMIT_TRAILING_MS = 360;
-const THUMBNAIL_RENDER_IDLE_MS = 420;
-const OVERLAY_PAGE_RADIUS = 1;
-const PDF_VIEWER_MAX_CANVAS_PIXELS = 5_242_880;
-const PDF_SELECTION_COMMIT_RETRY_DELAYS = [48, 120, 240, 420];
-
-type BBoxPageSizeSource = Pick<
-  PositionedMineruBlock | PdfHighlightTarget | PaperAnnotation,
-  'bboxCoordinateSystem' | 'bboxPageSize'
-> | null;
 
 interface PdfViewerProps {
   pane?: 'reader' | 'compare-original' | 'compare-translated';
@@ -186,131 +94,6 @@ interface PdfViewerProps {
   onSaveSuccess?: (path: string) => void;
 }
 
-function resolveToolMode(mode: AnnotationEditorTool) {
-  switch (mode) {
-    case 'freetext':
-      return AnnotationEditorType.FREETEXT;
-    case 'ink':
-      return AnnotationEditorType.INK;
-    case 'none':
-    default:
-      return AnnotationEditorType.NONE;
-  }
-}
-
-function sourceNeedsPdfPageSize(source: BBoxPageSizeSource): boolean {
-  return Boolean(
-    source &&
-      source.bboxCoordinateSystem !== 'normalized-1000' &&
-      !source.bboxPageSize,
-  );
-}
-
-function resolveOverlayOriginalPage(
-  cachedPageSize: PageSize | undefined,
-  renderedPage: PageSize,
-  sources: BBoxPageSizeSource[],
-): PageSize | null {
-  if (cachedPageSize) {
-    return cachedPageSize;
-  }
-
-  return sources.some(sourceNeedsPdfPageSize) ? null : renderedPage;
-}
-
-function setNumberStateIfChanged(
-  setter: (value: number | ((current: number) => number)) => void,
-  value: number,
-) {
-  setter((current) => (current === value ? current : value));
-}
-
-function setStringStateIfChanged(
-  setter: (value: string | ((current: string) => string)) => void,
-  value: string,
-) {
-  setter((current) => (current === value ? current : value));
-}
-
-function setBooleanStateIfChanged(
-  setter: (value: boolean | ((current: boolean) => boolean)) => void,
-  value: boolean,
-) {
-  setter((current) => (current === value ? current : value));
-}
-
-type PdfSidebarTab = 'thumbnails' | 'outline';
-
-function loadStoredSidebarTab(): PdfSidebarTab {
-  try {
-    return window.localStorage.getItem(PDF_SIDEBAR_TAB_STORAGE_KEY) === 'outline'
-      ? 'outline'
-      : 'thumbnails';
-  } catch {
-    return 'thumbnails';
-  }
-}
-
-function loadOutlineCollapsedIds(signature: string): Set<string> {
-  try {
-    const raw = window.localStorage.getItem(`${PDF_OUTLINE_COLLAPSED_STORAGE_PREFIX}${signature}`);
-    if (!raw) {
-      return new Set();
-    }
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) {
-      return new Set();
-    }
-    return new Set(parsed.filter((value): value is string => typeof value === 'string'));
-  } catch {
-    return new Set();
-  }
-}
-
-function persistOutlineCollapsedIds(signature: string, ids: ReadonlySet<string>) {
-  if (!signature) {
-    return;
-  }
-  try {
-    window.localStorage.setItem(
-      `${PDF_OUTLINE_COLLAPSED_STORAGE_PREFIX}${signature}`,
-      JSON.stringify([...ids]),
-    );
-  } catch {
-    // 存储失败仅影响展开状态记忆
-  }
-}
-
-/** 解析 PDF 原生目录 destination 的 0-based 页码；失败返回 null（仅影响当前位置高亮） */
-async function resolveOutlineDestinationPageIndex(
-  pdfDocument: { getDestination?: (id: string) => Promise<unknown>; getPageIndex?: (ref: unknown) => Promise<number> },
-  destination: unknown,
-): Promise<number | null> {
-  if (destination == null) {
-    return null;
-  }
-  try {
-    let explicit: unknown = destination;
-    if (typeof destination === 'string') {
-      explicit = await pdfDocument.getDestination?.(destination);
-    }
-    if (!Array.isArray(explicit) || explicit.length === 0) {
-      return null;
-    }
-    const ref: unknown = explicit[0];
-    if (typeof ref === 'number' && Number.isFinite(ref)) {
-      return ref;
-    }
-    if (ref && typeof ref === 'object' && pdfDocument.getPageIndex) {
-      const pageIndex = await pdfDocument.getPageIndex(ref);
-      return Number.isFinite(pageIndex) ? pageIndex : null;
-    }
-  } catch {
-    // 命名目标缺失等情况静默降级
-  }
-  return null;
-}
-
 function PdfViewer({
   pane = 'reader',
   onPageCountChange,
@@ -354,44 +137,35 @@ function PdfViewer({
 }: PdfViewerProps) {
   const l = useLocaleText();
   const documentInit = useMemo(() => buildPdfJsDocumentInit(source, pdfData), [pdfData, source]);
+  // source 为空且由 pdfData 承载时，签名只由数据内容决定：重命名（currentPdfName）
+  // 不能进入该分支的依赖，否则只会改文件名也会重新加载整份 PDF。
+  const pdfNameFallback = !source && pdfData ? '' : currentPdfName;
+  const sourceSignature = useMemo(
+    () => getPdfSourceSignature(source, pdfNameFallback, pdfData),
+    [pdfData, pdfNameFallback, source],
+  );
+
   const containerRef = useRef<HTMLDivElement | null>(null);
   const thumbnailSidebarRef = useRef<HTMLElement | null>(null);
   const viewerRef = useRef<HTMLDivElement | null>(null);
-  const loadingTaskRef = useRef<any>(null);
-  const pdfViewerRef = useRef<any>(null);
-  const pdfDocumentRef = useRef<any>(null);
-  const eventBusRef = useRef<any>(null);
-  const annotationEditorUiManagerRef = useRef<any>(null);
-  const annotationEditorReadyRef = useRef(false);
-  const editorToolRef = useRef<AnnotationEditorTool>('none');
-  const resizeObserverRef = useRef<ResizeObserver | null>(null);
-  const mutationObserverRef = useRef<MutationObserver | null>(null);
-  const observedPageElementsRef = useRef<Set<HTMLDivElement>>(new Set());
-  const pointerStartRef = useRef<{ x: number; y: number } | null>(null);
-  const lastSelectionRef = useRef<{ text: string; emittedAt: number } | null>(null);
   const lRef = useRef(l);
   const activeRef = useRef(active);
-  const pageSizesRef = useRef<Record<number, PageSize>>({});
-  const pageThumbnailsRef = useRef<Record<number, string>>({});
-  const pageHostsRef = useRef<Record<number, PageHostState>>({});
-  const pendingPageSizeRequestsRef = useRef<Set<number>>(new Set());
-  const selectionStartedInsideRef = useRef(false);
-  const selectionCommitTimerRef = useRef<number | null>(null);
-  const selectionCommitAttemptRef = useRef(0);
-  const pendingBlockSelectTimerRef = useRef<number | null>(null);
-  const linkServiceRef = useRef<any>(null);
-  const blocksRef = useRef<PositionedMineruBlock[]>(blocks);
-  const onOutlineNavigateBlockRef = useRef(onOutlineNavigateBlock);
-  const outlineRequestTokenRef = useRef(0);
-  const outlineBackStackRef = useRef<number[]>([]);
-  const lastHandledHighlightSignalRef = useRef(0);
-  const hoveredBlockIdRef = useRef<string | null>(hoveredBlockId);
   const currentPageRef = useRef(1);
-  const pageCountRef = useRef(0);
-  const firstPageRenderLoggedRef = useRef(false);
-  const loadGenerationRef = useRef(0);
-  const paneRef = useRef(pane);
-  paneRef.current = pane;
+  const sourceSignatureRef = useRef('');
+  // 原逻辑在「sourceSignature 变化」effect 内赋值。此处置于渲染期，使同一提交中
+  // 先执行的生命周期重置效果即可读到新的 sourceKey，保持换源首帧的页码语义。
+  sourceSignatureRef.current = sourceSignature;
+  const restoredScrollKeyRef = useRef('');
+  const lastPageSyncTokenRef = useRef(0);
+  const editorToolRef = useRef<AnnotationEditorTool>('none');
+  const viewerApiRef = useRef<PdfViewerLayoutApi>({});
+  const retrySavedScrollRestoreRef = useRef<() => void>(() => {});
+
+  const [currentPage, setCurrentPage] = useState(1);
+  const [hasSelectedEditor, setHasSelectedEditor] = useState(false);
+  const [annotationColors, setAnnotationColors] = useState(() => loadPdfAnnotationToolColors());
+  const [outlineCollapsedIds, setOutlineCollapsedIds] = useState<Set<string>>(() => new Set());
+
   // 每个 PdfViewer 实例独立的 toast key：多个标签页或对照窗格同时翻译时互不覆盖。
   const translationToastKeyRef = useRef('');
   if (!translationToastKeyRef.current) {
@@ -399,94 +173,8 @@ function PdfViewer({
     translationToastKeyRef.current = `pdf-translation:${pdfViewerToastSequence}`;
   }
   const translationToastKey = translationToastKeyRef.current;
-  const scrollPositionRef = useRef<PdfScrollPosition | null>(scrollPosition);
-  const sourceSignatureRef = useRef('');
-  const restoringScrollRef = useRef(false);
-  const restoredScrollKeyRef = useRef('');
-  const externalScrollRestoreKeyRef = useRef('');
-  const pendingScrollRestoreKeyRef = useRef('');
-  const lastUserScrollAtRef = useRef(0);
-  const scrollRestoreSchedulerRef = useRef(createScrollRestoreScheduler((callback) => {
-    window.requestAnimationFrame(callback);
-  }));
 
-  const [editorTool, setEditorTool] = useState<AnnotationEditorTool>('none');
-  const [retryRevision, setRetryRevision] = useState(0);
-  const [loadedPageCount, setLoadedPageCount] = useState<{
-    documentInit: PdfJsDocumentInit;
-    revision: number;
-    count: number;
-  } | null>(null);
-  // 换源时立即停止使用旧文档页数；缓存页签重新激活时也向父层同步。
-  const pageCount = loadedPageCount?.documentInit === documentInit && loadedPageCount.revision === retryRevision
-    ? loadedPageCount.count : 0;
-  pageCountRef.current = pageCount;
-  useEffect(() => {
-    onPageCountChange?.(pageCount);
-  }, [active, onPageCountChange, pageCount]);
-  const [pageSizes, setPageSizes] = useState<Record<number, PageSize>>({});
-  const [pageHosts, setPageHosts] = useState<Record<number, PageHostState>>({});
-  const [currentPage, setCurrentPage] = useState(1);
-  const [readingProgressRatio, setReadingProgressRatio] = useState(0);
-  const [zoomLabel, setZoomLabel] = useState('100%');
-  const [loading, setLoading] = useState(false);
-  const [renderedDocument, setRenderedDocument] = useState<{ documentInit: PdfJsDocumentInit; revision: number } | null>(null);
-  const [initializedDocument, setInitializedDocument] = useState<{ documentInit: PdfJsDocumentInit; revision: number } | null>(null);
-  const pagesInitialized = initializedDocument?.documentInit === documentInit && initializedDocument.revision === retryRevision;
-  const layoutViewportRef = useRef<{ viewer: unknown; width: number; height: number } | null>(null);
-  const firstPageRendered = renderedDocument?.documentInit === documentInit && renderedDocument.revision === retryRevision;
-  const [saving, setSaving] = useState(false);
-  const [documentErrorSnapshot, setDocumentErrorSnapshot] = useState<{
-    documentInit: PdfJsDocumentInit | null;
-    revision: number;
-    message: string;
-  } | null>(null);
-  const documentError = documentErrorSnapshot?.documentInit === documentInit &&
-    documentErrorSnapshot.revision === retryRevision ? documentErrorSnapshot.message : '';
-  const setDocumentError = useCallback((message: string) => {
-    setDocumentErrorSnapshot({ documentInit, revision: retryRevision, message });
-  }, [documentInit, retryRevision]);
-  useEffect(() => {
-    onDocumentErrorChange?.(documentError);
-  }, [onDocumentErrorChange, documentError]);
-  useEffect(() => {
-    if (!documentError) {
-      return;
-    }
-
-    emitToast({
-      tone: 'error',
-      key: `pdf-error:${paneRef.current}:${documentError}`,
-      message: documentError,
-    });
-  }, [documentError]);
-  const [hasSelectedEditor, setHasSelectedEditor] = useState(false);
-  const [hasLiveTextSelection, setHasLiveTextSelection] = useState(false);
-  const [annotationColors, setAnnotationColors] = useState(() => loadPdfAnnotationToolColors());
-  const [activeColorTool, setActiveColorTool] = useState<PdfAnnotationColorTool>('highlight');
-  const [thumbnailsCollapsed, setThumbnailsCollapsed] = useState(() =>
-    loadStoredBoolean(PDF_THUMBNAILS_COLLAPSED_STORAGE_KEY, true),
-  );
-  const [sidebarTab, setSidebarTab] = useState<PdfSidebarTab>(() => loadStoredSidebarTab());
-  const [outlineItems, setOutlineItems] = useState<ReaderOutlineItem[] | null>(null);
-  const [outlineLoading, setOutlineLoading] = useState(false);
-  const [outlineError, setOutlineError] = useState('');
-  const [outlineCollapsedIds, setOutlineCollapsedIds] = useState<Set<string>>(() => new Set());
-  // 仅作 canGoBack 的重渲染信号；真实栈在 outlineBackStackRef
-  const [outlineBackCount, setOutlineBackCount] = useState(0);
-  const [readingHeatmapBarVisible, setReadingHeatmapBarVisible] = useState(() =>
-    loadStoredBoolean(PDF_READING_HEATMAP_BAR_VISIBLE_STORAGE_KEY, true),
-  );
-  const [pageThumbnails, setPageThumbnails] = useState<Record<number, string>>({});
-  const [thumbnailFocusPage, setThumbnailFocusPage] = useState(1);
-  const [blockContextMenu, setBlockContextMenu] = useState<{
-    block: PositionedMineruBlock;
-    x: number;
-    y: number;
-    anchorClientRect?: TextSelectionPayload['anchorClientRect'];
-  } | null>(null);
-  const handleThumbnailWheelCapture = useWheelScrollDelegate({ rootRef: thumbnailSidebarRef });
-
+  // 跨 hook 共享的引用同步（原 effect #4/#5），置于 hook 调用前以保持下游读取顺序。
   useEffect(() => {
     lRef.current = l;
   }, [l]);
@@ -494,24 +182,6 @@ function PdfViewer({
   useEffect(() => {
     activeRef.current = active;
   }, [active]);
-
-  useEffect(() => {
-    window.addEventListener('unhandledrejection', suppressPdfLifecycleRejection);
-    return () => {
-      window.removeEventListener('unhandledrejection', suppressPdfLifecycleRejection);
-    };
-  }, []);
-
-  useEffect(() => {
-    setZoomLabel((current) =>
-      current === 'Fit Width' || current === '适合宽度' ? l('适合宽度', 'Fit width') : current,
-    );
-  }, [l]);
-
-  const sourceSignature = useMemo(
-    () => getPdfSourceSignature(source, currentPdfName),
-    [currentPdfName, source],
-  );
 
   useEffect(() => {
     const key = translationToastKey;
@@ -536,2581 +206,167 @@ function PdfViewer({
 
   useEffect(() => () => emitToastDismiss(translationToastKey), [translationToastKey]);
 
-  useEffect(() => {
-    scrollRestoreSchedulerRef.current.cancel();
-    sourceSignatureRef.current = sourceSignature;
-    restoredScrollKeyRef.current = '';
-    externalScrollRestoreKeyRef.current = '';
-    pendingScrollRestoreKeyRef.current = '';
-    lastUserScrollAtRef.current = 0;
-    setOutlineCollapsedIds(loadOutlineCollapsedIds(sourceSignature));
-  }, [sourceSignature]);
-
-  useEffect(() => {
-    blocksRef.current = blocks;
-  }, [blocks]);
-
-  useEffect(() => {
-    onOutlineNavigateBlockRef.current = onOutlineNavigateBlock;
-  }, [onOutlineNavigateBlock]);
-
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(PDF_SIDEBAR_TAB_STORAGE_KEY, sidebarTab);
-    } catch {
-      // 存储失败仅影响侧栏页签记忆
-    }
-  }, [sidebarTab]);
-
-  // 文档切换：清空目录数据/返回栈，等下次展开目录页签时按新文档重建
-  useEffect(() => {
-    outlineRequestTokenRef.current += 1;
-    outlineBackStackRef.current = [];
-    setOutlineBackCount(0);
-    setOutlineItems(null);
-    setOutlineLoading(false);
-    setOutlineError('');
-  }, [documentInit]);
-
-  // 目录懒加载：首次展开「目录」页签才读取 outline，失败回退 MinerU 标题块
-  useEffect(() => {
-    if (sidebarTab !== 'outline' || thumbnailsCollapsed || pageCount <= 0) {
-      return;
-    }
-    if (outlineItems !== null) {
-      return;
-    }
-    const pdfDocument = pdfDocumentRef.current;
-    if (!pdfDocument) {
-      return;
-    }
-
-    const token = ++outlineRequestTokenRef.current;
-    setOutlineLoading(true);
-    setOutlineError('');
-
-    void (async () => {
-      let items: ReaderOutlineItem[] = [];
-      let usedMineruFallback = false;
-
-      try {
-        const rawOutline = (await pdfDocument.getOutline?.()) ?? null;
-        items = normalizePdfOutline((rawOutline ?? []) as PdfJsOutlineNode[]);
-      } catch {
-        items = [];
-      }
-
-      if (items.length === 0) {
-        if (mineruOutlineIndex && mineruOutlineIndex.length > 0) {
-          items = buildMineruOutlineFromIndex(mineruOutlineIndex);
-          if (items.length > 0) {
-            usedMineruFallback = true;
-          }
-        } else {
-          const mineruItems = buildMineruOutline(blocksRef.current);
-          if (mineruItems.length > 0) {
-            items = mineruItems;
-            usedMineruFallback = true;
-          }
-        }
-      }
-
-      if (token !== outlineRequestTokenRef.current) {
-        return;
-      }
-      setOutlineItems(items);
-      setOutlineLoading(false);
-
-      // 懒解析原生目录页码供「当前位置」高亮；分批让出主线程，失败仅影响高亮
-      if (usedMineruFallback || items.length === 0) {
-        return;
-      }
-      const flat: ReaderOutlineItem[] = [];
-      const collect = (list: ReaderOutlineItem[]) => {
-        for (const item of list) {
-          flat.push(item);
-          collect(item.children);
-        }
-      };
-      collect(items);
-      let processed = 0;
-      for (const item of flat) {
-        if (token !== outlineRequestTokenRef.current) {
-          return;
-        }
-        if (item.destination != null && typeof item.pageIndex !== 'number') {
-          const resolved = await resolveOutlineDestinationPageIndex(pdfDocument, item.destination);
-          if (resolved !== null) {
-            item.pageIndex = resolved;
-          }
-        }
-        processed += 1;
-        if (processed % 25 === 0) {
-          await new Promise((resolve) => window.setTimeout(resolve, 0));
-        }
-      }
-      if (token !== outlineRequestTokenRef.current) {
-        return;
-      }
-      setOutlineItems((current) => (current ? [...current] : current));
-    })();
-  }, [sidebarTab, thumbnailsCollapsed, pageCount, outlineItems]);
-
-  // MinerU 章节索引或结构块异步到达：PDF 无原生目录时，章节索引到达立即构建目录，无需等待正文块全部渲染
-  useEffect(() => {
-    if (outlineItems === null || outlineItems.length > 0) {
-      return;
-    }
-    if (mineruOutlineIndex && mineruOutlineIndex.length > 0) {
-      const items = buildMineruOutlineFromIndex(mineruOutlineIndex);
-      if (items.length > 0) {
-        setOutlineItems(items);
-        return;
-      }
-    }
-    if (blocks.length > 0) {
-      const mineruItems = buildMineruOutline(blocks);
-      if (mineruItems.length > 0) {
-        setOutlineItems(mineruItems);
-      }
-    }
-  }, [blocks, mineruOutlineIndex, outlineItems]);
-
-  useEffect(() => {
-    const currentPosition = scrollPositionRef.current;
-
-    if (!scrollPosition) {
-      if (!sourceSignature || currentPosition?.sourceKey !== sourceSignature) {
-        scrollPositionRef.current = null;
-      }
-
-      return;
-    }
-
-    if (scrollPosition.sourceKey !== sourceSignature) {
-      return;
-    }
-
-    if (
-      !currentPosition ||
-      currentPosition.sourceKey !== scrollPosition.sourceKey ||
-      scrollPosition.updatedAt >= currentPosition.updatedAt
-    ) {
-      scrollPositionRef.current = scrollPosition;
-    }
-  }, [scrollPosition, sourceSignature]);
-
-  useEffect(() => {
-    currentPageRef.current = currentPage;
-
-    if (pageCount > 0) {
-      onPageChange?.(currentPage);
-    }
-  }, [currentPage, onPageChange, pageCount]);
-
-  useEffect(() => {
-    hoveredBlockIdRef.current = hoveredBlockId;
-  }, [hoveredBlockId]);
-
-  const blockById = useMemo(() => {
-    const map = new Map<string, PositionedMineruBlock>();
-
-    for (const block of blocks) {
-      map.set(block.blockId, block);
-    }
-
-    return map;
-  }, [blocks]);
-
-  const resolveBlockContentSource = useCallback(
-    (block: PositionedMineruBlock) => resolveMineruBlockContentSource(block, blockById),
-    [blockById],
-  );
-
-  const hasTranslatableBlockText = useCallback(
-    (block: PositionedMineruBlock) => Boolean(extractTextFromMineruBlock(block).trim()),
-    [],
-  );
-
-  const blocksByPage = useMemo(() => {
-    const map = new Map<number, PositionedMineruBlock[]>();
-
-    for (const block of blocks) {
-      if (!shouldCreateHotspot(block)) {
-        continue;
-      }
-
-      const pageBlocks = map.get(block.pageIndex) ?? [];
-      pageBlocks.push(block);
-      map.set(block.pageIndex, pageBlocks);
-    }
-
-    return map;
-  }, [blocks]);
-
-  const activeBlock = activeBlockId ? blockById.get(activeBlockId) ?? null : null;
-  const hoveredBlock = hoveredBlockId ? blockById.get(hoveredBlockId) ?? null : null;
-
-  const annotationsByPage = useMemo(() => {
-    const map = new Map<number, PaperAnnotation[]>();
-
-    for (const annotation of annotations) {
-      if (!isValidBBox(annotation.bbox)) {
-        continue;
-      }
-
-      const pageAnnotations = map.get(annotation.pageIndex) ?? [];
-      pageAnnotations.push(annotation);
-      map.set(annotation.pageIndex, pageAnnotations);
-    }
-
-    return map;
-  }, [annotations]);
-
-  const overlayPageIndexes = useMemo(() => {
-    const indexes = new Set<number>();
-    const currentPageIndex = Math.max(0, currentPage - 1);
-
-    for (
-      let pageIndex = Math.max(0, currentPageIndex - OVERLAY_PAGE_RADIUS);
-      pageIndex <= Math.min(Math.max(0, pageCount - 1), currentPageIndex + OVERLAY_PAGE_RADIUS);
-      pageIndex += 1
-    ) {
-      indexes.add(pageIndex);
-    }
-
-    if (activeBlock) indexes.add(activeBlock.pageIndex);
-    if (hoveredBlock) indexes.add(hoveredBlock.pageIndex);
-    if (activeHighlight) indexes.add(activeHighlight.pageIndex);
-    // A distant sync target needs a host before its token can be acknowledged.
-    // The usual current-page radius alone never materializes that target.
-    if (pageSyncSignal?.context === sourceSignature && pageCount > 0 &&
-      Number.isFinite(pageSyncSignal.page) && pageSyncSignal.page > 0) {
-      indexes.add(Math.min(pageCount - 1, Math.max(0, Math.round(pageSyncSignal.page) - 1)));
-    }
-
-    return Array.from(indexes).sort((left, right) => left - right);
-  }, [activeBlock, activeHighlight, currentPage, hoveredBlock, pageCount, pageSyncSignal, sourceSignature]);
-  const overlayPageIndexesRef = useRef(overlayPageIndexes);
-  overlayPageIndexesRef.current = overlayPageIndexes;
-
-  const resolvePageOverlaySources = useCallback(
-    (pageIndex: number): BBoxPageSizeSource[] => {
-      const sources: BBoxPageSizeSource[] = [
-        ...(blocksByPage.get(pageIndex) ?? []),
-        ...(annotationsByPage.get(pageIndex) ?? []),
-      ];
-
-      if (activeBlock?.pageIndex === pageIndex) {
-        sources.push(activeBlock);
-      }
-
-      if (hoveredBlock?.pageIndex === pageIndex) {
-        sources.push(hoveredBlock);
-      }
-
-      if (activeHighlight?.pageIndex === pageIndex) {
-        sources.push(blockById.get(activeHighlight.blockId) ?? activeHighlight);
-      }
-
-      return sources;
-    },
-    [
-      activeBlock,
-      activeHighlight,
-      annotationsByPage,
-      blockById,
-      blocksByPage,
-      hoveredBlock,
-    ],
-  );
-
-  const requestPageSize = useCallback((pageIndex: number) => {
-    const pdfDocument = pdfDocumentRef.current;
-
-    if (
-      !pdfDocument ||
-      !isPdfDocumentUsable(pdfDocument) ||
-      pageIndex < 0 ||
-      pageIndex >= pageCount ||
-      pageSizesRef.current[pageIndex] ||
-      pendingPageSizeRequestsRef.current.has(pageIndex)
-    ) {
-      return;
-    }
-
-    pendingPageSizeRequestsRef.current.add(pageIndex);
-
-    void pdfDocument
-      .getPage(pageIndex + 1)
-      .then((page: any) => {
-        if (pdfDocumentRef.current !== pdfDocument) {
-          page?.cleanup?.();
-          return;
-        }
-
-        const viewport = page.getViewport({ scale: 1 });
-        const pageSize = {
-          width: viewport.width,
-          height: viewport.height,
-        };
-
-        pageSizesRef.current = {
-          ...pageSizesRef.current,
-          [pageIndex]: pageSize,
-        };
-        setPageSizes(pageSizesRef.current);
-        page?.cleanup?.();
-      })
-      .catch((pageError: unknown) => {
-        if (!isPdfLifecycleCancellation(pageError)) {
-          console.debug('[paperquay] Failed to resolve PDF page size', pageIndex + 1, pageError);
-        }
-      })
-      .finally(() => {
-        pendingPageSizeRequestsRef.current.delete(pageIndex);
-      });
-  }, [pageCount]);
-
-  const resolveOriginalPageForSources = useCallback(
-    (pageIndex: number, renderedPage: PageSize, sources: BBoxPageSizeSource[]) => {
-      const originalPage = resolveOverlayOriginalPage(
-        pageSizesRef.current[pageIndex],
-        renderedPage,
-        sources,
-      );
-
-      if (!originalPage) {
-        requestPageSize(pageIndex);
-      }
-
-      return originalPage;
-    },
-    [requestPageSize],
-  );
-
-  const updateAnnotationToolColor = useCallback(
-    (tool: PdfAnnotationColorTool, value: string) => {
-      const nextColor = value.trim().toLowerCase();
-
-      setAnnotationColors((current) => {
-        if (current[tool] === nextColor) {
-          return current;
-        }
-
-        return {
-          ...current,
-          [tool]: nextColor,
-        };
-      });
-    },
-    [],
-  );
-
-  const syncPageHosts = useCallback(() => {
-    const viewer = viewerRef.current;
-    const observer = resizeObserverRef.current;
-
-    if (!viewer || !observer) {
-      return false;
-    }
-
-    const nextHosts: Record<number, PageHostState> = {};
-    const nextObservedElements = new Set<HTMLDivElement>();
-
-    for (const pageIndex of overlayPageIndexesRef.current) {
-      const element = viewer.querySelector<HTMLDivElement>(
-        `.page[data-page-number="${pageIndex + 1}"]`,
-      );
-
-      if (!element) {
-        continue;
-      }
-
-      const overlayElement = ensurePageOverlayElement(element);
-      nextObservedElements.add(element);
-
-      if (!observedPageElementsRef.current.has(element)) {
-        observer.observe(element);
-      }
-
-      nextHosts[pageIndex] = {
-        element,
-        overlayElement,
-        width: element.clientWidth || element.getBoundingClientRect().width,
-        height: element.clientHeight || element.getBoundingClientRect().height,
-      };
-    }
-
-    for (const element of observedPageElementsRef.current) {
-      if (!nextObservedElements.has(element)) {
-        observer.unobserve(element);
-      }
-    }
-
-    observedPageElementsRef.current = nextObservedElements;
-
-    const changed = !arePageHostsEqual(pageHostsRef.current, nextHosts);
-
-    if (changed) {
-      pageHostsRef.current = nextHosts;
-      setPageHosts(nextHosts);
-    }
-
-    return changed;
-  }, []);
-
-  const buildCurrentScrollPosition = useCallback((): PdfScrollPosition | null => {
-    const container = containerRef.current;
-    const viewer = viewerRef.current;
-
-    if (!container || !sourceSignature) {
-      return null;
-    }
-
-    const { page, pageElement } = resolveScrollAnchorPage(
-      container,
-      viewer,
-      currentPageRef.current || 1,
-    );
-    const pageHeight = pageElement ? getPageElementHeight(pageElement) : 0;
-    const pageOffsetTop = pageElement
-      ? Math.max(0, container.scrollTop - pageElement.offsetTop)
-      : 0;
-
-    return {
-      sourceKey: sourceSignature,
-      top: Math.max(0, container.scrollTop),
-      left: Math.max(0, container.scrollLeft),
-      page,
-      pageOffsetTop,
-      pageOffsetRatio: pageHeight > 0 ? clampScrollRatio(pageOffsetTop / pageHeight) : undefined,
-      pageHeight: pageHeight > 0 ? pageHeight : undefined,
-      updatedAt: Date.now(),
-    };
-  }, [sourceSignature]);
-
-  // 页数变化只更新进度计算，不能改变布局回调身份而触发同源 PDF 重载。
-  const updateLocalScrollPosition = useCallback((options?: { syncPageState?: boolean }) => {
-    const nextPosition = buildCurrentScrollPosition();
-
-    if (!nextPosition) {
-      return null;
-    }
-
-    scrollPositionRef.current = nextPosition;
-    setNumberStateIfChanged(
-      setReadingProgressRatio,
-      getPdfReadingProgressRatio(nextPosition, pageCountRef.current),
-    );
-
-    if (currentPageRef.current !== nextPosition.page) {
-      currentPageRef.current = nextPosition.page;
-
-      if (options?.syncPageState !== false) {
-        setNumberStateIfChanged(setCurrentPage, nextPosition.page);
-      }
-    }
-
-    return nextPosition;
-  }, [buildCurrentScrollPosition]);
-
-  const emitScrollPosition = useCallback((options?: { syncPageState?: boolean }) => {
-    if (!onScrollPositionChange) {
-      return;
-    }
-
-    const nextPosition = updateLocalScrollPosition(options) ?? scrollPositionRef.current;
-
-    if (!nextPosition) {
-      return;
-    }
-
-    const sourceKey = sourceSignatureRef.current;
-
-    if (!sourceKey || nextPosition.sourceKey !== sourceKey) {
-      return;
-    }
-
-    onScrollPositionChange(nextPosition);
-  }, [onScrollPositionChange, updateLocalScrollPosition]);
-
-  const getSavedScrollPage = useCallback((pagesCount?: number) => {
-    const position = scrollPositionRef.current;
-    const sourceKey = sourceSignatureRef.current;
-
-    if (!position || !sourceKey || position.sourceKey !== sourceKey) {
-      return 1;
-    }
-
-    const page = Math.max(1, Math.round(position.page || 1));
-
-    return pagesCount && pagesCount > 0 ? Math.min(page, pagesCount) : page;
-  }, []);
-
-  const applySavedScrollPosition = useCallback((options?: { force?: boolean }) => {
-    const force = Boolean(options?.force);
-
-    if (!force && Date.now() - lastUserScrollAtRef.current < USER_SCROLL_RESTORE_GUARD_MS) {
-      return false;
-    }
-
-    const position = scrollPositionRef.current;
-    const sourceKey = sourceSignatureRef.current;
-
-    if (!position || !sourceKey || position.sourceKey !== sourceKey) {
-      return false;
-    }
-
-    const restoreKey = buildScrollRestoreKey(position);
-
-    if (!force && restoredScrollKeyRef.current === restoreKey) {
-      return true;
-    }
-
-    const container = containerRef.current;
-    const viewer = viewerRef.current;
-
-    if (!container || !viewer) {
-      return false;
-    }
-
-    const page = getSavedScrollPage();
-    const pageElement = viewer.querySelector<HTMLDivElement>(
-      `.page[data-page-number="${page}"]`,
-    );
-    const pageHeight = pageElement ? getPageElementHeight(pageElement) : 0;
-
-    if (
-      !pageElement ||
-      pageHeight <= 0 ||
-      (position.top > 0 && container.scrollHeight <= container.clientHeight)
-    ) {
-      return false;
-    }
-
-    const pageOffsetTop =
-      typeof position.pageOffsetRatio === 'number' && pageHeight > 0
-        ? clampScrollRatio(position.pageOffsetRatio) * pageHeight
-        : Math.max(0, position.pageOffsetTop || 0);
-    const rawTop = pageElement.offsetTop + pageOffsetTop;
-    const maxTop = Math.max(0, container.scrollHeight - container.clientHeight);
-    const maxLeft = Math.max(0, container.scrollWidth - container.clientWidth);
-    const top = Math.min(Math.max(0, rawTop), maxTop);
-    const left = Math.min(Math.max(0, position.left), maxLeft);
-
-    restoringScrollRef.current = true;
-    scrollInstantly(container, { top, left });
-    currentPageRef.current = page;
-    setNumberStateIfChanged(setCurrentPage, page);
-    restoredScrollKeyRef.current = restoreKey;
-
-    if (pendingScrollRestoreKeyRef.current === restoreKey) {
-      pendingScrollRestoreKeyRef.current = '';
-    }
-
-    window.setTimeout(() => {
-      const appliedPosition = updateLocalScrollPosition({ syncPageState: false });
-
-      if (appliedPosition) {
-        restoredScrollKeyRef.current = buildScrollRestoreKey(appliedPosition);
-      }
-
-      restoringScrollRef.current = false;
-    }, 80);
-
-    return true;
-  }, [getSavedScrollPage, updateLocalScrollPosition]);
-
-  const primeSavedScrollPage = useCallback((pdfViewer: any, pagesCount?: number) => {
-    const page = getSavedScrollPage(pagesCount);
-
-    currentPageRef.current = page;
-    setNumberStateIfChanged(setCurrentPage, page);
-
-    try {
-      const viewerPageCount =
-        typeof pdfViewer?.pagesCount === 'number' ? pdfViewer.pagesCount : 0;
-
-      if (pdfViewer?.pdfDocument && page > 0 && viewerPageCount >= page) {
-        pdfViewer.currentPageNumber = page;
-      } else if (pdfViewer?.pdfDocument && page > 0 && '_currentPageNumber' in pdfViewer) {
-        pdfViewer._currentPageNumber = page;
-      }
-    } catch {
-      // PDF.js may reject page changes before pages are initialized.
-    }
-
-    return page;
-  }, [getSavedScrollPage]);
-
-  const restoreSavedScroll = useCallback((options?: { force?: boolean }) => {
-    const force = Boolean(options?.force);
-
-    if (!force && Date.now() - lastUserScrollAtRef.current < USER_SCROLL_RESTORE_GUARD_MS) {
-      return;
-    }
-
-    const position = scrollPositionRef.current;
-    const sourceKey = sourceSignatureRef.current;
-
-    if (!position || !sourceKey || position.sourceKey !== sourceKey) {
-      return;
-    }
-
-    const restoreKey = buildScrollRestoreKey(position);
-
-    if (!force && restoredScrollKeyRef.current === restoreKey) {
-      return;
-    }
-
-    scrollRestoreSchedulerRef.current.schedule(() => applySavedScrollPosition({ force }));
-  }, [applySavedScrollPosition]);
-
-  const hasPendingExternalScrollRestore = useCallback(() => {
-    const pendingRestoreKey = pendingScrollRestoreKeyRef.current;
-    const position = scrollPositionRef.current;
-    const sourceKey = sourceSignatureRef.current;
-
-    if (!pendingRestoreKey || !position || !sourceKey || position.sourceKey !== sourceKey) {
-      return false;
-    }
-
-    return pendingRestoreKey === buildScrollRestoreKey(position);
-  }, []);
-
-  const retrySavedScrollRestore = useCallback(() => {
-    restoreSavedScroll({ force: hasPendingExternalScrollRestore() });
-  }, [hasPendingExternalScrollRestore, restoreSavedScroll]);
-
-  const refreshPdfViewerLayout = useCallback(() => {
-    const pdfViewer = pdfViewerRef.current;
-    const container = containerRef.current;
-
-    if (!activeRef.current || !pdfViewer || !container || container.clientWidth <= 0 || container.clientHeight <= 0) {
-      return;
-    }
-
-    try {
-      const previous = layoutViewportRef.current;
-      const width = container.clientWidth;
-      const height = container.clientHeight;
-      if (!previous || previous.viewer !== pdfViewer || previous.width !== width || previous.height !== height) {
-        layoutViewportRef.current = { viewer: pdfViewer, width, height };
-        // PDF.js update() renders visible pages but does not recalculate fit scales.
-        // Reapply only fit presets; a user's numeric zoom must survive resizing.
-        const preset = pdfViewer.currentScaleValue;
-        if (['page-width', 'page-fit', 'page-height', 'auto'].includes(preset)) {
-          pdfViewer.currentScaleValue = preset;
-        }
-      }
-      pdfViewer.update?.();
-    } catch {
-      // PDF.js can throw while a document is still being attached.
-    }
-
-    if (syncPageHosts()) {
-      retrySavedScrollRestore();
-    }
-  }, [retrySavedScrollRestore, syncPageHosts]);
-
-  useEffect(() => {
-    if (!scrollPosition || !sourceSignature || scrollPosition.sourceKey !== sourceSignature) {
-      return;
-    }
-
-    const currentPosition = scrollPositionRef.current;
-
-    if (
-      currentPosition &&
-      currentPosition.sourceKey === scrollPosition.sourceKey &&
-      currentPosition.updatedAt > scrollPosition.updatedAt
-    ) {
-      return;
-    }
-
-    const restoreKey = buildScrollRestoreKey(scrollPosition);
-
-    if (
-      externalScrollRestoreKeyRef.current === restoreKey &&
-      restoredScrollKeyRef.current === restoreKey
-    ) {
-      return;
-    }
-
-    scrollPositionRef.current = scrollPosition;
-    currentPageRef.current = Math.max(1, scrollPosition.page || 1);
-    restoredScrollKeyRef.current = '';
-    externalScrollRestoreKeyRef.current = restoreKey;
-    pendingScrollRestoreKeyRef.current = restoreKey;
-    restoreSavedScroll({ force: true });
-  }, [restoreSavedScroll, scrollPosition, sourceSignature]);
-
-  const scrollToPage = useCallback(
-    (pageIndex: number, behavior?: ScrollBehavior) => {
-      const pageHost = pageHosts[pageIndex]?.element;
-      const container = containerRef.current;
-      const scrollBehavior = behavior ?? (smoothScroll ? 'smooth' : 'auto');
-
-      const appliedPage = pageIndex + 1;
-
-      try {
-        if (pdfViewerRef.current?.pdfDocument) {
-          pdfViewerRef.current.currentPageNumber = appliedPage;
-        }
-      } catch {
-        // PDF.js may reject page changes while pages are still being initialized.
-      }
-
-      if (pageHost && container) {
-        const maxTop = Math.max(0, container.scrollHeight - container.clientHeight);
-        const previousScrollBehavior = container.style.scrollBehavior;
-        container.style.scrollBehavior = 'auto';
-        container.scrollTo({
-          top: Math.min(Math.max(0, pageHost.offsetTop), maxTop),
-          left: container.scrollLeft,
-          behavior: 'auto',
-        });
-        container.style.scrollBehavior = previousScrollBehavior;
-      } else {
-        pdfViewerRef.current?.scrollPageIntoView?.({
-          pageNumber: appliedPage,
-        });
-      }
-
-      currentPageRef.current = appliedPage;
-      setNumberStateIfChanged(setCurrentPage, appliedPage);
-
-      window.requestAnimationFrame(() => {
-        syncPageHosts();
-        window.requestAnimationFrame(syncPageHosts);
-      });
-    },
-    [pageHosts, smoothScroll, syncPageHosts],
-  );
-
-  const handleOutlineNavigate = useCallback(
-    (item: ReaderOutlineItem) => {
-      // 记录返回位置（1-based 页），上限 50 条
-      const snapshot = Math.max(1, currentPageRef.current);
-      const stack = outlineBackStackRef.current;
-      if (stack[stack.length - 1] !== snapshot) {
-        stack.push(snapshot);
-        if (stack.length > 50) {
-          stack.shift();
-        }
-        setOutlineBackCount(stack.length);
-      }
-
-      if (item.source === 'mineru-heading') {
-        const block = item.blockId
-          ? blocksRef.current.find((entry) => entry.blockId === item.blockId)
-          : undefined;
-        if (block && onOutlineNavigateBlockRef.current) {
-          onOutlineNavigateBlockRef.current(block);
-          return;
-        }
-        if (typeof item.pageIndex === 'number' && item.pageIndex >= 0) {
-          scrollToPage(item.pageIndex);
-        }
-        return;
-      }
-
-      const linkService = linkServiceRef.current;
-      if (linkService && item.destination != null) {
-        try {
-          void Promise.resolve(linkService.goToDestination(item.destination)).catch(() => {
-            setOutlineError(lRef.current('无法跳转到该目录位置', 'Unable to navigate to this outline entry'));
-          });
-        } catch {
-          setOutlineError(lRef.current('无法跳转到该目录位置', 'Unable to navigate to this outline entry'));
-        }
-        return;
-      }
-      if (typeof item.pageIndex === 'number' && item.pageIndex >= 0) {
-        scrollToPage(item.pageIndex);
-      }
-    },
-    [scrollToPage],
-  );
-
-  const handleOutlineGoBack = useCallback(() => {
-    const stack = outlineBackStackRef.current;
-    const page = stack.pop();
-    if (typeof page !== 'number') {
-      return;
-    }
-    setOutlineBackCount(stack.length);
-    scrollToPage(Math.max(0, page - 1), 'auto');
-  }, [scrollToPage]);
-
-  const handleOutlineToggleCollapsed = useCallback((id: string) => {
-    setOutlineCollapsedIds((current) => {
-      const next = new Set(current);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      persistOutlineCollapsedIds(sourceSignatureRef.current, next);
-      return next;
-    });
-  }, []);
-
-  const lastPageSyncTokenRef = useRef(0);
-
-  useEffect(() => {
-    if (!pageSyncSignal || pageSyncSignal.token === lastPageSyncTokenRef.current) {
-      return;
-    }
-
-    if (pageSyncSignal.context !== sourceSignature) {
-      return;
-    }
-
-    if (
-      !Number.isFinite(pageSyncSignal.page) ||
-      pageSyncSignal.page <= 0 ||
-      pageCount <= 0 ||
-      !pagesInitialized ||
-      !pdfDocumentRef.current
-    ) {
-      return;
-    }
-
-    const targetIndex = Math.min(
-      Math.max(0, Math.round(pageSyncSignal.page) - 1),
-      pageCount - 1,
-    );
-
-    // Wait until PDF.js has materialized the target page. Consuming the token before
-    // pagesinit lets the subsequent saved-position restore overwrite the sync jump.
-    if (!pageHosts[targetIndex]?.element) {
-      return;
-    }
-
-    lastPageSyncTokenRef.current = pageSyncSignal.token;
-    const appliedPage = targetIndex + 1;
-
-    if (appliedPage === currentPageRef.current) {
-      onPageSyncApplied?.(appliedPage, pageSyncSignal.token);
-      return;
-    }
-
-    // 对照同步必须即时定位，避免平滑滚动途经中间页时反向触发另一栏。
-    scrollToPage(targetIndex, 'auto');
-    onPageSyncApplied?.(appliedPage, pageSyncSignal.token);
-  }, [onPageSyncApplied, pageSyncSignal, pageCount, pageHosts, pagesInitialized, scrollToPage, sourceSignature]);
-
-  const scrollToReadingProgress = useCallback(
-    (progressRatio: number) => {
-      const safeRatio = Number.isFinite(progressRatio)
-        ? Math.min(0.999999, Math.max(0, progressRatio))
-        : 0;
-      const targetPageIndex = Math.min(
-        Math.max(0, pageCount - 1),
-        Math.max(0, Math.floor(safeRatio * Math.max(1, pageCount))),
-      );
-      const pageHost = pageHosts[targetPageIndex]?.element;
-      const container = containerRef.current;
-
-      if (!container || !pageHost || pageCount <= 0) {
-        scrollToPage(targetPageIndex);
-        return;
-      }
-
-      const pageProgress = safeRatio * pageCount - targetPageIndex;
-      const top = pageHost.offsetTop + Math.max(0, pageHost.clientHeight * pageProgress);
-      const maxTop = Math.max(0, container.scrollHeight - container.clientHeight);
-
-      restoringScrollRef.current = true;
-      container.scrollTo({
-        top: Math.min(Math.max(0, top), maxTop),
-        left: container.scrollLeft,
-        behavior: smoothScroll ? 'smooth' : 'auto',
-      });
-      currentPageRef.current = targetPageIndex + 1;
-      setNumberStateIfChanged(setCurrentPage, targetPageIndex + 1);
-      setNumberStateIfChanged(setReadingProgressRatio, safeRatio);
-
-      window.setTimeout(() => {
-        restoringScrollRef.current = false;
-        emitScrollPosition();
-      }, smoothScroll ? 280 : 80);
-    },
-    [emitScrollPosition, pageCount, pageHosts, scrollToPage, smoothScroll],
-  );
-
-  const buildBlockPdfLocation = useCallback(
-    (block: PositionedMineruBlock): TextSelectionPayload['pdfLocation'] =>
-      block.bbox
-        ? {
-            pageNumber: block.pageIndex + 1,
-            bbox: block.bbox,
-            bboxCoordinateSystem: block.bboxCoordinateSystem,
-            bboxPageSize: block.bboxPageSize,
-          }
-        : undefined,
-    [],
-  );
-
-  const buildBlockSelectionPayload = useCallback(
-    (
-      block: PositionedMineruBlock,
-      options: {
-        x: number;
-        y: number;
-        anchorClientRect?: TextSelectionPayload['anchorClientRect'];
-      },
-    ): TextSelectionPayload | null => {
-      const contentBlock = resolveBlockContentSource(block);
-      const text = extractTranslatableMarkdownFromMineruBlock(contentBlock).trim();
-
-      if (!text) {
-        return null;
-      }
-
-      return {
-        text,
-        blockId: contentBlock.blockId,
-        anchorClientX: options.x,
-        anchorClientY: options.y,
-        anchorClientRect: options.anchorClientRect,
-        placement: 'bottom',
-        pdfLocation: buildBlockPdfLocation(block),
-      };
-    },
-    [buildBlockPdfLocation, resolveBlockContentSource],
-  );
-
-  const blockContextMenuEntries = useMemo<ContextMenuEntry[]>(() => {
-    if (!blockContextMenu || !onAddBlockToNote) {
-      return [];
-    }
-
-    const selection = buildBlockSelectionPayload(blockContextMenu.block, {
-      x: blockContextMenu.x,
-      y: blockContextMenu.y,
-      anchorClientRect: blockContextMenu.anchorClientRect,
-    });
-
-    return [
-      {
-        id: 'add-block-to-note',
-        label: l('整块加入笔记', 'Add Whole Block to Note'),
-        icon: <FilePlus2 className="h-4 w-4" strokeWidth={1.9} />,
-        tone: 'accent',
-        disabled: !selection,
-        onSelect: () => {
-          if (selection) {
-            onAddBlockToNote(blockContextMenu.block, selection);
-          }
-        },
-      },
-    ];
-  }, [blockContextMenu, buildBlockSelectionPayload, l, onAddBlockToNote]);
-
-  const { heatmap: localReadingHeatmap, maxBinMs: maxReadingHeatmapBinMs } =
-    usePdfReadingHeatmap({
-      sourceKey: sourceSignature,
-      pageCount,
-      heatmap: readingHeatmap,
-      active: Boolean(active && enableReadingHeatmap && documentInit && sourceSignature && pageCount > 0 && !loading),
-      displayActive: readingHeatmapBarVisible,
-      getCurrentScrollPosition: buildCurrentScrollPosition,
-      onChange: enableReadingHeatmap ? onReadingHeatmapChange : undefined,
-    });
-
-  useEffect(() => {
-    setNumberStateIfChanged(
-      setReadingProgressRatio,
-      getPdfReadingProgressRatio(scrollPositionRef.current, pageCount),
-    );
-  }, [pageCount, sourceSignature]);
-
-  const scrollToHighlight = useCallback(
-    (highlight: PdfHighlightTarget, options?: { retry?: boolean }) => {
-      scrollRestoreSchedulerRef.current.cancel();
-      pendingScrollRestoreKeyRef.current = '';
-      lastUserScrollAtRef.current = Date.now();
-      if (scrollPositionRef.current) {
-        restoredScrollKeyRef.current = buildScrollRestoreKey(scrollPositionRef.current);
-      }
-      const retry = () => {
-        if (options?.retry === false) {
-          return;
-        }
-
-        window.setTimeout(() => {
-          syncPageHosts();
-          scrollToHighlight(highlight, { retry: false });
-        }, 120);
-      };
-      const container = containerRef.current;
-      const viewer = viewerRef.current;
-
-      if (!container) {
-        scrollToPage(highlight.pageIndex);
-        retry();
-        return;
-      }
-
-      const hostedPage = pageHosts[highlight.pageIndex];
-      const pageElement =
-        hostedPage?.element ??
-        viewer?.querySelector<HTMLDivElement>(
-          `.page[data-page-number="${highlight.pageIndex + 1}"]`,
-        ) ??
-        null;
-      const renderedPage = hostedPage
-        ? { width: hostedPage.width, height: hostedPage.height }
-        : pageElement
-          ? getRenderedPageSize(pageElement)
-          : null;
-
-      if (!pageElement || !renderedPage) {
-        scrollToPage(highlight.pageIndex);
-        retry();
-        return;
-      }
-
-      const sourceBlock = blockById.get(highlight.blockId) ?? highlight;
-      const originalPage = resolveOriginalPageForSources(
-        highlight.pageIndex,
-        renderedPage,
-        [sourceBlock],
-      );
-
-      if (!originalPage) {
-        scrollToPage(highlight.pageIndex);
-        retry();
-        return;
-      }
-
-      const targetRect = bboxToRect(
-        highlight.bbox,
-        resolveBBoxBaseSize(sourceBlock, originalPage),
-        renderedPage,
-      );
-      const viewportLead = Math.min(180, Math.max(72, container.clientHeight * 0.28));
-      const maxTop = Math.max(0, container.scrollHeight - container.clientHeight);
-      const maxLeft = Math.max(0, container.scrollWidth - container.clientWidth);
-      const top = Math.min(Math.max(0, pageElement.offsetTop + targetRect.top - viewportLead), maxTop);
-      const left = Math.min(Math.max(0, container.scrollLeft), maxLeft);
-      const page = highlight.pageIndex + 1;
-
-      restoringScrollRef.current = true;
-      scrollInstantly(container, { top, left });
-      currentPageRef.current = page;
-      setNumberStateIfChanged(setCurrentPage, page);
-      updateLocalScrollPosition();
-
-      window.requestAnimationFrame(() => {
-        syncPageHosts();
-        window.requestAnimationFrame(syncPageHosts);
-      });
-
-      window.setTimeout(() => {
-        restoringScrollRef.current = false;
-        emitScrollPosition();
-      }, 80);
-    },
-    [
-      blockById,
-      emitScrollPosition,
-      pageHosts,
-      resolveOriginalPageForSources,
-      scrollToPage,
-      syncPageHosts,
-      updateLocalScrollPosition,
-    ],
-  );
-
-  useEffect(() => {
-    const container = containerRef.current;
-
-    if (!active || !container || !onScrollPositionChange || !sourceSignature) {
-      return undefined;
-    }
-
-    let trailingTimer = 0;
-    let scrollPositionFrame = 0;
-
-    const flushLocalScrollPosition = () => {
-      scrollPositionFrame = 0;
-      updateLocalScrollPosition();
-    };
-
-    const handleScroll = () => {
-      if (restoringScrollRef.current) {
-        return;
-      }
-
-      if (hasPendingExternalScrollRestore()) {
-        return;
-      }
-
-      lastUserScrollAtRef.current = Date.now();
-
-      if (scrollPositionFrame === 0) {
-        scrollPositionFrame = window.requestAnimationFrame(flushLocalScrollPosition);
-      }
-
-      if (trailingTimer !== 0) {
-        window.clearTimeout(trailingTimer);
-      }
-
-      trailingTimer = window.setTimeout(() => {
-        trailingTimer = 0;
-        emitScrollPosition();
-      }, SCROLL_EMIT_TRAILING_MS);
-    };
-
-    const cancelPendingExternalRestore = () => {
-      scrollRestoreSchedulerRef.current.cancel();
-      pendingScrollRestoreKeyRef.current = '';
-      lastUserScrollAtRef.current = Date.now();
-    };
-
-    container.addEventListener('wheel', cancelPendingExternalRestore, { passive: true });
-    container.addEventListener('pointerdown', cancelPendingExternalRestore, { passive: true });
-    container.addEventListener('keydown', cancelPendingExternalRestore);
-    container.addEventListener('scroll', handleScroll, { passive: true });
-
-    return () => {
-      if (trailingTimer !== 0) {
-        window.clearTimeout(trailingTimer);
-      }
-
-      if (scrollPositionFrame !== 0) {
-        window.cancelAnimationFrame(scrollPositionFrame);
-      }
-
-      container.removeEventListener('scroll', handleScroll);
-      container.removeEventListener('wheel', cancelPendingExternalRestore);
-      container.removeEventListener('pointerdown', cancelPendingExternalRestore);
-      container.removeEventListener('keydown', cancelPendingExternalRestore);
-
-      // Do not measure hidden tab DOM during cleanup. The PDF viewer remains mounted,
-      // so tab switching preserves the live scroll position without restoring.
-    };
-  }, [
-    emitScrollPosition,
-    hasPendingExternalScrollRestore,
-    onScrollPositionChange,
+  const lifecycle = usePdfDocumentLifecycle({
     active,
+    annotationColors,
+    containerRef,
+    currentPageRef,
+    documentInit,
+    editorToolRef,
+    l,
+    lRef,
+    lastPageSyncTokenRef,
+    onDocumentErrorChange,
+    onPageCountChange,
+    pane,
+    restoredScrollKeyRef,
+    setCurrentPage,
+    setHasSelectedEditor,
     sourceSignature,
-    updateLocalScrollPosition,
-  ]);
-
-  const clearSelectionCommitTimer = useCallback(() => {
-    if (selectionCommitTimerRef.current !== null) {
-      window.clearTimeout(selectionCommitTimerRef.current);
-      selectionCommitTimerRef.current = null;
-    }
-
-    selectionCommitAttemptRef.current = 0;
-  }, []);
-
-  const clearPendingBlockSelect = useCallback(() => {
-    if (pendingBlockSelectTimerRef.current !== null) {
-      window.clearTimeout(pendingBlockSelectTimerRef.current);
-      pendingBlockSelectTimerRef.current = null;
-    }
-  }, []);
-
-  const waitForAnnotationEditorMode = useCallback((mode: number, timeout = 240) => {
-    return new Promise<void>((resolve) => {
-      const pdfViewer = pdfViewerRef.current;
-      const eventBus = eventBusRef.current;
-
-      if (pdfViewer?.annotationEditorMode?.mode === mode || !eventBus?.on || !eventBus?.off) {
-        resolve();
-        return;
-      }
-
-      let settled = false;
-      const handleModeChanged = (event: { mode?: number }) => {
-        if (event.mode === mode) {
-          finish();
-        }
-      };
-      const finish = () => {
-        if (settled) {
-          return;
-        }
-
-        settled = true;
-        eventBus.off('annotationeditormodechanged', handleModeChanged);
-        window.clearTimeout(timerId);
-        resolve();
-      };
-      const timerId = window.setTimeout(finish, timeout);
-
-      eventBus.on('annotationeditormodechanged', handleModeChanged);
-    });
-  }, []);
-
-  const emitSelectedText = useCallback(() => {
-    if (!activeRef.current || !onTextSelect || editorToolRef.current !== 'none') {
-      return false;
-    }
-
-    const selection = getScopedSelectionPayload(containerRef.current);
-
-    if (!selection) {
-      lastSelectionRef.current = null;
-      return false;
-    }
-
-    const now = Date.now();
-
-    if (
-      lastSelectionRef.current &&
-      lastSelectionRef.current.text === selection.text &&
-      now - lastSelectionRef.current.emittedAt < 250
-    ) {
-      return true;
-    }
-
-    lastSelectionRef.current = {
-      text: selection.text,
-      emittedAt: now,
-    };
-    onTextSelect(selection);
-    return true;
-  }, [onTextSelect]);
-
-  const scheduleSelectionCommit = useCallback(
-    (delay = PDF_SELECTION_COMMIT_RETRY_DELAYS[0], attempt = 0) => {
-      if (!active || !onTextSelect || editorToolRef.current !== 'none') {
-        return;
-      }
-
-      if (selectionCommitTimerRef.current !== null) {
-        window.clearTimeout(selectionCommitTimerRef.current);
-        selectionCommitTimerRef.current = null;
-      }
-
-      selectionCommitAttemptRef.current = attempt;
-      selectionCommitTimerRef.current = window.setTimeout(() => {
-        selectionCommitTimerRef.current = null;
-        const committed = emitSelectedText();
-
-        if (committed) {
-          selectionCommitAttemptRef.current = 0;
-          return;
-        }
-
-        const nextAttempt = selectionCommitAttemptRef.current + 1;
-        const nextDelay = PDF_SELECTION_COMMIT_RETRY_DELAYS[nextAttempt];
-
-        if (
-          nextDelay !== undefined &&
-          hasActiveTextSelection() &&
-          editorToolRef.current === 'none' &&
-          activeRef.current
-        ) {
-          scheduleSelectionCommit(nextDelay, nextAttempt);
-          return;
-        }
-
-        selectionCommitAttemptRef.current = 0;
-      }, delay);
-    },
-    [active, emitSelectedText, onTextSelect],
-  );
-
-  const handleDeleteSelected = useCallback(() => {
-    const uiManager = annotationEditorUiManagerRef.current;
-
-    if (uiManager?.delete) {
-      uiManager.delete();
-      return;
-    }
-
-    eventBusRef.current?.dispatch?.('editingaction', {
-      source: pdfViewerRef.current,
-      name: 'delete',
-    });
-  }, []);
-
-  const handleCreatePdfHighlight = useCallback(async () => {
-    const pdfViewer = pdfViewerRef.current;
-    const uiManager = annotationEditorUiManagerRef.current;
-
-    if (!pdfViewer || !uiManager) {
-      setDocumentError(
-        lRef.current('PDF annotation tools are not ready yet.', 'PDF annotation tools are not ready yet.'),
-      );
-      return;
-    }
-
-    if (!selectionBelongsToContainer(containerRef.current) || !hasActiveTextSelection()) {
-      setDocumentError(
-        lRef.current(
-          'Select text in the PDF before creating a highlight.',
-          'Select text in the PDF before creating a highlight.',
-        ),
-      );
-      return;
-    }
-
-    try {
-      setDocumentError('');
-      setActiveColorTool('highlight');
-      clearSelectionCommitTimer();
-      clearPendingBlockSelect();
-
-      pdfViewer.annotationEditorMode = {
-        mode: AnnotationEditorType.HIGHLIGHT,
-        isFromKeyboard: false,
-      };
-      await waitForAnnotationEditorMode(AnnotationEditorType.HIGHLIGHT);
-
-      uiManager.highlightSelection('paperquay_toolbar');
-
-      pdfViewer.annotationEditorMode = {
-        mode: AnnotationEditorType.NONE,
-        isFromKeyboard: false,
-      };
-      await waitForAnnotationEditorMode(AnnotationEditorType.NONE);
-      setBooleanStateIfChanged(setHasLiveTextSelection, false);
-    } catch (highlightError) {
-      setDocumentError(
-        highlightError instanceof Error
-          ? highlightError.message
-          : lRef.current('创建 PDF 高亮失败', 'Failed to create the PDF highlight'),
-      );
-    }
-  }, [
-    clearPendingBlockSelect,
-    clearSelectionCommitTimer,
-    waitForAnnotationEditorMode,
-  ]);
-
-  useEffect(() => {
-    persistPdfAnnotationToolColors(annotationColors);
-  }, [annotationColors]);
-
-  useEffect(() => {
-    localStorage.setItem(PDF_THUMBNAILS_COLLAPSED_STORAGE_KEY, String(thumbnailsCollapsed));
-  }, [thumbnailsCollapsed]);
-
-  useEffect(() => {
-    localStorage.setItem(
-      PDF_READING_HEATMAP_BAR_VISIBLE_STORAGE_KEY,
-      String(readingHeatmapBarVisible),
-    );
-  }, [readingHeatmapBarVisible]);
-
-  useEffect(() => {
-    pageThumbnailsRef.current = pageThumbnails;
-  }, [pageThumbnails]);
-
-  useEffect(() => {
-    if (thumbnailsCollapsed) {
-      return undefined;
-    }
-
-    const timer = window.setTimeout(() => {
-      setThumbnailFocusPage(currentPage);
-    }, THUMBNAIL_RENDER_IDLE_MS);
-
-    return () => {
-      window.clearTimeout(timer);
-    };
-  }, [currentPage, thumbnailsCollapsed]);
-
-  useEffect(() => {
-    if (!annotationEditorReadyRef.current) {
-      return;
-    }
-
-    applyPdfAnnotationToolColors(annotationEditorUiManagerRef.current, annotationColors);
-  }, [annotationColors]);
-
-  const handleSave = useCallback(async () => {
-    const pdfDocument = pdfDocumentRef.current;
-
-    if (!pdfDocument || saving) {
-      return;
-    }
-
-    try {
-      setSaving(true);
-      setDocumentError('');
-
-      const sourcePath = source?.kind === 'local-path' ? source.path : '';
-      const exportDirectory = defaultSaveDirectory.trim();
-      const protectedSourcePath = originalPdfPath.trim();
-      const suggestedFileName = buildAnnotatedFileName(
-        currentPdfName || (sourcePath ? getFileNameFromPath(sourcePath) : 'document.pdf'),
-      );
-      const targetPath = sourcePath
-        ? exportDirectory
-          ? buildPathInDirectory(exportDirectory, suggestedFileName)
-          : buildAnnotatedSiblingPath(sourcePath)
-        : await selectSavePdfPath({
-            suggestedFileName,
-            initialDirectory:
-              exportDirectory || (sourcePath ? getParentDirectory(sourcePath) : undefined),
-          });
-
-      if (!targetPath) {
-        emitToast({
-          tone: 'info',
-          message: lRef.current('已取消导出批注版 PDF', 'Annotated PDF export canceled'),
-        });
-        return;
-      }
-
-      if (
-        protectedSourcePath &&
-        normalizePathForCompare(targetPath) === normalizePathForCompare(protectedSourcePath)
-      ) {
-        throw new Error('Cannot overwrite the original PDF. Save annotations to a separate file.');
-      }
-
-      const nextBytes = await pdfDocument.saveDocument();
-
-      if (pdfDocumentRef.current !== pdfDocument) {
-        return;
-      }
-
-      // 写权限由主进程策略决定：保存对话框已登记目标路径；同目录批注版
-      // 导出依赖文库附件目录的受限写规则。
-
-      await writeLocalBinaryFile(targetPath, new Uint8Array(nextBytes));
-      const updatingCurrentAnnotatedFile =
-        sourcePath && normalizePathForCompare(targetPath) === normalizePathForCompare(sourcePath);
-      const saveMessage = updatingCurrentAnnotatedFile
-        ? lRef.current(`已更新批注版 PDF：${targetPath}`, `Updated annotated PDF: ${targetPath}`)
-        : exportDirectory
-          ? lRef.current(`已将批注版 PDF 保存到文献项目目录：${targetPath}`, `Saved annotated PDF to the paper project folder: ${targetPath}`)
-          : sourcePath
-            ? lRef.current(`已将批注版 PDF 保存到原文件旁：${targetPath}`, `Saved annotated PDF next to the original file: ${targetPath}`)
-            : lRef.current(`已导出批注版 PDF：${targetPath}`, `Exported annotated PDF: ${targetPath}`);
-      emitToast({ tone: 'success', message: saveMessage });
-      onSaveSuccess?.(targetPath);
-    } catch (saveError) {
-      setDocumentError(
-        saveError instanceof Error
-          ? saveError.message
-          : lRef.current('导出批注版 PDF 失败', 'Failed to export the annotated PDF'),
-      );
-    } finally {
-      setSaving(false);
-    }
-  }, [currentPdfName, defaultSaveDirectory, onSaveSuccess, originalPdfPath, saving, source]);
-
-  useEffect(() => {
-    if (!active) {
-      return undefined;
-    }
-
-    let resizeFrame = 0;
-    const observer = new ResizeObserver(() => {
-      if (resizeFrame) return;
-      resizeFrame = window.requestAnimationFrame(() => {
-        resizeFrame = 0;
-        refreshPdfViewerLayout();
-      });
-    });
-    const mutationObserver = new MutationObserver(() => {
-      window.requestAnimationFrame(() => {
-        if (!activeRef.current) {
-          return;
-        }
-
-        if (syncPageHosts()) {
-          retrySavedScrollRestore();
-        }
-      });
-    });
-
-    resizeObserverRef.current = observer;
-    mutationObserverRef.current = mutationObserver;
-    if (containerRef.current) observer.observe(containerRef.current);
-    syncPageHosts();
-    refreshPdfViewerLayout();
-
-    const viewer = viewerRef.current;
-
-    if (viewer) {
-      mutationObserver.observe(viewer, {
-        childList: true,
-      });
-    }
-
-    return () => {
-      if (resizeFrame) window.cancelAnimationFrame(resizeFrame);
-      observer.disconnect();
-      mutationObserver.disconnect();
-      observedPageElementsRef.current = new Set();
-      resizeObserverRef.current = null;
-      mutationObserverRef.current = null;
-    };
-  }, [active, refreshPdfViewerLayout, retrySavedScrollRestore, syncPageHosts]);
-
-  useEffect(() => {
-    if (!active) {
-      return;
-    }
-
-    syncPageHosts();
-  }, [active, overlayPageIndexes, syncPageHosts]);
-
-  useEffect(() => {
-    if (!active || !documentInit) {
-      return undefined;
-    }
-
-    let firstFrame = 0;
-    let secondFrame = 0;
-
-    firstFrame = window.requestAnimationFrame(() => {
-      refreshPdfViewerLayout();
-      secondFrame = window.requestAnimationFrame(refreshPdfViewerLayout);
-    });
-
-    return () => {
-      if (firstFrame !== 0) {
-        window.cancelAnimationFrame(firstFrame);
-      }
-
-      if (secondFrame !== 0) {
-        window.cancelAnimationFrame(secondFrame);
-      }
-    };
-  }, [active, documentInit, refreshPdfViewerLayout]);
-
-  useEffect(() => {
-    editorToolRef.current = editorTool;
-    const pdfViewer = pdfViewerRef.current;
-
-    if (!pdfViewer || !annotationEditorReadyRef.current) {
-      return;
-    }
-
-    pdfViewer.annotationEditorMode = {
-      mode: resolveToolMode(editorTool),
-      isFromKeyboard: false,
-    };
-
-    if (editorTool !== 'none') {
-      clearSelectionCommitTimer();
-      clearPendingBlockSelect();
-      window.getSelection()?.removeAllRanges();
-      onBlockHover(null);
-      setBooleanStateIfChanged(setHasLiveTextSelection, false);
-    }
-  }, [clearPendingBlockSelect, clearSelectionCommitTimer, editorTool, onBlockHover]);
-
-  useEffect(
-    () => () => {
-      clearSelectionCommitTimer();
-      clearPendingBlockSelect();
-    },
-    [clearPendingBlockSelect, clearSelectionCommitTimer],
-  );
-
-  useEffect(() => {
-    if (!active || !hasSelectedEditor) {
-      return undefined;
-    }
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || isEditableTarget(event.target)) {
-        return;
-      }
-
-      if (event.key !== 'Delete' && event.key !== 'Backspace') {
-        return;
-      }
-
-      event.preventDefault();
-      handleDeleteSelected();
-    };
-
-    document.addEventListener('keydown', handleKeyDown);
-
-    return () => {
-      document.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [active, handleDeleteSelected, hasSelectedEditor]);
-
-  useEffect(() => {
-    setLoadedPageCount(null);
-    lastPageSyncTokenRef.current = 0;
-    pageSizesRef.current = {};
-    pendingPageSizeRequestsRef.current.clear();
-    setPageSizes({});
-    pageHostsRef.current = {};
-    setPageHosts({});
-    const initialPage = getSavedScrollPage();
-
-    currentPageRef.current = initialPage;
-    restoredScrollKeyRef.current = '';
-    setNumberStateIfChanged(setCurrentPage, initialPage);
-    setStringStateIfChanged(setZoomLabel, '100%');
-    setDocumentError('');
-    clearSelectionCommitTimer();
-    clearPendingBlockSelect();
-  }, [clearPendingBlockSelect, clearSelectionCommitTimer, documentInit, getSavedScrollPage]);
-
-  useEffect(() => {
-    const container = containerRef.current;
-    const viewer = viewerRef.current;
-
-    if (!container || !viewer || !documentInit) {
-      if (!documentInit) {
-        setLoadedPageCount(null);
-        pageHostsRef.current = {};
-        setPageHosts({});
-        setNumberStateIfChanged(setCurrentPage, 1);
-        setStringStateIfChanged(setZoomLabel, '100%');
-      }
-
-      setLoading(false);
-      return undefined;
-    }
-
-    let cancelled = false;
-    const generation = ++loadGenerationRef.current;
-    setLoading(true);
-    setDocumentError('');
-    firstPageRenderLoggedRef.current = false;
-    perfMark('pdf:document-load-start');
-
-    let eventBus: any = null;
-    let linkService: any = null;
-    let handlePagesInit: (() => void) | null = null;
-    let handlePageChanging: ((event: { pageNumber?: number }) => void) | null = null;
-    let handleScaleChanging: ((event: { scale?: number }) => void) | null = null;
-    let handlePageRendered: ((event: { error?: unknown }) => void) | null = null;
-    let handleAnnotationEditorUiManager: ((event: { uiManager?: unknown }) => void) | null = null;
-    let handleEditorStatesChanged:
-      | ((event: { details?: { hasSelectedEditor?: boolean } }) => void)
-      | null = null;
-
-    void import('pdfjs-dist/web/pdf_viewer.mjs')
-      .then(async ({ EventBus, PDFLinkService, PDFViewer: PdfJsViewer }) => {
-        if (cancelled) {
-          return;
-        }
-
-        eventBus = new EventBus();
-        eventBusRef.current = eventBus;
-        linkService = new PDFLinkService({ eventBus });
-        linkServiceRef.current = linkService;
-        viewer.textContent = '';
-
-        const pdfViewer = new PdfJsViewer({
-          container,
-          viewer,
-          eventBus,
-          linkService,
-          removePageBorders: true,
-          annotationMode: AnnotationMode.ENABLE_FORMS,
-          annotationEditorMode: AnnotationEditorType.NONE,
-          enableHighlightFloatingButton: false,
-          annotationEditorHighlightColors: buildPdfJsHighlightColorOptions(),
-          enableHWA: true,
-          maxCanvasPixels: PDF_VIEWER_MAX_CANVAS_PIXELS,
-        } as any);
-
-        pdfViewerRef.current = pdfViewer;
-        linkService.setViewer(pdfViewer);
-
-        handleAnnotationEditorUiManager = (event) => {
-          annotationEditorReadyRef.current = true;
-          annotationEditorUiManagerRef.current = event.uiManager ?? null;
-          applyPdfAnnotationToolColors(annotationEditorUiManagerRef.current, annotationColors);
-
-          pdfViewer.annotationEditorMode = {
-            mode: resolveToolMode(editorToolRef.current),
-            isFromKeyboard: false,
-          };
-        };
-
-        handleEditorStatesChanged = (event) => {
-          setBooleanStateIfChanged(
-            setHasSelectedEditor,
-            Boolean(event.details?.hasSelectedEditor),
-          );
-        };
-
-        handlePagesInit = () => {
-          primeSavedScrollPage(pdfViewer, pdfViewer.pagesCount);
-          pdfViewer.currentScaleValue = 'page-width';
-          pdfViewer.update?.();
-          setStringStateIfChanged(setZoomLabel, lRef.current('适合宽度', 'Fit width'));
-          syncPageHosts();
-          restoreSavedScroll({ force: true });
-          setInitializedDocument({ documentInit, revision: retryRevision });
-          window.requestAnimationFrame(refreshPdfViewerLayout);
-        };
-
-        handlePageChanging = (event) => {
-          const pageNumber = Math.max(1, Math.round(event.pageNumber ?? 1));
-          currentPageRef.current = pageNumber;
-          setNumberStateIfChanged(setCurrentPage, pageNumber);
-        };
-
-        handleScaleChanging = (event) => {
-          const scale = Number(event.scale);
-          setStringStateIfChanged(
-            setZoomLabel,
-            Number.isFinite(scale)
-              ? `${Math.round(scale * 100)}%`
-              : lRef.current('适合宽度', 'Fit width'),
-          );
-        };
-
-        handlePageRendered = (event) => {
-          if (cancelled) return;
-          if (event.error) {
-            const error = event.error;
-            console.error('PDF load failed', { pane: paneRef.current, generation, phase: 'page-render', type: error instanceof Error ? error.name : typeof error });
-            setDocumentError(error instanceof Error ? error.message : lRef.current('PDF 页面渲染失败', 'Failed to render the PDF page'));
-            return;
-          }
-          setRenderedDocument({ documentInit, revision: retryRevision });
-          // 基线指标：首个 pagerendered 才是首屏可用的准确信号（loading=false 早于实际绘制）。
-          if (!firstPageRenderLoggedRef.current) {
-            firstPageRenderLoggedRef.current = true;
-            perfMeasure('pdf:first-pagerendered', 'pdf:document-load-start');
-          }
-
-          if (syncPageHosts()) {
-            retrySavedScrollRestore();
-          }
-        };
-
-        eventBus.on('annotationeditoruimanager', handleAnnotationEditorUiManager);
-        eventBus.on('annotationeditorstateschanged', handleEditorStatesChanged);
-        eventBus.on('pagesinit', handlePagesInit);
-        eventBus.on('pagechanging', handlePageChanging);
-        eventBus.on('scalechanging', handleScaleChanging);
-        eventBus.on('pagerendered', handlePageRendered);
-
-        const loadingTask = getDocument(documentInit as any);
-        loadingTaskRef.current = loadingTask;
-        const pdfDocument = await loadingTask.promise;
-
-        if (cancelled) {
-          releasePdfDocument(pdfDocument);
-          return;
-        }
-
-        pdfDocumentRef.current = pdfDocument;
-        setLoadedPageCount({ documentInit, revision: retryRevision, count: pdfDocument.numPages });
-
-        if (!cancelled && pdfDocumentRef.current === pdfDocument) {
-          pdfViewer.setDocument(pdfDocument);
-          linkService.setDocument(pdfDocument, null);
-          primeSavedScrollPage(pdfViewer, pdfDocument.numPages);
-          window.requestAnimationFrame(refreshPdfViewerLayout);
-          setLoading(false);
-        }
-      })
-      .catch((loadError: unknown) => {
-        if (cancelled) {
-          return;
-        }
-
-        console.error('PDF load failed', { pane: paneRef.current, generation, phase: 'document-load', type: loadError instanceof Error ? loadError.name : typeof loadError });
-        setDocumentError(
-          loadError instanceof Error
-            ? loadError.message
-            : lRef.current('PDF 渲染模块加载失败', 'Failed to load the PDF rendering module'),
-        );
-        setLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-      annotationEditorReadyRef.current = false;
-      annotationEditorUiManagerRef.current = null;
-      eventBusRef.current = null;
-      linkServiceRef.current = null;
-      setBooleanStateIfChanged(setHasSelectedEditor, false);
-
-      if (eventBus && handleAnnotationEditorUiManager) {
-        eventBus.off('annotationeditoruimanager', handleAnnotationEditorUiManager);
-      }
-      if (eventBus && handleEditorStatesChanged) {
-        eventBus.off('annotationeditorstateschanged', handleEditorStatesChanged);
-      }
-      if (eventBus && handlePagesInit) {
-        eventBus.off('pagesinit', handlePagesInit);
-      }
-      if (eventBus && handlePageChanging) {
-        eventBus.off('pagechanging', handlePageChanging);
-      }
-      if (eventBus && handleScaleChanging) {
-        eventBus.off('scalechanging', handleScaleChanging);
-      }
-      if (eventBus && handlePageRendered) {
-        eventBus.off('pagerendered', handlePageRendered);
-      }
-
-      const pdfDocumentToDestroy = pdfDocumentRef.current;
-      const pdfViewerToDetach = pdfViewerRef.current;
-      detachPdfViewerDocument(pdfViewerToDetach, linkService);
-      pdfDocumentRef.current = null;
-      pdfViewerRef.current = null;
-      pageThumbnailsRef.current = {};
-      setPageThumbnails({});
-      viewer.textContent = '';
-
-      const loadingTaskToDestroy = loadingTaskRef.current;
-      loadingTaskRef.current = null;
-
-      if (pdfDocumentToDestroy) {
-        releasePdfDocumentSoon(pdfDocumentToDestroy);
-      } else {
-        releasePdfLoadingTask(loadingTaskToDestroy);
-      }
-
-      setLoading(false);
-    };
-  }, [documentInit, refreshPdfViewerLayout, retryRevision]);
-
-  useEffect(() => {
-    const pdfDocument = pdfDocumentRef.current;
-
-    if (!pdfDocument || pageCount <= 0) {
-      if (Object.keys(pageThumbnailsRef.current).length > 0) {
-        pageThumbnailsRef.current = {};
-        setPageThumbnails({});
-      }
-      return;
-    }
-
-    if (!active) {
-      return;
-    }
-
-    if (thumbnailsCollapsed) {
-      return;
-    }
-
-    let cancelled = false;
-    let activeRenderTask: any = null;
-    let activeCanvas: HTMLCanvasElement | null = null;
-    let activePage: any = null;
-    const isCurrentDocument = () =>
-      !cancelled && pdfDocumentRef.current === pdfDocument && isPdfDocumentUsable(pdfDocument);
-
-    const pageIndexes = buildThumbnailPageIndexes(pageCount, thumbnailFocusPage);
-
-    setPageThumbnails((current) => {
-      const nextEntries = Object.entries(current).filter(([pageIndex]) =>
-        pageIndexes.includes(Number(pageIndex)),
-      );
-
-      const next = Object.fromEntries(nextEntries);
-      pageThumbnailsRef.current = next;
-      return next;
-    });
-
-    const renderThumbnails = async () => {
-      for (const pageIndex of pageIndexes) {
-        if (!isCurrentDocument()) {
-          return;
-        }
-
-        if (pageThumbnailsRef.current[pageIndex]) {
-          continue;
-        }
-
-        let page: any = null;
-        let canvas: HTMLCanvasElement | null = null;
-
-        try {
-          page = await pdfDocument.getPage(pageIndex + 1);
-          activePage = page;
-
-          if (!isCurrentDocument()) {
-            return;
-          }
-
-          const viewport = page.getViewport({ scale: 1 });
-          const targetWidth = 136;
-          const scale = targetWidth / Math.max(viewport.width, 1);
-          const thumbnailViewport = page.getViewport({ scale });
-          canvas = document.createElement('canvas');
-          activeCanvas = canvas;
-          const context = canvas.getContext('2d', { alpha: false });
-
-          if (!context) {
-            continue;
-          }
-
-          canvas.width = Math.max(1, Math.floor(thumbnailViewport.width));
-          canvas.height = Math.max(1, Math.floor(thumbnailViewport.height));
-          context.fillStyle = '#ffffff';
-          context.fillRect(0, 0, canvas.width, canvas.height);
-
-          const renderTask = page.render({
-            canvasContext: context,
-            viewport: thumbnailViewport,
-          });
-
-          activeRenderTask = renderTask;
-          await renderTask.promise;
-          activeRenderTask = null;
-
-          if (!isCurrentDocument()) {
-            return;
-          }
-
-          const thumbnailUrl = canvas.toDataURL('image/jpeg', 0.78);
-
-          setPageThumbnails((current) => {
-            if (!isCurrentDocument() || current[pageIndex] === thumbnailUrl) {
-              return current;
-            }
-
-            const next = {
-              ...current,
-              [pageIndex]: thumbnailUrl,
-            };
-            pageThumbnailsRef.current = next;
-            return next;
-          });
-        } catch (thumbnailError) {
-          if (!isCurrentDocument() || isPdfLifecycleCancellation(thumbnailError)) {
-            return;
-          }
-        } finally {
-          activeRenderTask = null;
-          if (canvas) {
-            releaseCanvas(canvas);
-          }
-          page?.cleanup?.();
-          if (activeCanvas === canvas) {
-            activeCanvas = null;
-          }
-          if (activePage === page) {
-            activePage = null;
-          }
-        }
-      }
-    };
-
-    void renderThumbnails();
-
-    return () => {
-      cancelled = true;
-      try {
-        activeRenderTask?.cancel?.();
-      } catch {
-        // Best-effort cancellation for stale PDF.js thumbnail renders.
-      }
-      if (activeCanvas) {
-        releaseCanvas(activeCanvas);
-        activeCanvas = null;
-      }
-      try {
-        activePage?.cleanup?.();
-      } catch {
-        // Best-effort PDF.js page cleanup.
-      }
-      activePage = null;
-    };
-  }, [active, documentInit, pageCount, thumbnailFocusPage, thumbnailsCollapsed]);
-
-  useEffect(() => {
-    if (!active || !activeHighlight || pageCount === 0 || loading ||
-      !isHighlightScrollReady(pagesInitialized, Boolean(pageHosts[activeHighlight.pageIndex]?.element)) ||
-      highlightScrollSignal === lastHandledHighlightSignalRef.current) {
-      return;
-    }
-
-    const frame = window.requestAnimationFrame(() => {
-      lastHandledHighlightSignalRef.current = highlightScrollSignal;
-      scrollToHighlight(activeHighlight);
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, [active, activeHighlight, highlightScrollSignal, loading, pageCount, pageHosts, pagesInitialized, scrollToHighlight]);
-
-  useEffect(() => {
-    if (!active) {
-      return;
-    }
-
-    for (const pageIndex of overlayPageIndexes) {
-      const host = pageHosts[pageIndex];
-
-      if (!host) {
-        continue;
-      }
-
-      const renderedPage = {
-        width: host.width,
-        height: host.height,
-      };
-
-      if (renderedPage.width <= 0 || renderedPage.height <= 0) {
-        continue;
-      }
-
-      const originalPage = resolveOverlayOriginalPage(
-        pageSizes[pageIndex],
-        renderedPage,
-        resolvePageOverlaySources(pageIndex),
-      );
-
-      if (!originalPage) {
-        requestPageSize(pageIndex);
-      }
-    }
-  }, [
+    viewerApiRef,
+    viewerRef,
+  });
+
+  const selection = usePdfSelection({
     active,
-    overlayPageIndexes,
-    pageHosts,
-    pageSizes,
-    requestPageSize,
-    resolvePageOverlaySources,
-  ]);
-
-  useEffect(() => {
-    if (!active || !onTextSelect) {
-      return undefined;
-    }
-
-    const isEventInsideContainer = (event: Event) => {
-      const container = containerRef.current;
-      const target = event.target;
-
-      return Boolean(container && target instanceof Node && container.contains(target));
-    };
-
-    const handleSelectionStart = (event: MouseEvent | PointerEvent) => {
-      selectionStartedInsideRef.current = isEventInsideContainer(event);
-
-      if (selectionStartedInsideRef.current) {
-        clearPendingBlockSelect();
-      }
-    };
-
-    const handleMouseSelectionCommit = (event: MouseEvent) => {
-      if (editorToolRef.current !== 'none') {
-        return;
-      }
-
-      const shouldReadSelection =
-        selectionStartedInsideRef.current || isEventInsideContainer(event);
-
-      selectionStartedInsideRef.current = false;
-
-      if (!shouldReadSelection) {
-        return;
-      }
-
-      clearPendingBlockSelect();
-      scheduleSelectionCommit();
-    };
-
-    const handleKeyboardSelectionCommit = (event: KeyboardEvent) => {
-      if (editorToolRef.current !== 'none') {
-        return;
-      }
-
-      if (!isEventInsideContainer(event)) {
-        return;
-      }
-
-      scheduleSelectionCommit();
-    };
-
-    const handleSelectionChange = () => {
-      const selectionInside = selectionBelongsToContainer(containerRef.current);
-      const activeSelectionInside = selectionInside && hasActiveTextSelection();
-      setBooleanStateIfChanged(
-        setHasLiveTextSelection,
-        activeSelectionInside,
-      );
-
-      if (editorToolRef.current !== 'none') {
-        return;
-      }
-
-      if (activeSelectionInside) {
-        clearPendingBlockSelect();
-        scheduleSelectionCommit(180);
-        return;
-      }
-
-      if (!selectionStartedInsideRef.current && !selectionInside) {
-        return;
-      }
-
-      clearPendingBlockSelect();
-    };
-
-    document.addEventListener('pointerdown', handleSelectionStart);
-    document.addEventListener('mousedown', handleSelectionStart);
-    document.addEventListener('mouseup', handleMouseSelectionCommit);
-    document.addEventListener('keyup', handleKeyboardSelectionCommit);
-    document.addEventListener('selectionchange', handleSelectionChange);
-
-    return () => {
-      setBooleanStateIfChanged(setHasLiveTextSelection, false);
-      document.removeEventListener('pointerdown', handleSelectionStart);
-      document.removeEventListener('mousedown', handleSelectionStart);
-      document.removeEventListener('mouseup', handleMouseSelectionCommit);
-      document.removeEventListener('keyup', handleKeyboardSelectionCommit);
-      document.removeEventListener('selectionchange', handleSelectionChange);
-    };
-  }, [active, clearPendingBlockSelect, onTextSelect, scheduleSelectionCommit]);
-
-  useEffect(() => {
-    const viewer = viewerRef.current;
-
-    if (!active || !viewer) {
-      return undefined;
-    }
-
-    let pendingHoverBlock: PositionedMineruBlock | null = null;
-    let hoverAnimationFrame: number | null = null;
-
-    const flushBlockHover = () => {
-      hoverAnimationFrame = null;
-
-      const block = pendingHoverBlock;
-      pendingHoverBlock = null;
-      const nextBlockId = block?.blockId ?? null;
-
-      if (hoveredBlockIdRef.current === nextBlockId) {
-        return;
-      }
-
-      hoveredBlockIdRef.current = nextBlockId;
-      onBlockHover(block);
-    };
-
-    const emitBlockHover = (block: PositionedMineruBlock | null) => {
-      const nextBlockId = block?.blockId ?? null;
-      const pendingBlockId = pendingHoverBlock?.blockId ?? null;
-
-      if (
-        (hoverAnimationFrame === null && hoveredBlockIdRef.current === nextBlockId) ||
-        (hoverAnimationFrame !== null && pendingBlockId === nextBlockId)
-      ) {
-        return;
-      }
-
-      pendingHoverBlock = block;
-
-      if (hoverAnimationFrame !== null) {
-        return;
-      }
-
-      hoverAnimationFrame = window.requestAnimationFrame(flushBlockHover);
-    };
-
-    const getPointerPageTarget = (event: PointerEvent | MouseEvent) =>
-      getPageTargetFromEvent(event.target, event.clientX, event.clientY, viewer);
-
-    const getPointerRenderedPage = (pageTarget: ReturnType<typeof getPageTargetFromEvent>) => {
-      if (!pageTarget) {
-        return null;
-      }
-
-      return pageHosts[pageTarget.pageIndex] ?? getRenderedPageSize(pageTarget.pageElement);
-    };
-
-    const resolvePointerBlockHit = (event: MouseEvent | PointerEvent) => {
-      const pageTarget = getPointerPageTarget(event);
-
-      if (!pageTarget) {
-        return null;
-      }
-
-      const renderedPage = getPointerRenderedPage(pageTarget);
-
-      if (!renderedPage) {
-        return null;
-      }
-
-      const pageBlocks = blocksByPage.get(pageTarget.pageIndex) ?? [];
-      const originalPage = resolveOriginalPageForSources(
-        pageTarget.pageIndex,
-        renderedPage,
-        pageBlocks,
-      );
-
-      if (!originalPage) {
-        return null;
-      }
-
-      const hit = resolvePdfBlockHitByPoint(
-        event.clientX,
-        event.clientY,
-        pageTarget.pageElement,
-        pageBlocks,
-        originalPage,
-        renderedPage,
-        resolveBlockContentSource,
-        hasTranslatableBlockText,
-      );
-
-      if (!hit) {
-        return null;
-      }
-
-      return {
-        block: hit.block,
-        anchorBlock: hit.anchorBlock,
-        anchorClientRect: resolveBlockClientRect(
-          pageTarget.pageElement,
-          hit.anchorBlock,
-          originalPage,
-          renderedPage,
-        ),
-        pdfLocation: buildBlockPdfLocation(hit.anchorBlock),
-      };
-    };
-
-    const handlePointerDown = (event: PointerEvent) => {
-      clearPendingBlockSelect();
-
-      if (editorToolRef.current !== 'none') {
-        pointerStartRef.current = null;
-        emitBlockHover(null);
-        return;
-      }
-
-      if (isAnnotationUiTarget(event.target)) {
-        return;
-      }
-
-      const pageTarget = getPointerPageTarget(event);
-
-      if (!pageTarget) {
-        pointerStartRef.current = null;
-        return;
-      }
-
-      pointerStartRef.current = {
-        x: event.clientX,
-        y: event.clientY,
-      };
-    };
-
-    const handlePointerMove = (event: PointerEvent) => {
-      if (editorToolRef.current !== 'none') {
-        emitBlockHover(null);
-        return;
-      }
-
-      if (event.buttons !== 0 || hasActiveTextSelection() || isAnnotationUiTarget(event.target)) {
-        return;
-      }
-
-      const pageTarget = getPointerPageTarget(event);
-
-      if (!pageTarget) {
-        emitBlockHover(null);
-        return;
-      }
-
-      const pageBlocks = blocksByPage.get(pageTarget.pageIndex) ?? [];
-      const renderedPage = getPointerRenderedPage(pageTarget);
-
-      if (!renderedPage) {
-        emitBlockHover(null);
-        return;
-      }
-
-      const originalPage = resolveOriginalPageForSources(
-        pageTarget.pageIndex,
-        renderedPage,
-        pageBlocks,
-      );
-
-      if (!originalPage) {
-        emitBlockHover(null);
-        return;
-      }
-
-      const hit = resolvePdfBlockHitByPoint(
-        event.clientX,
-        event.clientY,
-        pageTarget.pageElement,
-        pageBlocks,
-        originalPage,
-        renderedPage,
-        resolveBlockContentSource,
-        hasTranslatableBlockText,
-      );
-
-      emitBlockHover(hit?.block ?? null);
-    };
-
-    const handlePointerUp = (event: PointerEvent) => {
-      if (editorToolRef.current !== 'none') {
-        pointerStartRef.current = null;
-        return;
-      }
-
-      const pageTarget = getPointerPageTarget(event);
-
-      if (!pageTarget) {
-        pointerStartRef.current = null;
-        return;
-      }
-
-      if (isAnnotationUiTarget(event.target)) {
-        pointerStartRef.current = null;
-        return;
-      }
-
-      const renderedPage = getPointerRenderedPage(pageTarget);
-
-      if (!renderedPage) {
-        pointerStartRef.current = null;
-        return;
-      }
-
-      const pointerStart = pointerStartRef.current;
-      pointerStartRef.current = null;
-
-      if (pointerStart) {
-        const movement = Math.hypot(event.clientX - pointerStart.x, event.clientY - pointerStart.y);
-
-        if (movement > 4) {
-          return;
-        }
-      }
-
-      if (hasActiveTextSelection()) {
-        return;
-      }
-
-      const pageBlocks = blocksByPage.get(pageTarget.pageIndex) ?? [];
-      const originalPage = resolveOriginalPageForSources(
-        pageTarget.pageIndex,
-        renderedPage,
-        pageBlocks,
-      );
-
-      if (!originalPage) {
-        return;
-      }
-
-      const hit = resolvePdfBlockHitByPoint(
-        event.clientX,
-        event.clientY,
-        pageTarget.pageElement,
-        pageBlocks,
-        originalPage,
-        renderedPage,
-        resolveBlockContentSource,
-        hasTranslatableBlockText,
-      );
-
-      if (hit) {
-        const anchorClientRect = resolveBlockClientRect(
-          pageTarget.pageElement,
-          hit.anchorBlock,
-          originalPage,
-          renderedPage,
-        );
-
-        clearPendingBlockSelect();
-        pendingBlockSelectTimerRef.current = window.setTimeout(() => {
-          pendingBlockSelectTimerRef.current = null;
-
-          if (hasActiveTextSelection()) {
-            return;
-          }
-
-          onBlockSelect(hit.block, {
-            anchorClientX: event.clientX,
-            anchorClientY: event.clientY,
-            anchorClientRect,
-            placement: 'bottom',
-            pdfLocation: buildBlockPdfLocation(hit.anchorBlock),
-          });
-        }, 48);
-      }
-    };
-
-    const handleClick = (event: MouseEvent) => {
-      if (editorToolRef.current !== 'none') {
-        return;
-      }
-
-      if (isAnnotationUiTarget(event.target) || hasActiveTextSelection()) {
-        return;
-      }
-
-      const pageTarget = getPointerPageTarget(event);
-
-      if (!pageTarget) {
-        return;
-      }
-
-      const renderedPage = getPointerRenderedPage(pageTarget);
-
-      if (!renderedPage) {
-        return;
-      }
-
-      const pageBlocks = blocksByPage.get(pageTarget.pageIndex) ?? [];
-      const originalPage = resolveOriginalPageForSources(
-        pageTarget.pageIndex,
-        renderedPage,
-        pageBlocks,
-      );
-
-      if (!originalPage) {
-        return;
-      }
-
-      const hit = resolvePdfBlockHitByPoint(
-        event.clientX,
-        event.clientY,
-        pageTarget.pageElement,
-        pageBlocks,
-        originalPage,
-        renderedPage,
-        resolveBlockContentSource,
-        hasTranslatableBlockText,
-      );
-
-      if (!hit) {
-        return;
-      }
-
-      clearPendingBlockSelect();
-      if (blockClickOpensQuickActions) {
-        (event as MouseEvent & { paperQuayPdfBlockSelectClick?: boolean }).paperQuayPdfBlockSelectClick = true;
-      }
-      onBlockSelect(hit.block, {
-        anchorClientX: event.clientX,
-        anchorClientY: event.clientY,
-        anchorClientRect: resolveBlockClientRect(
-          pageTarget.pageElement,
-          hit.anchorBlock,
-          originalPage,
-          renderedPage,
-        ),
-        placement: 'bottom',
-        pdfLocation: buildBlockPdfLocation(hit.anchorBlock),
-      });
-    };
-
-    const handleContextMenu = (event: MouseEvent) => {
-      if (!onAddBlockToNote || editorToolRef.current !== 'none') {
-        return;
-      }
-
-      if (isAnnotationUiTarget(event.target) || hasActiveTextSelection()) {
-        return;
-      }
-
-      const result = resolvePointerBlockHit(event);
-
-      if (!result) {
-        return;
-      }
-
-      event.preventDefault();
-      event.stopPropagation();
-      clearPendingBlockSelect();
-      setBlockContextMenu({
-        block: result.anchorBlock,
-        x: event.clientX,
-        y: event.clientY,
-        anchorClientRect: result.anchorClientRect,
-      });
-    };
-
-    const handlePointerLeave = (event: PointerEvent) => {
-      const relatedTarget = event.relatedTarget;
-
-      if (relatedTarget instanceof Node && viewer.contains(relatedTarget)) {
-        return;
-      }
-
-      emitBlockHover(null);
-    };
-
-    viewer.addEventListener('pointerdown', handlePointerDown);
-    viewer.addEventListener('pointermove', handlePointerMove);
-    viewer.addEventListener('pointerup', handlePointerUp);
-    viewer.addEventListener('pointerleave', handlePointerLeave);
-    viewer.addEventListener('click', handleClick, true);
-    viewer.addEventListener('contextmenu', handleContextMenu, true);
-
-    return () => {
-      if (hoverAnimationFrame !== null) {
-        window.cancelAnimationFrame(hoverAnimationFrame);
-      }
-
-      pendingHoverBlock = null;
-      if (hoveredBlockIdRef.current !== null) {
-        hoveredBlockIdRef.current = null;
-        onBlockHover(null);
-      }
-
-      viewer.removeEventListener('pointerdown', handlePointerDown);
-      viewer.removeEventListener('pointermove', handlePointerMove);
-      viewer.removeEventListener('pointerup', handlePointerUp);
-      viewer.removeEventListener('pointerleave', handlePointerLeave);
-      viewer.removeEventListener('click', handleClick, true);
-      viewer.removeEventListener('contextmenu', handleContextMenu, true);
-    };
-  }, [
+    activeRef,
+    containerRef,
+    editorToolRef,
+    onTextSelect,
+  });
+
+  const overlay = usePdfBlockOverlay({
     active,
+    activeBlockId,
+    activeHighlight,
+    activeRef,
+    annotations,
     blockClickOpensQuickActions,
-    blocksByPage,
-    clearPendingBlockSelect,
+    blocks,
+    clearPendingBlockSelect: selection.clearPendingBlockSelect,
+    containerRef,
+    currentPage,
+    documentInit,
+    editorToolRef,
+    hoveredBlockId,
+    l,
+    onAddBlockToNote,
     onBlockHover,
     onBlockSelect,
-    onAddBlockToNote,
-    pageHosts,
-    buildBlockPdfLocation,
-    hasTranslatableBlockText,
-    resolveBlockContentSource,
-    resolveOriginalPageForSources,
-  ]);
+    pageCount: lifecycle.pageCount,
+    pageSizes: lifecycle.pageSizes,
+    pageSyncSignal,
+    pdfViewerRef: lifecycle.pdfViewerRef,
+    pendingBlockSelectTimerRef: selection.pendingBlockSelectTimerRef,
+    requestPageSize: lifecycle.requestPageSize,
+    resolveOriginalPageForSources: lifecycle.resolveOriginalPageForSources,
+    retrySavedScrollRestoreRef,
+    sourceSignature,
+    viewerRef,
+  });
 
-  useEffect(() => {
-    const container = containerRef.current;
+  const scroll = usePdfScrollRestore({
+    active,
+    activeHighlight,
+    blockById: overlay.blockById,
+    containerRef,
+    currentPage,
+    currentPageRef,
+    documentInit,
+    enableReadingHeatmap,
+    highlightScrollSignal,
+    lastPageSyncTokenRef,
+    loading: lifecycle.loading,
+    onPageChange,
+    onPageSyncApplied,
+    onReadingHeatmapChange,
+    onScrollPositionChange,
+    pageCount: lifecycle.pageCount,
+    pageCountRef: lifecycle.pageCountRef,
+    pageHosts: overlay.pageHosts,
+    pageSyncSignal,
+    pagesInitialized: lifecycle.pagesInitialized,
+    pdfDocumentRef: lifecycle.pdfDocumentRef,
+    pdfViewerRef: lifecycle.pdfViewerRef,
+    readingHeatmap,
+    resolveOriginalPageForSources: lifecycle.resolveOriginalPageForSources,
+    restoredScrollKeyRef,
+    scrollPosition,
+    setCurrentPage,
+    setOutlineCollapsedIds,
+    smoothScroll,
+    sourceSignature,
+    sourceSignatureRef,
+    syncPageHosts: overlay.syncPageHosts,
+    viewerRef,
+  });
 
-    if (!active || !container) {
-      return undefined;
-    }
+  const annotationsState = usePdfAnnotations({
+    active,
+    annotationColors,
+    annotationEditorReadyRef: lifecycle.annotationEditorReadyRef,
+    annotationEditorUiManagerRef: lifecycle.annotationEditorUiManagerRef,
+    clearPendingBlockSelect: selection.clearPendingBlockSelect,
+    clearSelectionCommitTimer: selection.clearSelectionCommitTimer,
+    containerRef,
+    currentPdfName,
+    defaultSaveDirectory,
+    editorToolRef,
+    eventBusRef: lifecycle.eventBusRef,
+    hasSelectedEditor,
+    lRef,
+    onBlockHover,
+    onSaveSuccess,
+    originalPdfPath,
+    pdfDocumentRef: lifecycle.pdfDocumentRef,
+    pdfViewerRef: lifecycle.pdfViewerRef,
+    setAnnotationColors,
+    setDocumentError: lifecycle.setDocumentError,
+    setHasLiveTextSelection: selection.setHasLiveTextSelection,
+    setHasSelectedEditor,
+    source,
+  });
 
-    const handleWheel = (event: WheelEvent) => {
-      if (!event.ctrlKey) {
-        return;
-      }
+  const thumbnails = usePdfThumbnails({
+    active,
+    currentPage,
+    documentInit,
+    pageCount: lifecycle.pageCount,
+    pdfDocumentRef: lifecycle.pdfDocumentRef,
+    thumbnailSidebarRef,
+  });
 
-      event.preventDefault();
+  const outline = usePdfOutline({
+    blocks,
+    currentPageRef,
+    documentInit,
+    linkServiceRef: lifecycle.linkServiceRef,
+    lRef,
+    mineruOutlineIndex,
+    onOutlineNavigateBlock,
+    outlineCollapsedIds,
+    pageCount: lifecycle.pageCount,
+    pdfDocumentRef: lifecycle.pdfDocumentRef,
+    scrollToPage: scroll.scrollToPage,
+    setOutlineCollapsedIds,
+    sidebarTab: thumbnails.sidebarTab,
+    sourceSignatureRef,
+    thumbnailsCollapsed: thumbnails.thumbnailsCollapsed,
+  });
 
-      if (event.deltaY < 0) {
-        pdfViewerRef.current?.increaseScale?.();
-        return;
-      }
-
-      pdfViewerRef.current?.decreaseScale?.();
-    };
-
-    container.addEventListener('wheel', handleWheel, { passive: false });
-
-    return () => {
-      container.removeEventListener('wheel', handleWheel);
-    };
-  }, [active, documentInit]);
-
+  retrySavedScrollRestoreRef.current = scroll.retrySavedScrollRestore;
+  viewerApiRef.current = {
+    clearPendingBlockSelect: selection.clearPendingBlockSelect,
+    clearSelectionCommitTimer: selection.clearSelectionCommitTimer,
+    getSavedScrollPage: scroll.getSavedScrollPage,
+    primeSavedScrollPage: scroll.primeSavedScrollPage,
+    refreshPdfViewerLayout: overlay.refreshPdfViewerLayout,
+    resetPageHosts: overlay.resetPageHosts,
+    resetPageThumbnails: thumbnails.resetPageThumbnails,
+    restoreSavedScroll: scroll.restoreSavedScroll,
+    retrySavedScrollRestore: scroll.retrySavedScrollRestore,
+    syncPageHosts: overlay.syncPageHosts,
+  };
 
   if (!source && !pdfData) {
     return (
@@ -3133,42 +389,44 @@ function PdfViewer({
   }
 
   const canShowReadingHeatmapBar =
-    enableReadingHeatmap && pageCount > 0 && Boolean(sourceSignature);
-  const showReadingHeatmapBar = canShowReadingHeatmapBar && readingHeatmapBarVisible;
+    enableReadingHeatmap && lifecycle.pageCount > 0 && Boolean(sourceSignature);
+  const showReadingHeatmapBar = canShowReadingHeatmapBar && scroll.readingHeatmapBarVisible;
   const readingHeatmapToggleLabel = showReadingHeatmapBar
     ? l('隐藏阅读热力进度', 'Hide reading heat progress')
     : l('显示阅读热力进度', 'Show reading heat progress');
+  const allowLinkedInteractions =
+    annotationsState.editorTool === 'none' && !selection.hasLiveTextSelection;
 
   return (
     <div
       className="paperquay-pdf-linked flex h-full min-h-0 flex-col bg-[var(--pq-bg)]"
       data-soft-shadow={softPageShadow ? 'true' : 'false'}
-      data-pdf-phase={documentError ? 'error' : firstPageRendered ? 'page-rendered' : pageCount ? 'document-ready' : 'loading-document'}
+      data-pdf-phase={lifecycle.documentError ? 'error' : lifecycle.firstPageRendered ? 'page-rendered' : lifecycle.pageCount ? 'document-ready' : 'loading-document'}
     >
       <PdfViewerToolbar
-        activeColorTool={activeColorTool}
+        activeColorTool={annotationsState.activeColorTool}
         annotationColors={annotationColors}
         canShowReadingHeatmapBar={canShowReadingHeatmapBar}
         currentPage={currentPage}
-        editorTool={editorTool}
+        editorTool={annotationsState.editorTool}
         enableReadingHeatmap={enableReadingHeatmap}
-        hasLiveTextSelection={hasLiveTextSelection}
+        hasLiveTextSelection={selection.hasLiveTextSelection}
         hasSelectedEditor={hasSelectedEditor}
         hideToolbar={hideToolbar}
         l={l}
-        loading={loading}
-        onActiveColorToolChange={setActiveColorTool}
-        onAnnotationToolColorChange={updateAnnotationToolColor}
-        onCreateHighlight={handleCreatePdfHighlight}
-        onDeleteSelected={handleDeleteSelected}
-        onEditorToolChange={setEditorTool}
-        onSave={handleSave}
-        onScrollToPage={scrollToPage}
-        onToggleReadingHeatmapBar={() => setReadingHeatmapBarVisible((current) => !current)}
-        onZoomIn={() => pdfViewerRef.current?.increaseScale?.()}
-        onZoomOut={() => pdfViewerRef.current?.decreaseScale?.()}
+        loading={lifecycle.loading}
+        onActiveColorToolChange={annotationsState.setActiveColorTool}
+        onAnnotationToolColorChange={annotationsState.updateAnnotationToolColor}
+        onCreateHighlight={annotationsState.handleCreatePdfHighlight}
+        onDeleteSelected={annotationsState.handleDeleteSelected}
+        onEditorToolChange={annotationsState.setEditorTool}
+        onSave={annotationsState.handleSave}
+        onScrollToPage={scroll.scrollToPage}
+        onToggleReadingHeatmapBar={() => scroll.setReadingHeatmapBarVisible((current) => !current)}
+        onZoomIn={() => lifecycle.pdfViewerRef.current?.increaseScale?.()}
+        onZoomOut={() => lifecycle.pdfViewerRef.current?.decreaseScale?.()}
         onZoomPresetChange={(preset: PdfZoomPreset) => {
-          const pdfViewer = pdfViewerRef.current;
+          const pdfViewer = lifecycle.pdfViewerRef.current;
 
           if (!pdfViewer) {
             return;
@@ -3176,7 +434,7 @@ function PdfViewer({
 
           pdfViewer.currentScaleValue = getPdfZoomPresetValue(preset);
           pdfViewer.update?.();
-          setZoomLabel(
+          lifecycle.setZoomLabel(
             preset === 'page-width'
               ? l('适合宽度', 'Fit width')
               : preset === 'page-fit'
@@ -3184,40 +442,40 @@ function PdfViewer({
                 : '100%',
           );
         }}
-        pageCount={pageCount}
+        pageCount={lifecycle.pageCount}
         readingHeatmapToggleLabel={readingHeatmapToggleLabel}
-        saving={saving}
+        saving={annotationsState.saving}
         showReadingHeatmapBar={showReadingHeatmapBar}
         translating={translating}
         translationProgressCompleted={translationProgressCompleted}
         translationProgressTotal={translationProgressTotal}
-        zoomLabel={zoomLabel}
+        zoomLabel={lifecycle.zoomLabel}
       />
 
       <div className="relative flex min-h-0 flex-1">
         <PdfThumbnailSidebar
           ref={thumbnailSidebarRef}
-          collapsed={thumbnailsCollapsed}
-          pageCount={pageCount}
+          collapsed={thumbnails.thumbnailsCollapsed}
+          pageCount={lifecycle.pageCount}
           currentPage={currentPage}
-          pageThumbnails={pageThumbnails}
-          onToggleCollapsed={() => setThumbnailsCollapsed((current) => !current)}
-          onScrollToPage={scrollToPage}
-          onWheelCapture={handleThumbnailWheelCapture}
+          pageThumbnails={thumbnails.pageThumbnails}
+          onToggleCollapsed={() => thumbnails.setThumbnailsCollapsed((current) => !current)}
+          onScrollToPage={scroll.scrollToPage}
+          onWheelCapture={thumbnails.handleThumbnailWheelCapture}
           stripExtra={
             <>
               <button
                 type="button"
                 onClick={() => {
-                  setSidebarTab('thumbnails');
-                  setThumbnailsCollapsed(false);
+                  thumbnails.setSidebarTab('thumbnails');
+                  thumbnails.setThumbnailsCollapsed(false);
                 }}
                 title={l('页面缩略图', 'Page thumbnails')}
                 aria-label={l('页面缩略图', 'Page thumbnails')}
-                aria-pressed={sidebarTab === 'thumbnails'}
+                aria-pressed={thumbnails.sidebarTab === 'thumbnails'}
                 className={cn(
                   'inline-flex h-8 w-8 items-center justify-center rounded-[var(--pq-radius-sm)] border transition',
-                  sidebarTab === 'thumbnails' && !thumbnailsCollapsed
+                  thumbnails.sidebarTab === 'thumbnails' && !thumbnails.thumbnailsCollapsed
                     ? 'border-[var(--pq-accent-border)] bg-[var(--pq-accent-bg)] text-[var(--pq-accent)] '
                     : 'border-[var(--pq-border)] bg-[var(--pq-surface-1)] text-[var(--pq-text-muted)] hover:border-[var(--pq-border-strong)] hover:bg-[var(--pq-surface-2)]',
                 )}
@@ -3227,15 +485,15 @@ function PdfViewer({
               <button
                 type="button"
                 onClick={() => {
-                  setSidebarTab('outline');
-                  setThumbnailsCollapsed(false);
+                  thumbnails.setSidebarTab('outline');
+                  thumbnails.setThumbnailsCollapsed(false);
                 }}
                 title={l('文档目录', 'Document outline')}
                 aria-label={l('文档目录', 'Document outline')}
-                aria-pressed={sidebarTab === 'outline'}
+                aria-pressed={thumbnails.sidebarTab === 'outline'}
                 className={cn(
                   'inline-flex h-8 w-8 items-center justify-center rounded-[var(--pq-radius-sm)] border transition',
-                  sidebarTab === 'outline' && !thumbnailsCollapsed
+                  thumbnails.sidebarTab === 'outline' && !thumbnails.thumbnailsCollapsed
                     ? 'border-[var(--pq-accent-border)] bg-[var(--pq-accent-bg)] text-[var(--pq-accent)] '
                     : 'border-[var(--pq-border)] bg-[var(--pq-surface-1)] text-[var(--pq-text-muted)] hover:border-[var(--pq-border-strong)] hover:bg-[var(--pq-surface-2)]',
                 )}
@@ -3245,17 +503,17 @@ function PdfViewer({
             </>
           }
           contentOverride={
-            sidebarTab === 'outline' ? (
+            thumbnails.sidebarTab === 'outline' ? (
               <PdfOutlinePanel
-                items={outlineItems ?? []}
-                loading={outlineLoading}
+                items={outline.outlineItems ?? []}
+                loading={outline.outlineLoading}
                 currentPage={currentPage}
                 collapsedIds={outlineCollapsedIds}
-                onToggleCollapsed={handleOutlineToggleCollapsed}
-                onNavigate={handleOutlineNavigate}
-                canGoBack={outlineBackCount > 0}
-                onGoBack={handleOutlineGoBack}
-                errorMessage={outlineError || undefined}
+                onToggleCollapsed={outline.handleOutlineToggleCollapsed}
+                onNavigate={outline.handleOutlineNavigate}
+                canGoBack={outline.outlineBackCount > 0}
+                onGoBack={outline.handleOutlineGoBack}
+                errorMessage={outline.outlineError || undefined}
                 l={l}
               />
             ) : undefined
@@ -3265,19 +523,19 @@ function PdfViewer({
         />
 
         <div className="relative min-h-0 flex-1">
-          {(loading || (pageCount > 0 && !firstPageRendered && !documentError)) ? (
+          {(lifecycle.loading || (lifecycle.pageCount > 0 && !lifecycle.firstPageRendered && !lifecycle.documentError)) ? (
           <div className="absolute inset-0 z-20 flex items-center justify-center bg-[var(--pq-bg-elevated)] backdrop-blur-sm">
             <div className="inline-flex items-center rounded-[var(--pq-radius-sm)] border border-[var(--pq-border)] bg-[var(--pq-surface-1)] px-4 py-2 text-sm text-[var(--pq-text-muted)] shadow-[var(--pq-shadow-float)]">
-              {pageCount > 0 ? l('正在绘制 PDF 页面…', 'Rendering PDF page...') : l('正在加载 PDF…', 'Loading PDF...')}
+              {lifecycle.pageCount > 0 ? l('正在绘制 PDF 页面…', 'Rendering PDF page...') : l('正在加载 PDF…', 'Loading PDF...')}
             </div>
           </div>
           ) : null}
 
-          {!loading && documentError ? (
+          {!lifecycle.loading && lifecycle.documentError ? (
             <div role="alert" className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-[var(--pq-surface-1)] px-6 text-center text-sm">
               <div className="font-medium">{currentPdfName}</div>
-              <div className="text-[var(--pq-danger)]">{documentError}</div>
-              <button type="button" className="rounded border border-[var(--pq-border)] px-3 py-1" onClick={() => setRetryRevision((revision) => revision + 1)}>
+              <div className="text-[var(--pq-danger)]">{lifecycle.documentError}</div>
+              <button type="button" className="rounded border border-[var(--pq-border)] px-3 py-1" onClick={() => lifecycle.setRetryRevision((revision) => revision + 1)}>
                 {l('重试', 'Retry')}
               </button>
             </div>
@@ -3289,13 +547,13 @@ function PdfViewer({
             'pdf-annotation-scroll absolute inset-0 overflow-auto px-5 pt-5',
             showReadingHeatmapBar ? 'pb-24' : 'pb-5',
           )}
-          onMouseUp={active ? () => scheduleSelectionCommit() : undefined}
-          onKeyUp={active ? () => scheduleSelectionCommit() : undefined}
+          onMouseUp={active ? () => selection.scheduleSelectionCommit() : undefined}
+          onKeyUp={active ? () => selection.scheduleSelectionCommit() : undefined}
         >
           <div ref={viewerRef} className="pdfViewer" />
 
-          {overlayPageIndexes.map((pageIndex) => {
-            const host = pageHosts[pageIndex];
+          {overlay.overlayPageIndexes.map((pageIndex) => {
+            const host = overlay.pageHosts[pageIndex];
             const renderedPage = host
               ? {
               width: host.width,
@@ -3307,25 +565,13 @@ function PdfViewer({
               return null;
             }
 
-            const pageBlocks = blocksByPage.get(pageIndex) ?? [];
-            const pageAnnotations = annotationsByPage.get(pageIndex) ?? [];
-            const activePageBlock =
-              activeBlock?.pageIndex === pageIndex ? activeBlock : null;
+            const pageBlocks = overlay.blocksByPage.get(pageIndex) ?? [];
+            const pageAnnotations = overlay.annotationsByPage.get(pageIndex) ?? [];
             const activeHighlightSource =
               activeHighlight && activeHighlight.pageIndex === pageIndex
-                ? blockById.get(activeHighlight.blockId) ?? activeHighlight
+                ? overlay.blockById.get(activeHighlight.blockId) ?? activeHighlight
                 : null;
-            const originalPage = resolveOverlayOriginalPage(
-              pageSizes[pageIndex],
-              renderedPage,
-              [
-                ...pageBlocks,
-                ...pageAnnotations,
-                activePageBlock,
-                activeHighlightSource,
-              ],
-            );
-            const allowLinkedInteractions = editorTool === 'none' && !hasLiveTextSelection;
+            const originalPage = overlay.resolveOverlayPageOriginal(pageIndex, renderedPage);
 
             if (!originalPage) {
               return null;
@@ -3355,10 +601,10 @@ function PdfViewer({
         </div>
         {showReadingHeatmapBar ? (
           <PdfReadingHeatmapBar
-            heatmap={localReadingHeatmap}
-            currentProgressRatio={readingProgressRatio}
-            maxBinMs={maxReadingHeatmapBinMs}
-            onSeek={scrollToReadingProgress}
+            heatmap={scroll.localReadingHeatmap}
+            currentProgressRatio={scroll.readingProgressRatio}
+            maxBinMs={scroll.maxReadingHeatmapBinMs}
+            onSeek={scroll.scrollToReadingProgress}
             label={l('阅读热力进度', 'Reading heat progress')}
             totalLabel={l('累计', 'Total')}
           />
@@ -3366,16 +612,16 @@ function PdfViewer({
         </div>
       </div>
 
-      {blockContextMenu ? (
+      {overlay.blockContextMenu ? (
         <ContextMenu
-          x={blockContextMenu.x}
-          y={blockContextMenu.y}
+          x={overlay.blockContextMenu.x}
+          y={overlay.blockContextMenu.y}
           title={l(
-            `第 ${blockContextMenu.block.pageIndex + 1} 页 · 块 ${blockContextMenu.block.blockIndex + 1}`,
-            `Page ${blockContextMenu.block.pageIndex + 1} · Block ${blockContextMenu.block.blockIndex + 1}`,
+            `第 ${overlay.blockContextMenu.block.pageIndex + 1} 页 · 块 ${overlay.blockContextMenu.block.blockIndex + 1}`,
+            `Page ${overlay.blockContextMenu.block.pageIndex + 1} · Block ${overlay.blockContextMenu.block.blockIndex + 1}`,
           )}
-          entries={blockContextMenuEntries}
-          onClose={() => setBlockContextMenu(null)}
+          entries={overlay.blockContextMenuEntries}
+          onClose={() => overlay.setBlockContextMenu(null)}
         />
       ) : null}
     </div>

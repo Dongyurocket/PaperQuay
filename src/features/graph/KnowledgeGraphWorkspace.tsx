@@ -1,8 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import cytoscape, { type Core, type ElementDefinition, type StylesheetJson } from 'cytoscape';
-import fcose from 'cytoscape-fcose';
-
-cytoscape.use(fcose);
 import {
   ChevronDown,
   ChevronRight,
@@ -27,6 +24,7 @@ import {
 import type { ReactNode } from 'react';
 import { emitOpenLibraryPaper } from '../../app/appEvents';
 import { useAppLocale, useLocaleText } from '../../i18n/uiLanguage';
+import { noteDisplayTitle } from '../notes/notesDisplay';
 import {
   createKnowledgeGraphRelation,
   updateKnowledgeGraphRelation,
@@ -47,6 +45,10 @@ import type {
 } from '../../types/knowledgeGraph';
 import type { LibraryReferenceProgress } from '../../types/library';
 import { cn } from '../../utils/cn';
+import { positionsToMap } from './graphLayoutMessages.ts';
+import { createGraphLayoutClient, type GraphLayoutClient } from './graphLayoutRunner.ts';
+import { runMainThreadGraphLayout } from './graphLayoutFallback.ts';
+import { formatGraphSamplingSummary, readSnapshotMetadata } from './knowledgeGraphMeta.ts';
 
 type LayoutMode = 'global' | 'local';
 type GraphPerspective = 'mixed' | 'paper' | 'note' | 'reference' | 'semantic' | 'custom';
@@ -169,6 +171,13 @@ const NODE_COLORS: Record<string, string> = {
   reference: '#64748b',
 };
 
+// Cytoscape 只接受具体颜色值：深色主题的 --pq-text 是 rgba()，直接传入会被忽略。
+// 两套 6 位 hex 均对图谱画布（--pq-surface #ffffff / #1a1a1a）≥14:1。
+const GRAPH_TEXT_COLORS = {
+  light: '#1f2937',
+  dark: '#e5e7eb',
+} as const;
+
 const graphStyles = [
   {
     selector: 'node',
@@ -181,7 +190,7 @@ const graphStyles = [
       'font-size': 'mapData(size, 20, 60, 10, 13)',
       'min-zoomed-font-size': 6,
       'font-weight': 600,
-      color: '#1f2937',
+      color: GRAPH_TEXT_COLORS.light,
       'text-valign': 'bottom',
       'text-halign': 'center',
       'text-margin-y': 6,
@@ -396,7 +405,10 @@ const LABEL_ALL_BELOW = 40;
 const HUB_LABEL_RATIO = 0.2;
 const LABEL_ALL_ZOOM = 1.15;
 
-function toElements(snapshot: KnowledgeGraphSnapshot): ElementDefinition[] {
+function toElements(
+  snapshot: KnowledgeGraphSnapshot,
+  localizeNodeLabel: (node: KnowledgeGraphNode) => string,
+): ElementDefinition[] {
   const nodeSizes = snapshot.nodes.map((node) => node.size ?? 28).sort((left, right) => right - left);
   const labelAll = snapshot.nodes.length <= LABEL_ALL_BELOW;
   const hubCount = Math.max(1, Math.round(nodeSizes.length * HUB_LABEL_RATIO));
@@ -405,13 +417,17 @@ function toElements(snapshot: KnowledgeGraphSnapshot): ElementDefinition[] {
   return [
     ...snapshot.nodes.map((node) => {
       const size = node.size ?? 28;
+      const label = localizeNodeLabel(node);
 
       return {
         data: {
           ...node,
+          // 画布使用本地化标题；rawLabel 保留数据原文，供 locale 切换时就地更新。
+          label,
+          rawLabel: node.label,
           size,
           // displayLabel 为画布实际绘制的文本；data(label) 保留给选中态与放大态使用。
-          displayLabel: labelAll || size >= hubCutoff ? node.label : '',
+          displayLabel: labelAll || size >= hubCutoff ? label : '',
         },
       };
     }),
@@ -421,42 +437,88 @@ function toElements(snapshot: KnowledgeGraphSnapshot): ElementDefinition[] {
   ];
 }
 
-function runGraphLayout(cy: Core, mode: LayoutMode) {
-  const layout = cy.layout(
-    mode === 'local'
-      ? ({
-          name: 'concentric',
-          animate: true,
-          animationDuration: 320,
-          fit: true,
-          padding: 36,
-          concentric: (node) => node.degree(),
-          levelWidth: () => 2,
-          minNodeSpacing: 40,
-        } as cytoscape.LayoutOptions)
-      : ({
-          // fcose 布局参数经 headless 复现实验标定（45 节点多分量图与 662 节点大图均验证）。
-          // 注意：cytoscape 布局以容器尺寸为边界，容器 hidden（0x0）时任何布局都会把节点压成一团，
-          // 因此调用方必须保证容器可见（见渲染 effect 中的尺寸检查与 pendingLayoutRef 补跑）。
-          name: 'fcose',
-          quality: 'proof',
-          randomize: true,
-          animate: true,
-          animationDuration: 320,
-          fit: true,
-          padding: 36,
-          nodeRepulsion: 40000,
-          idealEdgeLength: 180,
-          edgeElasticity: 0.2,
-          gravity: 0.3,
-          numIter: 2500,
-          packComponents: true,
-          tile: true,
-          nodeDimensionsIncludeLabels: true,
-        } as unknown as cytoscape.LayoutOptions),
-  );
+// S5-GRAPH-1：全局 fcose 布局在 module worker 中计算（headless cytoscape），
+// 主线程只用 preset 布局套用坐标，避免 2500 次迭代阻塞渲染。
+// 单个客户端复用同一个 worker；请求序号用于丢弃过期的布局结果。
+let graphLayoutClient: GraphLayoutClient | null = null;
+let graphLayoutRequestSeq = 0;
+
+function getGraphLayoutClient(): GraphLayoutClient {
+  if (!graphLayoutClient) {
+    graphLayoutClient = createGraphLayoutClient({
+      runFallback: (request) => runMainThreadGraphLayout(request),
+    });
+  }
+  return graphLayoutClient;
+}
+
+function disposeGraphLayoutClient() {
+  graphLayoutRequestSeq += 1;
+  graphLayoutClient?.dispose();
+  graphLayoutClient = null;
+}
+
+function runLocalGraphLayout(cy: Core) {
+  const layout = cy.layout(({
+    name: 'concentric',
+    animate: true,
+    animationDuration: 320,
+    fit: true,
+    padding: 36,
+    concentric: (node: cytoscape.NodeSingular) => node.degree(),
+    levelWidth: () => 2,
+    minNodeSpacing: 40,
+  } as cytoscape.LayoutOptions));
 
   layout.run();
+}
+
+function applyPresetLayout(cy: Core, positions: ReturnType<typeof positionsToMap>) {
+  if (cy.destroyed()) return;
+
+  // preset 布局接受「节点 id -> 坐标」映射；未返回坐标的节点保持当前位置。
+  const positionMap: Record<string, { x: number; y: number }> = {};
+  cy.nodes().forEach((node) => {
+    positionMap[node.id()] = positions.get(node.id()) ?? node.position();
+  });
+
+  const layout = cy.layout(({
+    name: 'preset',
+    positions: positionMap,
+    animate: false,
+    fit: true,
+    padding: 36,
+  } as cytoscape.LayoutOptions));
+
+  layout.run();
+}
+
+function runGraphLayout(cy: Core, mode: LayoutMode) {
+  // 局部 concentric 布局很轻，留在主线程；全局 fcose 交给 worker。
+  if (mode === 'local') {
+    runLocalGraphLayout(cy);
+    return;
+  }
+
+  const requestId = graphLayoutRequestSeq + 1;
+  graphLayoutRequestSeq = requestId;
+  const nodes = cy.nodes().map((node) => ({ id: node.id() }));
+  const edges = cy.edges().map((edge) => ({
+    source: edge.source().id(),
+    target: edge.target().id(),
+  }));
+
+  void getGraphLayoutClient()
+    .requestLayout(nodes, edges)
+    .then((result) => {
+      if (requestId !== graphLayoutRequestSeq) return;
+      applyPresetLayout(cy, positionsToMap(result));
+    })
+    .catch((error) => {
+      if (requestId !== graphLayoutRequestSeq) return;
+      console.warn('[paperquay] Knowledge graph layout failed; keeping current positions.', error);
+      if (!cy.destroyed()) cy.fit(undefined, 36);
+    });
 }
 
 function graphContainerHasSize(container: HTMLDivElement | null) {
@@ -513,6 +575,12 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
   const locale = useAppLocale();
   const l = useLocaleText();
   const isEnglish = locale === 'en-US';
+  // 笔记节点的空标题/旧哨兵按当前语言显示；论文、标签等节点保持后端标签。
+  const displayNodeLabel = useCallback(
+    (node: Pick<KnowledgeGraphNode, 'type' | 'label'>) =>
+      node.type === 'note' ? noteDisplayTitle(node.label, l) : node.label,
+    [l],
+  );
   const containerRef = useRef<HTMLDivElement | null>(null);
   const cyRef = useRef<Core | null>(null);
   const resizeTimerRef = useRef<number | null>(null);
@@ -785,7 +853,7 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
 
     if (nodesChanged || layoutModeChanged) {
       cy.elements().remove();
-      cy.add(toElements(filteredSnapshot));
+      cy.add(toElements(filteredSnapshot, displayNodeLabel));
       renderedNodeIdsRef.current = nextNodeIds;
       renderedEdgeIdsRef.current = nextEdgeIds;
       renderedLayoutModeRef.current = layoutMode;
@@ -815,11 +883,20 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
     }
 
     for (const node of filteredSnapshot.nodes) {
-      cy.$id(node.id).data({ ...node, size: node.size ?? 28 });
+      const element = cy.$id(node.id);
+      const label = displayNodeLabel(node);
+      element.data({
+        ...node,
+        label,
+        rawLabel: node.label,
+        size: node.size ?? 28,
+        // 保留当前抽稀结果：原本为空的位置不因本地化切回可见。
+        displayLabel: element.data('displayLabel') ? label : '',
+      });
     }
 
     renderedEdgeIdsRef.current = nextEdgeIds;
-  }, [filteredSnapshot, layoutMode]);
+  }, [displayNodeLabel, filteredSnapshot, layoutMode]);
 
   // 工作区从 hidden 切换为可见时：同步画布尺寸，补跑被推迟的布局（或重新适配视图）。
   useEffect(() => {
@@ -1097,7 +1174,12 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
     if (!containerRef.current) return;
 
     let disconnectResizeObserver: (() => void) | null = null;
-    const graphTextColor = () => getComputedStyle(containerRef.current!).getPropertyValue('--pq-text').trim() || '#1f2937';
+    // 主题切换时只换两套不透明 hex；不要从 CSS 变量读 --pq-text，深色值是 rgba()。
+    const graphTextColor = () => (
+      document.documentElement.classList.contains('dark')
+        ? GRAPH_TEXT_COLORS.dark
+        : GRAPH_TEXT_COLORS.light
+    );
     const resolvedGraphStyles = (): StylesheetJson => {
       const nodeStyle = graphStyles[0] as { selector: string; style: Record<string, unknown> };
       return [
@@ -1215,6 +1297,8 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
         resizeTimerRef.current = null;
       }
       themeObserver.disconnect();
+      // 丢弃还在计算的布局结果并释放 worker。
+      disposeGraphLayoutClient();
       cy.destroy();
       cyRef.current = null;
     };
@@ -1223,6 +1307,15 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
 
   const nodeCount = filteredSnapshot?.nodes.length ?? 0;
   const edgeCount = filteredSnapshot?.edges.length ?? 0;
+  // S5-GRAPH-2：后端在超过节点/边预算时会抽样，并把统计放进 snapshot.metadata。
+  const snapshotMetadata = useMemo(
+    () => (snapshot ? readSnapshotMetadata(snapshot) : null),
+    [snapshot],
+  );
+  const samplingSummary = useMemo(
+    () => formatGraphSamplingSummary(snapshotMetadata, isEnglish ? 'en' : 'zh'),
+    [isEnglish, snapshotMetadata],
+  );
   const enabledNodeTypeCount = visibleNodeTypes.filter((item) => enabledNodeTypes[item.type]).length;
   const enabledEdgeTypeCount = visibleEdgeTypes.filter((item) => enabledEdgeTypes[item.type]).length;
   const canOpenSelectedNode =
@@ -1239,7 +1332,7 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
     )
     .filter((node) => {
       if (!normalizedRelationTargetSearch) return true;
-      return [node.label, node.subtitle, node.id]
+      return [displayNodeLabel(node), node.subtitle, node.id]
         .filter(Boolean)
         .join('\n')
         .toLowerCase()
@@ -1262,6 +1355,11 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
               <div className="text-[11px] text-[var(--pq-text-muted)]">
                 {compactNumber(nodeCount)} {l('节点', 'nodes')} · {compactNumber(edgeCount)} {l('关系', 'edges')}
               </div>
+              {samplingSummary ? (
+                <div className="truncate text-[10px] font-medium text-[var(--pq-text-faint)]" title={samplingSummary}>
+                  {samplingSummary}
+                </div>
+              ) : null}
             </div>
           </div>
 
@@ -1280,6 +1378,7 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
               {l('图谱视角', 'Graph Perspective')}
             </div>
             <select
+              aria-label={l('图谱视角', 'Graph perspective')}
               value={perspective}
               onChange={(event) => applyPerspective(event.target.value as GraphPerspective)}
               className="h-8 w-full rounded-[var(--pq-radius-sm)] border border-[var(--pq-border)] bg-[var(--pq-surface)] px-2 text-xs text-[var(--pq-text)] outline-none"
@@ -1449,7 +1548,7 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
                 className="pq-button h-8 w-full justify-center px-2 text-xs disabled:opacity-40"
               >
                 {relationSourceNode
-                  ? l(`起点：${relationSourceNode.label}`, `Source: ${relationSourceNode.label}`)
+                  ? l(`起点：${displayNodeLabel(relationSourceNode)}`, `Source: ${displayNodeLabel(relationSourceNode)}`)
                   : l('将选中节点设为起点', 'Use selected node as source')}
               </button>
               <div className="space-y-1">
@@ -1475,7 +1574,7 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
                         selectedNode?.id === node.id ? 'text-[var(--pq-accent)]' : 'text-[var(--pq-text-muted)]',
                       )}
                     >
-                      <span className="min-w-0 truncate">{node.label}</span>
+                      <span className="min-w-0 truncate">{displayNodeLabel(node)}</span>
                       <span className="shrink-0 text-[11px] uppercase text-[var(--pq-text-faint)]">{node.type}</span>
                     </button>
                   )) : (
@@ -1512,7 +1611,7 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
                 {relationWorking
                   ? l('保存中...', 'Saving...')
                   : relationTargetNode
-                    ? l(`添加关系：${relationTargetNode.label}`, `Add relation to ${relationTargetNode.label}`)
+                    ? l(`添加关系：${displayNodeLabel(relationTargetNode)}`, `Add relation to ${displayNodeLabel(relationTargetNode)}`)
                     : l('先选择终点节点', 'Choose a target node first')}
               </button>
             </div>
@@ -1537,7 +1636,7 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
                   className="flex w-full items-center gap-2 rounded-[var(--pq-radius-sm)] px-2 py-1.5 text-left text-[11px] text-[var(--pq-text-muted)] hover:bg-[var(--pq-bg-secondary)] hover:text-[var(--pq-text)]"
                 >
                   <span className="w-4 shrink-0 text-[var(--pq-text-faint)]">{index + 1}</span>
-                  <span className="min-w-0 flex-1 truncate">{item.node.label}</span>
+                  <span className="min-w-0 flex-1 truncate">{displayNodeLabel(item.node)}</span>
                   <span className="shrink-0 rounded bg-[var(--pq-bg-secondary)] px-1.5 py-0.5 text-[11px]">
                     {item.degree}
                   </span>
@@ -1651,7 +1750,7 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
           <div className="absolute left-4 top-4 flex items-center gap-2 rounded-[var(--pq-radius-sm)] border border-[var(--pq-accent-border)] bg-[var(--pq-surface)] px-3 py-2 text-xs text-[var(--pq-text)] shadow-[var(--pq-shadow-float)]">
             <Link2 className="h-4 w-4 text-[var(--pq-accent)]" strokeWidth={1.8} />
             <span className="max-w-[360px] truncate">
-              {l(`已选择起点：${quickRelationSourceNode.label}。点击另一个节点添加连接。`, `Source: ${quickRelationSourceNode.label}. Click another node to add a relation.`)}
+              {l(`已选择起点：${displayNodeLabel(quickRelationSourceNode)}。点击另一个节点添加连接。`, `Source: ${displayNodeLabel(quickRelationSourceNode)}. Click another node to add a relation.`)}
             </span>
             <button
               type="button"
@@ -1750,7 +1849,7 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
                 {selectedNode.type}
               </span>
               <span className="min-w-0 flex-1 truncate text-sm font-semibold text-[var(--pq-text)]">
-                {selectedNode.label}
+                {displayNodeLabel(selectedNode)}
               </span>
             </div>
             {selectedNode.subtitle ? (
@@ -1808,7 +1907,7 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
                       <div key={edge.id} className="flex items-center gap-2 rounded-[var(--pq-radius-sm)] bg-[var(--pq-bg-secondary)] px-2 py-1.5">
                         <div className="min-w-0 flex-1">
                           <div className="truncate text-[11px] font-medium text-[var(--pq-text)]">
-                            {edge.label} {'->'} {otherNode?.label ?? edge.target}
+                            {edge.label} {'->'} {otherNode ? displayNodeLabel(otherNode) : edge.target}
                           </div>
                           {edge.description ? (
                             <div className="truncate text-[11px] text-[var(--pq-text-faint)]">
@@ -1851,11 +1950,11 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
             <div className="mt-3 space-y-1.5 text-xs text-[var(--pq-text-muted)]">
               <div className="flex items-center gap-2">
                 <span className="w-10 shrink-0 text-[var(--pq-text-faint)]">{l('起点', 'From')}</span>
-                <span className="min-w-0 truncate text-[var(--pq-text)]">{selectedEdgeSource?.label ?? selectedEdge.source}</span>
+                <span className="min-w-0 truncate text-[var(--pq-text)]">{selectedEdgeSource ? displayNodeLabel(selectedEdgeSource) : selectedEdge.source}</span>
               </div>
               <div className="flex items-center gap-2">
                 <span className="w-10 shrink-0 text-[var(--pq-text-faint)]">{l('终点', 'To')}</span>
-                <span className="min-w-0 truncate text-[var(--pq-text)]">{selectedEdgeTarget?.label ?? selectedEdge.target}</span>
+                <span className="min-w-0 truncate text-[var(--pq-text)]">{selectedEdgeTarget ? displayNodeLabel(selectedEdgeTarget) : selectedEdge.target}</span>
               </div>
             </div>
             {edgeEdit ? (

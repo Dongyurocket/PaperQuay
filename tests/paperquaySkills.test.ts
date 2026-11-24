@@ -1,11 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
 import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 
 const repoRoot = path.resolve(import.meta.dirname, '..');
-const mcpSource = readFileSync(path.join(repoRoot, 'bin/paperquay-mcp.cjs'), 'utf8');
-const mcpToolNames = [...mcpSource.matchAll(/^\s*name: '([a-z_]+)',$/gm)].map((match) => match[1]);
+const require = createRequire(import.meta.url);
+const { TOOLS } = require('../electron/mcp/mcpTools.cjs');
+const mcpToolNames = TOOLS.map((tool: { name: string }) => tool.name);
 
 const SKILL_TOOLS: Record<string, string[]> = {
   'paperquay-knowledge-search': [

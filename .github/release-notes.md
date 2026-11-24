@@ -1,26 +1,37 @@
 # PaperQuay v{{VERSION}}
 
+This release closes the code, architecture and UI audit that started on 2026-11-22 (batches 1–12) plus the batch-12R release blockers. It also includes the 0.4.37 reader-QA formula retrieval work.
+
 ## What's Fixed
 
-- Reader QA and the local knowledge base can now retrieve the formula blocks themselves. Before this release, a mixed Chinese/English question such as "公式(6)，cm的计算公式是哪里来的" matched nothing in the keyword channel, so the model only saw the sentence that cites the equation, not the equation.
-- Keyword search now splits Chinese/English queries at character boundaries and expands equation numbers (`公式(6)`, `Eqs. 5-7`), reference numbers (`[18]`) and short symbols (`cm`) into equivalent forms such as `\tag{6}`, `(6)` and `C _{m}`. Paper-scoped retrieval adds an exact equation/reference channel so 1-2 character tokens are no longer limited by the trigram index.
-- Context expansion is no longer fixed to one chunk before and after a hit: it now bridges short sub-figure captions (`(a)`, `(b)`, ...) and keeps contiguous equation groups together, so equations are no longer cut off by figure captions.
-- New cross-reference hydration: when the question or a retrieved paragraph cites `Eqs. 5-7`, `公式(6)` or `[18]` and the corresponding equation block or bibliography entry is missing, it is fetched from the same paper; these sections are kept preferentially when the token budget is tight.
-- Fixed mixed-retrieval score mixing: `mineru-markdown` and `pdf-text` results are filtered within each source before ranking, so exact (`fts`) hits are no longer dropped by a vector-distance threshold.
-- MinerU chunking is upgraded to `mineru-chunks-v3`: consecutive caption fragments, contiguous equation groups and their variable definitions are merged within a section, equations are wrapped in `$$...$$` with a section hint, and legacy indexes stay usable until reopened or manually rebuilt.
-- LaTeX cleanup now repairs MinerU OCR spacing such as `C _ {m}`, `0. 5`, `0. 1 1` and `1. 1 7 5`.
-- QA prompts now ask the model to check `$$...$$` / `\tag{n}` equations and bibliography entries in the context; citations gain an `equation` evidence kind and preview truncation no longer cuts a formula in half. The MCP `search_knowledge_base` tool receives the same formula/short-token retrieval and caption-bridging behavior.
+- **Data and startup**: metadata writes now use UPSERT consistently, cascade deletes stay on the relation tables, and the import/delete/backup paths that could lose data are fixed. MinerU caches and custom translated-PDF directories require a fresh directory-picker authorization after upgrading.
+- **Directory authorization (B1)**: `select_directory` and `prepare_mineru_cache_dir` authorize only the selected directory, never its parent, so picking `D:/cache` no longer exposes all of `D:/`. `translatedPdfDir` authorization status now matches the real read/write policy; a previous MinerU directory that is unauthorized or rejected by the OS (EPERM/EACCES) only skips migration with a warning; write-mode status probes write permission; attaching a translated PDF checks the target directory; unauthorized status queries no longer return a realpath; non-existent intermediate directories are resolved through the nearest existing ancestor so a junction cannot escape the write root.
+- **Notes and vault (E5)**: Markdown export detects and removes an existing `参考文献`/`References` heading and its adjacent list before appending the canonical bibliography, so export → import → export no longer duplicates or grows the list; a handwritten list is kept when the note has no inline references. Fence tracking follows CommonMark length/info-string rules and handles list-item code blocks, nested fences, a following separate list and multi-line continuation without deleting or swallowing content; a heading followed by prose keeps that prose and does not append a second list. Distilled excerpt cards now write `💭 My thoughts:` and the `Excerpt card` tag in English, while append still recognizes both languages. Multi-line system-page operation summaries are no longer truncated.
+- **Graph and accessibility (E4/E1)**: graph labels use two opaque 6-digit hex colors (`#1f2937` light, `#e5e7eb` dark, ≥14:1 on the canvas) instead of passing the dark `rgba()` token to Cytoscape. The MCP configuration textarea and the note editor have localized `aria-label`s; the editor declares a `textbox` role, and the select-all button's visible text is part of its accessible name.
+- **axe acceptance**: the report now keeps each incomplete item's target/html/node details and scans the notes editor/list plus the backup, MCP and update settings pages. 16 view/theme combinations report 0 violations, 0 serious/critical violations and 0 `label-content-name-mismatch`; the report and 16 screenshots were regenerated with full drive paths (not just usernames) replaced by a placeholder.
+- **RetainPDF (A6)**: the paper-details panel remounts on `key={paper.id}`, ignores stale results from the previous paper, recognizes removed or replaced translated attachments, relying on the TaskCenter native-paper-updated event to refresh the library after attaching, and the reader entry now shares the concurrency-deduped start function. An in-flight status snapshot can no longer overwrite an attached event that arrived while it was loading.
+- **Engineering and release (F4/F2)**: the release workflow runs ESLint before typecheck; the typecheck backlog total is corrected to 250; NSIS residual-process detection compares the executable's directory with `$INSTDIR` instead of a prefix (so `PaperQuay Beta` is not matched); installer smoke reports now include installer/app.asar SHA-256 hashes and redact local paths and the test password.
+- **Performance (S1)**: remeasured against pre-audit `1283d82` with alternating baseline/current runs, recording `--no-sandbox --disable-gpu --disable-crash-reporter --disable-breakpad`, dist/preload hashes, endpoint definitions and sample variance. Medians: cold start 577 → 518 ms (100 ms poll resolution; the 59 ms delta is directional), window visible 259.6 → 194.8 ms, first library row present (renderer clock) 265.8 → 186.8 ms. First Notes/Graph opens are 100/60 ms versus 19/26 ms before because workspaces are now lazy-loaded instead of mounted at startup; see the batch-12R change record for the full table and variance.
 
-## Notes
+## Known Limitations
 
-- No schema or `user_version` change. Existing local RAG indexes remain readable; the new `mineru-chunks-v3` chunking is applied lazily when a paper is opened for QA or manually re-indexed, so the whole library is not silently re-embedded.
-- Database, PDF, MinerU cache and library data are untouched by this release.
+- **Unsigned Windows build (D1-13)**: code signing/notarization and the release pipeline were not verified on this machine. The Windows installer is unsigned. `--no-sandbox` was used for local acceptance because Chromium's OS sandbox crashes before `app ready` in this host; the renderer is still restricted by `webPreferences.sandbox`. Rejecting a tampered `app.asar` was not exercised.
+- **Registered install / backup import (F2)**: the NSIS registered install and uninstall were not run because this machine already has a PaperQuay install with the same appId and its MCP process holds files. The extracted payload smoke covers startup/preload, PDF import, opening papers, a Chinese CID PDF, notes, vault sync, RetainPDF status, backup export, unauthorized-package rejection and MCP `read_paper_figure`. Backup restore through the native dialog is not verified.
+- **S1 measurement scope**: numbers are single-machine medians of 3+3 alternating runs. They compare the audit result with pre-audit `1283d82`, not the theoretical S1-only delta; the "cold" endpoint is process spawn → first library row (window-visible is a separate main-process marker). Electron fps and installed-build first paint were not measured.
+- **axe boundary**: axe cannot determine contrast over the PDF canvas text layer, canvas graphics or animation mid-frames. Those incomplete items are kept with full target/html details in the report and are not counted as violations. The select-all checkbox glyph remains an incomplete color-contrast item because its background is composited from translucent layers.
+- **Notes first open**: the measured change versus baseline is recorded as-is; it was not optimized further.
+- **Platforms**: only Windows x64 is built and tested. macOS/Linux packaging and Windows arm64 remain unverified.
 
 ## Verification
 
-- `npx tsc --noEmit` and `npm run build` passed. `npm test` ran 816 tests with 815 passing, 1 optional benchmark skipped and 0 failed. Build and tests used a repository-local temporary directory to avoid the local `%TEMP%` write lock.
-- Verified against a read-only copy of a real paper (Conceptual Design of an AAM Tiltrotor via Aircraft-Level Weight-Performance Feedback): with the legacy index, the question already returns both equation (6) and reference `[18]`; after `mineru-chunks-v3` re-chunking the index shrank from 175 to 133 blocks and equations (5)-(7) became one section-tagged formula block.
-- Per-page click-through QA of the installed build was not performed before release.
+- `npm run typecheck`: six tsc projects, 0 diagnostics.
+- `npm test`: full suite, 0 failures.
+- Clean checkout from staged tree `f92fc7f` (`git -c core.autocrlf=false archive`): `npm ci`, typecheck, lint, build and tests passed with 1,489 tests (1,480 passed, 9 skipped, 0 failed).
+- `npm run lint`: 0 errors / 206 warnings (`--max-warnings 206`).
+- `npm run build` and `npm run mcp:bundle`: passed.
+- `PAPERQUAY_AXE=1 node --test tests/axeAudit.test.mjs`: 16 views/themes, 0 violations.
+- `node tests/support/perfAudit.mjs --baseline-ref 1283d82`: 3+3 alternating runs; table and variance in the change record.
+- NSIS 0.4.38 build plus afterPack/fuse/ELECTRONASAR assertions passed; payload smoke results are in `docs/assets/audit-2026-11-24/installer-smoke/`.
 
 ## Windows Release
 
@@ -30,25 +41,35 @@ Only Windows x64 installers are published and maintained. Download the `.exe` fr
 
 ## 修复内容
 
-- 阅读器问答与本地知识库现在能直接检索到公式块。此前「公式(6)，cm的计算公式是哪里来的」这类中英混合提问在关键词通道 0 命中，模型只能看到引用公式的那句话，看不到公式本体。
-- 关键词检索按中英边界切分查询，并把公式编号（`公式(6)`、`Eqs. 5-7`）、参考文献编号（`[18]`）和短物理量（`cm`）扩展为 `\tag{6}`、`(6)`、`C _{m}` 等等价写法；单篇范围新增精确公式/文献通道，1~2 字符短词不再受 trigram 限制。
-- 上下文扩展不再固定前后各 1 片：遇到 `(a)`、`(b)` 等子图题注碎片或连续公式组时会继续桥接，公式不再被插图题注挡断。
-- 新增交叉引用补全：提问或命中段落引用 `Eqs. 5–7`、`公式(6)`、`[18]` 而对应公式块或参考文献条目缺失时，自动从同一篇补齐；预算紧张时优先保留这些段落。
-- 修复混合检索分数混排：`mineru-markdown` 与 `pdf-text` 先在各自来源内过滤再统一排序，精确（`fts`）命中不再被向量阈值误杀。
-- MinerU 分块升级为 `mineru-chunks-v3`：同小节内合并连续图注碎片、连续公式组及其变量说明，公式包裹 `$$...$$` 并附带小节锚点；旧索引继续可用，打开文献或手动重建时才升级。
-- LaTeX 清洗补充 MinerU OCR 空格修复：`C _ {m}`、`0. 5`、`0. 1 1`、`1. 1 7 5` 等断字自动归一。
-- 问答提示词要求在上下文中核对 `$$...$$` / `\tag{n}` 公式与参考文献条目；引用证据类型新增 `equation`，预览截断不再从公式中间腰斩。MCP `search_knowledge_base` 同步获得公式/短编号检索与跨图注邻域能力。
+本版本收口 2026-11-22 开始的代码、架构与 UI 专项审计（第 1–12 批）及第 12R 批发布阻塞项，并包含 0.4.37 的阅读器问答公式检索改动。
 
-## 说明
+- **数据与启动**：文献元数据统一 UPSERT，关联表保留级联删除，修复导入/删除/备份恢复中的丢数据路径；MinerU 缓存与自定义译版目录升级后需要重新通过目录对话框授权。
+- **目录授权（B1）**：`select_directory` 与 `prepare_mineru_cache_dir` 只授权所选目录自身，不再放行父目录；选 `D:/cache` 不会让整个 `D:/` 可读。`translatedPdfDir` 的授权状态与真实读写策略一致；旧 MinerU 目录不可读时只跳过迁移并提示，不再让整次选择失败；未授权路径的状态查询不返回 realpath。
+- **笔记与 Vault（E5）**：Markdown 导出先识别并剔除已有的 `参考文献`/`References` 标题及其紧邻列表，再追加规范列表，回导再导出不再重复或增长；无内联引用时保留手写列表。提炼摘录卡在英文界面写 `💭 My thoughts:` 与 `Excerpt card` 标签，追加时中英标题都能识别；系统页多行操作摘要不再截断。
+- **图谱与可访问性（E4/E1）**：图谱标签改用浅/深两套不透明 6 位 hex（`#1f2937`/`#e5e7eb`，对画布 ≥14:1），不再把深色 `rgba()` 传给 Cytoscape。MCP 配置 textarea 与笔记编辑器补充本地化 `aria-label`，编辑器声明 `textbox` 角色；文献全选按钮的可见文字进入可访问名称。
+- **axe 验收**：报告保留 incomplete 的 target/html/nodes，扫描扩展到笔记编辑器/列表与设置备份/MCP/更新页。16 个视图/主题 0 violations、0 serious/critical violations、0 `label-content-name-mismatch`，报告与 16 张截图重新生成。
+- **RetainPDF（A6）**：详情面板以 `key={paper.id}` 重挂载，切换文献不串台；识别已移除/替换的译版附件；附加完成后由 TaskCenter 的 native-paper-updated 事件刷新文库；阅读器入口共用并发去重的启动函数。
+- **工程与发布（F4/F2）**：发布流水线在 typecheck 前执行 ESLint；typecheck 待清理清单复算为 250；NSIS 残留进程检测按 `$INSTDIR` 目录边界匹配，避免误杀 `PaperQuay Beta` 等同前缀目录；安装包冒烟报告记录 installer/app.asar 的 SHA-256 并脱敏本机路径与测试口令。
+- **性能（S1）**：以审计前 `1283d82` 为基线交替测量 3+3 次，记录 `--no-sandbox --disable-gpu`、dist/preload 哈希、端点定义与样本方差；数据见第 12R 批变更记录。
 
-- 未修改数据库 schema 或 `user_version`。已有本地 RAG 索引继续可读；新的 `mineru-chunks-v3` 分块在打开文献问答或手动重建索引时才生效，不会静默重嵌整库。
-- 本版本不触碰数据库、PDF、MinerU 缓存与文库数据。
+## 已知限制
+
+- **Windows 未签名（D1-13）**：本机未验证代码签名/公证与发布流水线，安装包未签名。本机 Chromium OS 沙箱在 app ready 前崩溃，验收统一使用 `--no-sandbox`；渲染器仍由 `webPreferences.sandbox` 限制。未验证篡改 `app.asar` 后的拒绝加载。
+- **注册式安装/备份导入（F2）**：本机已有同 appId 安装且其 MCP 进程占用文件，未执行 NSIS 注册式安装/卸载。安装包 payload 冒烟覆盖启动/preload、导入 PDF、打开论文、中文 CID PDF、笔记、Vault、RetainPDF 状态、备份导出、未授权包拒绝与 MCP `read_paper_figure`；原生对话框备份导入未验证。
+- **S1 口径**：单机 3+3 次交替测量，中位数与方差见变更记录；对比对象是审计前 `1283d82`，不是理论上的“仅 S1”差值；冷启动端点止于 Library 首行，窗口可见是独立的主进程埋点。未测 Electron 实际 fps 与安装版首屏。
+- **axe 边界**：PDF canvas 文本层、canvas 图形与动画中间态无法由 axe 给出确定结论；这些 incomplete 保留完整 target/html，按未决项记录，不计作 violation。文献全选按钮的图形对比度同样保留为 incomplete。
+- **Notes 首次打开**：与基线的变化按实测记录，未进一步优化。
+- **平台**：仅构建和测试 Windows x64；macOS/Linux 打包与 Windows arm64 未验证。
 
 ## 验证
 
-- `npx tsc --noEmit` 与 `npm run build` 通过；`npm test` 816 项中 815 通过、1 项可选基准跳过、0 失败。构建与测试使用仓库内临时目录，规避本机 `%TEMP%` 写入锁。
-- 使用真实论文《Conceptual Design of an AAM Tiltrotor via Aircraft-Level Weight-Performance Feedback》的只读副本验证：沿用旧索引时该提问即可同时取到式 (6) 与参考文献 `[18]`；按 `mineru-chunks-v3` 重分块后索引块由 175 降至 133，式 (5)–(7) 合并为一个带小节锚点的公式块。
-- 发布前未执行安装版逐页界面点击验收。
+- `npm run typecheck`：六个 tsc 项目 0 诊断。
+- `npm test`：全量 0 失败。
+- `npm run lint`：0 error / 206 warning（`--max-warnings 206`）。
+- `npm run build`、`npm run mcp:bundle` 通过。
+- `PAPERQUAY_AXE=1 node --test tests/axeAudit.test.mjs`：16 个视图/主题 0 violations。
+- `node tests/support/perfAudit.mjs --baseline-ref 1283d82`：3+3 次交替测量，数据与方差见变更记录。
+- NSIS 0.4.38 构建及 afterPack/fuse/ELECTRONASAR 断言通过；payload 冒烟结果见 `docs/assets/audit-2026-11-24/installer-smoke/`。
 
 ## Windows 发布范围
 

@@ -362,6 +362,120 @@ test('real Worker indexes saved and vault-imported notes, IPC semantic search us
   }
 });
 
+test('closeWhenIdle drains queued note indexing before shutdown and stops new work', async () => {
+  const f = fixture();
+  let release: () => void = () => {};
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  let calls = 0;
+  const embedding = configure(f);
+  const indexer = createNoteIndexer({
+    noteStore: f.notes, appPaths: f.appPaths,
+    ragStore: {
+      indexNote: async (args: any) => {
+        calls += 1;
+        await gate;
+        return indexNote(f.rag, args, async () => [[1, 0, 0]]);
+      },
+      removeNoteIndex: (args: any) => f.rag.removeNoteIndex(args),
+    },
+  });
+  f.notes.setMutationListener(indexer.enqueue);
+  try {
+    const note = f.add('pending semantic prose');
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(calls, 1);
+    let settled = false;
+    const closing = indexer.closeWhenIdle({ timeoutMs: 1000 }).then((result: any) => {
+      settled = true;
+      return result;
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(settled, false, 'shutdown must wait for the in-flight index job');
+    release();
+    const result = await closing;
+    assert.deepEqual(result, { drained: true, timedOut: false, pending: 0 });
+    assert.equal(indexer.status().pending, 0);
+    assert.equal(indexer.status().completed, 1);
+    assert.ok(f.rag.getDocumentIndexStatus({ documentKey: `note:${note.id}`, sourceType: 'note' }));
+
+    // After shutdown starts, new note edits must not be queued.
+    f.notes.updateNote({ id: note.id, patch: { title: 'Edited during shutdown' } });
+    await indexer.whenIdle();
+    assert.equal(calls, 1);
+    assert.equal(indexer.status().pending, 0);
+    assert.equal(noteModelKey(embedding), noteModelKey(embedding));
+  } finally {
+    release();
+    await indexer.whenIdle();
+    indexer.close();
+    f.close();
+  }
+});
+
+test('closeWhenIdle reports a bounded timeout when the queue cannot drain', async () => {
+  const f = fixture();
+  let release: () => void = () => {};
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  configure(f);
+  let embeddingSignal: AbortSignal | undefined;
+  const indexer = createNoteIndexer({
+    noteStore: f.notes, appPaths: f.appPaths,
+    ragStore: {
+      indexNote: async (args: any) => {
+        embeddingSignal = args.embedding.signal;
+        await gate;
+        return indexNote(f.rag, args, async () => [[1, 0, 0]]);
+      },
+      removeNoteIndex: (args: any) => f.rag.removeNoteIndex(args),
+    },
+  });
+  f.notes.setMutationListener(indexer.enqueue);
+  try {
+    f.add('stuck semantic prose');
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const result = await indexer.closeWhenIdle({ timeoutMs: 30 });
+    assert.equal(result.timedOut, true);
+    assert.equal(result.drained, false);
+    assert.ok(result.pending >= 1);
+    assert.equal(embeddingSignal?.aborted, true, 'a timed-out shutdown must cancel the in-flight embedding');
+  } finally {
+    indexer.close();
+    release();
+    await indexer.whenIdle();
+    f.close();
+  }
+});
+
+test('indexNote forwards shutdown abort signals to the embedding request', async () => {
+  const f = fixture();
+  const embedding = configure(f);
+  const note = f.add('abortable embedding prose');
+  const controller = new AbortController();
+  let reportedFailure: any = null;
+  let indexed = false;
+
+  const store = {
+    getDocumentIndexStatus: async () => null,
+    indexDocument: async () => { indexed = true; },
+    reportFailure: async (request: any) => { reportedFailure = request; },
+  };
+  const embed = (_texts: string[], config: { signal?: AbortSignal }) => new Promise<number[][]>((_resolve, reject) => {
+    config.signal?.addEventListener('abort', () => reject(new Error('embedding aborted')), { once: true });
+  });
+
+  const pending = indexNote(store, {
+    note,
+    embedding: { ...embedding, signal: controller.signal },
+  }, embed);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  controller.abort();
+
+  await assert.rejects(pending, /embedding aborted/);
+  assert.equal(indexed, false);
+  assert.match(reportedFailure?.errorMessage ?? '', /embedding aborted/);
+  f.close();
+});
+
 test('long note sections preserve heading context and paragraph separators', () => {
   const chunks = chunkNote({
     id: 'sections', title: 'Theme',

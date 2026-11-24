@@ -11,16 +11,25 @@ import {
 } from '../../services/desktop';
 import type { AppDefaultPaths } from '../../services/desktop';
 import {
-  resolveReaderConfigForHydration,
-  writeReaderConfigFile,
-} from '../../services/readerConfig';
-import {
   getLibrarySettings,
   updateLibrarySettings,
 } from '../../services/library';
+import {
+  getAppSettingsSecrets,
+  migrateLegacyAppSettings,
+} from '../../services/appSettings';
+import {
+  clearLegacyAppSettingsStorage,
+  getAppSettingsSnapshot,
+  patchAppSettingsAndSync,
+  patchAppSettingsSecretsAndSync,
+  patchZoteroLocalDataDirAndSync,
+  primeAppSettingsCache,
+  readLegacyAppSettingsStorage,
+  subscribeAppSettings,
+} from '../../app/settings/appSettingsCache';
 import type {
   QaModelPreset,
-  ReaderConfigFile,
   ReaderSecrets,
   ReaderSettings,
 } from '../../types/reader';
@@ -35,9 +44,7 @@ import {
 } from '../../app/appEvents';
 import { toast } from '../../ui/toast';
 import {
-  buildLegacyConfigPath,
   buildLegacyModelPresets,
-  CONFIG_WRITE_DEBOUNCE_MS,
   createQaPreset,
   DEFAULT_QA_PRESET,
   DEFAULT_QA_PRESET_ID,
@@ -47,13 +54,57 @@ import {
   mergeReaderConfigWithDefaults,
   normalizeReaderSettings,
   pickLocaleText,
-  READER_CONFIG_VERSION,
   resolveModelPreset,
-  SECRETS_STORAGE_KEY,
-  SETTINGS_STORAGE_KEY,
 } from './readerShared';
 
 type LocaleTextFn = <T,>(zh: T, en: T) => T;
+
+function valuesEqual(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true;
+  if (
+    left && right &&
+    typeof left === 'object' &&
+    typeof right === 'object'
+  ) {
+    try {
+      return JSON.stringify(left) === JSON.stringify(right);
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
+/** 只把真正变化的键发给主进程，避免整对象写回覆盖其它写入者。 */
+function buildSettingsPatch(
+  previous: ReaderSettings,
+  next: ReaderSettings,
+): Partial<ReaderSettings> {
+  const patch: Partial<ReaderSettings> = {};
+
+  for (const key of Object.keys(next) as Array<keyof ReaderSettings>) {
+    if (!valuesEqual(previous[key], next[key])) {
+      (patch as Record<string, unknown>)[key] = next[key];
+    }
+  }
+
+  return patch;
+}
+
+function buildSecretsPatch(
+  previous: ReaderSecrets,
+  next: ReaderSecrets,
+): Partial<ReaderSecrets> {
+  const patch: Partial<ReaderSecrets> = {};
+
+  for (const key of Object.keys(next) as Array<keyof ReaderSecrets>) {
+    if (!valuesEqual(previous[key], next[key])) {
+      (patch as Record<string, unknown>)[key] = next[key];
+    }
+  }
+
+  return patch;
+}
 
 export interface UseReaderSettingsOptions {
   setError: (value: string) => void;
@@ -65,10 +116,12 @@ export function useReaderSettings({
   setStatusMessage,
 }: UseReaderSettingsOptions) {
   const legacyModelPresetMigrationDoneRef = useRef(false);
+  const persistedSettingsRef = useRef<ReaderSettings | null>(null);
+  const persistedSecretsRef = useRef<ReaderSecrets | null>(null);
 
   const [settings, setSettings] = useState<ReaderSettings>(loadSettings);
   const [readerSecrets, setReaderSecrets] = useState<ReaderSecrets>(DEFAULT_SECRETS);
-  const [zoteroLocalDataDir, setZoteroLocalDataDir] = useState('');
+  const [zoteroLocalDataDir, setZoteroLocalDataDirState] = useState('');
   const [librarySettings, setLibrarySettings] = useState<LibrarySettings | null>(null);
   const [appDefaultPaths, setAppDefaultPaths] = useState<AppDefaultPaths | null>(null);
   const [configHydrated, setConfigHydrated] = useState(false);
@@ -102,25 +155,77 @@ export function useReaderSettings({
       summaryModelPreset?.model.trim(),
   );
 
+  const setZoteroLocalDataDir = useCallback(
+    (value: string) => {
+      const normalized = value.trim();
+      setZoteroLocalDataDirState(normalized);
+
+      void patchZoteroLocalDataDirAndSync(normalized).then(async (result) => {
+        if (result.ok && result.snapshot) {
+          const canonical = result.snapshot.zoteroLocalDataDir;
+          setZoteroLocalDataDirState(canonical);
+
+          // 主进程已把规范值镜像到 library_settings；广播给文库侧，
+          // 取代过去 Reader 里 500ms 的二次写回。
+          try {
+            const nextSettings = {
+              ...(librarySettings ?? await getLibrarySettings()),
+              zoteroLocalDataDir: canonical,
+            };
+            setLibrarySettings(nextSettings);
+            emitLibrarySettingsUpdated(nextSettings, 'reader-settings');
+          } catch {
+          }
+          return;
+        }
+
+        const message = l(
+          '保存 Zotero 数据目录失败',
+          'Failed to save the Zotero data directory',
+        );
+        setError(message);
+        setStatusMessage(message);
+      });
+    },
+    [l, librarySettings, setError, setStatusMessage],
+  );
+
   const updateNativeLibrarySettings = useCallback(
     async (
       patch: Partial<LibrarySettings> | LibrarySettings,
       source = 'reader-preferences',
     ): Promise<LibrarySettings | null> => {
       try {
-        const base = librarySettings ?? await getLibrarySettings();
-        const nextSettings = await updateLibrarySettings({
-          ...base,
-          ...patch,
-        });
+        const { zoteroLocalDataDir: nextZoteroDir, ...libraryPatch } = patch;
+        let nextSettings = librarySettings;
 
-        setLibrarySettings(nextSettings);
-
-        if (Object.prototype.hasOwnProperty.call(patch, 'zoteroLocalDataDir')) {
-          setZoteroLocalDataDir(nextSettings.zoteroLocalDataDir.trim());
+        if (Object.keys(libraryPatch).length > 0) {
+          const base = librarySettings ?? await getLibrarySettings();
+          nextSettings = await updateLibrarySettings({
+            ...base,
+            ...libraryPatch,
+          });
+          setLibrarySettings(nextSettings);
         }
 
-        emitLibrarySettingsUpdated(nextSettings, source);
+        if (nextZoteroDir !== undefined) {
+          const result = await patchZoteroLocalDataDirAndSync(nextZoteroDir);
+          if (!result.ok) {
+            throw new Error(result.code ?? 'Failed to save the Zotero data directory');
+          }
+
+          const canonicalDir = result.snapshot?.zoteroLocalDataDir ?? nextZoteroDir.trim();
+          setZoteroLocalDataDirState(canonicalDir);
+          nextSettings = {
+            ...(nextSettings ?? librarySettings ?? await getLibrarySettings()),
+            zoteroLocalDataDir: canonicalDir,
+          };
+          setLibrarySettings(nextSettings);
+        }
+
+        if (nextSettings) {
+          emitLibrarySettingsUpdated(nextSettings, source);
+        }
         return nextSettings;
       } catch (nextError) {
         const message =
@@ -286,63 +391,67 @@ export function useReaderSettings({
 
   useEffect(() => {
     let cancelled = false;
+    let defaultPaths: AppDefaultPaths | null = null;
 
     void (async () => {
       try {
-        const defaultPaths = await getAppDefaultPaths();
+        defaultPaths = await getAppDefaultPaths();
 
         if (cancelled) {
           return;
         }
 
         setAppDefaultPaths(defaultPaths);
-        const legacySecrets = loadSecrets();
-        let nextConfig = mergeReaderConfigWithDefaults(
-          null,
-          loadSettings(),
-          legacySecrets,
-          defaultPaths,
-        );
 
-        // 主配置缺失（ENOENT）才回退旧路径；读取/解析失败一律视为错误，
-        // 不拿默认值继续写回，否则会用回退值覆盖文件里的 API Key。
-        const hydration = await resolveReaderConfigForHydration({
-          defaultPaths,
-          legacyConfigPath: buildLegacyConfigPath(defaultPaths.executableDir),
+        const legacySettings = loadSettings();
+        const legacySecrets = loadSecrets();
+        const legacyStorage = readLegacyAppSettingsStorage();
+
+        // 旧 localStorage 与旧配置文件在第一次启动时并入主进程文档；
+        // Notes 专用引用样式键优先，避免被 Reader 的旧快照覆盖。
+        const migrated = await migrateLegacyAppSettings({
+          settings: legacyStorage.settings ?? legacySettings,
+          secrets: legacyStorage.secrets ?? legacySecrets,
+          noteCitationStyle:
+            legacyStorage.noteCitationStyle ?? legacySettings.noteCitationStyle,
         });
 
         if (cancelled) {
           return;
         }
 
-        if (hydration.error) {
-          // 保留 localStorage 里的上次设置/密钥供本次会话使用，但禁用配置持久化，
-          // 并保留 raw 文件原样，等待用户修复或删除后重启。
-          setReaderSecrets(legacySecrets);
-          setConfigPersistenceEnabled(false);
-          const message = l(
-            `读取配置文件失败，已暂停写回以保护 API Key：${defaultPaths.configPath}（${hydration.error.message}）。修复或删除该文件后重启应用。`,
-            `Failed to read the settings file. Writing is paused to protect API keys: ${defaultPaths.configPath} (${hydration.error.message}). Fix or remove the file, then restart the app.`,
-          );
-          console.error('Failed to read the reader config file.', hydration.error);
-          setConfigLoadError(message);
-          setError(message);
-          setStatusMessage(message);
-          toast({ tone: 'error', message, duration: 0, key: 'reader-config-load-error' });
-        } else {
-          if (hydration.config) {
-            nextConfig = mergeReaderConfigWithDefaults(
-              hydration.config,
-              loadSettings(),
-              legacySecrets,
-              defaultPaths,
-            );
-          }
-          setSettings(nextConfig.settings);
-          setReaderSecrets(nextConfig.secrets ?? DEFAULT_SECRETS);
-          setConfigPersistenceEnabled(true);
-          setConfigLoadError('');
+        if (!migrated.ok) {
+          throw new Error(migrated.message || 'Failed to migrate the settings document');
         }
+
+        const secretDocument = await getAppSettingsSecrets();
+
+        if (cancelled) {
+          return;
+        }
+
+        const nextConfig = mergeReaderConfigWithDefaults(
+          {
+            version: migrated.version,
+            settings: migrated.settings,
+            secrets: secretDocument,
+            zoteroLocalDataDir: migrated.zoteroLocalDataDir,
+            leftSidebarCollapsed: migrated.leftSidebarCollapsed,
+          },
+          legacySettings,
+          legacySecrets,
+          defaultPaths,
+        );
+
+        primeAppSettingsCache(migrated, secretDocument);
+        setSettings(nextConfig.settings);
+        setReaderSecrets(nextConfig.secrets ?? DEFAULT_SECRETS);
+        setZoteroLocalDataDirState(nextConfig.zoteroLocalDataDir.trim());
+        persistedSettingsRef.current = nextConfig.settings;
+        persistedSecretsRef.current = nextConfig.secrets ?? DEFAULT_SECRETS;
+        setConfigPersistenceEnabled(true);
+        setConfigLoadError('');
+        clearLegacyAppSettingsStorage();
 
         let nativeLibrarySettings: LibrarySettings | null = null;
 
@@ -351,23 +460,51 @@ export function useReaderSettings({
         } catch {
         }
 
-        const configZoteroDir = nextConfig.zoteroLocalDataDir.trim();
-        const nativeZoteroDir = nativeLibrarySettings?.zoteroLocalDataDir.trim() ?? '';
-        const resolvedZoteroDir = nativeZoteroDir || configZoteroDir;
-
-        // 必须始终用文库里的 Zotero 目录回填：读取失败时 configZoteroDir 为空，
-        // 若跳过赋值，Reader 的 500ms 同步 effect 会把空值写回文库，抹掉用户已配置的目录。
-        setZoteroLocalDataDir(resolvedZoteroDir);
-        setLibrarySettings(nativeLibrarySettings);
-        if (nativeLibrarySettings && !hydration.error && configZoteroDir && !nativeZoteroDir) {
-          const syncedSettings = await updateLibrarySettings({
-            ...nativeLibrarySettings,
-            zoteroLocalDataDir: configZoteroDir,
-          });
-
-          setLibrarySettings(syncedSettings);
-          emitLibrarySettingsUpdated(syncedSettings, 'reader-config-hydration');
+        if (cancelled) {
+          return;
         }
+
+        setLibrarySettings(nativeLibrarySettings);
+
+        // 主进程迁移已把 SQLite 旧值并入设置文档；这里只在文档仍为空时兜底。
+        if (!nextConfig.zoteroLocalDataDir.trim() && nativeLibrarySettings?.zoteroLocalDataDir) {
+          setZoteroLocalDataDirState(nativeLibrarySettings.zoteroLocalDataDir.trim());
+        }
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+
+        // 读取/迁移失败时保留 localStorage 供本次会话使用，并暂停写回，
+        // 避免用默认值覆盖文件里的 API Key。
+        setReaderSecrets(loadSecrets());
+        setConfigPersistenceEnabled(false);
+
+        // 设置文档读不出来时，文库里的 Zotero 目录仍应回填，避免被空值覆盖。
+        try {
+          const nativeLibrarySettings = await getLibrarySettings();
+          if (!cancelled) {
+            setLibrarySettings(nativeLibrarySettings);
+            if (nativeLibrarySettings?.zoteroLocalDataDir) {
+              setZoteroLocalDataDirState(nativeLibrarySettings.zoteroLocalDataDir.trim());
+            }
+          }
+        } catch {
+        }
+
+        if (cancelled) {
+          return;
+        }
+
+        const message = l(
+          `读取设置文件失败，已暂停写回以保护 API Key：${defaultPaths?.configPath ?? ''}（${error instanceof Error ? error.message : String(error)}）。修复或删除该文件后重启应用。`,
+          `Failed to read the settings file. Writing is paused to protect API keys: ${defaultPaths?.configPath ?? ''} (${error instanceof Error ? error.message : String(error)}). Fix or remove the file, then restart the app.`,
+        );
+        console.error('Failed to read the app settings document.', error);
+        setConfigLoadError(message);
+        setError(message);
+        setStatusMessage(message);
+        toast({ tone: 'error', message, duration: 0, key: 'reader-config-load-error' });
       } finally {
         if (!cancelled) {
           setConfigHydrated(true);
@@ -389,7 +526,7 @@ export function useReaderSettings({
       }
 
       setLibrarySettings(detail.settings);
-      setZoteroLocalDataDir(detail.settings.zoteroLocalDataDir.trim());
+      setZoteroLocalDataDirState(detail.settings.zoteroLocalDataDir.trim());
     };
 
     window.addEventListener(LIBRARY_SETTINGS_UPDATED_EVENT, handleLibrarySettingsUpdated);
@@ -399,12 +536,70 @@ export function useReaderSettings({
     };
   }, []);
 
-  useEffect(() => {
-    localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
-    emitUiLanguageChanged(settings.uiLanguage);
-  }, [settings]);
+  // Notes 与 Reader 共享同一份文档：任一入口改引用样式/界面语言后同步到本 hook。
+  useEffect(() => subscribeAppSettings(() => {
+    const next = getAppSettingsSnapshot();
+    if (!next) return;
 
-  // MinerU 缓存目录的写权限由主进程按配置文件登记，渲染层不再自行批准路径。
+    setSettings((current) => {
+      if (
+        valuesEqual(current.noteCitationStyle, next.settings.noteCitationStyle) &&
+        valuesEqual(current.uiLanguage, next.settings.uiLanguage)
+      ) {
+        return current;
+      }
+
+      return {
+        ...current,
+        noteCitationStyle: next.settings.noteCitationStyle,
+        uiLanguage: next.settings.uiLanguage,
+      };
+    });
+  }), []);
+
+  useEffect(() => {
+    emitUiLanguageChanged(settings.uiLanguage);
+  }, [settings.uiLanguage]);
+
+  useEffect(() => {
+    if (!configHydrated || !configPersistenceEnabled) return;
+    const previous = persistedSettingsRef.current;
+    if (!previous) return;
+
+    const patch = buildSettingsPatch(previous, settings);
+    if (Object.keys(patch).length === 0) return;
+
+    void patchAppSettingsAndSync(patch).then((result) => {
+      if (result.ok) {
+        persistedSettingsRef.current = settings;
+        return;
+      }
+
+      const message = l('保存设置失败', 'Failed to save settings');
+      setError(message);
+      setStatusMessage(message);
+    });
+  }, [configHydrated, configPersistenceEnabled, l, setError, setStatusMessage, settings]);
+
+  useEffect(() => {
+    if (!configHydrated || !configPersistenceEnabled) return;
+    const previous = persistedSecretsRef.current;
+    if (!previous) return;
+
+    const patch = buildSecretsPatch(previous, readerSecrets);
+    if (Object.keys(patch).length === 0) return;
+
+    void patchAppSettingsSecretsAndSync(patch).then((result) => {
+      if (result.ok) {
+        persistedSecretsRef.current = readerSecrets;
+        return;
+      }
+
+      const message = l('保存密钥失败', 'Failed to save API keys');
+      setError(message);
+      setStatusMessage(message);
+    });
+  }, [configHydrated, configPersistenceEnabled, l, readerSecrets, setError, setStatusMessage]);
 
   useEffect(() => {
     if (qaModelPresets.some((preset) => preset.id === settings.qaActivePresetId)) {
@@ -418,41 +613,6 @@ export function useReaderSettings({
       qaActivePresetId: fallbackPresetId,
     }));
   }, [qaModelPresets, settings.qaActivePresetId]);
-
-  useEffect(() => {
-    if (!configHydrated || !configPersistenceEnabled || !appDefaultPaths) {
-      return undefined;
-    }
-
-    const timer = window.setTimeout(() => {
-      const nextConfig: Partial<ReaderConfigFile> = {
-        version: READER_CONFIG_VERSION,
-        settings,
-        secrets: readerSecrets,
-        zoteroLocalDataDir,
-        leftSidebarCollapsed: false,
-      };
-
-      void writeReaderConfigFile(nextConfig, appDefaultPaths)
-        .then(() => {
-          window.localStorage.removeItem(SECRETS_STORAGE_KEY);
-        })
-        .catch((error) => {
-          console.error('Failed to persist reader config to file.', error);
-        });
-    }, CONFIG_WRITE_DEBOUNCE_MS);
-
-    return () => {
-      window.clearTimeout(timer);
-    };
-  }, [
-    appDefaultPaths,
-    configHydrated,
-    configPersistenceEnabled,
-    readerSecrets,
-    settings,
-    zoteroLocalDataDir,
-  ]);
 
   useEffect(() => {
     if (legacyModelPresetMigrationDoneRef.current) {

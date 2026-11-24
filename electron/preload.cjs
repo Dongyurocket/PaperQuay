@@ -1,5 +1,5 @@
-const { clipboard, contextBridge, ipcRenderer, webUtils } = require('electron');
-const { remapRendererStorage } = require('../src/shared/rendererStorageRemap.cjs');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
+const { restoreRendererStorage: applyRestorePayload } = require('../src/shared/rendererStorageRestore.cjs');
 const { isRendererCommandAllowed } = require('./ipcAllowlist.cjs');
 
 function restoreRendererStorage() {
@@ -11,34 +11,19 @@ function restoreRendererStorage() {
   }
   if (!payload?.restoreId || !payload.state || typeof payload.state !== 'object') return;
 
-  const failedKeys = [];
-  const warnings = [];
+  let result;
   try {
-    const storage = window.localStorage;
-    const remapped = remapRendererStorage(payload.state, {
-      pathMap: payload.pathMap,
-      rootMap: payload.rootMap,
-      platform: process.platform,
-      hasMineruCache: payload.hasMineruCache === true,
-    });
-    warnings.push(...remapped.warnings);
-    storage.clear();
-    for (const [key, value] of Object.entries(remapped.state)) {
-      try {
-        storage.setItem(key, String(value));
-      } catch {
-        failedKeys.push(key);
-      }
-    }
+    result = applyRestorePayload(window.localStorage, payload, { platform: process.platform });
   } catch {
-    failedKeys.push('__localStorage_restore__');
+    result = { failedKeys: ['__localStorage_restore__'], warnings: [] };
   }
+  if (!result) return;
 
   try {
     ipcRenderer.send('paperquay:renderer-restore-ack', {
       restoreId: payload.restoreId,
-      failedKeys,
-      warnings,
+      failedKeys: result.failedKeys,
+      warnings: result.warnings,
     });
   } catch {}
 }
@@ -170,10 +155,18 @@ contextBridge.exposeInMainWorld('paperquay', {
   },
   clipboard: {
     readText() {
-      return clipboard.readText();
+      // sandbox preload 没有 clipboard 模块；用最小同步 IPC 保持原有同步 API。
+      try {
+        const text = ipcRenderer.sendSync('paperquay:invoke-sync', 'clipboard_read_text', {});
+        return typeof text === 'string' ? text : '';
+      } catch {
+        return '';
+      }
     },
     writeText(value) {
-      clipboard.writeText(String(value ?? ''));
+      return ipcRenderer.invoke('paperquay:invoke', 'clipboard_write_text', {
+        text: String(value ?? ''),
+      });
     },
   },
   onFileDrop(callback) {

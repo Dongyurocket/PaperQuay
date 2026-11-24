@@ -86,3 +86,15 @@ test('Markdown 解析器重建表格和块级公式', () => {
   assert.equal(doc.content[0].content[1].content[0].content[0].content[0].type, 'inlineMath');
   assert.equal(doc.content[1].attrs.latex, 'P = \\rho V^3');
 });
+
+test('英文 References 小节同样映射正文引用', () => {
+  const doc = parseMarkdownToTiptap(
+    'First fact [1].\n\n## References\n1. Known Paper',
+    { papers: [{ id: 'p1', title: 'Known Paper' }] },
+  );
+  assert.deepEqual(doc.content.map((node: any) => node.type), ['paragraph', 'heading', 'orderedList']);
+  assert.deepEqual(
+    doc.content[0].content.filter((node: any) => node.type === 'paperReference').map((node: any) => node.attrs.paperId),
+    ['p1'],
+  );
+});

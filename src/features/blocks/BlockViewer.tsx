@@ -11,7 +11,6 @@ import {
 import {
   FilePlus2,
   Info,
-  Languages,
   RefreshCw,
   Scan,
   Sparkles,
@@ -22,6 +21,7 @@ import {
 import EmptyState from '../../components/EmptyState';
 import { ContextMenu, type ContextMenuEntry } from '../../components/ContextMenu';
 import { useLocaleText } from '../../i18n/uiLanguage';
+import { IconButton } from '../../ui/button';
 import { buildRenderableBlocks, extractTextFromMineruBlock, extractTableHtmlFromMineruBlock } from '../../services/mineru';
 import { createBlockReparseStorageKey, loadBlockReparseOverrides, saveBlockReparseOverride } from '../../services/blockReparseOverrides';
 import { getPdfSourceSignature } from '../pdf/pdfDocumentSource';
@@ -892,9 +892,8 @@ function BlockViewer({
       {!hideToolbar ? (
         <div className="sticky top-0 z-40 px-3 pt-1">
           <div className="pq-toolbar mx-auto flex h-9 w-fit max-w-full items-center gap-2 rounded-[var(--pq-radius-sm)] border border-[var(--pq-border)] px-2">
-            <button
-              type="button"
-              className="pq-icon-button !h-8 !w-8 shrink-0"
+            <IconButton
+              className="shrink-0"
               title={l(
                 `${visibleBlocks.length} 个块，${translatedCount} 个译文块。点击块可反向定位到 PDF 几何区域。`,
                 `${visibleBlocks.length} blocks, ${translatedCount} translated blocks. Click a block to jump back to the PDF geometry region.`,
@@ -902,7 +901,7 @@ function BlockViewer({
               aria-label={l('结构化阅读信息', 'Structured reading information')}
             >
               <Info className="h-4 w-4" strokeWidth={1.8} />
-            </button>
+            </IconButton>
 
             <div className="flex min-w-0 items-center gap-1 rounded-[var(--pq-radius-sm)] border border-[var(--pq-border)] bg-[var(--pq-surface-1)] p-0.5 text-[11px] text-[var(--pq-text-muted)]">
               {displayModeOptions.map((option) => {
@@ -927,25 +926,23 @@ function BlockViewer({
             </div>
 
             <div className="flex shrink-0 items-center gap-1 rounded-[var(--pq-radius-sm)] border border-[var(--pq-border)] bg-[var(--pq-surface-1)] px-1 text-[11px] text-[var(--pq-text-muted)]">
-              <button
-                type="button"
+              <IconButton
+                size="sm"
                 onClick={() => updateContentScale(-CONTENT_SCALE_STEP)}
-                className="pq-icon-button !h-7 !w-7"
                 aria-label={l('缩小正文', 'Zoom out content')}
               >
                 <ZoomOut className="h-3.5 w-3.5" strokeWidth={1.9} />
-              </button>
+              </IconButton>
               <span className="min-w-10 text-center font-medium text-[var(--pq-text-muted)]">
                 {Math.round(contentScale * 100)}%
               </span>
-              <button
-                type="button"
+              <IconButton
+                size="sm"
                 onClick={() => updateContentScale(CONTENT_SCALE_STEP)}
-                className="pq-icon-button !h-7 !w-7"
                 aria-label={l('放大正文', 'Zoom in content')}
               >
                 <ZoomIn className="h-3.5 w-3.5" strokeWidth={1.9} />
-              </button>
+              </IconButton>
             </div>
           </div>
         </div>

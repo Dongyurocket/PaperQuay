@@ -213,3 +213,11 @@ test('reconstructNomenclature parses collapsed nomenclature paragraph into markd
   assert.ok(output.includes('| $t/c$ | thickness-to-chord ratio |'));
 });
 
+
+test('sanitizeFakeSuperscripts does not rewrite author initials or drop caps implicitly', () => {
+  // Drop Cap 清洗由 sanitizeDropCapArtifacts 显式执行；通用伪上标清洗不能
+  // 把 "J SMITH" 这类作者缩写改成 "Jsmith"。
+  assert.equal(sanitizeFakeSuperscripts('J SMITH'), 'J SMITH');
+  assert.equal(sanitizeFakeSuperscripts('U RBAN air mobility'), 'U RBAN air mobility');
+  assert.equal(sanitizeDropCapArtifacts('U RBAN air mobility'), 'Urban air mobility');
+});

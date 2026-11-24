@@ -28,6 +28,8 @@ coverage/
 
 # Electron / desktop packaging output
 packaging/mcp/
+# scripts/bundle-preload.cjs 的生成物；构建时重新生成，不提交。
+electron/preload.bundle.cjs
 builder-debug.yml
 builder-effective-config.yaml
 *.asar
@@ -109,6 +111,8 @@ playwright-report/
 
 # Backups, archives, and scratch work
 .codex-tmp/
+.codex-temp/
+.verification-*/
 .backups/
 .mojibake-backup/
 .tmp/

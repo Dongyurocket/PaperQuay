@@ -61,6 +61,7 @@ function validateEntryPath(value) {
   if (typeof value !== 'string' || value.length === 0 || value.length > 240) {
     throw codedError('UNSAFE_ENTRY_PATH', 'Entry path must contain 1 to 240 characters');
   }
+  // eslint-disable-next-line no-control-regex -- 需要匹配并剔除不可见控制字符，保持原有字节级语义
   if (/[\\:*?"<>|]/u.test(value) || /[\u0000-\u001f\u007f]/u.test(value)) {
     throw codedError('UNSAFE_ENTRY_PATH', 'Entry path contains a forbidden character');
   }
@@ -773,6 +774,34 @@ function decodeFrame(stored, { compression, rawLength, entryIndex }) {
   }
 }
 
+// FAT/exFAT、SMB 与部分加密卷不支持硬链接（Windows 上常表现为 EPERM）。
+const LINK_UNSUPPORTED_CODES = new Set([
+  'EPERM',
+  'EACCES',
+  'ENOSYS',
+  'ENOTSUP',
+  'EOPNOTSUPP',
+  'EXDEV',
+  'EINVAL',
+  'EMLINK',
+]);
+
+/**
+ * 把同目录 partial 文件发布为最终文件。优先硬链接（零拷贝、原子），
+ * 文件系统不支持时回退到 rename；其他错误（例如目标已存在）照常抛出。
+ */
+async function publishExtractedFile(temporaryPath, outputPath, { link = fsp.link } = {}) {
+  try {
+    await link(temporaryPath, outputPath);
+    await fsp.unlink(temporaryPath).catch(() => {});
+    return 'link';
+  } catch (error) {
+    if (!LINK_UNSUPPORTED_CODES.has(error?.code)) throw error;
+    await fsp.rename(temporaryPath, outputPath);
+    return 'rename';
+  }
+}
+
 async function ensureSafeParent(destinationRoot, relativePath) {
   const root = path.resolve(destinationRoot);
   await fsp.mkdir(root, { recursive: true });
@@ -913,8 +942,7 @@ async function processEntries(opened, { destinationDir, resolveDestination, onEn
           await outputHandle.sync();
           await outputHandle.close();
           outputHandle = undefined;
-          await fsp.link(temporaryPath, outputPath);
-          await fsp.unlink(temporaryPath);
+          await publishExtractedFile(temporaryPath, outputPath);
           temporaryPath = undefined;
           createdFiles.push(outputPath);
         }
@@ -1006,6 +1034,7 @@ module.exports = {
   PREAMBLE_SIZE,
   extractBackupPackage,
   inspectBackupPackage,
+  publishExtractedFile,
   validateEntryPath,
   verifyBackupPackage,
   writeBackupPackage,

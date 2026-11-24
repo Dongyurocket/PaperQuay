@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { createRequire } from 'node:module';
 import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -8,6 +10,10 @@ import {
   createKnowledgeGraphSnapshot,
   createKnowledgeGraphCommands,
 } from '../electron/backend/knowledgeGraphCommands.cjs';
+
+const require = createRequire(import.meta.url);
+const fs = require('node:fs');
+const { writeJsonSync } = require('../electron/backend/utils.cjs');
 
 function createContext(overrides = {}) {
   return {
@@ -308,4 +314,122 @@ test('knowledge graph local mode keeps only nodes within the requested depth', a
   assert.ok(nodeIds.has('tag:rag'));
   assert.ok(nodeIds.has('category:cat-1'));
   assert.equal(nodeIds.has('note:note-2'), false);
+});
+
+const RELATION_FILE = 'paperquay-knowledge-graph-relations.json';
+
+test('corrupted relation store is backed up and reported instead of treated as empty', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'paperquay-graph-corrupt-'));
+  try {
+    const relationPath = path.join(dir, RELATION_FILE);
+    const raw = '{"version":1,"relations":[{"id":"broken"';
+    await writeFile(relationPath, raw, 'utf8');
+    const commands = createKnowledgeGraphCommands(createContext({ dataDir: dir }));
+
+    await assert.rejects(
+      async () => commands.knowledge_graph_list_relations(),
+      (error) => {
+        assert.equal(error.code, 'GRAPH_RELATION_STORE_CORRUPT');
+        assert.match(error.message, /corrupt/i);
+        assert.match(error.message, /corrupt\.json/);
+        return true;
+      },
+    );
+    assert.equal(await readFile(relationPath, 'utf8'), raw, 'the damaged file must not be rewritten');
+    const backupPath = path.join(dir, `${RELATION_FILE}.corrupt.json`);
+    assert.equal(await readFile(backupPath, 'utf8'), raw);
+
+    // Writes must refuse to start from the damaged file, and repeated reads must
+    // reuse the existing evidence backup instead of stacking new ones.
+    assert.throws(
+      () => commands.knowledge_graph_create_relation({ request: {
+        source: 'paper:paper-1', target: 'note:note-1', label: 'explains',
+      } }),
+      /corrupt/i,
+    );
+    assert.equal(await readFile(relationPath, 'utf8'), raw);
+    assert.equal(await readFile(backupPath, 'utf8'), raw);
+    const backups = (await readdir(dir)).filter((name) => name.includes('.corrupt'));
+    assert.deepEqual(backups, [`${RELATION_FILE}.corrupt.json`]);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('failed atomic writes keep the previous relation store and leave no temp files', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'paperquay-graph-atomic-'));
+  try {
+    const relationPath = path.join(dir, RELATION_FILE);
+    const previous = JSON.stringify({ version: 1, relations: [{ id: 'keep-me' }] });
+    await writeFile(relationPath, previous, 'utf8');
+    const originalRename = fs.renameSync;
+    fs.renameSync = () => { throw new Error('mock rename failure'); };
+    try {
+      assert.throws(
+        () => writeJsonSync(relationPath, { version: 1, relations: [{ id: 'must-not-land' }] }),
+        /mock rename failure/,
+      );
+    } finally {
+      fs.renameSync = originalRename;
+    }
+    assert.equal(await readFile(relationPath, 'utf8'), previous);
+    assert.deepEqual((await readdir(dir)).filter((name) => name.includes('.tmp')), []);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('concurrent relation writes stay atomic and readable', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'paperquay-graph-concurrent-'));
+  const utilsPath = require.resolve('../electron/backend/utils.cjs');
+  try {
+    const relationPath = path.join(dir, RELATION_FILE);
+    const childScript = [
+      "const { writeJsonSync } = require(process.argv[1]);",
+      "const filePath = process.argv[2];",
+      "const tag = process.argv[3];",
+      "const blob = tag.repeat(48000);",
+      "for (let index = 0; index < 150; index += 1) {",
+      "  writeJsonSync(filePath, { version: 1, relations: [{ id: tag + '-' + index, blob }] });",
+      "}",
+    ].join('\n');
+    const runWriter = (tag) => new Promise((resolve, reject) => {
+      const child = spawn(process.execPath, ['-e', childScript, utilsPath, relationPath, tag], {
+        stdio: ['ignore', 'ignore', 'pipe'],
+      });
+      let stderr = '';
+      child.stderr.on('data', (chunk) => { stderr += chunk; });
+      child.on('error', reject);
+      child.on('exit', (code) => {
+        if (code === 0) resolve();
+        else reject(new Error(`writer ${tag} exited with ${code}: ${stderr}`));
+      });
+    });
+
+    let running = true;
+    const writers = Promise.all([runWriter('a'), runWriter('b')]).finally(() => { running = false; });
+    const parseErrors = [];
+    let reads = 0;
+    while (running) {
+      try {
+        JSON.parse(await readFile(relationPath, 'utf8'));
+        reads += 1;
+      } catch (error) {
+        if (error.code !== 'ENOENT') parseErrors.push(error.message);
+      }
+      // 固定 4ms 延时改为让出一个 I/O 回合：读循环不需要与写入端约定节奏，
+      // 只要在两个写进程存活期间持续观察即可。
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    await writers;
+
+    assert.equal(parseErrors.length, 0, `observed partial writes: ${parseErrors.slice(0, 3).join(' | ')}`);
+    assert.ok(reads > 0, 'the reader must observe the file while writers are active');
+    const persisted = JSON.parse(await readFile(relationPath, 'utf8'));
+    assert.equal(persisted.relations.length, 1);
+    assert.match(persisted.relations[0].id, /^[ab]-\d+$/);
+    assert.deepEqual((await readdir(dir)).filter((name) => name.endsWith('.tmp')), []);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });

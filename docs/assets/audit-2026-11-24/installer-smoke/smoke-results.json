@@ -1,0 +1,196 @@
+{
+  "generatedAt": "2026-11-24T15:25:58.415Z",
+  "installer": {
+    "name": "PaperQuay-0.4.38-win-x64.exe",
+    "sha256": "0941c9c83d7d20c061ad55f0d53033830ab29224ab2292d2ef3cc61ca709c26f",
+    "bytes": 116159237
+  },
+  "payload": {
+    "appAsarSha256": "0523dc064aad2d10b6e08598da9c98f14ca3e34ee8ebfdba8505e7fedb87edc0",
+    "appAsarBytes": 50646364
+  },
+  "workRoot": "<temp>",
+  "password": "***",
+  "results": [
+    {
+      "name": "安装包 payload 解包布局",
+      "status": "pass",
+      "detail": {
+        "installDir": "<repo>\\release\\win-unpacked",
+        "installerPath": "<installer>"
+      },
+      "error": null
+    },
+    {
+      "name": "启动与 preload 桥",
+      "status": "pass",
+      "detail": {
+        "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) paperquay/0.4.38 Chrome/148.0.7778.97 Electron/42.2.0 Safari/537.36",
+        "title": "PaperQuay"
+      },
+      "error": null
+    },
+    {
+      "name": "导入 PDF",
+      "status": "pass",
+      "detail": {
+        "paperId": "paper_mwuujbc1_a3fff84a",
+        "title": "audit-simple"
+      },
+      "error": null
+    },
+    {
+      "name": "打开论文与 PDF 渲染",
+      "status": "pass",
+      "detail": {
+        "width": 417,
+        "height": 588,
+        "ink": 9939,
+        "total": 245196,
+        "ratio": 0.04053491900357265
+      },
+      "error": null
+    },
+    {
+      "name": "中文 CID PDF 导入与渲染",
+      "status": "pass",
+      "detail": {
+        "paperId": "paper_mwuujfxa_4563ede9",
+        "title": "audit-chinese-cid",
+        "ink": {
+          "width": 432,
+          "height": 609,
+          "ink": 1994,
+          "total": 263088,
+          "ratio": 0.007579213038983154
+        }
+      },
+      "error": null
+    },
+    {
+      "name": "笔记创建与读取",
+      "status": "pass",
+      "detail": {
+        "noteId": "note_mwuujgf2_c474301e"
+      },
+      "error": null
+    },
+    {
+      "name": "Vault 同步",
+      "status": "pass",
+      "detail": {
+        "vaultDir": "<temp>\\vault",
+        "files": 2
+      },
+      "error": null
+    },
+    {
+      "name": "RetainPDF 状态",
+      "status": "pass",
+      "detail": {
+        "installed": true,
+        "running": false,
+        "jobs": 0
+      },
+      "error": null
+    },
+    {
+      "name": "备份导出",
+      "status": "pass",
+      "detail": {
+        "destinationPath": "<temp>\\backups\\smoke-backup.pqbackup",
+        "bytes": 407527,
+        "estimateEntries": 5,
+        "exported": {
+          "ok": true,
+          "packagePath": "<temp>\\backups\\smoke-backup.pqbackup",
+          "bytes": 407527,
+          "entries": 5,
+          "durationMs": 747,
+          "warnings": [
+            {
+              "code": "FILE_MISSING_AT_EXPORT",
+              "kind": "knowledge-graph",
+              "originalName": "paperquay-knowledge-graph-relations.json"
+            },
+            {
+              "code": "FILE_UNSTABLE_AT_EXPORT",
+              "kind": "library-pdf",
+              "originalName": "Unknown_nodate_audit-chinese-cid__original__19eb9a56.pdf"
+            },
+            {
+              "code": "FILE_UNSTABLE_AT_EXPORT",
+              "kind": "library-pdf",
+              "originalName": "Unknown_nodate_audit-simple__original__5e6a9f45.pdf"
+            },
+            {
+              "code": "FILE_UNSTABLE_AT_EXPORT",
+              "kind": "notes-vault",
+              "originalName": ".paperquay-vault.json"
+            },
+            {
+              "code": "FILE_UNSTABLE_AT_EXPORT",
+              "kind": "notes-vault",
+              "originalName": "Smoke note.md"
+            },
+            {
+              "code": "VAULT_ORPHAN",
+              "kind": "notes-vault",
+              "originalName": "Smoke note.md"
+            }
+          ],
+          "verified": true,
+          "counts": {
+            "papers": 2,
+            "attachments": 2,
+            "notes": 1,
+            "noteFolders": 0,
+            "ragIndexes": 0,
+            "ragDocuments": 0,
+            "ragChunks": 0,
+            "agentMemoryFiles": 0,
+            "localStorageKeys": 0
+          }
+        }
+      },
+      "error": null
+    },
+    {
+      "name": "备份导入检查（拒绝未授权包路径）",
+      "status": "pass",
+      "detail": {
+        "rejected": true,
+        "message": "Error: Error: Error invoking remote method 'paperquay:invoke': Error: 请通过应用的文件对话框选择备份包。"
+      },
+      "error": null
+    },
+    {
+      "name": "备份导入（原生对话框授权）",
+      "status": "fail",
+      "detail": null,
+      "error": "Error: UIAutomation failed (code 1): file dialog window not found for pid 22912\r\nAt <temp>\\pq-uia-32192-1795533927421.ps1:43 char:21\r\n+ ...  $window) { throw \"file dialog window not found for pid $TargetProces ...\r\n+                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\r\n    + CategoryInfo          : OperationStopped: (file dialog win...d for pid 22912:String) [], RuntimeException\r\n    + FullyQualifiedErrorId : file dialog window not found for pid 22912\r\n \r\n\n    at ChildProcess.<anonymous> (file:///<repo>/tests/support/windowsDialog.mjs:116:21)\n    at ChildProcess.emit (node:events:509:28)\n    at ChildProcess._handle.onexit (node:internal/child_process:295:12)"
+    },
+    {
+      "name": "MCP read_paper_figure（安装版 server）",
+      "status": "pass",
+      "detail": {
+        "tools": 28,
+        "cacheDir": "<temp>\\userdata\\PaperQuay\\.mineru-cache\\document-1c56d4de",
+        "figureType": [
+          "text",
+          "image"
+        ]
+      },
+      "error": null
+    },
+    {
+      "name": "备份导入（恢复到临时目录）",
+      "status": "fail",
+      "detail": null,
+      "error": "Error: backup package was not authorized through the dialog\n    at assert (file:///<repo>/tests/support/installerSmoke.mjs:49:25)\n    at file:///<repo>/tests/support/installerSmoke.mjs:397:7\n    at step (file:///<repo>/tests/support/installerSmoke.mjs:39:26)\n    at main (file:///<repo>/tests/support/installerSmoke.mjs:396:11)\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)"
+    }
+  ],
+  "pass": 11,
+  "fail": 2,
+  "appLogs": null
+}

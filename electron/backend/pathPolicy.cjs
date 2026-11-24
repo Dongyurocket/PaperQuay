@@ -17,6 +17,20 @@ const { cleanString } = require('./utils.cjs');
 
 const WRITABLE_EXTENSIONS_IN_ATTACHMENT_DIRS = new Set(['.pdf']);
 
+/**
+ * 只读授权状态的原因码。设置页据此区分「应用默认目录」「dataDir 内的配置目录」
+ * 「目录对话框授权」「已登记附件目录」与「已配置但缺少授权」，从而提示用户重新选择目录。
+ */
+const AUTHORIZATION_REASONS = Object.freeze({
+  DEFAULT: 'default',
+  CONFIGURED: 'configured',
+  DIALOG_APPROVED: 'dialog-approved',
+  KNOWN_ATTACHMENT: 'known-attachment',
+  MISSING_APPROVAL: 'missing-approval',
+  MISSING: 'missing',
+  UNSAFE: 'unsafe',
+});
+
 function comparablePath(filePath) {
   const resolved = path.resolve(filePath);
   return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
@@ -137,9 +151,14 @@ function createPathPolicy({
   }
 
   /**
-   * 信任根只能来自应用路径、主进程写过的文库设置（storageDir/translatedPdfDir）
+   * 信任根只能来自应用路径、主进程写过的文库设置（storageDir）
    * 与主进程对话框授权。不要直接信任渲染层可写的配置文件：否则一次
    * write_text_file 就能把 C:\ 变成许可根。
+   *
+   * translatedPdfDir 不在这里信任：自定义译版目录必须和 MinerU 自定义目录
+   * 一样经目录对话框授权，否则 path_authorization_status 会报 missing-approval
+   * 而实际读写仍放行（B1 复核发现的策略/状态矛盾）。默认译版目录位于
+   * storageDir 或 dataDir 内，仍由上面的根覆盖。
    */
   function readRoots() {
     const settings = loadSettings();
@@ -148,7 +167,6 @@ function createPathPolicy({
       appPaths.mineruCacheDir,
       appPaths.remotePdfDownloadDir,
       settings.storageDir,
-      settings.translatedPdfDir,
       ...approvedReadPaths,
     ]);
   }
@@ -157,8 +175,9 @@ function createPathPolicy({
     const settings = loadSettings();
     return expandRoots([
       appPaths.dataDir,
+      // 默认 MinerU 缓存目录由主进程决定，始终可写；自定义目录只能来自对话框授权。
+      appPaths.mineruCacheDir,
       settings.storageDir,
-      settings.translatedPdfDir,
       ...approvedWritePaths,
     ]);
   }
@@ -177,18 +196,32 @@ function createPathPolicy({
 
   function resolveForCheck(filePath) {
     const raw = cleanString(filePath);
-    if (!raw || hasUnsafePathSyntax(raw)) {
+    // UNC 在 realpath 之前拒绝，避免授权查询/读写检查触发 SMB 探测。
+    if (!raw || hasUnsafePathSyntax(raw) || isUncPath(raw)) {
       return null;
     }
     const absolute = path.resolve(raw);
-    // realpath 只能用于真实存在的路径；写入目标可能尚未创建，此时用父目录的
-    // realpath 加文件名，避免符号链接目录绕过包含校验。
+    // realpath 只能用于真实存在的路径；写入目标可能尚未创建，此时沿父目录
+    // 向上找到最近一个存在的祖先再拼回后缀，避免 approved\link\newdir\file
+    // 这类中间目录不存在时按字面路径放行、随后 mkdir 跟随 junction 写出去。
     const real = safeRealpathSync(absolute);
     if (real) {
       return real;
     }
-    const parentReal = safeRealpathSync(path.dirname(absolute));
-    return parentReal ? path.join(parentReal, path.basename(absolute)) : absolute;
+    const suffix = [path.basename(absolute)];
+    let ancestor = path.dirname(absolute);
+    while (true) {
+      const realAncestor = safeRealpathSync(ancestor);
+      if (realAncestor) {
+        return path.join(realAncestor, ...suffix);
+      }
+      const parent = path.dirname(ancestor);
+      if (parent === ancestor) {
+        return absolute;
+      }
+      suffix.unshift(path.basename(ancestor));
+      ancestor = parent;
+    }
   }
 
   function isReadAllowed(filePath) {
@@ -230,6 +263,79 @@ function createPathPolicy({
     }
   }
 
+  /** 只读查询：路径是否位于渲染层可见的对话框授权记录内。 */
+  function isApprovedPath(filePath, mode = 'write') {
+    const absolute = resolveForCheck(filePath);
+    if (!absolute) return false;
+    const approvedPaths = mode === 'read' ? approvedReadPaths : approvedWritePaths;
+    for (const root of approvedPaths) {
+      if (isWithinRoot(absolute, root)) return true;
+    }
+    return false;
+  }
+
+  /**
+   * 只读授权状态（不授予任何权限）：
+   *   - default：应用默认路径（主进程决定，始终可用）；
+   *   - dialog-approved：目录对话框授权（持久化或本会话）；
+   *   - configured：位于主进程信任根（如 dataDir）内的配置路径；
+   *   - missing-approval：已配置但没有任何授权记录，需要用户重新选择；
+   *   - missing：未配置；
+   *   - unsafe：空路径或设备/ADS 等不安全语法。
+   */
+  function getAuthorizationStatus(filePath, {
+    mode = 'write',
+    defaultPaths = [],
+    trustedRoots = [],
+  } = {}) {
+    const raw = cleanString(filePath);
+    if (!raw) {
+      return { path: '', exists: false, authorized: false, reason: AUTHORIZATION_REASONS.MISSING };
+    }
+
+    const absolute = resolveForCheck(raw);
+    if (!absolute) {
+      return {
+        path: raw,
+        exists: false,
+        authorized: false,
+        reason: AUTHORIZATION_REASONS.UNSAFE,
+      };
+    }
+
+    // 默认 MinerU 缓存根始终可用，调用方不必重复传入。
+    const builtinDefaults = appPaths.mineruCacheDir ? [appPaths.mineruCacheDir] : [];
+    const isDefault = [...builtinDefaults, ...expandRoots(defaultPaths)]
+      .some((root) => isWithinRoot(absolute, root));
+    const isApproved = isApprovedPath(absolute, mode);
+    const isTrusted = expandRoots(trustedRoots).some((root) => isWithinRoot(absolute, root));
+    // 已登记附件所在目录/文件按既有策略可读写（批注版与译版 PDF 的落点）。
+    // 状态必须反映这一点，否则会出现「报 missing-approval、实际可读写」的矛盾。
+    // 写模式下必须探测写权限：只读祖先授权不应把未授权的目录报成可写。
+    const isAttachmentKnown = !(isDefault || isApproved || isTrusted)
+      && (mode === 'write'
+        ? isWriteAllowed(absolute) || isWriteAllowed(path.join(absolute, 'probe.pdf'))
+        : isReadAllowed(raw));
+    const authorized = isDefault || isApproved || isTrusted || isAttachmentKnown;
+    const reason = isDefault
+      ? AUTHORIZATION_REASONS.DEFAULT
+      : isApproved
+        ? AUTHORIZATION_REASONS.DIALOG_APPROVED
+        : isTrusted
+          ? AUTHORIZATION_REASONS.CONFIGURED
+          : isAttachmentKnown
+            ? AUTHORIZATION_REASONS.KNOWN_ATTACHMENT
+            : AUTHORIZATION_REASONS.MISSING_APPROVAL;
+
+    // 未授权路径不返回 realpath：状态命令不能成为渲染层的路径规范化探针。
+    return {
+      path: authorized ? absolute : path.resolve(raw),
+      exists: authorized ? fs.existsSync(absolute) : false,
+      authorized,
+      reason,
+    };
+  }
+
   function isPdfPathAllowed(filePath) {
     const raw = cleanString(filePath);
     if (!raw || path.extname(raw).toLowerCase() !== '.pdf') return false;
@@ -240,6 +346,20 @@ function createPathPolicy({
   /** 文件对话框返回的选择：文件本身与所在目录都登记为可读。 */
   function approveReadPath(filePath) {
     approveReadPaths([filePath]);
+  }
+
+  /**
+   * 目录对话框返回的选择：只登记目录自身，不把父目录加入读根。
+   * 目录本身已经覆盖其全部子路径；再登记父目录会把同级的整棵树一起放开。
+   * 目录读写仍分别由 approveReadDirectory / approveWritePath 决定。
+   */
+  function approveReadDirectory(directoryPath) {
+    const raw = cleanString(directoryPath);
+    if (!raw) return;
+    const absolute = safeRealpathSync(path.resolve(raw)) ?? path.resolve(raw);
+    if (approvedReadPaths.has(absolute)) return;
+    approvedReadPaths.add(absolute);
+    persistApprovals();
   }
 
   /** 批量登记，避免 Zotero 列表等场景逐条落盘。 */
@@ -276,11 +396,14 @@ function createPathPolicy({
   }
 
   return {
+    approveReadDirectory,
     approveReadPath,
     approveReadPaths,
     approveWritePath,
     assertReadAllowed,
     assertWriteAllowed,
+    getAuthorizationStatus,
+    isApprovedPath,
     isPdfPathAllowed,
     isReadAllowed,
     isWriteAllowed,
@@ -290,6 +413,7 @@ function createPathPolicy({
 }
 
 module.exports = {
+  AUTHORIZATION_REASONS,
   createPathPolicy,
   hasAlternateDataStream,
   hasUnsafePathSyntax,

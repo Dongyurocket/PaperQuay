@@ -1,14 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 const require = createRequire(import.meta.url);
 const { createFileCommands } = require('../electron/backend/fileCommands.cjs');
 
-function createCommands(storeLoad = null, approvedWritePaths = new Set()) {
+function createCommands(
+  storeLoad = null,
+  approvedWritePaths = new Set(),
+  extraContext: Record<string, unknown> = {},
+) {
   const dataDir = mkdtempSync(path.join(tmpdir(), 'paperquay-file-commands-test-'));
   const commands = createFileCommands({
     appPaths: {
@@ -24,6 +28,7 @@ function createCommands(storeLoad = null, approvedWritePaths = new Set()) {
         papers: [],
       })),
     },
+    ...extraContext,
   });
 
   return { commands, dataDir };
@@ -231,5 +236,80 @@ test('reveal_path rejects paths outside allowed roots and empty input', async ()
   } finally {
     rmSync(dataDir, { recursive: true, force: true });
     rmSync(outsideDir, { recursive: true, force: true });
+  }
+});
+
+const originalFetch = globalThis.fetch;
+
+function restoreFetch() {
+  globalThis.fetch = originalFetch;
+}
+
+function chunkedResponse(chunks: string[]) {
+  return new Response(new ReadableStream({
+    start(controller) {
+      for (const chunk of chunks) controller.enqueue(new TextEncoder().encode(chunk));
+      controller.close();
+    },
+  }));
+}
+
+test('download_remote_file_to_path streams the response to disk', async () => {
+  const { commands, dataDir } = createCommands(null, new Set(), {
+    httpLimits: { maxRemoteFileBytes: 1024, remoteDownloadTimeoutMs: 5000 },
+  });
+  const target = path.join(dataDir, '.downloads', 'pdfs', 'remote.pdf');
+  globalThis.fetch = async () => chunkedResponse(['%PDF-1.7\n', 'body\n']);
+
+  try {
+    await commands.download_remote_file_to_path({ url: 'https://example.test/remote.pdf', path: target });
+
+    assert.equal(readFileSync(target, 'utf8'), '%PDF-1.7\nbody\n');
+    assert.deepEqual(readdirSync(path.dirname(target)), ['remote.pdf']);
+  } finally {
+    restoreFetch();
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('download_remote_file_to_path enforces the chunked size limit and removes partial files', async () => {
+  const { commands, dataDir } = createCommands(null, new Set(), {
+    httpLimits: { maxRemoteFileBytes: 8, remoteDownloadTimeoutMs: 5000 },
+  });
+  const target = path.join(dataDir, '.downloads', 'pdfs', 'remote.pdf');
+  globalThis.fetch = async () => chunkedResponse(['x'.repeat(16), 'y'.repeat(16)]);
+
+  try {
+    await assert.rejects(
+      () => commands.download_remote_file_to_path({ url: 'https://example.test/remote.pdf', path: target }),
+      /too large|exceeds/i,
+    );
+    assert.equal(existsSync(target), false);
+    const directory = path.dirname(target);
+    assert.deepEqual(existsSync(directory) ? readdirSync(directory) : [], []);
+  } finally {
+    restoreFetch();
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('download_remote_file_to_path times out stalled downloads', async () => {
+  const { commands, dataDir } = createCommands(null, new Set(), {
+    httpLimits: { maxRemoteFileBytes: 1024, remoteDownloadTimeoutMs: 20 },
+  });
+  const target = path.join(dataDir, '.downloads', 'pdfs', 'remote.pdf');
+  globalThis.fetch = (_url: string, init: RequestInit) => new Promise<Response>((_resolve, reject) => {
+    init.signal?.addEventListener('abort', () => reject(init.signal?.reason));
+  });
+
+  try {
+    await assert.rejects(
+      () => commands.download_remote_file_to_path({ url: 'https://example.test/remote.pdf', path: target }),
+      /timed out/i,
+    );
+    assert.equal(existsSync(target), false);
+  } finally {
+    restoreFetch();
+    rmSync(dataDir, { recursive: true, force: true });
   }
 });

@@ -116,6 +116,68 @@ test('append patch keeps existing anchors immutable and inserts new distill befo
   assert.match(patch.contentText ?? '', /消融实验表明门控是关键/);
 });
 
+test('英文界面生成 Excerpt card 标签与 My thoughts 标题', () => {
+  const request = buildDistilledExcerptNoteCreateRequest({
+    paperId: 'paper-1',
+    selectedExcerpt: selectedExcerpt(),
+    sourceTitle: 'KVNet: A Study',
+    distilledTitle: 'Gated KV store',
+    distilledText: 'A short summary.',
+    locale: 'en-US',
+  });
+  assert.deepEqual(request.tags, ['Excerpt card']);
+  const blocks = request.contentJson?.content ?? [];
+  const last = blocks[blocks.length - 1];
+  assert.equal(last?.type, 'paragraph');
+  assert.match(String(last?.content?.[0]?.text ?? ''), /^💭 My thoughts:/);
+  assert.doesNotMatch(JSON.stringify(blocks), /我的想法|摘录卡/);
+});
+
+test('向英文摘录卡追加时识别 My thoughts 标题并保持其语言', () => {
+  const base = buildDistilledExcerptNoteCreateRequest({
+    paperId: 'paper-1',
+    selectedExcerpt: selectedExcerpt(),
+    sourceTitle: 'KVNet: A Study',
+    distilledTitle: 'Gated KV store',
+    distilledText: 'First distilled paragraph.',
+    locale: 'en-US',
+  });
+  const note = {
+    id: 'note-1',
+    paperId: 'paper-1',
+    type: 'highlight',
+    title: base.title,
+    content: base.content ?? '',
+    contentJson: base.contentJson,
+    contentText: base.contentText,
+    anchors: base.anchors ?? [],
+    tags: base.tags,
+    color: '#dbeafe',
+    createdAt: 1,
+    updatedAt: 1,
+    aiChatMessageIds: [],
+  } as const;
+
+  const { patch } = buildDistilledExcerptAppendPatch({
+    note: note as never,
+    paperId: 'paper-1',
+    selectedExcerpt: {
+      ...selectedExcerpt(),
+      text: 'Ablation shows the gate is the key factor.',
+      createdAt: 1_700_000_100_000,
+      pdfLocation: { pageNumber: 5 } as SelectedExcerpt['pdfLocation'],
+    },
+    sourceTitle: 'KVNet: A Study',
+    distilledText: 'Second distilled paragraph.',
+  });
+
+  const blocks = patch.contentJson?.content ?? [];
+  const last = blocks[blocks.length - 1];
+  assert.match(String(last?.content?.[0]?.text ?? ''), /^💭 My thoughts:/);
+  const secondAnchor = blocks.filter((node) => node?.type === 'noteAnchorBlock').at(-1);
+  assert.ok(blocks.indexOf(secondAnchor) < blocks.indexOf(last), '新内容必须插在英文「My thoughts」之前');
+});
+
 test('isExcerptCard requires at least one anchor', () => {
   assert.equal(isExcerptCard(null), false);
   assert.equal(isExcerptCard({ anchors: [] } as never), false);

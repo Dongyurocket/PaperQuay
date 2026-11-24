@@ -16,7 +16,6 @@ import { readLocalBinaryFile } from '../../services/desktop';
 import { bytesToDataUrl, decodeUtf8, formatFileSize, guessMimeTypeFromPath, isImagePath, isTextLikePath } from '../../utils/files';
 import { getFileNameFromPath, normalizeSelectionText as normalizeTextSelection } from '../../utils/text';
 import { pickLocaleText } from './readerShared';
-import type { MineruCacheManifest, SummaryCacheEnvelope, TranslationCacheEnvelope } from './readerShared';
 export {
   appendUniqueLocalPath,
   buildRemotePdfDownloadPath,
@@ -32,6 +31,8 @@ export const PANE_RATIO_STORAGE_KEY = 'paper-reader-pane-ratio-v2';
 
 export interface ReaderTabBridgeState {
   translating: boolean;
+  /** 该标签有问答会话正在生成回答；与 translating 一样计入 busy，避免被挂载预算卸载。 */
+  qaRunning: boolean;
   translatedCount: number;
   assistantSidebarProps: AssistantSidebarCoreProps;
   onDetachAssistant: () => void;

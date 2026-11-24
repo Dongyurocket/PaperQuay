@@ -3,6 +3,7 @@ import { buildPathInDirectory, normalizePathForCompare } from '../../utils/path.
 
 export function sanitizeFilename(filename: string): string {
   const sanitized = filename
+    // eslint-disable-next-line no-control-regex -- 需要匹配并剔除不可见控制字符，保持原有字节级语义
     .replace(/[<>:"/\\|?*\u0000-\u001F]/g, '_')
     .replace(/\s+/g, ' ')
     .trim();

@@ -8,6 +8,7 @@ const { DatabaseSync } = require('./nodeSqlite.cjs');
 const defaultContainer = require('./backupContainer.cjs');
 const { canonicalPath, remapRendererStorage } = require('../../src/shared/rendererStorageRemap.cjs');
 const { pathInside, safeRelativePath, safeSegment } = require('./backupSources.cjs');
+const { hasUnsafePathSyntax, isUncPath, isWithinRoot } = require('./pathPolicy.cjs');
 const PACKAGE_VERSION = require('../../package.json').version;
 const SUPPORTED_SCHEMA = { library: 1, notes: 1, rag: 1 };
 const RESTORE_ROOT_NAME = 'PaperQuay-restore';
@@ -101,19 +102,6 @@ function validPending(pending) {
   return actual.length === expected.length && crypto.timingSafeEqual(actual, expected);
 }
 
-function writeJsonAtomicSync(filePath, value) {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  const temporaryPath = `${filePath}.tmp`;
-  const descriptor = fs.openSync(temporaryPath, 'w', 0o600);
-  try {
-    fs.writeFileSync(descriptor, `${JSON.stringify(value, null, 2)}\n`);
-    fs.fsyncSync(descriptor);
-  } finally {
-    fs.closeSync(descriptor);
-  }
-  fs.renameSync(temporaryPath, filePath);
-}
-
 async function syncHandle(handle) {
   try { await handle.sync(); }
   catch (error) {
@@ -179,7 +167,33 @@ function validateAbsoluteTarget(value, label) {
   if (typeof value !== 'string' || !value.trim() || !path.isAbsolute(value)) {
     throw codedError('TARGET_NOT_WRITABLE', `${label} must be an absolute path`);
   }
+  // 绝不允许 UNC / 设备路径：realpath 与后续 mkdir 会先触发 SMB 探测或设备访问。
+  if (isUncPath(value) || hasUnsafePathSyntax(value)) {
+    throw codedError('UNSAFE_DESTINATION', `${label} cannot be a UNC or device path`);
+  }
   return path.resolve(value);
+}
+
+// 恢复目标只能来自主进程文件对话框。渲染层传入的绝对路径不可信：
+// 旧实现会把任意绝对路径（含 UNC 与用户文档）重命名为 .pre-import-* 并写入备份内容。
+function authorizedRestoreRoots(authorizedTargets) {
+  const roots = [];
+  for (const value of Array.isArray(authorizedTargets) ? authorizedTargets : []) {
+    if (typeof value !== 'string' || !value.trim() || !path.isAbsolute(value)) continue;
+    if (isUncPath(value) || hasUnsafePathSyntax(value)) continue;
+    for (const candidate of [path.resolve(value), realpathOrSelf(value)]) {
+      if (candidate && !roots.includes(candidate)) roots.push(candidate);
+    }
+  }
+  return roots;
+}
+
+function assertRestoreTargetAuthorized(target, label, roots) {
+  if (!target) return;
+  const candidates = [path.resolve(target), resolveLinkedParents(target), realpathOrSelf(target)].filter(Boolean);
+  if (!roots.some((root) => candidates.some((candidate) => isWithinRoot(candidate, root)))) {
+    throw codedError('UNSAFE_DESTINATION', `${label} must be a directory selected through the application dialog`);
+  }
 }
 
 async function assertNoLinkPath(target) {
@@ -762,10 +776,14 @@ async function stageBackupImport(context, input, dependencies) {
   if (typeof packagePath !== 'string' || !path.isAbsolute(packagePath)) throw codedError('INVALID_PACKAGE', 'Package path must be absolute');
   const manifest = assertCompatibleManifest((await container.inspectBackupPackage({ packagePath, password })).manifest);
   const roots = { sourceRoots: manifest.sourceRoots || {}, resolvedRoots: manifest.resolvedRoots || {} };
+  const authorizedRoots = authorizedRestoreRoots(input?.authorizedTargets);
   const libraryStorageDir = resolveLinkedParents(validateAbsoluteTarget(requestedTargets.libraryStorageDir, 'libraryStorageDir'));
   const translatedPdfDir = resolveLinkedParents(validateAbsoluteTarget(requestedTargets.translatedPdfDir || path.join(libraryStorageDir, 'translated-pdfs'), 'translatedPdfDir'));
   const hasVault = manifest.entries.some((entry) => entry.kind === 'notes-vault');
   const notesVaultDir = requestedTargets.notesVaultDir ? resolveLinkedParents(validateAbsoluteTarget(requestedTargets.notesVaultDir, 'notesVaultDir')) : '';
+  assertRestoreTargetAuthorized(libraryStorageDir, 'libraryStorageDir', authorizedRoots);
+  assertRestoreTargetAuthorized(translatedPdfDir, 'translatedPdfDir', authorizedRoots);
+  assertRestoreTargetAuthorized(notesVaultDir, 'notesVaultDir', authorizedRoots);
   const restoreId = `${new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14)}-${crypto.randomBytes(4).toString('hex')}`;
   const stagingDir = path.join(base.restoreRoot, restoreId);
   const stagingDataDir = path.join(stagingDir, 'data');
@@ -1137,7 +1155,7 @@ async function cleanupOrphanBackupImports(appPaths, { maxAgeMs = 24 * 60 * 60 * 
   return removed;
 }
 
-async function applyPendingBackupRestore(appPaths, { app, dialog, marker, onError } = {}) {
+async function applyPendingBackupRestore(appPaths, { dialog, marker, onError } = {}) {
   const base = rootPaths(getAppPaths(appPaths));
   let pending = readJsonSync(base.pendingPath, null);
   if (!pending) return { rendererRestorePayload: null, restored: false, dataDir: base.dataDir };

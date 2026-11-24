@@ -115,7 +115,9 @@ test('translate_cancel aborts the in-flight request and stops further batches', 
     assert.equal(cancelled.cancelled, true);
 
     await assert.rejects(pending, /TRANSLATION_CANCELLED/);
-    await new Promise((resolve) => setTimeout(resolve, 150));
+    // 取消后 pending 已经 reject，批量循环已退出；只需让出一个宏任务，
+    // 若实现仍调度了后续批次，requestCount 会在此刻之后变化。
+    await new Promise((resolve) => setImmediate(resolve));
     assert.equal(requestCount, 1, 'no new requests may start after cancellation');
 
     const unknown = await commands.translate_cancel({ requestId: 'missing' });

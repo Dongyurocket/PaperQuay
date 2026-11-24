@@ -88,6 +88,7 @@ function writeMarkerPayload(filePath, entries) {
   });
   const temporaryPath = `${filePath}.${process.pid}.${Math.random().toString(16).slice(2)}.tmp`;
 
+  let cleanupError = null;
   try {
     fs.writeFileSync(temporaryPath, payload, { encoding: 'utf8', flag: 'wx' });
     fs.renameSync(temporaryPath, filePath);
@@ -95,9 +96,10 @@ function writeMarkerPayload(filePath, entries) {
     try {
       fs.unlinkSync(temporaryPath);
     } catch (error) {
-      if (error?.code !== 'ENOENT') throw error;
+      if (error?.code !== 'ENOENT') cleanupError = error;
     }
   }
+  if (cleanupError) throw cleanupError;
 }
 
 function liveEntries(entries) {

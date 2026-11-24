@@ -15,6 +15,17 @@ import {
 
 export type { MineruCachePaths } from '../shared/mineruCachePaths.cjs';
 
+/**
+ * 译文缓存的身份信息。缓存文件按「目标语言 + 模型身份 + 源语言」隔离：
+ * 切换模型或源语言后不会读到另一套译文，读取时仍会把旧版
+ * `<targetLanguage>.json` 作为候选回退。
+ */
+export interface MineruTranslationCacheIdentity {
+  baseUrl: string;
+  model: string;
+  sourceLanguage: string;
+}
+
 export function guessSiblingJsonPath(pdfPath: string): string {
   const separator = pdfPath.includes('\\') ? '\\' : '/';
   const lastSeparatorIndex = Math.max(pdfPath.lastIndexOf('/'), pdfPath.lastIndexOf('\\'));
@@ -63,15 +74,61 @@ export function buildMineruCachePathCandidates(rootDir: string, item: WorkspaceI
   return buildSharedMineruCachePathCandidates(rootDir, item);
 }
 
+export function buildMineruTranslationCacheFileName(
+  targetLanguage: string,
+  identity?: MineruTranslationCacheIdentity | null,
+): string {
+  const languageSegment = sanitizePathSegment(targetLanguage || 'default');
+
+  if (!identity) {
+    return `${languageSegment}.json`;
+  }
+
+  // 身份哈希覆盖模型地址、模型名与源语言；目标语言已经在文件名前缀里。
+  const identityHash = hashString([
+    String(identity.sourceLanguage ?? '').trim(),
+    String(identity.baseUrl ?? '').trim(),
+    String(identity.model ?? '').trim(),
+  ].join('\n'));
+
+  return `${languageSegment}-${identityHash}.json`;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * 判断文件名是否属于某个目标语言的译文缓存（旧版 `<language>.json`
+ * 或新版 `<language>-<8位身份哈希>.json`）。清除缓存时用它过滤目录列表，
+ * 避免误删其它语言或无关文件。
+ */
+export function isMineruTranslationCacheFileName(
+  fileName: string,
+  targetLanguage: string,
+): boolean {
+  const languageSegment = sanitizePathSegment(targetLanguage || 'default');
+  const normalized = String(fileName ?? '').trim().toLowerCase();
+
+  if (normalized === `${languageSegment}.json`) {
+    return true;
+  }
+
+  return new RegExp(`^${escapeRegExp(languageSegment)}-[0-9a-f]{8}\\.json$`).test(normalized);
+}
+
 export function buildMineruTranslationCachePath(
   rootDir: string,
   item: WorkspaceItem,
   targetLanguage: string,
+  identity?: MineruTranslationCacheIdentity | null,
 ): string {
   const cachePaths = buildMineruCachePaths(rootDir, item);
-  const languageSegment = sanitizePathSegment(targetLanguage || 'default');
 
-  return joinPath(cachePaths.translationsDir, `${languageSegment}.json`);
+  return joinPath(
+    cachePaths.translationsDir,
+    buildMineruTranslationCacheFileName(targetLanguage, identity),
+  );
 }
 
 export function buildLegacyMineruTranslationCachePath(
@@ -85,15 +142,35 @@ export function buildLegacyMineruTranslationCachePath(
   return joinPath(cachePaths.translationsDir, `${languageSegment}.json`);
 }
 
+export function buildMineruTranslationCachePathCandidatesForLayout(
+  cachePaths: MineruCachePaths,
+  targetLanguage: string,
+  identity?: MineruTranslationCacheIdentity | null,
+): string[] {
+  const fileNames = identity
+    ? [
+        buildMineruTranslationCacheFileName(targetLanguage, identity),
+        buildMineruTranslationCacheFileName(targetLanguage),
+      ]
+    : [buildMineruTranslationCacheFileName(targetLanguage)];
+
+  return [...new Set(fileNames)].map((fileName) =>
+    joinPath(cachePaths.translationsDir, fileName)
+  );
+}
+
 export function buildMineruTranslationCachePathCandidates(
   rootDir: string,
   item: WorkspaceItem,
   targetLanguage: string,
+  identity?: MineruTranslationCacheIdentity | null,
 ): string[] {
-  const languageSegment = sanitizePathSegment(targetLanguage || 'default');
-
-  return buildMineruCachePathCandidates(rootDir, item).map((cachePaths) =>
-    joinPath(cachePaths.translationsDir, `${languageSegment}.json`)
+  return buildMineruCachePathCandidates(rootDir, item).flatMap((cachePaths) =>
+    buildMineruTranslationCachePathCandidatesForLayout(
+      cachePaths,
+      targetLanguage,
+      identity,
+    )
   );
 }
 

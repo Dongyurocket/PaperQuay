@@ -4,9 +4,9 @@ const { MARKER_FILE, externalWriteRevisions, readExternalWriteMarker } = require
 /**
  * 监听外部写入标记并广播变化。
  *
- * 监听数据目录而不是标记文件本身：MCP 用临时文件 + rename 原子替换标记，
- * 直接 watch 文件在 Windows 上会在替换后失效。目录 watch 配合文件名过滤即可，
- * 且数据库 WAL 等噪声事件不会触发广播。
+ * 监听数据目录而不是标记文件本身：标记是 SQLite 库，提交时同时可能改动主文件和
+ * journal/WAL 边车文件。目录 watch 配合文件名前缀过滤即可，且数据库 WAL 等噪声
+ * 事件不会触发广播。
  */
 function createExternalWriteWatcher({ dataDir, onChange }) {
   let watcher = null;
@@ -43,7 +43,10 @@ function createExternalWriteWatcher({ dataDir, onChange }) {
     if (closed || watcher) return;
     try {
       watcher = fs.watch(dataDir, { persistent: false }, (_eventType, filename) => {
-        if (!filename || String(filename) === MARKER_FILE) check();
+        if (!filename) return;
+        const name = String(filename);
+        // 主库提交与 -journal/-wal/-shm 边车事件都要检查，避免漏掉一次刷新。
+        if (name === MARKER_FILE || name.startsWith(`${MARKER_FILE}-`)) check();
       });
       watcher.on('error', () => {
         detach();

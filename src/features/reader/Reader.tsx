@@ -37,11 +37,12 @@ import type {
 } from '../../types/library';
 import { ATTACHMENT_KIND_TRANSLATED_PDF } from '../../utils/libraryPaper';
 import type {
+  DocumentChatSession,
   TranslationDisplayMode,
   WorkspaceItem,
 } from '../../types/reader';
 import DocumentReaderTab from './DocumentReaderTab';
-import { chooseMountedReaderTabIds } from './readerResourceBudget';
+import { chooseMountedReaderTabIds, collectBusyReaderTabIds } from './readerResourceBudget';
 import { AssistantSidebar } from './AssistantSidebar';
 import { usePointerDragResize } from './usePointerDragResize';
 import LiteratureLibraryView from '../literature/LiteratureLibraryView';
@@ -67,7 +68,7 @@ import {
   MIN_ASSISTANT_PANEL_WIDTH,
 } from './readerWorkspaceShared';
 import { useReaderLayoutStore } from '../../stores/useReaderLayoutStore';
-import { useReaderQaStore } from '../../stores/useReaderQaStore';
+import { createReaderQaTabActions, removeReaderQaTab, useReaderQaStore } from '../../stores/useReaderQaStore';
 import {
   mergeLocalPdfPath,
   createNativeLibraryWorkspaceItem,
@@ -77,8 +78,9 @@ import {
 import { confirmAction } from '../../ui/confirmHost';
 import { normalizeNotePaperTarget } from '../notes/notePaperTarget';
 
-interface ReaderProps {
-  workspaceActive?: boolean;
+const EMPTY_READER_QA_SESSIONS: DocumentChatSession[] = [];
+
+interface ReaderProps {  workspaceActive?: boolean;
 }
 
 function resolveNoteAnchorWorkspaceId(detail: JumpToNoteAnchorEventDetail) {
@@ -107,6 +109,7 @@ function areReaderTabBridgeStatesEqual(
   if (!left || !right) return false;
   return (
     left.translating === right.translating &&
+    left.qaRunning === right.qaRunning &&
     left.translatedCount === right.translatedCount &&
     left.assistantSidebarProps === right.assistantSidebarProps &&
     left.onDetachAssistant === right.onDetachAssistant &&
@@ -124,11 +127,10 @@ function Reader({ workspaceActive = true }: ReaderProps) {
   const tabs = useTabsStore((state) => state.tabs);
   const activeTabId = useTabsStore((state) => state.activeTabId);
   const openTab = useTabsStore((state) => state.openTab);
-  const setActiveTab = useTabsStore((state) => state.setActiveTab);
   const setHomeTabTitle = useTabsStore((state) => state.setHomeTabTitle);
 
-  const [statusMessage, setStatusMessage] = useState('');
-  const [error, setError] = useState('');
+  const [, setStatusMessage] = useState('');
+  const [, setError] = useState('');
   const {
     configHydrated,
     l,
@@ -164,10 +166,7 @@ function Reader({ workspaceActive = true }: ReaderProps) {
   const [libraryLoading, setLibraryLoading] = useState(false);
   const [readerBridges, setReaderBridges] = useState<Record<string, ReaderTabBridgeState>>({});
   const [recentReaderTabIds, setRecentReaderTabIds] = useState<string[]>([]);
-  const readerAssistantActivePanel = useReaderLayoutStore((state) => state.assistantActivePanel);
-  const setReaderAssistantActivePanel = useReaderLayoutStore((state) => state.setAssistantActivePanel);
   const readerAssistantDetached = useReaderLayoutStore((state) => state.assistantDetached);
-  const setReaderAssistantDetached = useReaderLayoutStore((state) => state.setAssistantDetached);
   const readerAssistantPanelWidth = useReaderLayoutStore((state) => state.assistantPanelWidth);
   const setReaderAssistantPanelWidth = useReaderLayoutStore((state) => state.setAssistantPanelWidth);
   const readerAssistantPanelResizing = useReaderLayoutStore((state) => state.assistantPanelResizing);
@@ -175,15 +174,36 @@ function Reader({ workspaceActive = true }: ReaderProps) {
   const persistReaderAssistantPanelWidth = useReaderLayoutStore((state) => state.persistAssistantPanelWidth);
   const latestAssistantPanelWidthRef = useRef(readerAssistantPanelWidth);
   const startAssistantPanelResize = usePointerDragResize();
-  const readerQaSessions = useReaderQaStore((state) => state.qaSessions);
-  const setReaderQaSessions = useReaderQaStore((state) => state.setQaSessions);
-  const readerSelectedQaSessionId = useReaderQaStore((state) => state.selectedQaSessionId);
-  const setReaderSelectedQaSessionId = useReaderQaStore((state) => state.setSelectedQaSessionId);
-  const readerSelectedQaPresetId = useReaderQaStore((state) => state.selectedQaPresetId);
-  const setReaderSelectedQaPresetId = useReaderQaStore((state) => state.setSelectedQaPresetId);
-  const [allLibraryPapers, setAllLibraryPapers] = useState<LiteraturePaper[]>([]);
+  const activeReaderTabId = useMemo(() => {
+    const tab = tabs.find((item) => item.id === activeTabId);
+    return tab?.type === 'reader' ? tab.id : '';
+  }, [activeTabId, tabs]);
+  const readerQaActions = useMemo(
+    () => createReaderQaTabActions(activeReaderTabId),
+    [activeReaderTabId],
+  );
+  const readerQaSessions = useReaderQaStore(
+    (state) => (activeReaderTabId ? state.tabs[activeReaderTabId]?.qaSessions : undefined)
+      ?? EMPTY_READER_QA_SESSIONS,
+  );
+  const readerSelectedQaSessionId = useReaderQaStore(
+    (state) => (activeReaderTabId ? state.tabs[activeReaderTabId]?.selectedQaSessionId : undefined)
+      ?? '',
+  );
+  const readerSelectedQaPresetId = useReaderQaStore(
+    (state) => (activeReaderTabId ? state.tabs[activeReaderTabId]?.selectedQaPresetId : undefined)
+      ?? '',
+  );
+  const {
+    setQaSessions: setReaderQaSessions,
+    setSelectedQaSessionId: setReaderSelectedQaSessionId,
+    setSelectedQaPresetId: setReaderSelectedQaPresetId,
+  } = readerQaActions;
   const [libraryPaperStatuses, setLibraryPaperStatuses] = useState<Record<string, { mineruParsed?: boolean }>>({});
-  const notePaperCandidates = allLibraryPapers;
+  const [notePaperCandidates, setNotePaperCandidates] = useState<LiteraturePaper[]>([]);
+  const [resolvedLibraryPapers, setResolvedLibraryPapers] = useState<Record<string, LiteraturePaper>>({});
+  const notePaperCandidatesRequestedRef = useRef(false);
+  const resolvedLibraryPaperIdsRef = useRef<Set<string>>(new Set());
   const [pendingNoteAnchorJump, setPendingNoteAnchorJump] =
     useState<JumpToNoteAnchorEventDetail | null>(null);
 
@@ -220,6 +240,10 @@ function Reader({ workspaceActive = true }: ReaderProps) {
   }, [setHomeTabTitle, settings.uiLanguage]);
 
   useEffect(() => {
+    if (!activeReaderTabId) {
+      return;
+    }
+
     const fallbackPresetId =
       qaModelPresets.find((preset) => preset.id === settings.qaActivePresetId)?.id ??
       qaModelPresets[0]?.id ??
@@ -234,9 +258,13 @@ function Reader({ workspaceActive = true }: ReaderProps) {
     }
 
     setReaderSelectedQaPresetId(fallbackPresetId);
-  }, [qaModelPresets, readerSelectedQaPresetId, settings.qaActivePresetId]);
+  }, [activeReaderTabId, qaModelPresets, readerSelectedQaPresetId, settings.qaActivePresetId]);
 
   useEffect(() => {
+    if (!activeReaderTabId) {
+      return;
+    }
+
     if (readerQaSessions.length === 0) {
       const initialSession = createQaSession(settings.uiLanguage);
 
@@ -251,7 +279,7 @@ function Reader({ workspaceActive = true }: ReaderProps) {
     ) {
       setReaderSelectedQaSessionId(readerQaSessions[0].id);
     }
-  }, [readerQaSessions, readerSelectedQaSessionId, settings.uiLanguage]);
+  }, [activeReaderTabId, readerQaSessions, readerSelectedQaSessionId, settings.uiLanguage]);
 
   const handleOpenPreferences = useCallback(() => {
     setPreferredPreferencesSection(undefined);
@@ -278,12 +306,6 @@ function Reader({ workspaceActive = true }: ReaderProps) {
     [activeTabId, tabs],
   );
 
-  const libraryWorkspaceItems = useMemo(() => {
-    return allLibraryPapers
-      .map((paper) => createNativeLibraryWorkspaceItem(paper, librarySettings?.storageDir))
-      .filter((item): item is WorkspaceItem => Boolean(item));
-  }, [allLibraryPapers, librarySettings?.storageDir]);
-
   const workspaceItemMap = useMemo(() => {
     const itemMap = new Map<string, WorkspaceItem>();
 
@@ -304,12 +326,13 @@ function Reader({ workspaceActive = true }: ReaderProps) {
       }
     };
 
-    applyItems(libraryWorkspaceItems);
+    // 只合并已打开/已解析的工作区条目；全库文献不再在启动时构造成
+    // WorkspaceItem，持久化标签页按 id 懒解析（见下方 effect）。
     applyItems(standaloneItems);
     applyItems(nativeLibraryItems);
 
     return itemMap;
-  }, [libraryWorkspaceItems, nativeLibraryItems, standaloneItems]);
+  }, [nativeLibraryItems, standaloneItems]);
 
   const allKnownItems = useMemo(
     () => Array.from(workspaceItemMap.values()),
@@ -320,14 +343,25 @@ function Reader({ workspaceActive = true }: ReaderProps) {
     () => tabs.filter((tab): tab is ReaderTab => tab.type === 'reader'),
     [tabs],
   );
+  const previousReaderTabIdsRef = useRef<string[]>([]);
+  useEffect(() => {
+    const currentTabIds = readerTabs.map((tab) => tab.id);
+    const currentTabIdSet = new Set(currentTabIds);
+    for (const tabId of previousReaderTabIdsRef.current) {
+      if (!currentTabIdSet.has(tabId)) removeReaderQaTab(tabId);
+    }
+    previousReaderTabIdsRef.current = currentTabIds;
+  }, [readerTabs]);
   const mountedReaderTabIds = useMemo(
     () => chooseMountedReaderTabIds({
       readerTabIds: readerTabs.map((tab) => tab.id),
       activeTabId,
       recentTabIds: recentReaderTabIds,
-      busyTabIds: readerTabs
-        .filter((tab) => readerBridges[tab.id]?.translating)
-        .map((tab) => tab.id),
+      // 翻译中与问答生成中的标签都必须保持挂载：切走后任务仍在继续。
+      busyTabIds: collectBusyReaderTabIds(
+        readerTabs.map((tab) => tab.id),
+        readerBridges,
+      ),
     }),
     [activeTabId, readerBridges, readerTabs, recentReaderTabIds],
   );
@@ -436,7 +470,6 @@ function Reader({ workspaceActive = true }: ReaderProps) {
     handleBatchTranslatePaperTitles,
     batchTitleTranslationRunning,
     handleBatchExportBib,
-    batchBibExportRunning,
     handleOpenNativeLibraryPaper,
     handleOpenStandalonePdf,
     handleSelectMineruCacheDir,
@@ -445,9 +478,6 @@ function Reader({ workspaceActive = true }: ReaderProps) {
     handleTestLlmConnection,
     handleToggleBatchMineruPause,
     handleToggleBatchSummaryPause,
-    handleWindowClose,
-    handleWindowMinimize,
-    handleWindowToggleMaximize,
     handleWorkspaceItemResolved,
     nativePaperActionStates,
   } = useReaderLibraryActions({
@@ -604,30 +634,55 @@ function Reader({ workspaceActive = true }: ReaderProps) {
     );
   }, []);
 
+  // 持久化标签页按需解析：只对已打开且尚未恢复的 native-library 标签按 id
+  // 单条查询，不再在启动时拉取并构造全库 workspaceItemMap。
   useEffect(() => {
-    if (!configHydrated || !workspaceActive) {
-      return undefined;
+    if (!configHydrated) {
+      return;
     }
 
-    let cancelled = false;
+    for (const tab of readerTabs) {
+      const workspaceId = tab.documentId;
+      if (!workspaceId.startsWith('native-library:')) continue;
+      if (workspaceItemMap.has(workspaceId) || resolvedLibraryPaperIdsRef.current.has(workspaceId)) continue;
 
-    // 分页取全量：library_list_papers 会在 1000 条处截断，不能用来构建全库 workspaceItemMap。
+      resolvedLibraryPaperIdsRef.current.add(workspaceId);
+      const paperId = workspaceId.slice('native-library:'.length);
+      void getLibraryPaper(paperId)
+        .then((paper) => {
+          if (!paper) return;
+          setResolvedLibraryPapers((current) => (
+            current[paper.id] ? current : { ...current, [paper.id]: paper }
+          ));
+          const item = createNativeLibraryWorkspaceItem(paper, librarySettings?.storageDir);
+          if (!item) return;
+          setNativeLibraryItems((current) => (
+            current.some((entry) => entry.workspaceId === item.workspaceId)
+              ? current
+              : [item, ...current]
+          ));
+        })
+        .catch(() => {
+          // 下次依赖变化时允许重试。
+          resolvedLibraryPaperIdsRef.current.delete(workspaceId);
+        });
+    }
+  }, [configHydrated, librarySettings?.storageDir, readerTabs, workspaceItemMap]);
+
+  // 问答范围/笔记引用候选按需加载：只有助手侧栏真正打开时才拉取全库候选，
+  // 首屏与纯阅读不承担整库水合成本。
+  useEffect(() => {
+    if (!showReaderAssistantSidebar || notePaperCandidatesRequestedRef.current) {
+      return;
+    }
+
+    notePaperCandidatesRequestedRef.current = true;
     void listAllLibraryPapers({ sortBy: 'updatedAt', sortDirection: 'desc' })
-      .then((papers) => {
-        if (!cancelled) {
-          setAllLibraryPapers(papers);
-        }
-      })
+      .then((papers) => setNotePaperCandidates(papers))
       .catch(() => {
-        if (!cancelled) {
-          setAllLibraryPapers([]);
-        }
+        notePaperCandidatesRequestedRef.current = false;
       });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [configHydrated, workspaceActive]);
+  }, [showReaderAssistantSidebar]);
 
   const {
     handleDetectLocalZotero,
@@ -727,6 +782,12 @@ function Reader({ workspaceActive = true }: ReaderProps) {
           ? createNativeLibraryWorkspaceItem(paper, librarySettings?.storageDir)
           : null;
 
+        if (paper) {
+          setResolvedLibraryPapers((current) => (
+            current[paper.id] ? current : { ...current, [paper.id]: paper }
+          ));
+        }
+
         if (!workspaceItem) {
           const message = l('没有找到该引用对应的可打开 PDF', 'No openable PDF was found for this reference.');
           setError(message);
@@ -753,6 +814,16 @@ function Reader({ workspaceActive = true }: ReaderProps) {
     [l, librarySettings?.storageDir, openTab, setError, setNativeLibraryItems, setSelectedLibraryItemId, setStatusMessage, workspaceItemMap],
   );
 
+  const handleOpenLibraryPaperFromShelf = useCallback(
+    (paper: LiteraturePaper) => {
+      setResolvedLibraryPapers((current) => (
+        current[paper.id] ? current : { ...current, [paper.id]: paper }
+      ));
+      handleOpenNativeLibraryPaper(paper);
+    },
+    [handleOpenNativeLibraryPaper],
+  );
+
   const handleNotePaperClick = useCallback(
     async (paperId: string) => {
       const normalizedPaperId = paperId.trim();
@@ -762,6 +833,9 @@ function Reader({ workspaceActive = true }: ReaderProps) {
       }
 
       const openPaper = (paper: LiteraturePaper) => {
+        setResolvedLibraryPapers((current) => (
+          current[paper.id] ? current : { ...current, [paper.id]: paper }
+        ));
         const workspaceItem = createNativeLibraryWorkspaceItem(paper, librarySettings?.storageDir);
 
         if (!workspaceItem) {
@@ -866,9 +940,17 @@ function Reader({ workspaceActive = true }: ReaderProps) {
         });
         if (!proceed) { setTranslatedPdfAttachDraft(null); return; }
       }
-      const existingIds = new Set((allLibraryPapers.find((paper) => paper.id === item.itemKey)?.attachments ?? [])
+      const currentPaper = resolvedLibraryPapers[item.itemKey]
+        ?? await getLibraryPaper(item.itemKey).catch(() => null);
+      if (currentPaper) {
+        setResolvedLibraryPapers((current) => (
+          current[currentPaper.id] ? current : { ...current, [currentPaper.id]: currentPaper }
+        ));
+      }
+      const existingIds = new Set((currentPaper?.attachments ?? [])
         .filter((attachment) => attachment.kind === ATTACHMENT_KIND_TRANSLATED_PDF).map((attachment) => attachment.id));
       const updatedPaper = await addLibraryAttachment({ paperId: item.itemKey, sourcePath, kind: ATTACHMENT_KIND_TRANSLATED_PDF, language });
+      setResolvedLibraryPapers((current) => ({ ...current, [updatedPaper.id]: updatedPaper }));
       const refreshedItem = createNativeLibraryWorkspaceItem(updatedPaper, librarySettings?.storageDir);
       if (refreshedItem) handleWorkspaceItemResolved(refreshedItem);
       emitNativePaperUpdated(updatedPaper);
@@ -883,7 +965,7 @@ function Reader({ workspaceActive = true }: ReaderProps) {
       setError(message);
       setStatusMessage(message);
     }
-  }, [translatedPdfAttachDraft, allLibraryPapers, l, librarySettings?.storageDir, handleWorkspaceItemResolved, setError, setStatusMessage]);
+  }, [translatedPdfAttachDraft, resolvedLibraryPapers, l, librarySettings?.storageDir, handleWorkspaceItemResolved, setError, setStatusMessage]);
 
   // 文献库视图中附加/移除翻译版 PDF 后，同步更新已打开的阅读标签页文档
   useEffect(() => {
@@ -894,11 +976,12 @@ function Reader({ workspaceActive = true }: ReaderProps) {
         return;
       }
 
-      setAllLibraryPapers((current) =>
+      setResolvedLibraryPapers((current) => ({ ...current, [detail.paper.id]: detail.paper }));
+      setNotePaperCandidates((current) => (
         current.some((paper) => paper.id === detail.paper.id)
           ? current.map((paper) => (paper.id === detail.paper.id ? detail.paper : paper))
-          : [detail.paper, ...current],
-      );
+          : current
+      ));
 
       const refreshedItem = createNativeLibraryWorkspaceItem(detail.paper, librarySettings?.storageDir);
 
@@ -910,20 +993,6 @@ function Reader({ workspaceActive = true }: ReaderProps) {
     window.addEventListener(NATIVE_PAPER_UPDATED_EVENT, handleNativePaperUpdated);
     return () => window.removeEventListener(NATIVE_PAPER_UPDATED_EVENT, handleNativePaperUpdated);
   }, [handleWorkspaceItemResolved, librarySettings?.storageDir]);
-
-  useEffect(() => {
-    if (!configHydrated) {
-      return undefined;
-    }
-
-    const timer = window.setTimeout(() => {
-      void syncNativeLibraryZoteroDir(zoteroLocalDataDir, 'reader-zotero-input');
-    }, 500);
-
-    return () => {
-      window.clearTimeout(timer);
-    };
-  }, [configHydrated, syncNativeLibraryZoteroDir, zoteroLocalDataDir]);
 
   useEffect(() => {
     const handleOpenStandalonePdfEvent = () => {
@@ -984,7 +1053,7 @@ function Reader({ workspaceActive = true }: ReaderProps) {
                 hidden={!workspaceActive || activeTabId !== HOME_TAB_ID}
               >
                 <LiteratureLibraryView
-                  onOpenPaper={handleOpenNativeLibraryPaper}
+                  onOpenPaper={handleOpenLibraryPaperFromShelf}
                   mineruCacheDir={settings.mineruCacheDir}
                   autoLoadSiblingJson={settings.autoLoadSiblingJson}
                   showReadingHeatmap={settings.showLibraryReadingHeatmap}
@@ -1001,7 +1070,6 @@ function Reader({ workspaceActive = true }: ReaderProps) {
                   ragBadgeByDocumentKey={ragBadgeByDocumentKey}
                   ragIndexingDocumentKey={ragIndexingDocumentKey}
                   onIndexPaperRag={(paperId) => void handleIndexPaperRag(paperId)}
-                  onAllPapersChange={setAllLibraryPapers}
                   onPaperStatusesChange={setLibraryPaperStatuses}
                 />
               </div>
@@ -1048,7 +1116,7 @@ function Reader({ workspaceActive = true }: ReaderProps) {
                     loadLibraryPreviewBlocks={loadLibraryPreviewBlocks}
                     translationSnapshot={libraryTranslationSnapshots[item.workspaceId] ?? null}
                     libraryPreviewSummary={libraryPreviewStates[item.workspaceId]?.summary ?? null}
-                    overviewPaper={item.source === 'native-library' ? allLibraryPapers.find((paper) => paper.id === item.itemKey) : undefined}
+                    overviewPaper={item.source === 'native-library' ? resolvedLibraryPapers[item.itemKey] : undefined}
                     libraryStorageDir={librarySettings?.storageDir}
                   />
                   ) : null}
@@ -1109,8 +1177,8 @@ function Reader({ workspaceActive = true }: ReaderProps) {
           translatedCount={activeReaderBridge?.translatedCount ?? 0}
           onSettingChange={updateSetting}
           onNativeLibrarySettingsChange={(patch) => void updateNativeLibrarySettings(patch)}
-          onSelectLibraryStorageDir={() => void handleSelectLibraryStorageDir()}
-          onSelectTranslatedPdfStorageDir={() => void handleSelectTranslatedPdfStorageDir()}
+          onSelectLibraryStorageDir={() => handleSelectLibraryStorageDir()}
+          onSelectTranslatedPdfStorageDir={() => handleSelectTranslatedPdfStorageDir()}
           onZoteroLocalDataDirChange={setZoteroLocalDataDir}
           onMineruApiTokenChange={(value) => updateReaderSecret('mineruApiToken', value)}
           onRepairMineruCacheImages={() => void handleRepairMineruCacheImages()}
@@ -1124,7 +1192,7 @@ function Reader({ workspaceActive = true }: ReaderProps) {
           onReloadLocalZotero={() => void handleReloadLocalZotero()}
           onImportLocalZotero={() => void handleImportLocalZoteroToNativeLibrary()}
           onEnrichAllLibraryMetadata={emitLibraryMetadataEnrichRequest}
-          onSelectMineruCacheDir={() => void handleSelectMineruCacheDir()}
+          onSelectMineruCacheDir={() => handleSelectMineruCacheDir()}
           onSelectRemotePdfDownloadDir={() => void handleSelectRemotePdfDownloadDir()}
           onListLlmModels={handleListLlmModels}
           onTestLlmConnection={handleTestLlmConnection}

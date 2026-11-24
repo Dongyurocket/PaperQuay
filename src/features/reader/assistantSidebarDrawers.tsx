@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { BookOpenText, FileJson, FileText, Info, PanelRightClose } from 'lucide-react';
 import { useLocaleText } from '../../i18n/uiLanguage';
+import { noteAnchorDisplayText, noteDisplayTitle } from '../notes/notesDisplay';
 import type { SelectedExcerpt, ZoteroRelatedNote } from '../../types/reader';
 import { cn } from '../../utils/cn';
 import {
@@ -340,9 +341,9 @@ function NotesDrawerContent({
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="truncate text-sm font-semibold text-[var(--pq-text)]">
-                        {note.title || l('未命名笔记', 'Untitled Note')}
+                        {noteDisplayTitle(note.title, l)}
                       </div>
-                      <div className="mt-1 text-xs text-[var(--pq-text-faint)]">{note.sourceLabel}</div>
+                      <div className="mt-1 text-xs text-[var(--pq-text-faint)]">{noteAnchorDisplayText(note.sourceLabel, l)}</div>
                     </div>
                     <span className="rounded-full border border-[var(--pq-border)] bg-[var(--pq-surface-2)] px-2 py-1 text-[11px] text-[var(--pq-text-muted)]">
                       {note.kind}

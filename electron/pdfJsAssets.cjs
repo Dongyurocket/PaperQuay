@@ -7,6 +7,12 @@ const PDFJS_ASSET_DIRS = ['cmaps', 'standard_fonts', 'image_decoders'];
 /** extraResources 中放置 PDF.js 资源的目录名（resources/pdfjs/<dir>）。 */
 const PDFJS_RESOURCES_DIR_NAME = 'pdfjs';
 
+/** 主进程 PDF 元数据预览需要的 legacy 构建文件（D4-13）。 */
+const PDFJS_LEGACY_REQUIRED_FILES = [
+  path.join('legacy', 'build', 'pdf.mjs'),
+  path.join('legacy', 'build', 'pdf.worker.mjs'),
+];
+
 /** 每个目录至少要有的代表文件，避免只复制到空目录或部分文件。 */
 const PDFJS_REQUIRED_FILES = {
   cmaps: ['Adobe-Japan1-0.bcmap', 'UniGB-UCS2-H.bcmap'],
@@ -94,10 +100,29 @@ async function assertPdfJsAssets(resourcesDir, sourceRoot) {
   return counts;
 }
 
+async function assertPdfJsRuntime(resourcesDir) {
+  const root = path.join(resourcesDir, PDFJS_RESOURCES_DIR_NAME);
+  const problems = [];
+
+  for (const relativePath of PDFJS_LEGACY_REQUIRED_FILES) {
+    try {
+      await fs.access(path.join(root, relativePath));
+    } catch {
+      problems.push(`PDF.js legacy runtime file not found: ${path.join(root, relativePath)}`);
+    }
+  }
+
+  if (problems.length > 0) {
+    throw new Error(problems.join('\n'));
+  }
+}
+
 module.exports = {
   PDFJS_ASSET_DIRS,
+  PDFJS_LEGACY_REQUIRED_FILES,
   PDFJS_RESOURCES_DIR_NAME,
   PDFJS_REQUIRED_FILES,
   resolvePdfJsAssetRoot,
   assertPdfJsAssets,
+  assertPdfJsRuntime,
 };

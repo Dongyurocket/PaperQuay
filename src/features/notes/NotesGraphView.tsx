@@ -2,6 +2,8 @@ import { useMemo, useState } from 'react';
 import { GLOBAL_NOTES_PAPER_ID } from '../../stores/useNotesStore';
 import type { Note, NoteFolder } from '../../types/notes';
 import { buildNoteHealthReport, noteHealthBadges, noteHealthCategoryIds, type NoteHealthCategory } from './noteHealth';
+import { noteDisplayTitle } from './notesDisplay';
+import { useAppLocale, useLocaleText } from '../../i18n/uiLanguage';
 
 const TYPE_COLORS: Record<string, string> = {
   highlight: '#60a5fa',
@@ -22,6 +24,8 @@ interface GraphEdge {
   targetId: string;
 }
 
+type Localizer = <T>(zh: T, en: T) => T;
+
 const WIDTH = 900;
 const HEIGHT = 560;
 const CENTER_X = WIDTH / 2;
@@ -36,11 +40,17 @@ function nodeRadius(note: Note): number {
  * 确定性布局（无物理引擎、无第三方依赖）：
  * 按文件夹（或论文归属）分组，组在圆周上，组内笔记排在组内小圆环上。
  */
-function layoutGraph(notes: Note[], folders: NoteFolder[]): { nodes: GraphNode[]; edges: GraphEdge[] } {
+function layoutGraph(
+  notes: Note[],
+  folders: NoteFolder[],
+  l: Localizer,
+): { nodes: GraphNode[]; edges: GraphEdge[] } {
   const folderNameById = new Map(folders.map((folder) => [folder.id, folder.name]));
   const groupOf = (note: Note): string =>
     (note.folderId && folderNameById.get(note.folderId)) ||
-    (note.paperId && note.paperId !== GLOBAL_NOTES_PAPER_ID ? '📄 论文关联' : '未分类');
+    (note.paperId && note.paperId !== GLOBAL_NOTES_PAPER_ID
+      ? l('📄 论文关联', '📄 Paper notes')
+      : l('未分类', 'Uncategorized'));
 
   const groups = new Map<string, Note[]>();
   for (const note of notes) {
@@ -97,18 +107,21 @@ export function NotesGraphView({
   onOpenNote: (noteId: string) => void;
 }) {
   const [highlightCategory, setHighlightCategory] = useState<NoteHealthCategory | null>(null);
+  const l = useLocaleText();
+  const locale = useAppLocale();
   const report = useMemo(() => buildNoteHealthReport(notes), [notes]);
+  const badges = useMemo(() => noteHealthBadges(report, locale), [locale, report]);
   const highlightedIds = useMemo(
     () => new Set(highlightCategory ? noteHealthCategoryIds(report, highlightCategory) : []),
     [highlightCategory, report],
   );
-  const { nodes, edges } = useMemo(() => layoutGraph(notes, folders), [notes, folders]);
+  const { nodes, edges } = useMemo(() => layoutGraph(notes, folders, l), [notes, folders, l]);
   const nodeById = useMemo(() => new Map(nodes.map((node) => [node.note.id, node])), [nodes]);
 
   if (notes.length === 0) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-[var(--pq-text-faint)]">
-        暂无笔记可展示
+        {l('暂无笔记可展示', 'No notes to display')}
       </div>
     );
   }
@@ -117,12 +130,15 @@ export function NotesGraphView({
     <div className="flex h-full min-h-0 flex-col">
       {/* 体检 badges：点击高亮对应分类节点，再次点击取消 */}
       <div className="flex flex-wrap items-center gap-1.5 px-3 pb-2">
-        <span className="text-xs text-[var(--pq-text-faint)]">体检：</span>
-        {noteHealthBadges(report).map((badge) => (
+        <span className="text-xs text-[var(--pq-text-faint)]">{l('体检：', 'Health:')}</span>
+        {badges.map((badge) => (
           <button
             key={badge.category}
             type="button"
             onClick={() => setHighlightCategory((current) => (current === badge.category ? null : badge.category))}
+            title={badge.description}
+            aria-label={`${badge.label}: ${badge.description} (${badge.count})`}
+            aria-pressed={highlightCategory === badge.category}
             className={`rounded-full border px-2 py-0.5 text-xs transition ${
               highlightCategory === badge.category
                 ? 'border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-error-bg)] text-[var(--pq-danger)]'
@@ -140,7 +156,7 @@ export function NotesGraphView({
         viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
         className="min-h-0 flex-1"
         role="img"
-        aria-label="Notes graph"
+        aria-label={l('笔记图谱', 'Notes graph')}
       >
         {edges.map((edge) => {
           const source = nodeById.get(edge.sourceId);
@@ -164,6 +180,7 @@ export function NotesGraphView({
           const highlighted = highlightedIds.has(node.note.id);
           const dimmed = highlightCategory !== null && !highlighted;
           const radius = nodeRadius(node.note);
+          const title = noteDisplayTitle(node.note.title, l);
           return (
             <g
               key={node.note.id}
@@ -185,9 +202,9 @@ export function NotesGraphView({
                 fill="var(--pq-text-muted)"
                 style={{ userSelect: 'none', pointerEvents: 'none' }}
               >
-                {(node.note.title || '未命名笔记').slice(0, 10)}
+                {title.slice(0, 10)}
               </text>
-              <title>{`${node.note.title || '未命名笔记'} · ${node.group}`}</title>
+              <title>{`${title} · ${node.group}`}</title>
             </g>
           );
         })}

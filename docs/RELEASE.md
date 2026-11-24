@@ -7,7 +7,7 @@
 - `package.json` 和 `package-lock.json` 的版本号已同步递增，且高于已发布版本和上游版本。
 - `CHANGELOG.md` 已新增本版本条目。
 - `.github/release-notes.md` 已改为本次实际变更（`{{VERSION}}` 为版本占位符），否则 Release 会沿用上一版说明。
-- `npm ci`、`npx tsc --noEmit`、`npm run build`、`npm test` 通过。Windows 构建报 `Access is denied` 时，按 [DEVELOPMENT.zh-CN.md](./DEVELOPMENT.zh-CN.md#windows-构建报-access-is-denied) 把 `TEMP`/`TMP` 指到仓库内目录。
+- `npm ci`、`npm run lint`、`npm run typecheck`（六个 tsc 项目）、`npm run build`、`npm test` 通过。Windows 构建报 `Access is denied` 时，按 [DEVELOPMENT.zh-CN.md](./DEVELOPMENT.zh-CN.md#windows-构建报-access-is-denied) 把 `TEMP`/`TMP` 指到仓库内目录。
 - 在 Windows 安装包上完成核心回归：启动、打开已有论文、导入 PDF、打开笔记、设置页和退出。验证使用 `--user-data-dir=<空目录>` 或一次性数据副本，不写入真实文库。
 - 涉及备份或恢复的改动：额外做一次导出与导入 smoke，包内含 MinerU 缓存和源机上打开过的 PDF，确认恢复后两者都能打开。
 - 没有提交 API key、数据库、PDF、解析结果或构建产物。

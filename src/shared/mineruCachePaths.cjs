@@ -22,6 +22,7 @@ function sanitizePathSegment(value) {
   if (!trimmed) return 'document';
 
   return trimmed
+    // eslint-disable-next-line no-control-regex -- 需要匹配并剔除不可见控制字符，保持原有字节级语义
     .replace(/[<>:"/\\|?*\u0000-\u001f]+/g, '-')
     .replace(/\s+/g, '-')
     .replace(/-+/g, '-')
@@ -95,6 +96,32 @@ function buildMineruCachePathCandidates(rootDir, item) {
   });
 }
 
+/**
+ * MinerU content_list 里的 asset 引用是不可信数据。这里只做字符串层面的
+ * 规范化：拒绝绝对路径、盘符、UNC/设备路径、URL、NTFS ADS 与 `.`/`..` 段。
+ * realpath 包含校验由 electron/backend/mineruAssetPaths.cjs 在读取边界完成。
+ */
+function sanitizeMineruAssetReference(value) {
+  const raw = typeof value === 'string' ? value.trim() : '';
+  if (!raw || raw.includes('\0')) return null;
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(raw)) return null;
+  if (/^[\\/]/.test(raw)) return null;
+  if (/^[a-zA-Z]:/.test(raw)) return null;
+  if (/[\\/]$/.test(raw)) return null;
+
+  const segments = raw.split(/[\\/]+/);
+  if (segments.length === 0) return null;
+
+  for (const segment of segments) {
+    if (!segment || segment === '.' || segment === '..') return null;
+    if (segment.includes(':')) return null;
+    // eslint-disable-next-line no-control-regex -- 需要匹配并剔除不可见控制字符，保持原有字节级语义
+    if (/[<>"|?*\u0000-\u001f]/.test(segment)) return null;
+  }
+
+  return segments.join('/');
+}
+
 module.exports = {
   buildCachePaths,
   buildLegacyMineruCachePaths,
@@ -105,6 +132,7 @@ module.exports = {
   getPathSeparator,
   hashString,
   joinPath,
+  sanitizeMineruAssetReference,
   sanitizePathSegment,
   stableDocumentKey,
 };

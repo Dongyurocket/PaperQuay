@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   BookOpenText,
   Archive,
@@ -16,7 +16,11 @@ import {
 } from 'lucide-react';
 import clsx from 'clsx';
 
-import { openExternalUrl } from '../../services/desktop';
+import { getPathAuthorizationStatus, openExternalUrl } from '../../services/desktop';
+import type {
+  PathAuthorizationStatus,
+  PathAuthorizationStatusEntry,
+} from '../../services/desktop';
 import { testRagEmbeddingEndpoint } from '../../services/rag';
 import { resolveSummaryOutputLanguage } from '../../services/summarySource';
 import type { LibraryImportMode, LibrarySettings } from '../../types/library';
@@ -39,11 +43,11 @@ import {
   SettingsSelect,
   SettingsTextarea,
   ToggleRow,
-} from './readerPreferencesPrimitives';
-import { BackupTransferSection } from './BackupTransferSection';
+} from '../../app/settings/settingsPrimitives';
+import { BackupTransferSection } from '../../app/settings/BackupTransferSection';
 import { ReaderPreferencesModelsSection } from './readerPreferencesModelsSection';
-import { ReaderPreferencesMcpSection } from './readerPreferencesMcpSection';
-import { ReaderPreferencesUpdateSection } from './readerPreferencesUpdateSection';
+import { McpSettingsSection } from '../../app/settings/McpSettingsSection';
+import { UpdateSettingsSection } from '../../app/settings/UpdateSettingsSection';
 import type {
   ReaderPreferencesLocalizer,
   ReaderPreferencesSectionDescriptor,
@@ -126,6 +130,64 @@ const DEFAULT_LIBRARY_SETTINGS: LibrarySettings = {
   openAlexApiKey: '',
   openAlexMailto: '',
 };
+
+type AuthorizationWarningStatus = PathAuthorizationStatusEntry | null | undefined;
+type AuthorizationField = 'storageDir' | 'translatedPdfDir' | 'mineruCacheDir';
+
+/** 默认目录由应用按需创建；只有显式配置的目录缺失时才提示重新选择。 */
+function shouldWarnAboutPath(status: AuthorizationWarningStatus): status is PathAuthorizationStatusEntry {
+  if (!status || !status.path) return false;
+  if (!status.authorized) return true;
+  return status.reason !== 'default' && !status.exists;
+}
+
+/**
+ * 升级后自定义 MinerU/译版目录没有授权记录时的提示。
+ * 重新选择走既有 select_directory（主进程会登记读写授权），成功后写回设置。
+ */
+function PathAuthorizationWarning({
+  status,
+  error,
+  disabled = false,
+  l,
+  onSelect,
+}: {
+  status: AuthorizationWarningStatus;
+  error?: string;
+  disabled?: boolean;
+  l: ReaderPreferencesLocalizer;
+  onSelect: () => void;
+}) {
+  if (!shouldWarnAboutPath(status) && !error) return null;
+
+  return (
+    <div
+      role="alert"
+      className="mt-2 rounded-xl border border-[var(--pq-border)] bg-[var(--pq-warning-bg)] px-3 py-2 text-xs leading-5 text-[var(--pq-warning)]"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span>
+          {status && !status.authorized
+            ? l(
+                '该目录尚未获得授权，解析或保存会失败。请重新选择目录以授权。',
+                'This folder is not authorized yet; parsing or saving will fail. Select it again to grant access.',
+              )
+            : l('该目录不存在。请重新选择目录。', 'This folder does not exist. Select it again.')}
+        </span>
+        <button
+          type="button"
+          onClick={onSelect}
+          disabled={disabled}
+          className="rounded-lg border border-[var(--pq-border)] bg-[var(--pq-surface-1)] px-2.5 py-1.5 text-xs font-medium text-[var(--pq-text)] transition hover:bg-[var(--pq-hover)] disabled:opacity-60"
+        >
+          <FolderOpen className="mr-1.5 inline h-3.5 w-3.5" strokeWidth={1.8} />
+          {l('重新选择目录', 'Select Directory Again')}
+        </button>
+      </div>
+      {error ? <p className="mt-1 text-[11px]">{error}</p> : null}
+    </div>
+  );
+}
 
 export function buildReaderPreferencesSections(
   l: ReaderPreferencesLocalizer,
@@ -301,6 +363,63 @@ export function ReaderPreferencesContent({
     onNativeLibrarySettingsChange({ [key]: value } as Partial<LibrarySettings>);
   };
 
+  const [authorizationStatus, setAuthorizationStatus] = useState<PathAuthorizationStatus | null>(null);
+  const [authorizationError, setAuthorizationError] = useState<{
+    field: AuthorizationField;
+    message: string;
+  } | null>(null);
+  const authorizationRequestRef = useRef(0);
+
+  const refreshAuthorizationStatus = useCallback(async () => {
+    const requestId = authorizationRequestRef.current + 1;
+    authorizationRequestRef.current = requestId;
+
+    try {
+      const nextStatus = await getPathAuthorizationStatus();
+      // 只接受最后一次请求的结果，避免旧的查询覆盖重新授权后的状态。
+      if (requestId === authorizationRequestRef.current) {
+        setAuthorizationStatus(nextStatus);
+      }
+    } catch {
+      if (requestId === authorizationRequestRef.current) {
+        // 状态查询只用于提示；失败时保持安静，重新选择目录本身会显式报错。
+        setAuthorizationStatus(null);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeSection !== 'library' && activeSection !== 'mineru') return;
+
+    void refreshAuthorizationStatus();
+  }, [
+    activeSection,
+    refreshAuthorizationStatus,
+    settings.mineruCacheDir,
+    activeLibrarySettings.storageDir,
+    activeLibrarySettings.translatedPdfDir,
+  ]);
+
+  const selectDirectoryAndRefresh = useCallback(async (
+    action: () => void | Promise<void>,
+    field: AuthorizationField,
+  ) => {
+    setAuthorizationError(null);
+
+    try {
+      await action();
+    } catch (nextError) {
+      setAuthorizationError({
+        field,
+        message: nextError instanceof Error
+          ? nextError.message
+          : l('重新选择目录失败', 'Failed to select the directory'),
+      });
+    } finally {
+      await refreshAuthorizationStatus();
+    }
+  }, [l, refreshAuthorizationStatus]);
+
   const [embeddingTestState, setEmbeddingTestState] = useState<{
     status: 'idle' | 'testing' | 'ok' | 'fail';
     message: string;
@@ -443,7 +562,7 @@ export function ReaderPreferencesContent({
             <div className="flex flex-wrap gap-2">
               <button
                 type="button"
-                onClick={onSelectLibraryStorageDir}
+                onClick={() => void selectDirectoryAndRefresh(onSelectLibraryStorageDir, 'storageDir')}
                 disabled={libraryLoading}
                 className="rounded-xl border border-[var(--pq-border)] bg-[var(--pq-surface-2)] px-3 py-2 text-sm text-[var(--pq-text-muted)] transition hover:bg-[var(--pq-surface-2)] disabled:opacity-60 dark:border-white/10 dark:bg-[var(--pq-surface-2)] dark:text-[var(--pq-text)] dark:hover:bg-[var(--pq-hover)]"
               >
@@ -460,6 +579,13 @@ export function ReaderPreferencesContent({
                 {l('解析全部元数据', 'Parse All Metadata')}
               </button>
             </div>
+            <PathAuthorizationWarning
+              status={authorizationStatus?.storageDir}
+              error={authorizationError?.field === 'storageDir' ? authorizationError.message : undefined}
+              disabled={libraryLoading}
+              l={l}
+              onSelect={() => void selectDirectoryAndRefresh(onSelectLibraryStorageDir, 'storageDir')}
+            />
           </SettingsField>
 
           <SettingsField
@@ -477,7 +603,7 @@ export function ReaderPreferencesContent({
             <div className="flex flex-wrap gap-2">
               <button
                 type="button"
-                onClick={onSelectTranslatedPdfStorageDir}
+                onClick={() => void selectDirectoryAndRefresh(onSelectTranslatedPdfStorageDir, 'translatedPdfDir')}
                 disabled={libraryLoading}
                 className="rounded-xl border border-[var(--pq-border)] bg-[var(--pq-surface-2)] px-3 py-2 text-sm text-[var(--pq-text-muted)] transition hover:bg-[var(--pq-surface-2)] disabled:opacity-60 dark:border-white/10 dark:bg-[var(--pq-surface-2)] dark:text-[var(--pq-text)] dark:hover:bg-[var(--pq-hover)]"
               >
@@ -495,6 +621,13 @@ export function ReaderPreferencesContent({
                 </button>
               ) : null}
             </div>
+            <PathAuthorizationWarning
+              status={authorizationStatus?.translatedPdfDir}
+              error={authorizationError?.field === 'translatedPdfDir' ? authorizationError.message : undefined}
+              disabled={libraryLoading}
+              l={l}
+              onSelect={() => void selectDirectoryAndRefresh(onSelectTranslatedPdfStorageDir, 'translatedPdfDir')}
+            />
           </SettingsField>
 
           <SettingsField
@@ -908,7 +1041,7 @@ export function ReaderPreferencesContent({
             <div className="flex flex-wrap gap-2">
               <button
                 type="button"
-                onClick={onSelectMineruCacheDir}
+                onClick={() => void selectDirectoryAndRefresh(onSelectMineruCacheDir, 'mineruCacheDir')}
                 className="rounded-xl border border-[var(--pq-border)] bg-[var(--pq-surface-2)] px-3 py-2 text-sm text-[var(--pq-text-muted)] transition hover:bg-[var(--pq-surface-2)]"
               >
                 <FolderOpen className="mr-2 inline h-4 w-4" strokeWidth={1.8} />
@@ -936,6 +1069,12 @@ export function ReaderPreferencesContent({
                 </button>
               ) : null}
             </div>
+            <PathAuthorizationWarning
+              status={authorizationStatus?.mineruCacheDir}
+              error={authorizationError?.field === 'mineruCacheDir' ? authorizationError.message : undefined}
+              l={l}
+              onSelect={() => void selectDirectoryAndRefresh(onSelectMineruCacheDir, 'mineruCacheDir')}
+            />
           </SettingsField>
 
           <SettingsField
@@ -1040,12 +1179,12 @@ export function ReaderPreferencesContent({
         l={l}
       />
 
-      <ReaderPreferencesMcpSection
+      <McpSettingsSection
         active={activeSection === 'mcp'}
         l={l}
       />
 
-      <ReaderPreferencesUpdateSection
+      <UpdateSettingsSection
         active={activeSection === 'updates'}
         l={l}
       />

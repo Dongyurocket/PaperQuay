@@ -171,6 +171,61 @@ function createSchema(db) {
   } catch (error) {
     console.warn('PaperQuay notes FTS5 is unavailable; falling back to LIKE search.', error);
   }
+
+  // 旧库/迁移后 FTS 表可能存在但内容缺失（例如早期版本先有笔记、后加
+  // 全文索引），这类笔记此前会静默不可搜索。启动时比对有效笔记数与索引
+  // 行数并全量回填；不回填已软删除笔记，避免旧残留行复活。
+  try {
+    rebuildNotesFtsIfStale(db);
+  } catch (error) {
+    console.warn('PaperQuay notes FTS backfill failed; search will fall back to LIKE.', error);
+  }
+}
+
+function notesFtsRowCount(db) {
+  if (!ftsTableExists(db)) return null;
+  try {
+    return Number(db.prepare('SELECT COUNT(*) AS count FROM notes_fts').get()?.count) || 0;
+  } catch {
+    return null;
+  }
+}
+
+function rebuildNotesFts(db) {
+  if (!ftsTableExists(db)) return false;
+  withTransaction(db, () => {
+    db.prepare('DELETE FROM notes_fts').run();
+    db.prepare(`
+      INSERT INTO notes_fts (note_id, title, content_text, excerpt)
+      SELECT id, title, COALESCE(content_text, content, ''), COALESCE(excerpt, '')
+      FROM notes
+      WHERE deleted_at IS NULL
+    `).run();
+  });
+  return true;
+}
+
+/**
+ * 只在索引行数与有效笔记数不一致时重建；内容文本的外观变更由逐条写入
+ * syncFtsRow 维护，这里不承担全量比对成本。
+ */
+function rebuildNotesFtsIfStale(db) {
+  const actual = notesFtsRowCount(db);
+  if (actual === null) return false;
+  const expected = Number(
+    db.prepare('SELECT COUNT(*) AS count FROM notes WHERE deleted_at IS NULL').get()?.count,
+  ) || 0;
+  if (actual === expected) {
+    // 行数相同也可能因残留行/漏行互相抵消：再确认没有有效笔记缺索引。
+    const missing = Number(db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM notes n
+      LEFT JOIN notes_fts f ON f.note_id = n.id
+      WHERE n.deleted_at IS NULL AND f.note_id IS NULL
+    `).get()?.count) || 0;
+    if (missing === 0) return false;
+  }
+  return rebuildNotesFts(db);
 }
 
 function parseJson(value, fallback) {
@@ -303,7 +358,7 @@ function normalizeAnchors(value) {
 
     const excerpt = cleanString(item.excerpt);
     const paperId = cleanString(item.paperId);
-    const label = cleanString(item.label) || (excerpt ? excerpt.slice(0, 48) : 'Reference');
+    const label = cleanString(item.label) || (excerpt ? excerpt.slice(0, 48) : '');
     const sourceTitle = cleanString(item.sourceTitle);
     const source = ['pdf', 'blocks', 'ai-chat', 'manual'].includes(item.source)
       ? item.source
@@ -459,6 +514,59 @@ function extractWikiLinkIds(value, output = []) {
   return output;
 }
 
+/** 结构化正文中的锚点 id：锚点块与锚点行内链接都算，供写入时校验不丢锚点。 */
+function extractNoteAnchorIds(value, output = new Set()) {
+  if (!value || typeof value !== 'object') return output;
+  if (value.type === 'noteAnchorBlock' || value.type === 'noteAnchorLink') {
+    const anchorId = cleanString(value.attrs?.anchorId);
+    if (anchorId) output.add(anchorId);
+  }
+  for (const child of Array.isArray(value.content) ? value.content : []) {
+    extractNoteAnchorIds(child, output);
+  }
+  return output;
+}
+
+function noteTargetError(code, message, details) {
+  // Electron IPC 只保留 message，error.code 会丢失；把稳定码写进 message 前缀，
+  // 渲染层才能在真实 IPC 拒绝里映射 PAPER_NOT_FOUND / FOLDER_NOT_FOUND。
+  const error = new Error(`${code}: ${message}`);
+  error.code = code;
+  error.details = details;
+  return error;
+}
+
+/**
+ * 笔记目标校验：folder 必须存在于同一 notes 库；paper 是否存在由调用方注入
+ * （MCP 使用文库只读连接），这样 noteStore 不依赖文库路径，桌面写路径行为不变。
+ * 事务内执行，校验失败会整体回滚，不留下绑定到不可见目标的笔记。
+ */
+function assertNoteTargets(db, { paperId, linkedPaperId, folderId, assertPaperExists } = {}) {
+  const validatePaper = (candidate) => {
+    const targetPaperId = cleanString(candidate);
+    if (
+      targetPaperId
+      && targetPaperId !== GLOBAL_NOTES_PAPER_ID
+      && typeof assertPaperExists === 'function'
+      && !assertPaperExists(targetPaperId)
+    ) {
+      throw noteTargetError('PAPER_NOT_FOUND', `Paper does not exist: ${targetPaperId}`, { paperId: targetPaperId });
+    }
+  };
+
+  validatePaper(paperId);
+  // linkedPaperId 是笔记指向的文库条目，变化时与 paperId 同等校验。
+  validatePaper(linkedPaperId);
+
+  const targetFolderId = cleanString(folderId);
+  if (targetFolderId) {
+    const folder = db.prepare('SELECT id FROM note_folders WHERE id = ?').get(targetFolderId);
+    if (!folder) {
+      throw noteTargetError('FOLDER_NOT_FOUND', `Folder does not exist: ${targetFolderId}`, { folderId: targetFolderId });
+    }
+  }
+}
+
 function normalizeNoteInput(input, existing = null) {
   const timestamp = now();
   const contentJson = normalizeContentJson(input?.contentJson, existing?.contentJson);
@@ -492,7 +600,9 @@ function normalizeNoteInput(input, existing = null) {
   const pageKind = input?.pageKind === undefined
     ? normalizePageKind(existing?.pageKind)
     : normalizePageKind(input.pageKind);
-  const title = cleanString(input?.title ?? existing?.title) || 'Untitled Note';
+  // 空标题保持空串：界面按当前语言显示「未命名笔记 / Untitled note」，
+  // noteHealth 也把空标题判为 untitled；不再把英文哨兵写进数据层。
+  const title = cleanString(input?.title ?? existing?.title) || '';
   const pdfLocation = input?.pdfLocation === undefined
     ? existing?.pdfLocation ?? null
     : normalizePdfLocation(input.pdfLocation);
@@ -711,11 +821,6 @@ function findNoteIdByTitle(db, title) {
   return row?.id ?? null;
 }
 
-function findNoteTitleById(db, noteId) {
-  const row = db.prepare('SELECT title FROM notes WHERE id = ?').get(noteId);
-  return row?.title ?? noteId;
-}
-
 function resolveNoteLinks(db, note) {
   const links = new Map();
 
@@ -925,6 +1030,41 @@ function rowToFolder(row) {
   };
 }
 
+// MCP 只读路径复用这两个查询：它们不建库、不迁移，表缺失时按空结果处理。
+function queryNoteTags(db, request = {}) {
+  if (getTableColumns(db, 'note_tags').size === 0) return [];
+  const paperId = cleanString(request.paperId);
+  const args = [];
+  const hasDeletedAt = getTableColumns(db, 'notes').has('deleted_at');
+  const where = [hasDeletedAt ? 'notes.deleted_at IS NULL' : '1 = 1'];
+
+  if (paperId) {
+    where.push('notes.paper_id = ?');
+    args.push(paperId);
+  }
+
+  return db.prepare(`
+    SELECT note_tags.tag AS tag, COUNT(*) AS count
+    FROM note_tags
+    INNER JOIN notes ON notes.id = note_tags.note_id
+    WHERE ${where.join(' AND ')}
+    GROUP BY note_tags.tag
+    ORDER BY count DESC, lower(note_tags.tag) ASC
+  `).all(...args).map((row) => ({
+    tag: row.tag,
+    count: Number(row.count) || 0,
+  }));
+}
+
+function queryNoteFolders(db) {
+  if (getTableColumns(db, 'note_folders').size === 0) return [];
+  return db.prepare(`
+    SELECT id, name, parent_id, sort_order, created_at, updated_at
+    FROM note_folders
+    ORDER BY sort_order ASC, created_at ASC
+  `).all().map(rowToFolder);
+}
+
 function getFolderDescendantIds(db, folderId) {
   const ids = [];
   const stack = [folderId];
@@ -1003,7 +1143,7 @@ function createNoteStore(appPaths) {
       SELECT *
       FROM notes
       ${whereSql}
-      ORDER BY is_pinned DESC, updated_at DESC, created_at DESC
+      ORDER BY is_pinned DESC, updated_at DESC, created_at DESC, id ASC
       LIMIT ?
     `).all(...args, limit);
 
@@ -1020,38 +1160,25 @@ function createNoteStore(appPaths) {
       SELECT *
       FROM notes
       ${whereSql}
-      ORDER BY is_pinned DESC, updated_at DESC, created_at DESC
+      ORDER BY is_pinned DESC, updated_at DESC, created_at DESC, id ASC
     `).all(...args);
 
     return hydrateNotes(db, rows);
   }
 
   function listTags(request = {}) {
-    const paperId = cleanString(request.paperId);
-    const args = [];
-    const where = ['notes.deleted_at IS NULL'];
-
-    if (paperId) {
-      where.push('notes.paper_id = ?');
-      args.push(paperId);
-    }
-
-    return db.prepare(`
-      SELECT note_tags.tag AS tag, COUNT(*) AS count
-      FROM note_tags
-      INNER JOIN notes ON notes.id = note_tags.note_id
-      WHERE ${where.join(' AND ')}
-      GROUP BY note_tags.tag
-      ORDER BY count DESC, lower(note_tags.tag) ASC
-    `).all(...args).map((row) => ({
-      tag: row.tag,
-      count: Number(row.count) || 0,
-    }));
+    return queryNoteTags(db, request);
   }
 
   function createNote(request) {
     const saved = withTransaction(db, () => {
       const note = normalizeNoteInput(request);
+      assertNoteTargets(db, {
+        paperId: note.paperId,
+        linkedPaperId: note.linkedPaperId,
+        folderId: note.folderId,
+        assertPaperExists: request?.assertPaperExists,
+      });
       upsertNote(db, note);
       return getNoteById(db, note.id);
     });
@@ -1071,7 +1198,25 @@ function createNoteStore(appPaths) {
         throw noteConflictError('笔记已被其他操作修改，请刷新或确认后重试。');
       }
 
+      // 只在显式移动文件夹时校验：历史笔记可能已绑定被删除的 folder，不应阻塞其他字段更新。
+      if (request?.patch && Object.prototype.hasOwnProperty.call(request.patch, 'folderId')) {
+        assertNoteTargets(db, { folderId: request.patch.folderId });
+      }
+
       const note = normalizeNoteInput({ ...existing, ...(request.patch ?? {}), id: noteId }, existing);
+
+      // paperId / linkedPaperId 显式变化时在事务内校验目标文献存在，失败整体回滚。
+      if (request?.patch && (
+        Object.prototype.hasOwnProperty.call(request.patch, 'paperId')
+        || Object.prototype.hasOwnProperty.call(request.patch, 'linkedPaperId')
+      )) {
+        assertNoteTargets(db, {
+          paperId: note.paperId,
+          linkedPaperId: note.linkedPaperId,
+          assertPaperExists: request.assertPaperExists,
+        });
+      }
+
       upsertNote(db, note);
       return getNoteById(db, note.id, { includeDeleted: true });
     });
@@ -1102,11 +1247,7 @@ function createNoteStore(appPaths) {
   }
 
   function listFolders() {
-    return db.prepare(`
-      SELECT id, name, parent_id, sort_order, created_at, updated_at
-      FROM note_folders
-      ORDER BY sort_order ASC, created_at ASC
-    `).all().map(rowToFolder);
+    return queryNoteFolders(db);
   }
 
   function createFolder(request) {
@@ -1174,9 +1315,19 @@ function createNoteStore(appPaths) {
         throw noteConflictError('文件夹已被其他操作修改，请刷新或确认后重试。');
       }
       if (expected) {
+        // 版本快照必须覆盖全部将被删除的文件夹（目标 + 后代）。缺失条目意味着
+        // 调用方读到的树不完整，继续删除可能误删并发新建/移动的子文件夹。
+        const missingIds = rows
+          .map((row) => row.id)
+          .filter((rowId) => expected[rowId] === undefined || expected[rowId] === null);
+        if (missingIds.length > 0) {
+          throw noteConflictError(
+            `expectedFolderVersions 缺少文件夹 ${missingIds.join(', ')} 的版本，请重新读取文件夹树后重试。`,
+          );
+        }
         for (const row of rows) {
           const wanted = expected[row.id];
-          if (wanted !== undefined && wanted !== null && Number(wanted) !== Number(row.updated_at)) {
+          if (Number(wanted) !== Number(row.updated_at)) {
             throw noteConflictError(`文件夹 ${row.id} 已被其他操作修改，请刷新或确认后重试。`);
           }
         }
@@ -1258,4 +1409,4 @@ function createNoteStore(appPaths) {
   };
 }
 
-module.exports = { createNoteStore };
+module.exports = { createNoteStore, queryNoteTags, queryNoteFolders, extractNoteAnchorIds };

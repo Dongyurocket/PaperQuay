@@ -95,6 +95,21 @@ export async function startRetainPdfTranslation(paperId: string): Promise<Retain
   }
 }
 
+const startInFlight = new Map<string, Promise<RetainPdfJob>>();
+
+/** 同一文献的启动请求合并为一个：详情面板与文献库操作栏共用，避免双启动。 */
+export function startRetainPdfTranslationOnce(paperId: string): Promise<RetainPdfJob> {
+  const existing = startInFlight.get(paperId);
+  if (existing) {
+    return existing;
+  }
+  const pending = startRetainPdfTranslation(paperId).finally(() => {
+    startInFlight.delete(paperId);
+  });
+  startInFlight.set(paperId, pending);
+  return pending;
+}
+
 export async function cancelRetainPdfTranslation(paperId: string): Promise<RetainPdfJob> {
   try {
     return await invoke<RetainPdfJob>('retainpdf_cancel_translation', { paperId });

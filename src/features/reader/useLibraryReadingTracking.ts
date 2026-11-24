@@ -16,7 +16,9 @@ export function useLibraryReadingTracking(options: {
   if (!writerRef.current) {
     writerRef.current = createLibraryReadingWriter(async (request) => {
       const updated = await invoke<boolean>('library_record_reading', { request });
-      if (updated) window.dispatchEvent(new Event(LIBRARY_READING_UPDATED_EVENT));
+      if (updated) {
+        window.dispatchEvent(new CustomEvent(LIBRARY_READING_UPDATED_EVENT, { detail: request }));
+      }
     });
   }
   const writer = writerRef.current;

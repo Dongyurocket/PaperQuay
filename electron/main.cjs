@@ -1,10 +1,24 @@
 const fs = require('node:fs');
 const path = require('node:path');
-const { app, BrowserWindow, ipcMain, shell, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, dialog, session, clipboard } = require('electron');
 const { createBackend } = require('./backend.cjs');
 const { createAppPaths } = require('./backend/libraryStore.cjs');
-const { isRendererCommandAllowed } = require('./ipcAllowlist.cjs');
-const { createIpcSenderGuard } = require('./ipcSecurity.cjs');
+const {
+  MAX_CLIPBOARD_TEXT_LENGTH,
+  SYNCHRONOUS_RENDERER_COMMANDS,
+  isRendererCommandAllowed,
+} = require('./ipcAllowlist.cjs');
+const { createIpcSenderGuard, isTrustedRendererNavigation } = require('./ipcSecurity.cjs');
+const {
+  installContentSecurityPolicy,
+  installPermissionHandlers,
+} = require('./appSecurity.cjs');
+const {
+  createRendererFailureController,
+  createStartupFailureHandler,
+  loadRendererEntry,
+  showPendingRestoreError,
+} = require('./appLifecycle.cjs');
 const { perfMark, perfMeasure } = require('./perfTrace.cjs');
 const { removeDesktopRunMarker, writeDesktopRunMarker } = require('./backend/desktopRunMarker.cjs');
 const { createExternalWriteWatcher } = require('./backend/externalWriteWatch.cjs');
@@ -110,6 +124,33 @@ function getBackend() {
   return backend;
 }
 
+/** 启动/渲染失败时的统一清理：关闭后端、移除运行标记、释放恢复锁。 */
+function cleanupApplicationResources() {
+  try {
+    backend?.close();
+  } catch (error) {
+    console.warn('[paperquay] Backend close failed during failure cleanup.', error);
+  }
+  backend = null;
+
+  if (desktopMarkerDataDir) {
+    try {
+      removeDesktopRunMarker(desktopMarkerDataDir);
+    } catch (error) {
+      console.warn('[paperquay] Failed to remove the desktop run marker.', error);
+    }
+    desktopMarkerDataDir = null;
+  }
+
+  releaseRestoreResumeLock();
+}
+
+const handleFatalStartupError = createStartupFailureHandler({
+  dialog,
+  app,
+  cleanup: cleanupApplicationResources,
+});
+
 function getAppIconPath() {
   const iconFileName = process.platform === 'win32' ? 'icon.ico' : 'icon.png';
   const iconRoot = app.isPackaged ? 'dist' : 'public';
@@ -144,7 +185,7 @@ function createWindow() {
   const mainWindow = new BrowserWindow({
     width: 1440,
     height: 920,
-    minWidth: 1040,
+    minWidth: 960,
     minHeight: 720,
     title: 'PaperQuay',
     frame: false,
@@ -153,10 +194,12 @@ function createWindow() {
     backgroundColor: '#eef2f8',
     show: false,
     webPreferences: {
-      preload: path.join(__dirname, 'preload.cjs'),
+      // sandbox preload 不能 require 本地模块；dev/build 先把 preload 及其
+      // 依赖打成 preload.bundle.cjs（scripts/bundle-preload.cjs）。
+      preload: path.join(__dirname, 'preload.bundle.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      sandbox: true,
       webSecurity: true,
     },
   });
@@ -180,15 +223,46 @@ function createWindow() {
       const source = event.sourceId ? `${event.sourceId}:${event.lineNumber}` : `line ${event.lineNumber ?? '?'}`;
       console.log(`[renderer:${event.level ?? 'info'}] ${message} (${source})`);
     });
-
-    mainWindow.webContents.on('render-process-gone', (_event, details) => {
-      console.error('[renderer] process gone', details);
-    });
-
-    mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedUrl) => {
-      console.error(`[renderer] failed to load ${validatedUrl}: ${errorCode} ${errorDescription}`);
-    });
   }
+
+  const failureController = createRendererFailureController({
+    log: console.error,
+    showErrorBox: (title, content) => dialog.showErrorBox(title, content),
+    showRecoveryDialog: async (details) => {
+      const detail = `Reason: ${details?.reason || 'unknown'}${details?.exitCode != null ? ` (exit code ${details.exitCode})` : ''}`;
+      const options = {
+        type: 'error',
+        title: 'PaperQuay window stopped',
+        message: 'The PaperQuay window stopped unexpectedly.',
+        detail,
+        buttons: ['Reload window', 'Quit PaperQuay'],
+        defaultId: 0,
+        cancelId: 1,
+        noLink: true,
+      };
+      const result = mainWindow.isDestroyed()
+        ? await dialog.showMessageBox(options)
+        : await dialog.showMessageBox(mainWindow, options);
+
+      return result.response === 0 ? 'reload' : 'quit';
+    },
+    cleanup: cleanupApplicationResources,
+    exit: (code) => app.exit(code),
+    reload: () => {
+      if (!mainWindow.isDestroyed()) mainWindow.reload();
+    },
+  });
+
+  // 生产版同样要可见：渲染器崩溃或入口加载失败时不能只留一个隐藏窗口。
+  mainWindow.webContents.on('render-process-gone', (event, details) => {
+    if (quitInProgress || quitFinished) return;
+    void failureController.handleRenderProcessGone(event, details);
+  });
+
+  mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedUrl, isMainFrame) => {
+    if (quitInProgress || quitFinished) return;
+    failureController.handleDidFailLoad(event, errorCode, errorDescription, validatedUrl, isMainFrame);
+  });
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:\/\//i.test(url)) {
@@ -199,10 +273,15 @@ function createWindow() {
   });
 
   mainWindow.webContents.on('will-navigate', (event, url) => {
-    const allowedDevUrl = isDev && url.startsWith(process.env.VITE_DEV_SERVER_URL);
-    const allowedFileUrl = !isDev && url.startsWith('file://');
+    // 生产版只允许 dist/index.html 自身文档；任意 file:// 页面会带着 preload
+    // 暴露的 clipboard/listen 等能力在主窗口运行，等同 UI 劫持。
+    const trustedOptions = {
+      isDev,
+      devServerUrl: process.env.VITE_DEV_SERVER_URL,
+      appDir: __dirname,
+    };
 
-    if (allowedDevUrl || allowedFileUrl) {
+    if (isTrustedRendererNavigation(url, trustedOptions)) {
       return;
     }
 
@@ -213,11 +292,47 @@ function createWindow() {
     }
   });
 
-  if (isDev) {
-    void mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
-  } else {
-    void mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
+  loadRendererEntry(mainWindow.webContents, {
+    isDev,
+    devServerUrl: process.env.VITE_DEV_SERVER_URL,
+    entryFile: path.join(__dirname, '..', 'dist', 'index.html'),
+  }).catch((error) => {
+    if (quitInProgress || quitFinished) return;
+    failureController.handleLoadRejection(error);
+  });
+}
+
+/**
+ * sandbox:true 的 preload 无法 require clipboard；剪贴板读写统一由主进程执行。
+ * 文本只接受字符串并限制长度，避免渲染层把超大字符串塞进主进程或系统剪贴板。
+ */
+const MAIN_PROCESS_RENDERER_COMMANDS = new Set([
+  'clipboard_read_text',
+  'clipboard_write_text',
+]);
+
+function readClipboardText() {
+  try {
+    const text = clipboard.readText();
+    return typeof text === 'string' ? text.slice(0, MAX_CLIPBOARD_TEXT_LENGTH) : '';
+  } catch {
+    return '';
   }
+}
+
+function writeClipboardText(args) {
+  const text = args?.text;
+  if (typeof text !== 'string') {
+    throw new Error('IPC_INVALID_ARGS: clipboard_write_text: args.text: expected string');
+  }
+  clipboard.writeText(text.slice(0, MAX_CLIPBOARD_TEXT_LENGTH));
+  return { ok: true };
+}
+
+function runMainProcessRendererCommand(command, args) {
+  if (command === 'clipboard_read_text') return readClipboardText();
+  if (command === 'clipboard_write_text') return writeClipboardText(args);
+  throw new Error(`Unsupported main-process command: ${String(command)}`);
 }
 
 ipcMain.handle('paperquay:invoke', async (event, command, args) => {
@@ -228,7 +343,27 @@ ipcMain.handle('paperquay:invoke', async (event, command, args) => {
     throw new Error(`Unsupported Electron command: ${String(command)}`);
   }
 
+  if (MAIN_PROCESS_RENDERER_COMMANDS.has(command)) {
+    return runMainProcessRendererCommand(command, args ?? {});
+  }
+
   return getBackend().invoke(command, args ?? {}, event);
+});
+
+// preload 需要同步取值时使用（当前只有剪贴板读取）。通道只放行白名单里的
+// 同步子集，其余命令即使已登记也返回 null，避免把异步后端命令搬到阻塞通道上。
+ipcMain.on('paperquay:invoke-sync', (event, command, args) => {
+  try {
+    assertTrustedIpcWebContents(event);
+    assertTrustedIpcSender(event);
+    if (!isRendererCommandAllowed(command) || !SYNCHRONOUS_RENDERER_COMMANDS.has(command)) {
+      event.returnValue = null;
+      return;
+    }
+    event.returnValue = runMainProcessRendererCommand(command, args ?? {});
+  } catch {
+    event.returnValue = null;
+  }
 });
 
 ipcMain.handle('paperquay:window-control', (event, action) => {
@@ -322,6 +457,18 @@ app.whenReady().then(async () => {
     app.setAppUserModelId('dev.paperquay.app');
   }
 
+  // CSP 同时以 index.html meta 与主文档响应头下发：file:// 文档不会被
+  // webRequest 拦截，meta 是生产版的实际执行路径。权限请求默认拒绝，
+  // 只放行主窗口的剪贴板读写。
+  installContentSecurityPolicy(session.defaultSession, {
+    isDev,
+    devServerUrl: process.env.VITE_DEV_SERVER_URL,
+  });
+  installPermissionHandlers(session.defaultSession, {
+    isTrustedWebContents: (webContents) =>
+      Boolean(mainWindowContentsId) && webContents?.id === mainWindowContentsId,
+  });
+
   if (isRestoreResume && !await waitForSingleInstanceLock()) {
     dialog.showErrorBox('PaperQuay restore could not start', 'The previous instance is still closing. pending.json was kept; launch PaperQuay again to resume recovery.');
     releaseRestoreResumeLock();
@@ -342,7 +489,6 @@ app.whenReady().then(async () => {
       }
     },
   });
-  let initializedBackend;
   try {
     const appPaths = createAppPaths(app);
     writeDesktopRunMarker(appPaths.dataDir);
@@ -372,18 +518,15 @@ app.whenReady().then(async () => {
       writeDesktopRunMarker(appPaths.dataDir);
     }
 
-    initializedBackend = getBackend();
+    getBackend();
   } catch (error) {
     console.error('[paperquay] Failed to apply pending backup restore or initialize stores.', error);
-    if (!['RESTORE_APPLY_FAILED', 'STAGING_MISSING', 'PENDING_CHECKSUM_INVALID'].includes(error?.code)) {
+    if (error?.code === 'PENDING_CHECKSUM_INVALID') {
+      showPendingRestoreError(dialog);
+    } else if (!['RESTORE_APPLY_FAILED', 'STAGING_MISSING'].includes(error?.code)) {
       dialog.showErrorBox('PaperQuay startup failed', error.message || 'PaperQuay could not initialize its local data stores.');
     }
-    backend?.close();
-    if (desktopMarkerDataDir) {
-      removeDesktopRunMarker(desktopMarkerDataDir);
-      desktopMarkerDataDir = null;
-    }
-    releaseRestoreResumeLock();
+    cleanupApplicationResources();
     app.exit(1);
     return;
   }
@@ -411,6 +554,10 @@ app.whenReady().then(async () => {
       createWindow();
     }
   });
+}).catch((error) => {
+  // whenReady 链上的未预期异常（协议注册、窗口创建、入口加载等）必须可见地退出，
+  // 否则会留下无窗口的后台进程或永不显示的隐藏窗口。
+  handleFatalStartupError(error);
 });
 
 app.on('window-all-closed', () => {
@@ -419,18 +566,59 @@ app.on('window-all-closed', () => {
   }
 });
 
-app.on('before-quit', () => {
-  // Keep the advisory run state through synchronous store shutdown so MCP writes
-  // cannot enter between the window closing and backend resource teardown.
+let quitInProgress = false;
+let quitFinished = false;
+
+app.on('before-quit', (event) => {
+  if (quitFinished) return;
+  // Delay the quit until the queued note index work drains (bounded below).
+  event.preventDefault();
+  if (quitInProgress) return;
+  quitInProgress = true;
+
+  // Keep the advisory run state through store shutdown so MCP writes cannot
+  // enter while the note index queue is still draining or stores are closing.
   externalWriteWatcher?.close();
   externalWriteWatcher = null;
-  backend?.close();
-  if (desktopMarkerDataDir) {
-    removeDesktopRunMarker(desktopMarkerDataDir);
-    desktopMarkerDataDir = null;
+
+  const finish = () => {
+    if (quitFinished) return;
+    quitFinished = true;
+    clearTimeout(forceExitTimer);
+    try {
+      backend?.close();
+    } catch (error) {
+      console.warn('[paperquay] Backend close failed during quit.', error);
+    }
+    if (desktopMarkerDataDir) {
+      removeDesktopRunMarker(desktopMarkerDataDir);
+      desktopMarkerDataDir = null;
+    }
+    releaseRestoreResumeLock();
+    app.exit(0);
+  };
+
+  // 兜底：后端资源（如 RAG worker 线程卡在同步 SQLite 调用里）关闭耗时过长、
+  // 或笔记索引队列迟迟不排空时，3 秒后强制退出，避免留下无窗口的驻留进程，
+  // 导致覆盖安装被误判为"正在运行"。
+  const forceExitTimer = setTimeout(finish, 3000);
+  forceExitTimer.unref?.();
+
+  if (backend && typeof backend.shutdown === 'function') {
+    Promise.resolve(backend.shutdown({ timeoutMs: 2500 }))
+      .then((result) => {
+        if (result?.timedOut) {
+          console.warn('[paperquay] Note index queue did not drain before quit.', result);
+        }
+        if (result?.ragStoreCloseTimedOut) {
+          console.warn('[paperquay] RAG store/worker did not close before quit.', result);
+        }
+      })
+      .catch((error) => {
+        console.warn('[paperquay] Graceful backend shutdown failed.', error);
+      })
+      .finally(finish);
+  } else {
+    finish();
   }
-  releaseRestoreResumeLock();
-  // 兜底：后端资源（如 RAG worker 线程卡在同步 SQLite 调用里）关闭耗时过长时，
-  // 3 秒后强制退出，避免留下无窗口的驻留进程，导致覆盖安装被误判为"正在运行"。
-  setTimeout(() => app.exit(0), 3000).unref();
 });

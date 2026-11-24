@@ -8,7 +8,18 @@
  * 注意：`approve_write_path` 已删除。写权限只能由主进程文件对话框或应用
  * 配置中的已知目录授予，不能由渲染层自行声明。
  */
+// 剪贴板文本上限：主进程与 preload（bundle 内联）共用同一份限制。
+const MAX_CLIPBOARD_TEXT_LENGTH = 200000;
+
+// sendSync 会阻塞主进程；同步通道只放行必须在用户手势里同步取值的命令。
+const SYNCHRONOUS_RENDERER_COMMANDS = new Set(['clipboard_read_text']);
+
 const RENDERER_ALLOWED_COMMANDS = new Set([
+  'app_settings_get',
+  'app_settings_get_secrets',
+  'app_settings_migrate_legacy',
+  'app_settings_patch',
+  'app_settings_patch_secrets',
   'app_update_check',
   'app_update_download',
   'app_update_get_status',
@@ -31,6 +42,9 @@ const RENDERER_ALLOWED_COMMANDS = new Set([
   'backup_select_package',
   'backup_select_vault_dir',
   'capture_system_screenshot',
+  'clipboard_read_text',
+  'clipboard_write_text',
+  'delete_text_file',
   'download_remote_file_to_path',
   'external_write_state',
   'extract_literature_metadata_openai_compatible',
@@ -43,6 +57,8 @@ const RENDERER_ALLOWED_COMMANDS = new Set([
   'knowledge_graph_update_relation',
   'library_add_attachment',
   'library_assign_paper_category',
+  'library_batch_delete_papers',
+  'library_batch_update_papers',
   'library_count_papers',
   'library_create_category',
   'library_delete_category',
@@ -51,11 +67,13 @@ const RENDERER_ALLOWED_COMMANDS = new Set([
   'library_fetch_paper_references',
   'library_get_paper',
   'library_get_paper_references',
+  'library_get_paper_summary',
   'library_get_settings',
   'library_import_pdfs',
   'library_init',
   'library_inspect_pdf_assets',
   'library_list_categories',
+  'library_list_citation_keys',
   'library_list_paper_ids',
   'library_list_tags',
   'library_list_papers',
@@ -96,8 +114,10 @@ const RENDERER_ALLOWED_COMMANDS = new Set([
   'notes_vault_sync_now',
   'notes_vault_update_settings',
   'open_external_url',
+  'path_authorization_status',
   'path_exists',
   'paths_exist',
+  'pdf_read_metadata_preview',
   'prepare_mineru_cache_dir',
   'prepare_mineru_reparse',
   'rag_embed_chunks',
@@ -112,6 +132,7 @@ const RENDERER_ALLOWED_COMMANDS = new Set([
   'rag_retrieve_document_chunks',
   'rag_test_embedding',
   'read_binary_file_base64',
+  'read_mineru_asset_base64',
   'read_text_file',
   'read_text_file_if_exists',
   'reader_secret_decrypt',
@@ -154,6 +175,8 @@ function isRendererCommandAllowed(command) {
 }
 
 module.exports = {
+  MAX_CLIPBOARD_TEXT_LENGTH,
   RENDERER_ALLOWED_COMMANDS,
+  SYNCHRONOUS_RENDERER_COMMANDS,
   isRendererCommandAllowed,
 };

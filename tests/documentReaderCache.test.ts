@@ -8,7 +8,7 @@ import {
   resolveSavedPdfPath,
 } from '../src/features/reader/documentReaderCache.ts';
 import { parseMineruMarkdownPages } from '../src/services/mineru.ts';
-import type { PaperSummary, PdfSource, WorkspaceItem } from '../src/types/reader.ts';
+import type { PaperSummary, WorkspaceItem } from '../src/types/reader.ts';
 
 function item(overrides: Partial<WorkspaceItem> = {}): WorkspaceItem {
   return {

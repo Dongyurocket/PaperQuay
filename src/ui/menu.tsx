@@ -1,4 +1,4 @@
-import { useEffect, useRef, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { cn } from '../utils/cn';
 
@@ -72,42 +72,41 @@ export function Menu({
   const restoreFocusRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
-    // 指针打开的菜单不抢焦点（否则右键会跳走焦点），但要记住触发前的焦点，
-    // 关闭时归还；键盘打开的菜单直接聚焦首项。
     restoreFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-
-    if (!keyboardAnchor) return;
     const first = menuRef.current?.querySelector<HTMLButtonElement>('button:not(:disabled)');
-    (first ?? menuRef.current)?.focus();
+    if (keyboardAnchor) (first ?? menuRef.current)?.focus();
+
+    const handleDocumentKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        onClose();
+        restoreFocus();
+        return;
+      }
+      if (event.key === 'Tab') {
+        event.preventDefault();
+        onClose();
+        restoreFocus();
+        return;
+      }
+      if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+      const items = Array.from(menuRef.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? []);
+      if (!items.length) return;
+      event.preventDefault();
+      const index = items.indexOf(document.activeElement as HTMLButtonElement);
+      const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1
+        : event.key === 'ArrowDown' ? (index + 1) % items.length
+          : (index <= 0 ? items.length - 1 : index - 1);
+      items[next].focus();
+    };
+    document.addEventListener('keydown', handleDocumentKeyDown, true);
+    return () => document.removeEventListener('keydown', handleDocumentKeyDown, true);
   }, [keyboardAnchor]);
 
   const restoreFocus = () => {
     const target = keyboardAnchor ?? restoreFocusRef.current;
     target?.focus?.();
-  };
-
-  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      event.stopPropagation();
-      onClose();
-      restoreFocus();
-      return;
-    }
-    if (event.key === 'Tab') {
-      onClose();
-      restoreFocus();
-      return;
-    }
-    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
-    const items = Array.from(menuRef.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? []);
-    if (!items.length) return;
-    event.preventDefault();
-    const index = items.indexOf(document.activeElement as HTMLButtonElement);
-    const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1
-      : event.key === 'ArrowDown' ? (index + 1) % items.length
-        : (index <= 0 ? items.length - 1 : index - 1);
-    items[next].focus();
   };
 
   const position = clampPosition(x, y, width, estimateMenuHeight(entries, Boolean(title)));
@@ -126,7 +125,6 @@ export function Menu({
         role="menu"
         aria-label={keyboardAnchor?.getAttribute("aria-label") ?? keyboardAnchor?.title ?? title}
         tabIndex={-1}
-        onKeyDown={handleKeyDown}
         className={cn("pq-card fixed overflow-hidden p-1 shadow-[var(--pq-shadow-dialog)]", keyboardAnchor && "!rounded-[var(--pq-radius-sm)]")}
         style={{ left: position.left, top: position.top, width, boxShadow: keyboardAnchor ? "var(--pq-shadow-dialog)" : undefined }}
         onClick={(event) => event.stopPropagation()}

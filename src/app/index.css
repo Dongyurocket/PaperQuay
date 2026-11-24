@@ -12,7 +12,6 @@
   --pq-surface: var(--pq-surface-1);
   --pq-surface-2: #f5f5f4;
   --pq-surface-3: #e7e5e4;
-  --pq-surface-elevated: #f5f5f4;
   --pq-hover: rgba(0, 0, 0, 0.04);
   --pq-active: rgba(0, 0, 0, 0.08);
   --pq-border: rgba(0, 0, 0, 0.08);
@@ -23,13 +22,11 @@
   --pq-text-primary: var(--pq-text);
   --pq-text-muted: #57534e;
   --pq-text-secondary: var(--pq-text-muted);
-  --pq-text-faint: #a8a29e;
+  --pq-text-faint: #6b6a66;
   --pq-text-tertiary: var(--pq-text-faint);
-  --pq-text-quaternary: #d6d3d1;
-  --pq-accent: #0d9488;
-  --pq-accent-hover: #0f766e;
+  --pq-accent: #0f766e;
+  --pq-accent-hover: #115e59;
   --pq-accent-strong: #115e59;
-  --pq-accent-light: #5eead4;
   --pq-accent-soft: rgba(13, 148, 136, 0.1);
   --pq-accent-bg: var(--pq-accent-soft);
   --pq-accent-bg-hover: rgba(13, 148, 136, 0.15);
@@ -37,16 +34,14 @@
   --pq-accent-border-strong: rgba(13, 148, 136, 0.34);
   --pq-accent-ring: rgba(13, 148, 136, 0.16);
   --pq-accent-shadow: rgba(13, 148, 136, 0.12);
-  --pq-accent-text: #ffffff;
-  --pq-accent-button-bg: var(--pq-accent);
-  --pq-accent-button-bg-hover: var(--pq-accent-hover);
+  --pq-accent-button-bg: #0f766e;
+  --pq-accent-button-bg-hover: #115e59;
   --pq-accent-button-text: #ffffff;
   --pq-focus-ring: var(--pq-accent-bg);
-  --pq-teal: var(--pq-accent);
   --pq-success: #16a34a;
   --pq-success-bg: rgba(22, 163, 74, 0.1);
-  --pq-warning: #d97706;
-  --pq-warning-bg: rgba(217, 119, 6, 0.1);
+  --pq-warning: #9a3412;
+  --pq-warning-bg: rgba(194, 65, 12, 0.1);
   --pq-danger: #dc2626;
   --pq-error: var(--pq-danger);
   --pq-error-bg: rgba(220, 38, 38, 0.1);
@@ -54,10 +49,7 @@
   --pq-info-bg: rgba(8, 145, 178, 0.1);
   /* 按钮级语义令牌：实心状态按钮专用，浅色为「亮底 + 白字」。
      不要用 --pq-{semantic} 直接当实心按钮底：它是文字/图标色，深色主题下为亮色，白字会糊。
-     每组文字对底均按 WCAG 核算 ≥4.5:1（success 用 #15803d 而非 #16a34a，后者配白字仅 3.30:1）。 */
-  --pq-success-button-bg: #15803d;
-  --pq-success-button-bg-hover: #166534;
-  --pq-success-button-text: #ffffff;
+     每组文字对底均按 WCAG 核算 ≥4.5:1。success 没有实心按钮场景，令牌已删除。 */
   --pq-danger-button-bg: #dc2626;
   --pq-danger-button-bg-hover: #b91c1c;
   --pq-danger-button-text: #ffffff;
@@ -67,17 +59,16 @@
   --pq-radius-sm: 8px;
   --pq-radius-md: 12px;
   --pq-radius-lg: 16px;
+  /* 控件高度：UI 原语 size='sm'|'md' 的唯一来源，避免 h-7/h-8 手写高度漂移。 */
+  --pq-control-sm: 28px;
+  --pq-control-md: 32px;
   --pq-shadow-soft: 0 1px 3px rgba(0, 0, 0, 0.04);
   --pq-shadow-float: 0 4px 12px rgba(0, 0, 0, 0.06);
   --pq-shadow-dialog: 0 8px 24px rgba(0, 0, 0, 0.12);
   --pq-blur: blur(10px) saturate(1.05);
   --pq-motion-fast: 120ms ease-out;
-  --pq-motion: 200ms ease-out;
-  --pq-motion-slow: 300ms ease-out;
   --pq-bg: var(--pq-bg-primary);
   --pq-bg-elevated: rgba(255, 255, 255, 0.86);
-  --pq-bg-solid: var(--pq-surface-1);
-  --pq-bg-subtle: var(--pq-bg-secondary);
   /* 遮罩层：不要用 bg-slate-950/62 这类非 5 倍数透明度——Tailwind 不会为
      它生成 CSS，浅色主题下遮罩会完全消失。 */
   --pq-overlay-soft: rgba(2, 6, 23, 0.28);
@@ -85,6 +76,15 @@
   /* 窗口关闭按钮：沿用 Windows 原生标题栏的关闭色，深浅主题一致。 */
   --pq-window-close-bg: #e81123;
   --pq-window-close-text: #ffffff;
+  /* MinerU 解析表格：语义令牌为一组，浅/深主题各自覆盖；表格不再写裸 hex/rgba。 */
+  --pq-table-text: #334155;
+  --pq-table-head-text: #0f172a;
+  --pq-table-head-bg: rgba(248, 250, 252, 0.96);
+  --pq-table-border: #e2e8f0;
+  --pq-table-row-alt-bg: #fbfdff;
+  --pq-table-row-hover-bg: #f6f9fc;
+  --pq-scrollbar-thumb: rgba(148, 163, 184, 0.34);
+  --pq-scrollbar-thumb-hover: rgba(100, 116, 139, 0.42);
   font-family:
     ui-sans-serif,
     system-ui,
@@ -108,7 +108,6 @@
   --pq-surface: var(--pq-surface-1);
   --pq-surface-2: #202020;
   --pq-surface-3: #262626;
-  --pq-surface-elevated: #202020;
   --pq-hover: rgba(255, 255, 255, 0.06);
   --pq-active: rgba(255, 255, 255, 0.1);
   --pq-border: rgba(255, 255, 255, 0.1);
@@ -119,16 +118,14 @@
   --pq-text-primary: var(--pq-text);
   --pq-text-muted: rgba(255, 255, 255, 0.65);
   --pq-text-secondary: var(--pq-text-muted);
-  --pq-text-faint: rgba(255, 255, 255, 0.45);
+  --pq-text-faint: rgba(255, 255, 255, 0.55);
   --pq-text-tertiary: var(--pq-text-faint);
-  --pq-text-quaternary: rgba(255, 255, 255, 0.25);
-  /* 深色 accent 改回与浅色同色相（约 172°）的中饱和变体。
-     旧值 #86a89f 是 164°/16% 的降饱和灰绿，与浅色 #0d9488（174.7°/84%）不同色相也不同性格，
+  /* 深色 accent 改回与浅色同色相（约 175°）的中饱和变体。
+     旧值 #86a89f 是 164°/16% 的降饱和灰绿，与浅色 #0f766e（175.3°/77%）不同色相也不同性格，
      品牌色跨主题不连续。现在只提亮、不改变色相族。 */
   --pq-accent: #2dd4bf;
   --pq-accent-hover: #5eead4;
   --pq-accent-strong: #99f6e4;
-  --pq-accent-light: #99f6e4;
   --pq-accent-soft: rgba(45, 212, 191, 0.14);
   --pq-accent-bg: var(--pq-accent-soft);
   --pq-accent-bg-hover: rgba(45, 212, 191, 0.2);
@@ -136,12 +133,10 @@
   --pq-accent-border-strong: rgba(45, 212, 191, 0.42);
   --pq-accent-ring: rgba(45, 212, 191, 0.2);
   --pq-accent-shadow: rgba(45, 212, 191, 0.16);
-  --pq-accent-text: #99f6e4;
   --pq-accent-button-bg: #115e59;
   --pq-accent-button-bg-hover: #0f766e;
   --pq-accent-button-text: #ecfeff;
   --pq-focus-ring: var(--pq-accent-bg);
-  --pq-teal: var(--pq-accent);
   /* success 移到纯绿（142°），与 accent（172°）拉开 30° 以上。
      旧值 #6ee7b7 与 accent 只差 8°，且浅色下 accent(#0d9488,174.7°) 与 success(#059669,161.4°)
      色相只差 13°、亮度饱和度几乎相同，导致「强调」与「成功」在视觉上不可区分。 */
@@ -155,9 +150,6 @@
   --pq-info: #67e8f9;
   --pq-info-bg: rgba(103, 232, 249, 0.12);
   /* 深色主题实心按钮与浅色相反：深底 + 浅字（不是把浅色的亮底简单提亮）。 */
-  --pq-success-button-bg: #14532d;
-  --pq-success-button-bg-hover: #166534;
-  --pq-success-button-text: #dcfce7;
   --pq-danger-button-bg: #7f1d1d;
   --pq-danger-button-bg-hover: #991b1b;
   --pq-danger-button-text: #fee2e2;
@@ -169,12 +161,18 @@
   --pq-shadow-dialog: 0 10px 28px rgba(0, 0, 0, 0.46);
   --pq-bg: var(--pq-bg-primary);
   --pq-bg-elevated: rgba(26, 26, 26, 0.88);
-  --pq-bg-solid: var(--pq-surface-1);
-  --pq-bg-subtle: var(--pq-surface-2);
   --pq-overlay-soft: rgba(0, 0, 0, 0.45);
   --pq-overlay-strong: rgba(0, 0, 0, 0.7);
   --pq-window-close-bg: #e81123;
   --pq-window-close-text: #ffffff;
+  --pq-table-text: #cbd5e1;
+  --pq-table-head-text: #e2e8f0;
+  --pq-table-head-bg: rgba(15, 23, 42, 0.94);
+  --pq-table-border: #1e293b;
+  --pq-table-row-alt-bg: #0f172a;
+  --pq-table-row-hover-bg: #1a2744;
+  --pq-scrollbar-thumb: rgba(255, 255, 255, 0.12);
+  --pq-scrollbar-thumb-hover: rgba(255, 255, 255, 0.2);
   background: var(--pq-bg-primary);
 }
 
@@ -252,7 +250,7 @@ textarea,
 
 /* 键盘焦点可见：此前只有 3 个文件零散写了 focus-visible，大部分控件（图标按钮、导航、列表行）
    用键盘 Tab 过去时没有任何视觉反馈。这里统一给可聚焦元素补一圈使用 accent 的焦点环；
-   已自带 ring 的元素通过 .pq-focus-ring-reset 或后续自定义 class 覆盖。
+   已自带焦点视觉的元素通过后续自定义 class 覆盖。
    注意：全局规则不改 border-radius（曾把每个聚焦元素的几何形状改掉，见 D7-5）。 */
 :focus-visible {
   outline: 2px solid var(--pq-accent);
@@ -479,8 +477,9 @@ select:focus-visible,
 .pq-input:focus {
   border-color: var(--pq-accent);
   background: var(--pq-surface);
-  /* 实心 accent 环（约 3.9:1），此前 10% accent 仅 1.13:1（E4）。 */
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--pq-accent) 45%, transparent);
+  /* Opaque accent ring: 5.02:1 on light --pq-bg-secondary, 5.47:1 on white,
+     8.13:1 / 9.35:1 in dark. Ratios are asserted by tests/uiContrast.test.ts. */
+  box-shadow: 0 0 0 3px var(--pq-accent);
 }
 
 .pq-input::placeholder,
@@ -627,17 +626,6 @@ select:focus-visible,
   box-shadow: var(--pq-shadow-float);
 }
 
-.pq-chat-bubble-assistant {
-  border: 1px solid var(--pq-border);
-  background: var(--pq-surface-1);
-  box-shadow: var(--pq-shadow-soft);
-}
-
-.dark .pq-chat-bubble-assistant {
-  background: var(--pq-surface-1);
-  box-shadow: none;
-}
-
 .pq-chat-bubble-user {
   border: 1px solid var(--pq-accent-border);
   background: var(--pq-accent-soft);
@@ -686,25 +674,20 @@ select:focus-visible,
 }
 
 .pq-library-workspace,
-.pq-agent-workspace,
 .pq-reader-assistant,
 .pq-chat-workspace {
   background: transparent;
 }
 
 .pq-library-workspace .pq-library-pane,
-.pq-agent-workspace .pq-agent-pane,
-.pq-reader-assistant .pq-reader-pane,
-.pq-chat-workspace .pq-chat-pane {
+.pq-reader-assistant .pq-reader-pane {
   border-color: var(--pq-border);
   background: rgba(255, 255, 255, 0.62);
   backdrop-filter: var(--pq-blur);
 }
 
 .dark .pq-library-workspace .pq-library-pane,
-.dark .pq-agent-workspace .pq-agent-pane,
-.dark .pq-reader-assistant .pq-reader-pane,
-.dark .pq-chat-workspace .pq-chat-pane {
+.dark .pq-reader-assistant .pq-reader-pane {
   background: var(--pq-surface-1);
 }
 
@@ -720,22 +703,12 @@ select:focus-visible,
 *::-webkit-scrollbar-thumb {
   border-radius: 9999px;
   border: 2px solid transparent;
-  background: rgba(148, 163, 184, 0.34);
+  background: var(--pq-scrollbar-thumb);
   background-clip: padding-box;
 }
 
 *::-webkit-scrollbar-thumb:hover {
-  background: rgba(100, 116, 139, 0.42);
-  background-clip: padding-box;
-}
-
-.dark *::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.12);
-  background-clip: padding-box;
-}
-
-.dark *::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.2);
+  background: var(--pq-scrollbar-thumb-hover);
   background-clip: padding-box;
 }
 
@@ -821,7 +794,7 @@ select:focus-visible,
   min-width: 100%;
   border-collapse: separate;
   border-spacing: 0;
-  color: #334155;
+  color: var(--pq-table-text);
   font-size: 13px;
   line-height: 1.7;
 }
@@ -831,8 +804,8 @@ select:focus-visible,
   position: sticky;
   top: 0;
   z-index: 1;
-  background: rgba(248, 250, 252, 0.96);
-  color: #0f172a;
+  background: var(--pq-table-head-bg);
+  color: var(--pq-table-head-text);
   font-weight: 700;
   backdrop-filter: blur(12px);
 }
@@ -840,63 +813,29 @@ select:focus-visible,
 .mineru-table td,
 .mineru-table th {
   max-width: 360px;
-  border-right: 1px solid #e2e8f0;
-  border-bottom: 1px solid #e2e8f0;
+  border-right: 1px solid var(--pq-table-border);
+  border-bottom: 1px solid var(--pq-table-border);
   padding: 11px 13px;
   vertical-align: top;
   white-space: normal;
 }
 
 .mineru-table tr:nth-child(2n + 3) td {
-  background: #fbfdff;
+  background: var(--pq-table-row-alt-bg);
 }
 
 .mineru-table tr:hover td {
-  background: #f6f9fc;
-}
-
-.dark .mineru-table table {
-  color: #cbd5e1;
-}
-
-.dark .mineru-table tr:first-child td,
-.dark .mineru-table th {
-  background: rgba(15, 23, 42, 0.94);
-  color: #e2e8f0;
-}
-
-.dark .mineru-table td,
-.dark .mineru-table th {
-  border-right-color: #1e293b;
-  border-bottom-color: #1e293b;
-}
-
-.dark .mineru-table tr:nth-child(2n + 3) td {
-  background: #0f172a;
-}
-
-.dark .mineru-table tr:hover td {
-  background: #1a2744;
-}
-
-.dark .mineru-table td:first-child,
-.dark .mineru-table th:first-child {
-  border-left-color: #1e293b;
-}
-
-.dark .mineru-table tr:first-child td,
-.dark .mineru-table tr:first-child th {
-  border-top-color: #1e293b;
+  background: var(--pq-table-row-hover-bg);
 }
 
 .mineru-table td:first-child,
 .mineru-table th:first-child {
-  border-left: 1px solid #e2e8f0;
+  border-left: 1px solid var(--pq-table-border);
 }
 
 .mineru-table tr:first-child td,
 .mineru-table tr:first-child th {
-  border-top: 1px solid #e2e8f0;
+  border-top: 1px solid var(--pq-table-border);
 }
 
 .pq-notes-workspace {
@@ -1308,7 +1247,7 @@ select:focus-visible,
   border-radius: 999px;
   background: var(--pq-accent-bg);
   padding: 0.16rem 0.5rem;
-  color: var(--pq-accent-text);
+  color: var(--pq-text-primary);
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0;

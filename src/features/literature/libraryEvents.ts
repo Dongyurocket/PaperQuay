@@ -40,6 +40,13 @@ export interface NativePaperUpdatedEventDetail {
   paper: LiteraturePaper;
 }
 
+/** 阅读进度写入后的增量事件；缺失 detail 时调用方应退回完整重查。 */
+export interface LibraryReadingUpdatedEventDetail {
+  paperId?: string;
+  lastReadAt?: number;
+  readingProgress?: number;
+}
+
 /** 文献附件或元数据在某一侧（文献库/阅读器）变更后广播，另一侧据此增量刷新本地状态。 */
 export function emitNativePaperUpdated(paper: LiteraturePaper) {
   window.dispatchEvent(

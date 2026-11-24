@@ -1,7 +1,11 @@
 import { useEffect, useRef } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 import type { LiteratureCategory } from '../../types/library';
-import { LIBRARY_READING_UPDATED_EVENT, NATIVE_PAPER_UPDATED_EVENT } from './libraryEvents.ts';
+import {
+  LIBRARY_READING_UPDATED_EVENT,
+  NATIVE_PAPER_UPDATED_EVENT,
+  type LibraryReadingUpdatedEventDetail,
+} from './libraryEvents.ts';
 
 interface Options {
   enabled: boolean;
@@ -9,12 +13,17 @@ interface Options {
   refreshPapers: () => Promise<unknown>;
   listCategories: () => Promise<LiteratureCategory[]>;
   setCategories: Dispatch<SetStateAction<LiteratureCategory[]>>;
+  /**
+   * 阅读进度事件可被调用方按 id 增量处理；返回 true 表示已处理、不需要
+   * 全量重查（分类计数与筛选成员资格不变）。缺少 detail 或调用方未提供
+   * 处理器时保持原有全量刷新语义。
+   */
+  handleReadingUpdated?: (detail: LibraryReadingUpdatedEventDetail | null) => boolean;
 }
 
 const UPDATE_EVENTS = [
   'paperquay:native-summary-updated',
   NATIVE_PAPER_UPDATED_EVENT,
-  LIBRARY_READING_UPDATED_EVENT,
 ];
 
 /** Requery membership, totals and ordering after writes, including while the library is hidden. */
@@ -46,13 +55,22 @@ export function useLibraryQueryRefresh(options: Options) {
       if (timer !== null) clearTimeout(timer);
       timer = latest.current.ready ? setTimeout(refresh, 100) : null;
     };
+    const handleReadingUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<LibraryReadingUpdatedEventDetail>).detail ?? null;
+      if (latest.current.handleReadingUpdated?.(detail)) {
+        return;
+      }
+      schedule();
+    };
     resumeRef.current = () => { if (pending) schedule(); };
     for (const event of UPDATE_EVENTS) window.addEventListener(event, schedule);
+    window.addEventListener(LIBRARY_READING_UPDATED_EVENT, handleReadingUpdated);
     return () => {
       cancelled = true;
       resumeRef.current = null;
       if (timer !== null) clearTimeout(timer);
       for (const event of UPDATE_EVENTS) window.removeEventListener(event, schedule);
+      window.removeEventListener(LIBRARY_READING_UPDATED_EVENT, handleReadingUpdated);
     };
   }, [options.enabled]);
 

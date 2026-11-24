@@ -32,8 +32,8 @@ export function estimatePdfDocumentBytes(doc?: { numPages?: number } | null): nu
  */
 export function estimateMineruParseBytes(
   input?:
-    | readonly any[]
-    | { pages?: readonly any[] | null; flatBlocks?: readonly any[] | null }
+    | readonly unknown[]
+    | { pages?: readonly unknown[] | null; flatBlocks?: readonly unknown[] | null }
     | null,
 ): number {
   if (!input) {
@@ -46,10 +46,11 @@ export function estimateMineruParseBytes(
     // 可能是 MineruPage[] 或 PositionedMineruBlock[]
     for (const item of input) {
       if (!item || typeof item !== 'object') continue;
-      if (Array.isArray((item as any).blocks)) {
+      const blocks = (item as { blocks?: unknown }).blocks;
+      if (Array.isArray(blocks)) {
         // 是 MineruPage
         totalBytes += 512;
-        for (const block of (item as any).blocks) {
+        for (const block of blocks) {
           totalBytes += estimateBlockBytes(block);
         }
       } else {
@@ -60,12 +61,15 @@ export function estimateMineruParseBytes(
     return totalBytes;
   }
 
-  const container = input as { pages?: readonly any[] | null; flatBlocks?: readonly any[] | null };
+  const container = input as { pages?: readonly unknown[] | null; flatBlocks?: readonly unknown[] | null };
   if (Array.isArray(container.pages)) {
     for (const page of container.pages) {
       totalBytes += 512;
-      if (Array.isArray(page?.blocks)) {
-        for (const block of page.blocks) {
+      const pageBlocks = page && typeof page === 'object'
+        ? (page as { blocks?: unknown }).blocks
+        : undefined;
+      if (Array.isArray(pageBlocks)) {
+        for (const block of pageBlocks) {
           totalBytes += estimateBlockBytes(block);
         }
       }
@@ -79,16 +83,21 @@ export function estimateMineruParseBytes(
   return totalBytes;
 }
 
-function estimateBlockBytes(block: any): number {
+function estimateBlockBytes(block: unknown): number {
   if (!block || typeof block !== 'object') {
     return 0;
   }
+  const candidate = block as { text?: unknown; content?: { text?: unknown } | null };
   const structBytes = 384;
   let textBytes = 0;
-  if (typeof block.text === 'string') {
-    textBytes = block.text.length * 2;
-  } else if (block.content && typeof block.content === 'object' && typeof block.content.text === 'string') {
-    textBytes = block.content.text.length * 2;
+  if (typeof candidate.text === 'string') {
+    textBytes = candidate.text.length * 2;
+  } else if (
+    candidate.content &&
+    typeof candidate.content === 'object' &&
+    typeof candidate.content.text === 'string'
+  ) {
+    textBytes = candidate.content.text.length * 2;
   }
   return structBytes + textBytes;
 }
@@ -324,6 +333,30 @@ export class ByteBudgetLruCache<T> {
 
     return evictedCount;
   }
+}
+
+/** 桥接状态中与挂载决策相关的字段。 */
+export interface ReaderTabBusyBridgeState {
+  /** 文档翻译进行中。 */
+  translating?: boolean;
+  /** 该标签有问答会话正在生成回答。 */
+  qaRunning?: boolean;
+}
+
+/**
+ * 汇总必须保持挂载的阅读标签：
+ * 翻译与问答都会在标签切走后继续运行，若被挂载上限或 LRU 顺序卸载，
+ * 进行中的任务会被中断（问答还会丢失流式占位与中止清理的机会）。
+ */
+export function collectBusyReaderTabIds(
+  readerTabIds: readonly string[],
+  bridges: Readonly<Record<string, ReaderTabBusyBridgeState | undefined>>,
+): string[] {
+  return readerTabIds.filter((id) => {
+    const bridge = bridges[id];
+
+    return Boolean(bridge && (bridge.translating || bridge.qaRunning));
+  });
 }
 
 export function chooseMountedReaderTabIds(input: {

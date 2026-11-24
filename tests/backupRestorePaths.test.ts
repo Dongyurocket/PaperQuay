@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { buildMineruCachePaths } from '../src/utils/mineruCache.ts';
@@ -19,9 +18,11 @@ const {
 } = require('../electron/backend/backupImport.cjs');
 
 const PASSWORD = 'correct horse battery staple';
+const TEST_TMP = path.join(process.cwd(), '.tmp-test');
+mkdirSync(TEST_TMP, { recursive: true });
 
 async function fixture() {
-  const userDataDir = await mkdtemp(path.join(tmpdir(), 'paperquay-restore-paths-'));
+  const userDataDir = await mkdtemp(path.join(TEST_TMP, 'paperquay-restore-paths-'));
   const dataDir = path.join(userDataDir, 'PaperQuay');
   const appPaths = {
     userDataDir,
@@ -167,6 +168,7 @@ async function stageAndApply(temp, packagePath, libraryStorageDir) {
     packagePath,
     password: PASSWORD,
     targets: { libraryStorageDir },
+    authorizedTargets: [libraryStorageDir],
     currentRendererState: {},
   });
   assert.equal(staged.ok, true);
@@ -175,6 +177,72 @@ async function stageAndApply(temp, packagePath, libraryStorageDir) {
   const summary = JSON.parse(await readFile(path.join(temp.dataDir, '.settings', 'restore-summary.json'), 'utf8'));
   return { applied, summary };
 }
+
+test('T0 restore targets must come from an authorized dialog selection and reject UNC/device paths', async () => {
+  const temp = await fixture();
+  try {
+    const { packagePath } = await buildPackage(temp, {
+      attachments: () => [],
+      pdfEntries: () => [],
+    });
+    const unauthorized = path.join(temp.userDataDir, 'not-approved');
+    const approved = path.join(temp.userDataDir, 'approved');
+    await mkdir(unauthorized, { recursive: true });
+    await writeFile(path.join(unauthorized, 'keep.txt'), 'keep');
+
+    // 未授权但存在的非空目录：拒绝且不移动/写入。
+    await assert.rejects(
+      stageBackupImport(temp.appPaths, {
+        packagePath,
+        password: PASSWORD,
+        targets: { libraryStorageDir: unauthorized },
+        authorizedTargets: [approved],
+        currentRendererState: {},
+      }),
+      { code: 'UNSAFE_DESTINATION' },
+    );
+    assert.equal(await readFile(path.join(unauthorized, 'keep.txt'), 'utf8'), 'keep');
+    assert.equal(await readdir(unauthorized).then((names) => names.length), 1);
+
+    // 完全缺少授权记录（渲染层直接调用的旧路径）：同样拒绝。
+    await assert.rejects(
+      stageBackupImport(temp.appPaths, {
+        packagePath,
+        password: PASSWORD,
+        targets: { libraryStorageDir: unauthorized },
+        currentRendererState: {},
+      }),
+      { code: 'UNSAFE_DESTINATION' },
+    );
+
+    // UNC 与设备路径即使被列为授权也拒绝（不发起 SMB 探测/不写入）。
+    const uncCode = process.platform === 'win32' ? 'UNSAFE_DESTINATION' : 'TARGET_NOT_WRITABLE';
+    await assert.rejects(
+      stageBackupImport(temp.appPaths, {
+        packagePath,
+        password: PASSWORD,
+        targets: { libraryStorageDir: '\\\\server\\share\\library' },
+        authorizedTargets: ['\\\\server\\share\\library'],
+        currentRendererState: {},
+      }),
+      { code: uncCode },
+    );
+    if (process.platform === 'win32') {
+      await assert.rejects(
+        stageBackupImport(temp.appPaths, {
+          packagePath,
+          password: PASSWORD,
+          targets: { libraryStorageDir: '\\\\?\\C:\\library' },
+          authorizedTargets: ['\\\\?\\C:\\library'],
+          currentRendererState: {},
+        }),
+        { code: 'UNSAFE_DESTINATION' },
+      );
+    }
+  } finally {
+    await temp.dispose();
+  }
+});
 
 test('T1 installs MinerU caches directly under the cache root where the reader looks them up', async () => {
   const temp = await fixture();

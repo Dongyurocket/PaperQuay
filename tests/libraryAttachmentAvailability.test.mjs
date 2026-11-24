@@ -6,7 +6,12 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
-const { resolveAttachmentFilterRequest } = require('../electron/backend/libraryAttachmentAvailability.cjs');
+const {
+  createAttachmentAvailabilityCache,
+  resolveAttachmentFilterRequest,
+} = require('../electron/backend/libraryAttachmentAvailability.cjs');
+
+const noCache = () => createAttachmentAvailabilityCache({ ttlMs: 0, negativeTtlMs: 0 });
 
 test('attachment filters use current disk state and intersect existing paper ids', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'paperquay-attachment-filter-'));
@@ -22,17 +27,18 @@ test('attachment filters use current disk state and intersect existing paper ids
       { id: 'd', attachments: [] },
     ] };
     const request = { search: 'x', hasPdf: true, paperIds: ['a', 'c'] };
-    assert.deepEqual(await resolveAttachmentFilterRequest(request, library), { search: 'x', paperIds: ['a'] });
-    assert.deepEqual((await resolveAttachmentFilterRequest({ missingFile: true }, library)).paperIds, ['c']);
-    assert.deepEqual((await resolveAttachmentFilterRequest({ hasTranslatedPdf: true, missingFile: false }, library)).paperIds, ['b']);
-    assert.deepEqual((await resolveAttachmentFilterRequest({ hasPdf: false }, library)).paperIds, ['b', 'c', 'd']);
-    assert.deepEqual((await resolveAttachmentFilterRequest({ hasPdf: true, paperIds: [] }, library)).paperIds, []);
+    const cache = noCache();
+    assert.deepEqual(await resolveAttachmentFilterRequest(request, library, { cache }), { search: 'x', paperIds: ['a'] });
+    assert.deepEqual((await resolveAttachmentFilterRequest({ missingFile: true }, library, { cache })).paperIds, ['c']);
+    assert.deepEqual((await resolveAttachmentFilterRequest({ hasTranslatedPdf: true, missingFile: false }, library, { cache })).paperIds, ['b']);
+    assert.deepEqual((await resolveAttachmentFilterRequest({ hasPdf: false }, library, { cache })).paperIds, ['b', 'c', 'd']);
+    assert.deepEqual((await resolveAttachmentFilterRequest({ hasPdf: true, paperIds: [] }, library, { cache })).paperIds, []);
     await fs.unlink(pdf);
-    assert.deepEqual((await resolveAttachmentFilterRequest({ missingFile: true }, library)).paperIds, ['a', 'c']);
+    assert.deepEqual((await resolveAttachmentFilterRequest({ missingFile: true }, library, { cache })).paperIds, ['a', 'c']);
     await fs.writeFile(pdf, 'pdf');
-    assert.deepEqual((await resolveAttachmentFilterRequest({ hasPdf: true }, library)).paperIds, ['a']);
+    assert.deepEqual((await resolveAttachmentFilterRequest({ hasPdf: true }, library, { cache })).paperIds, ['a']);
     const noFilter = { search: 'untouched' };
-    assert.strictEqual(await resolveAttachmentFilterRequest(noFilter, library), noFilter);
+    assert.strictEqual(await resolveAttachmentFilterRequest(noFilter, library, { cache }), noFilter);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }
@@ -51,7 +57,7 @@ test('attachment filter commands keep page totals and selected ids consistent af
     const library = store.load();
     library.papers.push({ id: 'p1', title: 'Paper', year: '2020', keywords: [], importedAt: 1, updatedAt: 1, lastReadAt: null, readingProgress: 0, isFavorite: false, source: 'local', sortOrder: 0, authors: [], tags: [], categoryIds: [], attachments: [{ id: 'a1', paperId: 'p1', kind: 'pdf', storedPath: file, fileName: 'paper.pdf', mimeType: 'application/pdf', createdAt: 1, missing: false }] });
     store.save(library);
-    const commands = createLibraryCommands({ appPaths, store });
+    const commands = createLibraryCommands({ appPaths, store, attachmentAvailabilityCache: noCache() });
     const request = { missingFile: true, paperIds: ['p1'] };
     assert.equal((await commands.library_query_papers({ request })).total, 0);
     await fs.unlink(file);

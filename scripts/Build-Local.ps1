@@ -15,11 +15,13 @@ if (-not (Test-Path (Join-Path $repoRoot 'node_modules'))) {
   }
 }
 
-npm run build
-if ($LASTEXITCODE -ne 0) {
-  throw "npm run build failed with exit code $LASTEXITCODE"
+# D8-11：sqlite-vec 0.1.9 只有 windows-x64 原生扩展，没有 windows-arm64。
+# 显式拒绝并说明原因，避免打包到 afterPack 才失败。
+if ($Architecture -ne 'x64') {
+  throw "Windows $Architecture is not supported: sqlite-vec 0.1.9 publishes only sqlite-vec-windows-x64. Use -Architecture x64, or add an in-process vector fallback before enabling Windows arm64 builds."
 }
 
+# electron:build 已经包含 npm run build（typecheck + vite build），这里不再重复构建前端。
 npm run electron:build -- --win --$Architecture --publish never
 if ($LASTEXITCODE -ne 0) {
   throw "Electron packaging failed with exit code $LASTEXITCODE"

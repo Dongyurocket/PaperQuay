@@ -3,6 +3,7 @@ import { createRequire } from 'node:module';
 import test from 'node:test';
 import { build } from 'esbuild';
 import type { PdfSource } from '../src/types/reader.ts';
+import { getPdfSourceSignature } from '../src/features/pdf/pdfDocumentSource.ts';
 
 const require = createRequire(import.meta.url);
 const React = require('react');
@@ -784,6 +785,115 @@ test('a translated pane failure leaves the original pane rendered', async (t) =>
   assert.equal(left.lifecycle.pageCount, 47);
   assert.equal(right.lifecycle.tree?.props['data-pdf-phase'], 'error');
   assert.equal(left.tasks.length, 1);
+});
+
+test('renaming the paper does not reload the PDF, while changing its path does', async (t) => {
+  const { lifecycle, tasks } = await createViewer(() => {});
+  t.after(() => lifecycle.unmount());
+  tasks[0].resolve(pdfDocument(15));
+  await lifecycle.settle();
+  assert.equal(lifecycle.pageCount, 15);
+
+  // A library rename updates the display name only; pdfSource stays the same
+  // state object. The load effect must not see a new signature/documentInit.
+  const source = lifecycle.props.source;
+  const counts: number[] = [];
+  for (const currentPdfName of ['paper-a.pdf', 'Renamed Paper', 'A completely different display name']) {
+    lifecycle.render({ ...lifecycle.props, source, currentPdfName });
+    lifecycle.commit();
+    lifecycle.flush();
+    await lifecycle.settle();
+    counts.push(lifecycle.pageCount);
+  }
+
+  assert.equal(tasks.length, 1, 'renaming the paper must not start a new PDF load');
+  assert.deepEqual(counts, [15, 15, 15]);
+
+  // A genuine source change still reloads.
+  lifecycle.render({
+    ...lifecycle.props,
+    source: { kind: 'local-path', path: 'C:/fixture/paper-b.pdf' },
+    currentPdfName: 'paper-b.pdf',
+  });
+  lifecycle.commit();
+  await lifecycle.settle();
+  assert.equal(tasks.length, 2, 'a different PDF path must reload the document');
+});
+
+test('local PDF source signatures depend only on the path, not the display name', () => {
+  const source: PdfSource = { kind: 'local-path', path: 'C:/papers/paper-a.pdf' };
+
+  assert.equal(
+    getPdfSourceSignature(source, 'paper-a.pdf'),
+    getPdfSourceSignature(source, 'Renamed paper title'),
+    'title/display-name changes must not alter the local source signature',
+  );
+  assert.equal(getPdfSourceSignature(source, ''), 'local:C:/papers/paper-a.pdf');
+  assert.notEqual(
+    getPdfSourceSignature(source, 'paper-a.pdf'),
+    getPdfSourceSignature({ kind: 'local-path', path: 'C:/papers/paper-b.pdf' }, 'paper-a.pdf'),
+  );
+});
+
+test('in-memory PDF source signatures follow the bytes, not the display name', () => {
+  const data = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]);
+
+  const baseline = getPdfSourceSignature(null, 'paper-a.pdf', data);
+  assert.match(baseline, /^data:8:[0-9a-f]{8}$/);
+  assert.equal(
+    getPdfSourceSignature(null, 'Renamed paper title', data),
+    baseline,
+    'renaming a data-backed PDF must not change its signature',
+  );
+
+  const sameLengthMiddleChanged = new Uint8Array(data);
+  sameLengthMiddleChanged[4] = 42;
+  assert.notEqual(
+    getPdfSourceSignature(null, 'paper-a.pdf', sameLengthMiddleChanged),
+    baseline,
+    'same-length data with a different middle byte must produce a new signature',
+  );
+
+  const longer = new Uint8Array([...data, 9]);
+  assert.notEqual(getPdfSourceSignature(null, '', longer), baseline);
+
+  const local: PdfSource = { kind: 'local-path', path: 'C:/papers/paper-a.pdf' };
+  assert.equal(
+    getPdfSourceSignature(local, 'paper-a.pdf', data),
+    'local:C:/papers/paper-a.pdf',
+    'local-path signatures must keep the path-only semantics',
+  );
+  const remote: PdfSource = { kind: 'remote-url', url: 'https://example.test/paper-a.pdf' };
+  assert.equal(getPdfSourceSignature(remote, 'paper-a.pdf', data), 'remote:https://example.test/paper-a.pdf');
+  assert.equal(getPdfSourceSignature(null, 'paper-a.pdf'), 'paper-a.pdf', 'without pdfData the fallback still applies');
+  assert.equal(getPdfSourceSignature(null, 'paper-a.pdf', null), 'paper-a.pdf');
+});
+
+test('renaming a data-backed PDF does not reload, while changed bytes do', async (t) => {
+  const first = new Uint8Array(64).fill(7);
+  const { lifecycle, tasks } = await createViewer(() => {}, { source: null, pdfData: first });
+  t.after(() => lifecycle.unmount());
+  tasks[0].resolve(pdfDocument(15));
+  await lifecycle.settle();
+  assert.equal(lifecycle.pageCount, 15);
+
+  for (const currentPdfName of ['paper-a.pdf', 'Renamed Paper', '另一个显示名']) {
+    lifecycle.render({ ...lifecycle.props, currentPdfName });
+    lifecycle.commit();
+    lifecycle.flush();
+    await lifecycle.settle();
+    assert.equal(lifecycle.pageCount, 15);
+  }
+  assert.equal(tasks.length, 1, 'renaming a data-backed PDF must not start a new PDF load');
+
+  const middleChanged = new Uint8Array(first);
+  middleChanged[32] = 8;
+  lifecycle.render({ ...lifecycle.props, pdfData: middleChanged, currentPdfName: 'Renamed Paper' });
+  lifecycle.commit();
+  await lifecycle.settle();
+  assert.equal(tasks.length, 2, 'same-length data with a changed middle byte must reload');
+  assert.equal(tasks[1].init.data, middleChanged, 'the reload must carry the new bytes');
+  assert.equal(lifecycle.pageCount, 0, 'the previous data-backed page count must not leak into the new bytes');
 });
 
 test('unmount cancels an in-flight task and releases a late document', async () => {

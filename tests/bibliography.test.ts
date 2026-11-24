@@ -52,7 +52,7 @@ test('normalizeNoteCitationStyle falls back to gbt7714', () => {
   assert.equal(normalizeNoteCitationStyle(undefined), 'gbt7714');
 });
 
-test('引用样式从旧 localStorage 一次性迁移到阅读器设置并可回写', () => {
+test('旧引用样式键只作为首帧回退，不再写 localStorage', async () => {
   const previousWindow = (globalThis as { window?: unknown }).window;
   const values = new Map<string, string>();
   const storage = {
@@ -65,11 +65,12 @@ test('引用样式从旧 localStorage 一次性迁移到阅读器设置并可回
   try {
     values.set(NOTE_CITATION_STYLE_STORAGE_KEY, 'apa7');
     assert.equal(loadNoteCitationStyle(), 'apa7');
-    assert.equal(values.get(`${NOTE_CITATION_STYLE_STORAGE_KEY}:migrated`), '1');
-    assert.equal(JSON.parse(values.get(SETTINGS_STORAGE_KEY) || '{}').noteCitationStyle, 'apa7');
+    assert.equal(values.get(`${NOTE_CITATION_STYLE_STORAGE_KEY}:migrated`), undefined);
+    assert.equal(values.get(SETTINGS_STORAGE_KEY), undefined);
 
-    saveNoteCitationStyle('ieee');
-    assert.equal(JSON.parse(values.get(SETTINGS_STORAGE_KEY) || '{}').noteCitationStyle, 'ieee');
+    // 没有 Electron bridge 时写入失败但不抛错，也不会退回 localStorage 整对象写。
+    await saveNoteCitationStyle('ieee');
+    assert.equal(values.get(SETTINGS_STORAGE_KEY), undefined);
   } finally {
     if (previousWindow === undefined) delete (globalThis as { window?: unknown }).window;
     else Object.assign(globalThis, { window: previousWindow });

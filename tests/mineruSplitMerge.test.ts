@@ -5,9 +5,7 @@ import os from 'node:os';
 import test from 'node:test';
 import { PDFDocument } from 'pdf-lib';
 
-// @ts-ignore
 import { planPdfSplits, getPdfPageCount, splitPdfFiles } from '../electron/backend/pdfSplitter.cjs';
-// @ts-ignore
 import { mergeMineruParseResults } from '../electron/backend/mineruMerge.cjs';
 
 test('planPdfSplits correctly divides pages into batches', () => {

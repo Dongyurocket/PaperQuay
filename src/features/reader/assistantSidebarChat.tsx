@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import {
   ArrowUp,
   Bot,
@@ -48,6 +48,7 @@ import {
   type ReaderChatCopyFeedback,
 } from './readerChatCopyFeedback';
 import { MarkdownPreview, SectionCard } from './assistantSidebarPrimitives';
+import { readerQaStreamStore, type ReaderQaStreamEntry } from './readerAssistantSidebarProps';
 import {
   formatQaContextBadge,
   formatQaContextHint,
@@ -668,6 +669,369 @@ function isNearScrollBottom(element: HTMLElement, threshold = CHAT_AUTO_SCROLL_B
   return element.scrollHeight - element.scrollTop - element.clientHeight <= threshold;
 }
 
+type ReaderChatLocaleText = (zh: string, en: string) => string;
+
+/**
+ * Subscribes one chat row to the transient streaming slice for its own message. Completed
+ * rows never get that entry, and the store notifies per key, so a delta only re-renders the
+ * bubble that is actually streaming.
+ */
+function useReaderQaStreamEntry(sessionId: string, messageId: string): ReaderQaStreamEntry | null {
+  const subscribe = useCallback(
+    (listener: () => void) => readerQaStreamStore.subscribe(sessionId, messageId, listener),
+    [messageId, sessionId],
+  );
+  const getSnapshot = useCallback(
+    () => readerQaStreamStore.getSnapshot(sessionId, messageId),
+    [messageId, sessionId],
+  );
+
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+}
+
+interface ChatMessageRowProps {
+  message: DocumentChatMessage;
+  sessionId: string;
+  l: ReaderChatLocaleText;
+  locale: 'zh-CN' | 'en-US';
+  loading: boolean;
+  copyFeedback: ReaderChatCopyFeedback | null;
+  onCopy: (messageId: string, content: string) => void;
+  onCitationClick?: (citation: DocumentChatCitation) => void;
+  onCitationContext?: (citation: DocumentChatCitation) => void;
+  onSaveAssistantMessageAsNote?: (message: DocumentChatMessage) => void;
+  onStreamingContentChange?: () => void;
+}
+
+/**
+ * Memoized so streaming deltas (which only notify the active bubble) never re-render
+ * completed history rows. Props are primitives or stable callbacks/objects.
+ */
+const ChatMessageRow = memo(function ChatMessageRow({
+  message,
+  sessionId,
+  l,
+  locale,
+  loading,
+  copyFeedback,
+  onCopy,
+  onCitationClick,
+  onCitationContext,
+  onSaveAssistantMessageAsNote,
+  onStreamingContentChange,
+}: ChatMessageRowProps) {
+  const streamEntry = useReaderQaStreamEntry(sessionId, message.id);
+  const isStreaming = streamEntry !== null;
+  const assistantMessage = message.role === 'assistant';
+  const effectiveContent = assistantMessage && streamEntry ? streamEntry.text : message.content;
+  const citations = (assistantMessage ? streamEntry?.meta.citations : undefined) ?? message.citations;
+  const qaContext = (assistantMessage ? streamEntry?.meta.qaContext : undefined) ?? message.qaContext;
+  const parsed = useMemo(() => {
+    const raw = (
+      assistantMessage ? cleanQaAssistantOutput(effectiveContent) : effectiveContent
+    ).trim();
+    const htmlAnswer = assistantMessage && message.renderMode === 'html';
+    const renderHtmlPreview = htmlAnswer && shouldRenderHtmlAnswerPreview(raw);
+
+    return {
+      raw,
+      htmlAnswer,
+      renderHtmlPreview,
+      rendered: assistantMessage && !renderHtmlPreview
+        ? injectCitationLinks(raw, citations)
+        : raw,
+    };
+  }, [assistantMessage, citations, effectiveContent, message.renderMode]);
+  const qaContextBadge = assistantMessage ? formatQaContextBadge(qaContext, l) : null;
+  const qaContextHint = assistantMessage ? formatQaContextHint(qaContext, l) : null;
+  const qaContextBadgeTone = assistantMessage
+    ? getQaContextBadgeTone(qaContext)
+    : 'neutral';
+  const rawMessageContent = parsed.raw;
+
+  useEffect(() => {
+    if (isStreaming) {
+      onStreamingContentChange?.();
+    }
+  }, [effectiveContent, isStreaming, onStreamingContentChange]);
+
+  return (
+    <div
+      className={cn(
+        'pq-msg-in group flex flex-col',
+        assistantMessage ? 'items-stretch' : 'items-end',
+      )}
+    >
+      {assistantMessage ? (
+        <div className="w-full min-w-0">
+          {parsed.renderHtmlPreview ? (
+            rawMessageContent ? (
+              <HtmlAnswerPreview content={rawMessageContent} />
+            ) : (
+              <div className="text-[15px] leading-7 text-[var(--pq-text-faint)]">
+                {loading ? l('正在思考...', 'Thinking...') : ''}
+              </div>
+            )
+          ) : (
+            <MarkdownPreview
+              content={
+                parsed.rendered ||
+                (assistantMessage && loading ? l('正在思考...', 'Thinking...') : '')
+              }
+              cacheNormalization={!isStreaming}
+              components={{
+                a: ({ href, children, ...props }) => {
+                  const citation =
+                    href && onCitationClick
+                      ? findCitationByHref(href, citations)
+                      : null;
+
+                  if (citation && onCitationClick) {
+                    return (
+                      <button
+                        type="button"
+                        onClick={() => onCitationClick(citation)}
+                        className="font-medium text-[var(--pq-accent)] underline underline-offset-2 transition hover:text-[var(--pq-accent-hover)]"
+                      >
+                        [{children}]
+                      </button>
+                    );
+                  }
+
+                  if (href && citations && findCitationByHref(href, citations)) {
+                    return <span className="text-[var(--pq-text-faint)]">[{children}]</span>;
+                  }
+
+                  return (
+                    <a href={href} target="_blank" rel="noreferrer" {...props}>
+                      {children}
+                    </a>
+                  );
+                },
+              }}
+              className={cn(
+                'text-[15px] leading-7',
+                !rawMessageContent && loading && 'text-[var(--pq-text-faint)]',
+              )}
+            />
+          )}
+
+          {qaContextHint ? (
+            <div className="mt-3 rounded-xl border border-[var(--pq-border)] bg-[var(--pq-surface-2)] px-3 py-2 text-xs leading-5 text-[var(--pq-text-muted)]">
+              {qaContextHint}
+            </div>
+          ) : null}
+
+          {/*
+            Citation chips: in HTML-preview mode they are the only citation UI
+            (inline links cannot be injected into the sandboxed iframe); in
+            markdown mode they complement inline [n] links and carry the
+            「查看上下文」 entry for every retrieval hit.
+          */}
+          {assistantMessage && citations && citations.length > 0 ? (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {citations.map((citation) => (
+                <span
+                  key={citation.id}
+                  className="inline-flex items-center overflow-hidden rounded-full border border-[var(--pq-accent-border)] bg-[var(--pq-accent-soft)] text-[11px] text-[var(--pq-accent)]"
+                >
+                  <button
+                    type="button"
+                    onClick={() => onCitationClick?.(citation)}
+                    className="px-3 py-1 transition hover:bg-[var(--pq-accent-bg-hover)]"
+                    title={
+                      citation.previewText
+                        ? `${
+                            citation.pageIndex !== null && citation.pageIndex !== undefined
+                              ? l(`Page ${citation.pageIndex + 1}`, `Page ${citation.pageIndex + 1}`)
+                              : citation.sourceType
+                          }\n${citation.previewText}`
+                        : undefined
+                    }
+                  >
+                    <span>[{citation.label}]</span>
+                  </button>
+                  {citation.chunkId && onCitationContext ? (
+                    <button
+                      type="button"
+                      onClick={() => onCitationContext(citation)}
+                      className="border-l border-[var(--pq-accent-border)] px-2 py-1 transition hover:bg-[var(--pq-accent-bg-hover)]"
+                      title={l('查看该切片的前后文', 'Show the context around this chunk')}
+                    >
+                      {l('上下文', 'Context')}
+                    </button>
+                  ) : null}
+                </span>
+              ))}
+            </div>
+          ) : null}
+
+          {message.attachments && message.attachments.length > 0 ? (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {message.attachments.map((attachment) => {
+                const AttachmentIcon =
+                  attachment.kind === 'image'
+                    ? ImagePlus
+                    : attachment.kind === 'screenshot'
+                      ? Camera
+                      : Paperclip;
+
+                return (
+                  <span
+                    key={attachment.id}
+                    className="inline-flex items-center gap-2 rounded-full border border-[var(--pq-border)] bg-[var(--pq-surface-2)] px-3 py-1 text-xs text-[var(--pq-text-muted)]"
+                  >
+                    <AttachmentIcon className="h-3.5 w-3.5" strokeWidth={1.8} />
+                    <span className="max-w-[180px] truncate">{attachment.name}</span>
+                    <span className="text-[var(--pq-text-faint)]">
+                      {formatFileSize(attachment.size)}
+                    </span>
+                  </span>
+                );
+              })}
+            </div>
+          ) : null}
+
+          {/* Hover-reveal meta + actions row, below the answer */}
+          <div className={cn('mt-2 flex flex-wrap items-center gap-2 text-[11px] text-[var(--pq-text-faint)] transition-opacity duration-200 focus-within:opacity-100 group-hover:opacity-100', copyFeedback?.messageId === message.id ? 'opacity-100' : 'opacity-0')}>
+            {message.modelLabel ? (
+              <span className="pq-chip px-2 py-0.5 text-[11px]">
+                {message.modelLabel}
+              </span>
+            ) : null}
+            {parsed.htmlAnswer ? (
+              <span className="rounded-full border border-[var(--pq-accent-border)] bg-[var(--pq-accent-soft)] px-2 py-0.5 text-[11px] font-semibold text-[var(--pq-accent)]">
+                HTML
+              </span>
+            ) : null}
+            {qaContextBadge ? (
+              <span
+                className={cn(
+                  'rounded-full px-2 py-0.5 text-[11px]',
+                  qaContextBadgeTone === 'success' &&
+                    'border border-[color-mix(in_srgb,var(--pq-success)_28%,transparent)] bg-[var(--pq-success-bg)] text-[var(--pq-success)]',
+                  qaContextBadgeTone === 'warning' &&
+                    'border border-[color-mix(in_srgb,var(--pq-warning)_28%,transparent)] bg-[var(--pq-warning-bg)] text-[var(--pq-warning)]',
+                  qaContextBadgeTone === 'neutral' &&
+                    'border border-[var(--pq-border)] bg-[var(--pq-surface-2)] text-[var(--pq-text-muted)]',
+                )}
+              >
+                {qaContextBadge}
+              </span>
+            ) : null}
+            <span>{formatChatSessionTime(message.createdAt, locale)}</span>
+            {rawMessageContent ? (
+              <div className="ml-auto flex max-w-full flex-wrap items-center justify-end gap-1">
+                <button
+                  type="button"
+                  onClick={() => void onCopy(message.id, assistantMessage ? rawMessageContent : message.content)}
+                  className="inline-flex min-h-6 items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-[var(--pq-text-muted)] transition hover:bg-[var(--pq-hover)] hover:text-[var(--pq-text)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--pq-accent)]"
+                  title={l('复制原始内容', 'Copy raw content')}
+                  aria-label={l(
+                    copyFeedback?.messageId === message.id && copyFeedback.status === 'success' ? '已复制' : '复制原始内容',
+                    copyFeedback?.messageId === message.id && copyFeedback.status === 'success' ? 'Copied' : 'Copy raw content',
+                  )}
+                >
+                  {copyFeedback?.messageId === message.id && copyFeedback.status === 'success' ? (
+                    <Check className="h-3.5 w-3.5" strokeWidth={2} />
+                  ) : (
+                    <Copy className="h-3.5 w-3.5" strokeWidth={1.8} />
+                  )}
+                  {l(
+                    copyFeedback?.messageId === message.id && copyFeedback.status === 'success' ? '已复制' : '复制原始内容',
+                    copyFeedback?.messageId === message.id && copyFeedback.status === 'success' ? 'Copied' : 'Copy raw content',
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    onSaveAssistantMessageAsNote?.({
+                      ...message,
+                      content: rawMessageContent,
+                    })
+                  }
+                  disabled={!onSaveAssistantMessageAsNote}
+                  className="inline-flex min-h-6 items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-[var(--pq-text-muted)] transition hover:bg-[var(--pq-hover)] hover:text-[var(--pq-text)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--pq-accent)] disabled:cursor-not-allowed disabled:opacity-50"
+                  title={l('保存为笔记', 'Save as note')}
+                >
+                  <FilePlus2 className="h-3 w-3" strokeWidth={1.8} />
+                  {l('保存', 'Save')}
+                </button>
+              </div>
+            ) : null}
+            {copyFeedback?.messageId === message.id && copyFeedback.status === 'error' ? (
+              <span role="status" className="basis-full text-[11px] text-[var(--pq-danger)]">
+                {l('复制失败，请重试', 'Copy failed. Try again.')}
+              </span>
+            ) : null}
+          </div>
+        </div>
+      ) : (
+        <div className="flex max-w-[85%] flex-col items-end">
+          <div className="pq-chat-bubble-user min-w-0 rounded-2xl px-4 py-2.5 text-[15px] leading-7 text-[var(--pq-text)]">
+            <MarkdownPreview content={parsed.rendered} className="text-[15px] leading-7" />
+          </div>
+
+          {message.attachments && message.attachments.length > 0 ? (
+            <div className="mt-2 flex flex-wrap justify-end gap-2">
+              {message.attachments.map((attachment) => {
+                const AttachmentIcon =
+                  attachment.kind === 'image'
+                    ? ImagePlus
+                    : attachment.kind === 'screenshot'
+                      ? Camera
+                      : Paperclip;
+
+                return (
+                  <span
+                    key={attachment.id}
+                    className="inline-flex items-center gap-2 rounded-full border border-[var(--pq-border)] bg-[var(--pq-surface-2)] px-3 py-1 text-xs text-[var(--pq-text-muted)]"
+                  >
+                    <AttachmentIcon className="h-3.5 w-3.5" strokeWidth={1.8} />
+                    <span className="max-w-[180px] truncate">{attachment.name}</span>
+                    <span className="text-[var(--pq-text-faint)]">
+                      {formatFileSize(attachment.size)}
+                    </span>
+                  </span>
+                );
+              })}
+            </div>
+          ) : null}
+
+          <div className={cn('mt-1 flex max-w-full flex-wrap items-center justify-end gap-1 transition-opacity duration-200 focus-within:opacity-100 group-hover:opacity-100', copyFeedback?.messageId === message.id ? 'opacity-100' : 'opacity-0')}>
+            <span className="px-1 text-[11px] text-[var(--pq-text-faint)]">
+              {formatChatSessionTime(message.createdAt, locale)}
+            </span>
+            {rawMessageContent ? (
+              <button
+                type="button"
+                onClick={() => void onCopy(message.id, assistantMessage ? rawMessageContent : message.content)}
+                className="pq-icon-button h-6 w-6 rounded-lg text-[var(--pq-text-muted)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--pq-accent)]"
+                title={l('复制消息', 'Copy message')}
+                aria-label={l(
+                  copyFeedback?.messageId === message.id && copyFeedback.status === 'success' ? '已复制' : '复制消息',
+                  copyFeedback?.messageId === message.id && copyFeedback.status === 'success' ? 'Copied' : 'Copy message',
+                )}
+              >
+                {copyFeedback?.messageId === message.id && copyFeedback.status === 'success' ? (
+                  <Check className="h-3.5 w-3.5" strokeWidth={2} />
+                ) : (
+                  <Copy className="h-3.5 w-3.5" strokeWidth={1.8} />
+                )}
+              </button>
+            ) : null}
+            {copyFeedback?.messageId === message.id && copyFeedback.status === 'error' ? (
+              <span role="status" className="basis-full text-right text-[11px] text-[var(--pq-danger)]">
+                {l('复制失败，请重试', 'Copy failed. Try again.')}
+              </span>
+            ) : null}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+});
+
 export interface ChatWorkspacePanelProps {
   sessions: DocumentChatSession[];
   selectedSessionId: string;
@@ -811,6 +1175,32 @@ export function ChatWorkspacePanel({
     } catch {
       controller.resolve(requestId, { messageId, status: 'error' });
     }
+  }, []);
+  // The streaming bubble grows outside React state; keep the pre-refactor auto-scroll behavior.
+  const handleStreamingContentChange = useCallback(() => {
+    const scrollElement = chatScrollRef.current;
+
+    if (!scrollElement) {
+      return;
+    }
+
+    if (!shouldStickToBottomRef.current && !isNearScrollBottom(scrollElement)) {
+      return;
+    }
+
+    shouldStickToBottomRef.current = true;
+    window.requestAnimationFrame(() => {
+      const nextScrollElement = chatScrollRef.current;
+
+      if (
+        !nextScrollElement ||
+        (!shouldStickToBottomRef.current && !isNearScrollBottom(nextScrollElement))
+      ) {
+        return;
+      }
+
+      nextScrollElement.scrollTop = nextScrollElement.scrollHeight;
+    });
   }, []);
   const streamingAssistantMessage =
     selectedSessionRunning && messages[messages.length - 1]?.role === 'assistant';
@@ -1193,298 +1583,23 @@ export function ChatWorkspacePanel({
             </div>
           ) : (
             <div className="mx-auto max-w-3xl space-y-6">
-              {messages.map((message) => {
-                const assistantMessage = message.role === 'assistant';
-                const rawMessageContent = (
-                  assistantMessage ? cleanQaAssistantOutput(message.content) : message.content
-                ).trim();
-                const htmlAnswer = assistantMessage && message.renderMode === 'html';
-                const renderHtmlPreview = htmlAnswer && shouldRenderHtmlAnswerPreview(rawMessageContent);
-                const qaContextBadge = assistantMessage ? formatQaContextBadge(message.qaContext, l) : null;
-                const qaContextHint = assistantMessage ? formatQaContextHint(message.qaContext, l) : null;
-                const qaContextBadgeTone = assistantMessage
-                  ? getQaContextBadgeTone(message.qaContext)
-                  : 'neutral';
-                const renderedMessageContent = assistantMessage && !renderHtmlPreview
-                  ? injectCitationLinks(rawMessageContent, message.citations)
-                  : rawMessageContent;
+              {messages.map((message) => (
+                <ChatMessageRow
+                  key={message.id}
+                  message={message}
+                  sessionId={selectedSessionId}
+                  l={l}
+                  locale={locale}
+                  loading={loading}
+                  copyFeedback={copyFeedback?.messageId === message.id ? copyFeedback : null}
+                  onCopy={handleCopyMessage}
+                  onCitationClick={onCitationClick}
+                  onCitationContext={onCitationContext}
+                  onSaveAssistantMessageAsNote={onSaveAssistantMessageAsNote}
+                  onStreamingContentChange={handleStreamingContentChange}
+                />
+              ))}
 
-                return (
-                  <div
-                    key={message.id}
-                    className={cn(
-                      'pq-msg-in group flex flex-col',
-                      assistantMessage ? 'items-stretch' : 'items-end',
-                    )}
-                  >
-                    {assistantMessage ? (
-                      <div className="w-full min-w-0">
-                        {renderHtmlPreview ? (
-                          rawMessageContent ? (
-                            <HtmlAnswerPreview content={rawMessageContent} />
-                          ) : (
-                            <div className="text-[15px] leading-7 text-[var(--pq-text-faint)]">
-                              {loading ? l('正在思考...', 'Thinking...') : ''}
-                            </div>
-                          )
-                        ) : (
-                          <MarkdownPreview
-                            content={
-                              renderedMessageContent ||
-                              (assistantMessage && loading ? l('正在思考...', 'Thinking...') : '')
-                            }
-                            components={{
-                              a: ({ href, children, ...props }) => {
-                                const citation =
-                                  href && onCitationClick
-                                    ? findCitationByHref(href, message.citations)
-                                    : null;
-
-                                if (citation && onCitationClick) {
-                                  return (
-                                    <button
-                                      type="button"
-                                      onClick={() => onCitationClick(citation)}
-                                      className="font-medium text-[var(--pq-accent)] underline underline-offset-2 transition hover:text-[var(--pq-accent-hover)]"
-                                    >
-                                      [{children}]
-                                    </button>
-                                  );
-                                }
-
-                                if (href && message.citations && findCitationByHref(href, message.citations)) {
-                                  return <span className="text-[var(--pq-text-faint)]">[{children}]</span>;
-                                }
-
-                                return (
-                                  <a href={href} target="_blank" rel="noreferrer" {...props}>
-                                    {children}
-                                  </a>
-                                );
-                              },
-                            }}
-                            className={cn(
-                              'text-[15px] leading-7',
-                              !rawMessageContent && loading && 'text-[var(--pq-text-faint)]',
-                            )}
-                          />
-                        )}
-
-                        {qaContextHint ? (
-                          <div className="mt-3 rounded-xl border border-[var(--pq-border)] bg-[var(--pq-surface-2)] px-3 py-2 text-xs leading-5 text-[var(--pq-text-muted)]">
-                            {qaContextHint}
-                          </div>
-                        ) : null}
-
-                        {/*
-                          Citation chips: in HTML-preview mode they are the only citation UI
-                          (inline links cannot be injected into the sandboxed iframe); in
-                          markdown mode they complement inline [n] links and carry the
-                          「查看上下文」 entry for every retrieval hit.
-                        */}
-                        {assistantMessage && message.citations && message.citations.length > 0 ? (
-                          <div className="mt-3 flex flex-wrap gap-2">
-                            {message.citations.map((citation) => (
-                              <span
-                                key={citation.id}
-                                className="inline-flex items-center overflow-hidden rounded-full border border-[var(--pq-accent-border)] bg-[var(--pq-accent-soft)] text-[11px] text-[var(--pq-accent)]"
-                              >
-                                <button
-                                  type="button"
-                                  onClick={() => onCitationClick?.(citation)}
-                                  className="px-3 py-1 transition hover:bg-[var(--pq-accent-bg-hover)]"
-                                  title={
-                                    citation.previewText
-                                      ? `${
-                                          citation.pageIndex !== null && citation.pageIndex !== undefined
-                                            ? l(`Page ${citation.pageIndex + 1}`, `Page ${citation.pageIndex + 1}`)
-                                            : citation.sourceType
-                                        }\n${citation.previewText}`
-                                      : undefined
-                                  }
-                                >
-                                  <span>[{citation.label}]</span>
-                                </button>
-                                {citation.chunkId && onCitationContext ? (
-                                  <button
-                                    type="button"
-                                    onClick={() => onCitationContext(citation)}
-                                    className="border-l border-[var(--pq-accent-border)] px-2 py-1 transition hover:bg-[var(--pq-accent-bg-hover)]"
-                                    title={l('查看该切片的前后文', 'Show the context around this chunk')}
-                                  >
-                                    {l('上下文', 'Context')}
-                                  </button>
-                                ) : null}
-                              </span>
-                            ))}
-                          </div>
-                        ) : null}
-
-                        {message.attachments && message.attachments.length > 0 ? (
-                          <div className="mt-3 flex flex-wrap gap-2">
-                            {message.attachments.map((attachment) => {
-                              const AttachmentIcon =
-                                attachment.kind === 'image'
-                                  ? ImagePlus
-                                  : attachment.kind === 'screenshot'
-                                    ? Camera
-                                    : Paperclip;
-
-                              return (
-                                <span
-                                  key={attachment.id}
-                                  className="inline-flex items-center gap-2 rounded-full border border-[var(--pq-border)] bg-[var(--pq-surface-2)] px-3 py-1 text-xs text-[var(--pq-text-muted)]"
-                                >
-                                  <AttachmentIcon className="h-3.5 w-3.5" strokeWidth={1.8} />
-                                  <span className="max-w-[180px] truncate">{attachment.name}</span>
-                                  <span className="text-[var(--pq-text-faint)]">
-                                    {formatFileSize(attachment.size)}
-                                  </span>
-                                </span>
-                              );
-                            })}
-                          </div>
-                        ) : null}
-
-                        {/* Hover-reveal meta + actions row, below the answer */}
-                        <div className={cn('mt-2 flex flex-wrap items-center gap-2 text-[11px] text-[var(--pq-text-faint)] transition-opacity duration-200 focus-within:opacity-100 group-hover:opacity-100', copyFeedback?.messageId === message.id ? 'opacity-100' : 'opacity-0')}>
-                          {message.modelLabel ? (
-                            <span className="pq-chip px-2 py-0.5 text-[11px]">
-                              {message.modelLabel}
-                            </span>
-                          ) : null}
-                          {htmlAnswer ? (
-                            <span className="rounded-full border border-[var(--pq-accent-border)] bg-[var(--pq-accent-soft)] px-2 py-0.5 text-[11px] font-semibold text-[var(--pq-accent)]">
-                              HTML
-                            </span>
-                          ) : null}
-                          {qaContextBadge ? (
-                            <span
-                              className={cn(
-                                'rounded-full px-2 py-0.5 text-[11px]',
-                                qaContextBadgeTone === 'success' &&
-                                  'border border-[color-mix(in_srgb,var(--pq-success)_28%,transparent)] bg-[var(--pq-success-bg)] text-[var(--pq-success)]',
-                                qaContextBadgeTone === 'warning' &&
-                                  'border border-[color-mix(in_srgb,var(--pq-warning)_28%,transparent)] bg-[var(--pq-warning-bg)] text-[var(--pq-warning)]',
-                                qaContextBadgeTone === 'neutral' &&
-                                  'border border-[var(--pq-border)] bg-[var(--pq-surface-2)] text-[var(--pq-text-muted)]',
-                              )}
-                            >
-                              {qaContextBadge}
-                            </span>
-                          ) : null}
-                          <span>{formatChatSessionTime(message.createdAt, locale)}</span>
-                          {rawMessageContent ? (
-                            <div className="ml-auto flex max-w-full flex-wrap items-center justify-end gap-1">
-                              <button
-                                type="button"
-                                onClick={() => void handleCopyMessage(message.id, assistantMessage ? rawMessageContent : message.content)}
-                                className="inline-flex min-h-6 items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-[var(--pq-text-muted)] transition hover:bg-[var(--pq-hover)] hover:text-[var(--pq-text)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--pq-accent)]"
-                                title={l('复制原始内容', 'Copy raw content')}
-                                aria-label={l(
-                                  copyFeedback?.messageId === message.id && copyFeedback.status === 'success' ? '已复制' : '复制原始内容',
-                                  copyFeedback?.messageId === message.id && copyFeedback.status === 'success' ? 'Copied' : 'Copy raw content',
-                                )}
-                              >
-                                {copyFeedback?.messageId === message.id && copyFeedback.status === 'success' ? (
-                                  <Check className="h-3.5 w-3.5" strokeWidth={2} />
-                                ) : (
-                                  <Copy className="h-3.5 w-3.5" strokeWidth={1.8} />
-                                )}
-                                {l(
-                                  copyFeedback?.messageId === message.id && copyFeedback.status === 'success' ? '已复制' : '复制原始内容',
-                                  copyFeedback?.messageId === message.id && copyFeedback.status === 'success' ? 'Copied' : 'Copy raw content',
-                                )}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  onSaveAssistantMessageAsNote?.({
-                                    ...message,
-                                    content: rawMessageContent,
-                                  })
-                                }
-                                disabled={!onSaveAssistantMessageAsNote}
-                                className="inline-flex min-h-6 items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-[var(--pq-text-muted)] transition hover:bg-[var(--pq-hover)] hover:text-[var(--pq-text)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--pq-accent)] disabled:cursor-not-allowed disabled:opacity-50"
-                                title={l('保存为笔记', 'Save as note')}
-                              >
-                                <FilePlus2 className="h-3 w-3" strokeWidth={1.8} />
-                                {l('保存', 'Save')}
-                              </button>
-                            </div>
-                          ) : null}
-                          {copyFeedback?.messageId === message.id && copyFeedback.status === 'error' ? (
-                            <span role="status" className="basis-full text-[11px] text-[var(--pq-danger)]">
-                              {l('复制失败，请重试', 'Copy failed. Try again.')}
-                            </span>
-                          ) : null}
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="flex max-w-[85%] flex-col items-end">
-                        <div className="pq-chat-bubble-user min-w-0 rounded-2xl px-4 py-2.5 text-[15px] leading-7 text-[var(--pq-text)]">
-                          <MarkdownPreview content={renderedMessageContent} className="text-[15px] leading-7" />
-                        </div>
-
-                        {message.attachments && message.attachments.length > 0 ? (
-                          <div className="mt-2 flex flex-wrap justify-end gap-2">
-                            {message.attachments.map((attachment) => {
-                              const AttachmentIcon =
-                                attachment.kind === 'image'
-                                  ? ImagePlus
-                                  : attachment.kind === 'screenshot'
-                                    ? Camera
-                                    : Paperclip;
-
-                              return (
-                                <span
-                                  key={attachment.id}
-                                  className="inline-flex items-center gap-2 rounded-full border border-[var(--pq-border)] bg-[var(--pq-surface-2)] px-3 py-1 text-xs text-[var(--pq-text-muted)]"
-                                >
-                                  <AttachmentIcon className="h-3.5 w-3.5" strokeWidth={1.8} />
-                                  <span className="max-w-[180px] truncate">{attachment.name}</span>
-                                  <span className="text-[var(--pq-text-faint)]">
-                                    {formatFileSize(attachment.size)}
-                                  </span>
-                                </span>
-                              );
-                            })}
-                          </div>
-                        ) : null}
-
-                        <div className={cn('mt-1 flex max-w-full flex-wrap items-center justify-end gap-1 transition-opacity duration-200 focus-within:opacity-100 group-hover:opacity-100', copyFeedback?.messageId === message.id ? 'opacity-100' : 'opacity-0')}>
-                          <span className="px-1 text-[11px] text-[var(--pq-text-faint)]">
-                            {formatChatSessionTime(message.createdAt, locale)}
-                          </span>
-                          {rawMessageContent ? (
-                            <button
-                              type="button"
-                              onClick={() => void handleCopyMessage(message.id, assistantMessage ? rawMessageContent : message.content)}
-                              className="pq-icon-button h-6 w-6 rounded-lg text-[var(--pq-text-muted)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--pq-accent)]"
-                              title={l('复制消息', 'Copy message')}
-                              aria-label={l(
-                                copyFeedback?.messageId === message.id && copyFeedback.status === 'success' ? '已复制' : '复制消息',
-                                copyFeedback?.messageId === message.id && copyFeedback.status === 'success' ? 'Copied' : 'Copy message',
-                              )}
-                            >
-                              {copyFeedback?.messageId === message.id && copyFeedback.status === 'success' ? (
-                                <Check className="h-3.5 w-3.5" strokeWidth={2} />
-                              ) : (
-                                <Copy className="h-3.5 w-3.5" strokeWidth={1.8} />
-                              )}
-                            </button>
-                          ) : null}
-                          {copyFeedback?.messageId === message.id && copyFeedback.status === 'error' ? (
-                            <span role="status" className="basis-full text-right text-[11px] text-[var(--pq-danger)]">
-                              {l('复制失败，请重试', 'Copy failed. Try again.')}
-                            </span>
-                          ) : null}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
 
               {loading && !streamingAssistantMessage ? (
                 <div className="pq-msg-in flex items-center gap-2 text-[15px] text-[var(--pq-text-muted)]">

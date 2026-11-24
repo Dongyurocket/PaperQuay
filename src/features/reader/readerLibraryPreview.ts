@@ -1,6 +1,5 @@
 import {
   readLocalBinaryFile,
-  readLocalTextFile,
   readLocalTextFileIfExists,
   writeLocalTextFile,
 } from '../../services/desktop';
@@ -43,7 +42,10 @@ import {
   buildPaperSummarySourceKey,
   computeMineruBlocksContentSignature,
 } from './documentReaderSummarySource';
-import { writeTranslationCache } from './readerTranslationCache';
+import {
+  writeTranslationCache,
+  type TranslationCacheIdentity,
+} from './readerTranslationCache';
 
 type LocaleTextFn = (zh: string, en: string) => string;
 
@@ -579,12 +581,14 @@ export async function writeLibraryTranslationCache({
   sourceLanguage,
   targetLanguage,
   translations,
+  identity,
 }: {
   item: WorkspaceItem;
   mineruCacheDir: string;
   sourceLanguage: string;
   targetLanguage: string;
   translations: TranslationMap;
+  identity?: TranslationCacheIdentity | null;
 }) {
   return writeTranslationCache({
     item,
@@ -592,5 +596,6 @@ export async function writeLibraryTranslationCache({
     sourceLanguage,
     targetLanguage,
     translations,
+    identity,
   });
 }

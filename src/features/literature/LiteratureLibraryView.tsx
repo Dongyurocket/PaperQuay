@@ -1,154 +1,54 @@
 import {
-  useCallback,
   useEffect,
-  useMemo,
   useRef,
   useState,
-  type DragEvent,
   type MouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from 'react';
-import { Database, Sparkles, Star, Tag, Trash2, X } from 'lucide-react';
+import { Database, Sparkles, Star, Tag, Trash2 } from 'lucide-react';
 import { useLocaleText } from '../../i18n/uiLanguage';
-import { localPathsExist } from '../../services/desktop';
-import {
-  extractLiteratureMetadataWithLlm,
-  lookupLiteratureMetadata,
-} from '../../services/metadata';
-import { extractLocalPdfMetadataPreview } from '../../services/pdfMetadata';
-import { isChineseDominant, isChineseText } from '../../utils/languageDetect';
-import {
-  addLibraryAttachment,
-  assignPaperToLibraryCategory,
-  createLibraryCategory,
-  deleteLibraryPaper,
-  deleteLibraryCategory,
-  getLibrarySettings,
-  inspectLibraryPdfAssets,
-  importPdfsToLibrary,
-  initializeLiteratureLibrary,
-  listAllLibraryPaperIds,
-  listAllLibraryPapers,
-  listLibraryCategories,
-  queryLibraryPapers,
-  previewLibraryPdfAssetNames,
-  moveLibraryCategory,
-  removeLibraryAttachment,
-  reorderLibraryPapers,
-  selectLibraryPdfFiles,
-  setLibraryPaperCategories,
-  setLibraryRagMembership,
-  updateLibraryPaper,
-  updateTranslatedPdfLanguages,
-  updateLibraryCategory,
-  updateLibrarySettings,
-} from '../../services/library';
-import {
-  detectLocalZoteroDataDir,
-  listLocalZoteroCollectionItems,
-  listLocalZoteroCollections,
-  listLocalZoteroLibraryItems,
-} from '../../services/zotero';
-import type {
-  LibrarySettings,
-  LiteratureCategory,
-  LiteraturePaper,
-  LiteraturePaperTaskState,
-  ListPapersRequest,
-  PdfAssetInventoryReport,
-  PdfAssetNamePlan,
-  UpdatePaperRequest,
-} from '../../types/library';
-import type {
-  ZoteroCollection,
-  ZoteroLibraryItem,
-  QaModelPreset,
-} from '../../types/reader';
-import type { MetadataLookupResult } from '../../types/metadata';
+import { listLibraryCitationKeys } from '../../services/library';
+import type { LiteraturePaper, LiteraturePaperTaskState } from '../../types/library';
+import type { QaModelPreset } from '../../types/reader';
 import { getFileNameFromPath } from '../../utils/text';
 import ImportConfirmationDialog from './components/ImportConfirmationDialog';
 import LibraryConfirmDialog from './components/LibraryConfirmDialog';
 import LibraryTextInputDialog from './components/LibraryTextInputDialog';
-import {
-  mergeLocalPdfMetadataIntoDraft,
-  mergeRemoteMetadataIntoDraft,
-  titleFromPdfPath,
-} from './importMetadata';
-import type { ImportDraftItem } from './importTypes';
 import LiteratureCategorySidebar from './components/LiteratureCategorySidebar';
 import LiteraturePaperDetails from './components/LiteraturePaperDetails';
-import TranslatedPdfLanguageBatchDialog, { type TranslatedPdfLanguageBatchEntry } from './components/TranslatedPdfLanguageBatchDialog';
+import TranslatedPdfLanguageBatchDialog from './components/TranslatedPdfLanguageBatchDialog';
 import TranslatedPdfLanguageConfirmDialog from './components/TranslatedPdfLanguageConfirmDialog';
 import LiteraturePaperList, {
   type LiteraturePaperListStatus,
   type LiteraturePaperRagStatus,
 } from './components/LiteraturePaperList';
-import { buildPaperQuery, DEFAULT_LIBRARY_FILTERS, matchesDemoLibraryFilters } from './libraryFilters';
-import { flattenCategories, paperPdfPath, paperTranslatedPdfAttachment } from './literatureUi';
 import {
-  capturePaperSelection,
-  EMPTY_PAPER_SELECTION,
-  replacePaperSelection,
-  selectionCheckState,
-  togglePaperSelection,
-  type PaperSelection,
-} from './paperSelection';
-import { readPdfPageCount } from './pdfPageCount';
+  CATEGORY_SIDEBAR_DEFAULT_WIDTH,
+  DETAILS_PANEL_DEFAULT_WIDTH,
+  CATEGORY_SIDEBAR_WIDTH_STORAGE_KEY,
+  DETAILS_PANEL_WIDTH_STORAGE_KEY,
+  clampCategorySidebarWidth,
+  clampDetailsPanelWidth,
+  loadCategorySidebarWidth,
+  loadDetailsPanelWidth,
+  type LiteratureLibraryDemoState,
+} from './literatureLibraryUtils';
 import {
   loadPaperTitleDisplayMode,
   type PaperTitleDisplayMode,
 } from './titleDisplay';
-import { ATTACHMENT_KIND_TRANSLATED_PDF } from '../../utils/libraryPaper';
-import {
-  filterZoteroItemsOutsideCollections,
-  uniqueZoteroItems,
-} from './zoteroImport';
-import {
-  emitLibrarySettingsUpdated,
-  emitNativePaperUpdated,
-  LIBRARY_METADATA_ENRICH_REQUEST_EVENT,
-  LIBRARY_SETTINGS_UPDATED_EVENT,
-  NATIVE_PAPER_UPDATED_EVENT,
-  ZOTERO_IMPORT_REQUEST_EVENT,
-  type LibrarySettingsUpdatedEventDetail,
-  type NativePaperUpdatedEventDetail,
-  type ZoteroImportRequestEventDetail,
-} from './libraryEvents';
-import { useDesktopPdfDrop } from './useDesktopPdfDrop';
 import { usePaperFileLocationMenu } from './usePaperFileLocationMenu';
-import {
-  categorySignature,
-  clampDetailsPanelWidth,
-  DETAILS_PANEL_DEFAULT_WIDTH,
-  DETAILS_PANEL_WIDTH_STORAGE_KEY,
-  CATEGORY_SIDEBAR_DEFAULT_WIDTH,
-  CATEGORY_SIDEBAR_WIDTH_STORAGE_KEY,
-  applyPaperMineruStatusUpdate,
-  applyPaperSummaryStatusUpdate,
-  buildImportDraftsFromPdfPaths,
-  buildInitialPaperStatuses,
-  clampCategorySidebarWidth,
-  filterDemoPapers,
-  loadCategorySidebarWidth,
-  loadDetailsPanelWidth,
-  markPaperStatusesCheckingMineru,
-  metadataFromDraft,
-  metadataFromZoteroItem,
-  metadataUpdateForPaper,
-  mineruOutputPathCandidatesForPaper,
-  reorderPaperList,
-  resolveSelectedPaperId,
-  type LiteratureLibraryDemoState,
-} from './literatureLibraryUtils';
-import { confirmAction } from '../../ui/confirmHost';
-import { useLibraryFilters } from './useLibraryFilters';
-import { useLibraryQueryRefresh } from './useLibraryQueryRefresh';
-import { EXTERNAL_LIBRARY_WRITE_EVENT } from '../../services/externalWrite';
-import { startRetainPdfTranslation } from '../../services/retainPdf';
-import { useSelectionFilterGuard } from './useSelectionFilterGuard';
-import { Dialog } from '../../ui/dialog';
 import { Menu, type MenuEntry } from '../../ui/menu';
 import { toast } from '../../ui/toast';
+import { useLibraryCatalog } from './hooks/useLibraryCatalog';
+import { usePaperSelection } from './hooks/usePaperSelection';
+import { useMetadataJobs } from './hooks/useMetadataJobs';
+import { useImportFlow } from './hooks/useImportFlow';
+import { usePdfAssetAudit } from './hooks/usePdfAssetAudit';
+import { useBatchOperations, type LibraryConfirmDialogState } from './hooks/useBatchOperations';
+import { useCategoryActions } from './hooks/useCategoryActions';
+import MetadataParseDialog from './dialogs/MetadataParseDialog';
+import PdfAssetAuditDialog from './dialogs/PdfAssetAuditDialog';
 
 interface LiteratureLibraryViewProps {
   onOpenPaper: (paper: LiteraturePaper) => void;
@@ -176,157 +76,14 @@ interface LiteratureLibraryViewProps {
   ragIndexingDocumentKey?: string;
   /** 右键菜单：为单篇文献建立/重建 RAG 索引。 */
   onIndexPaperRag?: (paperId: string) => void;
-  /** 全量文献快照同步至父级（如供阅读器 RAG 索引与概览池使用）。 */
-  onAllPapersChange?: (allPapers: LiteraturePaper[]) => void;
   /** MinerU 批量检测状态字典同步至父级。 */
   onPaperStatusesChange?: (statuses: Record<string, LiteraturePaperListStatus>) => void;
-}
-
-interface NativeSummaryUpdatedEventDetail {
-  paperId: string;
-  aiSummary: string | null;
-}
-
-interface NativeMineruStatusUpdatedEventDetail {
-  paperId: string;
-  mineruParsed: boolean;
 }
 
 interface PaperContextMenuState {
   paper: LiteraturePaper;
   x: number;
   y: number;
-}
-
-interface MetadataDialogState {
-  paper: LiteraturePaper;
-  title: string;
-  doi: string;
-}
-
-function buildManualMetadataUpdateRequest(
-  paper: LiteraturePaper,
-  metadata: Awaited<ReturnType<typeof lookupLiteratureMetadata>>,
-  draft: Pick<MetadataDialogState, 'title' | 'doi'>,
-): UpdatePaperRequest | null {
-  const request: UpdatePaperRequest = {
-    paperId: paper.id,
-  };
-  let changed = false;
-  const assignString = (
-    key:
-      | 'title'
-      | 'year'
-      | 'publication'
-      | 'doi'
-      | 'url'
-      | 'abstractText'
-      | 'publisher'
-      | 'volume'
-      | 'issue'
-      | 'pages'
-      | 'issn',
-    currentValue: string | null | undefined,
-    nextValue: string | null | undefined,
-  ) => {
-    const normalized = nextValue?.trim();
-
-    if (!normalized || normalized === currentValue?.trim()) {
-      return;
-    }
-
-    request[key] = normalized;
-    changed = true;
-  };
-
-  assignString('title', paper.title, metadata?.title || draft.title);
-  assignString('doi', paper.doi, metadata?.doi || draft.doi);
-
-  if (metadata) {
-    assignString('year', paper.year, metadata.year);
-    assignString('publication', paper.publication, metadata.publication);
-    assignString('url', paper.url, metadata.url);
-    assignString('abstractText', paper.abstractText, metadata.abstractText);
-    assignString('publisher', paper.publisher ?? null, metadata.publisher);
-    assignString('volume', paper.volume ?? null, metadata.volume);
-    assignString('issue', paper.issue ?? null, metadata.issue);
-    assignString('pages', paper.pages ?? null, metadata.pages);
-    assignString('issn', paper.issn ?? null, metadata.issn);
-
-    const nextAuthors = metadata.authors.map((author) => author.trim()).filter(Boolean);
-
-    if (nextAuthors.length > 0) {
-      const currentAuthors = paper.authors.map((author) => author.name.trim()).filter(Boolean);
-
-      if (nextAuthors.join('\n').toLocaleLowerCase() !== currentAuthors.join('\n').toLocaleLowerCase()) {
-        request.authors = nextAuthors;
-        changed = true;
-      }
-    }
-
-    const nextKeywords = (metadata.keywords ?? []).map((keyword) => keyword.trim()).filter(Boolean);
-
-    if (nextKeywords.length > 0 && paper.keywords.filter((keyword) => keyword.trim()).length === 0) {
-      request.keywords = nextKeywords;
-      changed = true;
-    }
-  }
-
-  return changed ? request : null;
-}
-
-type CategoryNameDialogState =
-  | { mode: 'create'; parentCategory: LiteratureCategory | null }
-  | { mode: 'rename'; category: LiteratureCategory };
-
-type LibraryConfirmDialogState =
-  | { kind: 'delete-category'; category: LiteratureCategory }
-  | { kind: 'delete-paper'; paper: LiteraturePaper; deleteFiles: boolean }
-  | { kind: 'delete-papers'; paperIds: string[]; deleteFiles: boolean }
-  | { kind: 'exclude-rag-paper'; paper: LiteraturePaper }
-  | { kind: 'exclude-rag-papers'; paperIds: string[]; indexedCount: number }
-  | { kind: 'remove-translated-pdf'; paper: LiteraturePaper; attachmentId: string; fileName: string };
-
-type LiteraturePaperSortBy = NonNullable<ListPapersRequest['sortBy']>;
-type LiteraturePaperSortDirection = NonNullable<ListPapersRequest['sortDirection']>;
-
-const PAPER_SORT_STORAGE_KEY = 'paperquay-literature-paper-sort-v1';
-/** SQL 分页每页条数（P2-1）：首屏只取一页，滚动接近底部再追加。 */
-const PAPER_PAGE_SIZE = 500;
-
-/** 需要「全库文献」的后台任务（MinerU 状态/批量元数据）按页取齐，不再受 1000 条硬上限截断。 */
-async function fetchAllLibraryPapers(): Promise<LiteraturePaper[]> {
-  return listAllLibraryPapers(
-    buildPaperQuery(DEFAULT_LIBRARY_FILTERS, { sortBy: 'manual', sortDirection: 'asc' }, null, ''),
-  );
-}
-const PAPER_SORT_FIELDS: LiteraturePaperSortBy[] = [
-  'manual',
-  'title',
-  'year',
-  'author',
-  'importedAt',
-  'updatedAt',
-  'lastReadAt',
-];
-
-function loadPaperSortState(): {
-  sortBy: LiteraturePaperSortBy;
-  sortDirection: LiteraturePaperSortDirection;
-} {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(PAPER_SORT_STORAGE_KEY) ?? '{}') as Partial<{
-      sortBy: LiteraturePaperSortBy;
-      sortDirection: LiteraturePaperSortDirection;
-    }>;
-
-    return {
-      sortBy: parsed.sortBy && PAPER_SORT_FIELDS.includes(parsed.sortBy) ? parsed.sortBy : 'manual',
-      sortDirection: parsed.sortDirection === 'desc' ? 'desc' : 'asc',
-    };
-  } catch {
-    return { sortBy: 'manual', sortDirection: 'asc' };
-  }
 }
 
 export default function LiteratureLibraryView({
@@ -348,79 +105,18 @@ export default function LiteratureLibraryView({
   ragBadgeByDocumentKey,
   ragIndexingDocumentKey = '',
   onIndexPaperRag,
-  onAllPapersChange,
   onPaperStatusesChange,
 }: LiteratureLibraryViewProps) {
   const l = useLocaleText();
   const demoMode = Boolean(demoLibrary);
-  const [settings, setSettings] = useState<LibrarySettings | null>(null);
-  const [categories, setCategories] = useState<LiteratureCategory[]>([]);
-  const [papers, setPapers] = useState<LiteraturePaper[]>([]);
-  // SQL 分页（P2-1）：papers 是「当前筛选结果」的已加载前缀；papersTotal 是完整匹配数。
-  const [papersTotal, setPapersTotal] = useState(0);
-  const [papersLoadingMore, setPapersLoadingMore] = useState(false);
-  const papersRef = useRef<LiteraturePaper[]>([]);
-  const papersQueryGenerationRef = useRef(0);
-
-  useEffect(() => {
-    papersRef.current = papers;
-  }, [papers]);
-  const [paperStatuses, setPaperStatuses] = useState<Record<string, LiteraturePaperListStatus>>({});
-
-  useEffect(() => {
-    onPaperStatusesChange?.(paperStatuses);
-  }, [onPaperStatusesChange, paperStatuses]);
-  const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
-  const [selectedPaperId, setSelectedPaperId] = useState<string | null>(null);
-  const [paperSelection, setPaperSelection] = useState<PaperSelection>(EMPTY_PAPER_SELECTION);
-  const paperSelectionRef = useRef(paperSelection);
-  const selectionFilterRef = useRef<string | null>(null);
-  const [selectionAnchorId, setSelectionAnchorId] = useState<string | null>(null);
-  const [batchWorking, setBatchWorking] = useState(false);
-  const [bibExportMenuOpen, setBibExportMenuOpen] = useState(false);
-  const [pdfAssetAuditOpen, setPdfAssetAuditOpen] = useState(false);
-  const [pdfAssetAuditLoading, setPdfAssetAuditLoading] = useState(false);
-  const [pdfAssetAuditError, setPdfAssetAuditError] = useState('');
-  const [pdfAssetInventory, setPdfAssetInventory] = useState<PdfAssetInventoryReport | null>(null);
-  const [pdfAssetNamePlan, setPdfAssetNamePlan] = useState<PdfAssetNamePlan | null>(null);
-  const [searchQuery, setSearchQuery] = useState('');
-  const { filters, setFilters, libraryTags, mineruIdKey, mineruPaperIds } = useLibraryFilters({
-    demoPapers: demoLibrary?.papers, categories, paperStatuses,
-  });
-  const selectionQueryGuard = useSelectionFilterGuard({
-    categoryId: selectedCategoryId, search: searchQuery, filters, mineruIdKey,
-  });
-  const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState(false);
-  const [metadataWorking, setMetadataWorking] = useState(false);
-  const [localImportMetadataWorking, setLocalImportMetadataWorking] = useState(false);
-  // 导入对话框中文献首页文本缓存（path -> firstPageText），供中文文献 LLM 元数据兜底使用。
-  const importFirstPageTextRef = useRef(new Map<string, string>());
-  const [bulkMetadataWorking, setBulkMetadataWorking] = useState(false);
-  const [statusMessage, setStatusMessage] = useState('');
-  const [error, setError] = useState('');
-  const [importDrafts, setImportDrafts] = useState<ImportDraftItem[]>([]);
-  const [importDialogOpen, setImportDialogOpen] = useState(false);
-  const [dropActive, setDropActive] = useState(false);
+  const [batchWorking, setBatchWorking] = useState(false);
   const [paperSaving, setPaperSaving] = useState(false);
-  const paperSaveInFlightRef = useRef(false);
+  const [citationKeys, setCitationKeys] = useState<Array<{ id: string; citationKey?: string | null }>>([]);
   const [dialogBusy, setDialogBusy] = useState(false);
-  const [metadataAttemptedPaths, setMetadataAttemptedPaths] = useState<Set<string>>(
-    () => new Set(),
-  );
-  const [categoryNameDialog, setCategoryNameDialog] =
-    useState<CategoryNameDialogState | null>(null);
-  const [confirmDialog, setConfirmDialog] =
-    useState<LibraryConfirmDialogState | null>(null);
-  const [paperContextMenu, setPaperContextMenu] =
-    useState<PaperContextMenuState | null>(null);
-  const [metadataDialog, setMetadataDialog] = useState<MetadataDialogState | null>(null);
-  const [metadataDialogBusy, setMetadataDialogBusy] = useState(false);
-  const [translatedPdfLanguageBatch, setTranslatedPdfLanguageBatch] = useState<{ entries: TranslatedPdfLanguageBatchEntry[]; skippedCount: number } | null>(null);
-  const [translatedPdfAttachDraft, setTranslatedPdfAttachDraft] = useState<{ paper: LiteraturePaper; sourcePath: string } | null>(null);
-  const [paperDragOverCategoryId, setPaperDragOverCategoryId] = useState<string | null>(null);
-  const [tagDialogPaper, setTagDialogPaper] = useState<LiteraturePaper | null>(null);
-  const [paperSort, setPaperSort] = useState(loadPaperSortState);
+  const [bibExportMenuOpen, setBibExportMenuOpen] = useState(false);
+  const [paperContextMenu, setPaperContextMenu] = useState<PaperContextMenuState | null>(null);
+  const [confirmDialog, setConfirmDialog] = useState<LibraryConfirmDialogState | null>(null);
   const [titleDisplayMode, setTitleDisplayMode] = useState<PaperTitleDisplayMode>(
     () => loadPaperTitleDisplayMode(),
   );
@@ -436,561 +132,139 @@ export default function LiteratureLibraryView({
     clientX: 0,
     width: DETAILS_PANEL_DEFAULT_WIDTH,
   });
-  const selectedCategoryIdRef = useRef<string | null>(null);
-  const checkedMineruPaperIdsRef = useRef<Set<string>>(new Set());
-  // init/refreshAll 拉取的全量文献快照，供 MinerU 状态检查复用，避免启动时重复全库查询。
-  const allPapersSnapshotRef = useRef<LiteraturePaper[]>([]);
-  const mineruStatusConfigKey = useMemo(
-    () => `${mineruCacheDir.trim()}::${autoLoadSiblingJson ? 'auto-sibling' : 'cache-only'}`,
-    [autoLoadSiblingJson, mineruCacheDir],
-  );
-  const mineruStatusConfigKeyRef = useRef(mineruStatusConfigKey);
 
-  const flatCategories = useMemo(() => flattenCategories(categories), [categories]);
-  const duplicatePdfAttachmentIds = useMemo(
-    () => new Set(pdfAssetInventory?.duplicateGroups.flatMap((group) => group.map((entry) => entry.attachmentId)) ?? []),
-    [pdfAssetInventory],
-  );
-  const selectedCategory = useMemo(
-    () => categories.find((category) => category.id === selectedCategoryId) ?? null,
-    [categories, selectedCategoryId],
-  );
-  const libraryStorageDir = settings?.storageDir ?? '';
-  const selectedPaper = useMemo(
-    () => papers.find((paper) => paper.id === selectedPaperId) ?? papers[0] ?? null,
-    [papers, selectedPaperId],
-  );
-
-  // 多选与详情面板的 selectedPaperId 分开。全选保存 id 快照，已加载行只是其中可见的一部分。
-  paperSelectionRef.current = paperSelection;
-  const multiSelectedPaperIds = paperSelection.ids;
-  const selectedCount = multiSelectedPaperIds.length;
-  const selectAllState = selectionCheckState(paperSelection, papersTotal);
-  const multiSelectedPaperIdSet = useMemo(() => new Set(multiSelectedPaperIds), [multiSelectedPaperIds]);
-  const multiSelectedPapers = useMemo(
-    () => papers.filter((paper) => multiSelectedPaperIdSet.has(paper.id)),
-    [papers, multiSelectedPaperIdSet],
-  );
-
-  useEffect(() => {
-    const nextFilter = JSON.stringify({ categoryId: selectedCategoryId, search: searchQuery, filters, mineruIdKey });
-    const previousFilter = selectionFilterRef.current;
-    selectionFilterRef.current = nextFilter;
-    if (
-      !previousFilter
-      || previousFilter === nextFilter
-      || paperSelectionRef.current.ids.length === 0
-    ) {
-      return;
-    }
-
-    setPaperSelection(EMPTY_PAPER_SELECTION);
-    setStatusMessage(
-      l('筛选条件已变化，选择已清空。', 'The filter changed, so the selection was cleared.'),
-    );
-  }, [filters, l, mineruIdKey, searchQuery, selectedCategoryId]);
-
-  const clearMultiSelection = useCallback(() => {
-    setPaperSelection(EMPTY_PAPER_SELECTION);
-  }, []);
-
-  const handleSelectPaperWithModifiers = useCallback(
-    (paperId: string, modifiers: { ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean } = {}) => {
-      const orderedIds = papers.map((paper) => paper.id);
-
-      if (modifiers.shiftKey) {
-        const anchorId = selectionAnchorId ?? selectedPaperId;
-        const anchorIndex = anchorId ? orderedIds.indexOf(anchorId) : -1;
-        const targetIndex = orderedIds.indexOf(paperId);
-
-        if (anchorIndex >= 0 && targetIndex >= 0) {
-          const [start, end] = anchorIndex < targetIndex ? [anchorIndex, targetIndex] : [targetIndex, anchorIndex];
-          const rangeIds = orderedIds.slice(start, end + 1);
-          const currentIds = paperSelectionRef.current.ids;
-
-          setPaperSelection(replacePaperSelection(
-            modifiers.ctrlKey || modifiers.metaKey
-              ? [...currentIds, ...rangeIds]
-              : rangeIds,
-          ));
-          setSelectedPaperId(paperId);
-          return;
-        }
-      }
-
-      if (modifiers.ctrlKey || modifiers.metaKey) {
-        setPaperSelection((current) => togglePaperSelection(current, paperId));
-        setSelectionAnchorId(paperId);
-        setSelectedPaperId(paperId);
-        return;
-      }
-
-      // 普通点击：单选并退出多选。
-      setPaperSelection(EMPTY_PAPER_SELECTION);
-      setSelectionAnchorId(paperId);
-      setSelectedPaperId(paperId);
-    },
-    [papers, selectedPaperId, selectionAnchorId],
-  );
-
-  const resolveSelectedPapers = useCallback(async (ids: string[]) => {
-    const wanted = new Set(ids);
-    const found = new Map<string, LiteraturePaper>();
-
-    for (const paper of papersRef.current) {
-      if (wanted.has(paper.id)) {
-        found.set(paper.id, paper);
-      }
-    }
-
-    if (!demoLibrary && found.size < wanted.size) {
-      let offset = 0;
-      const pageSize = 500;
-
-      while (found.size < wanted.size) {
-        const result = await queryLibraryPapers({
-          ...buildPaperQuery(filters, paperSort, selectedCategoryId, searchQuery, mineruPaperIds),
-          limit: pageSize,
-          offset,
-        });
-
-        for (const paper of result.papers) {
-          if (wanted.has(paper.id)) {
-            found.set(paper.id, paper);
-          }
-        }
-
-        offset += result.papers.length;
-        if (result.papers.length === 0 || offset >= result.total) {
-          break;
-        }
-      }
-    }
-
-    return ids.flatMap((id) => {
-      const paper = found.get(id);
-      return paper ? [paper] : [];
-    });
-  }, [demoLibrary, paperSort.sortBy, paperSort.sortDirection, filters, mineruPaperIds, searchQuery, selectedCategoryId]);
-
-  const resolveDemoPapers = useCallback(
-    (nextCategoryId = selectedCategoryId) => {
-      if (!demoLibrary) {
-        return [];
-      }
-
-      return filterDemoPapers(demoLibrary, nextCategoryId, searchQuery)
-        .filter((paper) => matchesDemoLibraryFilters(paper, filters, mineruPaperIds));
-    },
-    [demoLibrary, filters, mineruPaperIds, searchQuery, selectedCategoryId],
-  );
-
-  const handleToggleSelectAll = useCallback(async () => {
-    if (selectionCheckState(paperSelectionRef.current, papersTotal) === 'all') {
-      setPaperSelection(EMPTY_PAPER_SELECTION);
-      return;
-    }
-
-    const selectionRequest = selectionQueryGuard.capture();
-    setBatchWorking(true);
-    setError('');
-
-    try {
-      const ids = demoLibrary
-        ? resolveDemoPapers().map((paper) => paper.id)
-        : await listAllLibraryPaperIds({
-          ...buildPaperQuery(filters, paperSort, selectedCategoryId, searchQuery, mineruPaperIds),
-        });
-
-      if (!selectionQueryGuard.isCurrent(selectionRequest)) return;
-      setPaperSelection(capturePaperSelection(ids));
-      setStatusMessage(
-        ids.length === 0
-          ? l('当前筛选没有文献。', 'No papers match the current filter.')
-          : l(
-            `已全选当前筛选的 ${ids.length} 篇。之后导入的文献不会自动加入。`,
-            `Selected all ${ids.length} papers in the current filter. Papers imported later are not added.`,
-          ),
-      );
-    } catch (nextError) {
-      if (!selectionQueryGuard.isCurrent(selectionRequest)) return;
-      const message = nextError instanceof Error
-        ? nextError.message
-        : l('全选当前筛选失败', 'Failed to select the current filter');
-      setError(message);
-      setStatusMessage(message);
-    } finally {
-      if (selectionQueryGuard.isLatest(selectionRequest)) setBatchWorking(false);
-    }
-  }, [demoLibrary, l, papersTotal, filters, mineruPaperIds, paperSort, resolveDemoPapers, searchQuery, selectedCategoryId, selectionQueryGuard]);
-
-  const showDemoLockedMessage = useCallback(() => {
-    setStatusMessage(
-      l(
-        '演示模式不允许修改真实文库。',
-        'Demo mode does not allow changes to the real library.',
-      ),
-    );
-  }, [l]);
-
-  const refreshMineruStatusesForPapers = useCallback(
-    async (
-      targetPapers: LiteraturePaper[],
-      shouldCancel: () => boolean = () => false,
-    ) => {
-      if (demoLibrary || targetPapers.length === 0) {
-        return;
-      }
-
-      const uniquePapers = Array.from(
-        new Map(targetPapers.map((paper) => [paper.id, paper])).values(),
-      );
-      const uncheckedPapers = uniquePapers.filter(
-        (paper) => !checkedMineruPaperIdsRef.current.has(paper.id),
-      );
-      const uncheckedPaperIds = new Set(uncheckedPapers.map((paper) => paper.id));
-
-      setPaperStatuses((current) =>
-        markPaperStatusesCheckingMineru(current, uniquePapers, uncheckedPaperIds),
-      );
-
-      if (uncheckedPapers.length === 0) {
-        return;
-      }
-
-      if (uncheckedPapers.length > 0) {
-        // 提前标记，避免并发重入时重复检查同一批文献。
-        for (const paper of uncheckedPapers) {
-          checkedMineruPaperIdsRef.current.add(paper.id);
-        }
-
-        // 大库分批检查：每批一次批量 IPC，批次间让出主线程；
-        // 调用方将当前可见文献排在前面，保证可见项状态优先就绪，
-        // 其余条目在后台分批补齐（limit-concurrency backfill）。
-        const MINERU_STATUS_BATCH_SIZE = 400;
-        let processedCount = 0;
-
-        const rollbackUncheckedMarks = (papersToRollback: LiteraturePaper[]) => {
-          for (const paper of papersToRollback) {
-            checkedMineruPaperIdsRef.current.delete(paper.id);
-          }
-        };
-
-        for (let start = 0; start < uncheckedPapers.length; start += MINERU_STATUS_BATCH_SIZE) {
-          if (shouldCancel()) {
-            // 取消时回滚未处理批次的标记，让下一次运行重新检查；同时清除已写入的
-            // checking 状态，避免没有后续运行时界面永久停在“检测中”。
-            rollbackUncheckedMarks(uncheckedPapers.slice(processedCount));
-            const remainingPaperIds = new Set(
-              uncheckedPapers.slice(processedCount).map((paper) => paper.id),
-            );
-            setPaperStatuses((current) =>
-              Object.fromEntries(
-                Object.entries(current).map(([paperId, status]) => [
-                  paperId,
-                  remainingPaperIds.has(paperId) && status.checkingMineru
-                    ? { ...status, checkingMineru: false }
-                    : status,
-                ]),
-              ),
-            );
-            return;
-          }
-
-          // 汇总本批候选路径，单次 IPC 批量检查，避免每篇文献多次 IPC 往返。
-          const batch = uncheckedPapers.slice(start, start + MINERU_STATUS_BATCH_SIZE);
-
-          try {
-            const candidatesByPaper = batch.map((paper) => ({
-              paper,
-              candidates: mineruOutputPathCandidatesForPaper(
-                paper,
-                mineruCacheDir,
-                autoLoadSiblingJson,
-                libraryStorageDir,
-              ),
-            }));
-            const uniquePaths = Array.from(
-              new Set(candidatesByPaper.flatMap((item) => item.candidates)),
-            );
-            const existence = await localPathsExist(uniquePaths);
-
-            if (shouldCancel()) {
-              rollbackUncheckedMarks(uncheckedPapers.slice(processedCount));
-              const remainingPaperIds = new Set(
-                uncheckedPapers.slice(processedCount).map((paper) => paper.id),
-              );
-              setPaperStatuses((current) =>
-                Object.fromEntries(
-                  Object.entries(current).map(([paperId, status]) => [
-                    paperId,
-                    remainingPaperIds.has(paperId) && status.checkingMineru
-                      ? { ...status, checkingMineru: false }
-                      : status,
-                  ]),
-                ),
-              );
-              return;
-            }
-
-            const existsByPath = new Map(uniquePaths.map((candidate, index) => [candidate, existence[index] === true]));
-            const batchEntries: Array<[string, LiteraturePaperListStatus]> = [];
-
-            for (const { paper, candidates } of candidatesByPaper) {
-              batchEntries.push([
-                paper.id,
-                {
-                  mineruParsed: candidates.some((candidate) => existsByPath.get(candidate) === true),
-                  overviewGenerated: Boolean(paper.aiSummary?.trim()),
-                  checkingMineru: false,
-                },
-              ]);
-            }
-
-            setPaperStatuses((current) => ({
-              ...current,
-              ...Object.fromEntries(batchEntries),
-            }));
-            processedCount = start + batch.length;
-          } catch {
-            // 本批检查失败时回滚标记并清除 checking 状态，允许后续重试；其余批次继续。
-            rollbackUncheckedMarks(batch);
-            const failedBatchIds = new Set(batch.map((paper) => paper.id));
-
-            setPaperStatuses((current) =>
-              Object.fromEntries(
-                Object.entries(current).map(([paperId, status]) => [
-                  paperId,
-                  failedBatchIds.has(paperId) ? { ...status, checkingMineru: false } : status,
-                ]),
-              ),
-            );
-            processedCount = start + batch.length;
-          }
-
-          // 批次间让出事件循环，避免大库状态检查挤占交互。
-          if (start + MINERU_STATUS_BATCH_SIZE < uncheckedPapers.length) {
-            await new Promise((resolve) => setTimeout(resolve, 0));
-          }
-        }
-      }
-    },
-    [autoLoadSiblingJson, demoLibrary, libraryStorageDir, mineruCacheDir],
-  );
-
-  const refreshPapers = useCallback(
-    async (nextCategoryId = selectedCategoryId) => {
-      if (demoLibrary) {
-        const nextPapers = resolveDemoPapers(nextCategoryId);
-
-        setPapers(nextPapers);
-        setPapersTotal(nextPapers.length);
-        setSelectedPaperId((current) => resolveSelectedPaperId(current, nextPapers));
-        return nextPapers;
-      }
-
-      const generation = papersQueryGenerationRef.current + 1;
-      papersQueryGenerationRef.current = generation;
-      const result = await queryLibraryPapers({
-        ...buildPaperQuery(filters, paperSort, nextCategoryId, searchQuery, mineruPaperIds),
-        limit: PAPER_PAGE_SIZE,
-        offset: 0,
-      });
-      const nextPapers = result.papers;
-      if (generation !== papersQueryGenerationRef.current) {
-        return nextPapers;
-      }
-
-      setPapers(nextPapers);
-      setPapersTotal(result.total);
-      setSelectedPaperId((current) => resolveSelectedPaperId(current, nextPapers));
-      return nextPapers;
-    },
-    [demoLibrary, paperSort.sortBy, paperSort.sortDirection, filters, mineruPaperIds, resolveDemoPapers, searchQuery, selectedCategoryId],
-  );
-
-  useLibraryQueryRefresh({
-    enabled: !demoMode,
-    ready: !loading,
-    refreshPapers,
-    listCategories: listLibraryCategories,
-    setCategories,
-  });
-
-  // 滚动接近底部时按当前筛选追加下一页；按 id 去重防止翻页期间并发写入造成重复行。
-  const loadMorePapers = useCallback(async () => {
-    if (demoLibrary || papersLoadingMore) return;
-
-    const generation = papersQueryGenerationRef.current;
-    setPapersLoadingMore(true);
-    try {
-      const snapshot = papersRef.current;
-      const result = await queryLibraryPapers({
-        ...buildPaperQuery(filters, paperSort, selectedCategoryId, searchQuery, mineruPaperIds),
-        limit: PAPER_PAGE_SIZE,
-        offset: snapshot.length,
-      });
-      if (generation !== papersQueryGenerationRef.current) {
-        return;
-      }
-
-      if (result.papers.length === 0) {
-        setPapersTotal(result.total);
-        return;
-      }
-
-      setPapers((current) => {
-        const seen = new Set(current.map((paper) => paper.id));
-        return [...current, ...result.papers.filter((paper) => !seen.has(paper.id))];
-      });
-      setPapersTotal(result.total);
-    } finally {
-      setPapersLoadingMore(false);
-    }
-  }, [
+  const catalog = useLibraryCatalog({
     demoLibrary,
-    paperSort.sortBy,
-    paperSort.sortDirection,
-    papersLoadingMore,
-    filters, mineruPaperIds,
-    searchQuery,
-    selectedCategoryId,
-  ]);
-
-  const refreshAll = useCallback(async () => {
-    if (demoLibrary) {
-      const nextPapers = resolveDemoPapers();
-
-      setSettings(demoLibrary.settings);
-      setCategories(demoLibrary.categories);
-      setPapers(nextPapers);
-      setPapersTotal(nextPapers.length);
-      setSelectedPaperId((current) => resolveSelectedPaperId(current, nextPapers));
-      setStatusMessage(demoLibrary.statusMessage);
-      return;
-    }
-
-    const [nextCategories, visiblePapers, allPapers] = await Promise.all([
-      listLibraryCategories(),
-      refreshPapers(),
-      fetchAllLibraryPapers(),
-    ]);
-
-    allPapersSnapshotRef.current = allPapers;
-    onAllPapersChange?.(allPapers);
-    setCategories(nextCategories);
-
-    // 解析状态可见项优先：当前列表页排在前面先检查，其余条目后台分批补齐。
-    const visiblePaperIds = new Set(visiblePapers.map((paper) => paper.id));
-    const prioritizedPapers = [
-      ...visiblePapers,
-      ...allPapers.filter((paper) => !visiblePaperIds.has(paper.id)),
-    ];
-    void refreshMineruStatusesForPapers(prioritizedPapers);
-  }, [demoLibrary, onAllPapersChange, refreshMineruStatusesForPapers, refreshPapers, resolveDemoPapers]);
-
-  // MCP/外部进程写入文库：重新加载列表、分类与整个快照；
-  // 详情表单在数据变化时自行保留未保存编辑并显示“外部更新”提示。
-  useEffect(() => {
-    const handleExternalWrite = () => {
-      if (demoMode) return;
-      void refreshAll().catch((error) => console.error('Failed to refresh library after external write', error));
-    };
-    window.addEventListener(EXTERNAL_LIBRARY_WRITE_EVENT, handleExternalWrite);
-    return () => window.removeEventListener(EXTERNAL_LIBRARY_WRITE_EVENT, handleExternalWrite);
-  }, [demoMode, refreshAll]);
-
-  const hydrateImportDraftsFromLocalPdf = useCallback(
-    async (drafts: ImportDraftItem[]) => {
-      if (drafts.length === 0) {
-        return;
-      }
-
-      setLocalImportMetadataWorking(true);
-
-      try {
-        for (const draft of drafts) {
-          const preview = await extractLocalPdfMetadataPreview(draft.path).catch(() => null);
-
-          if (!preview) {
-            continue;
-          }
-
-          if (preview.firstPageText?.trim()) {
-            importFirstPageTextRef.current.set(draft.path, preview.firstPageText);
-          }
-
-          setImportDrafts((current) =>
-            current.map((item) => {
-              if (item.path !== draft.path) {
-                return item;
-              }
-
-              return mergeLocalPdfMetadataIntoDraft(item, preview);
-            }),
-          );
-        }
-      } finally {
-        setLocalImportMetadataWorking(false);
-      }
-    },
-    [],
-  );
-
-  const beginImportDrafts = useCallback(
-    (paths: string[]) => {
-      if (demoMode) {
-        showDemoLockedMessage();
-        return;
-      }
-
-      const { pdfPaths, drafts: nextDrafts } = buildImportDraftsFromPdfPaths({
-        paths,
-        existingDrafts: importDrafts,
-        categories,
-        selectedCategoryId,
-      });
-
-      if (pdfPaths.length === 0) {
-        setStatusMessage(l('没有可导入的 PDF 文件', 'No importable PDF files were found'));
-        return;
-      }
-
-      setImportDrafts((current) => [...current, ...nextDrafts]);
-      setImportDialogOpen(true);
-      setStatusMessage(
-        l(
-          `已准备 ${pdfPaths.length} 个 PDF，请确认元数据。`,
-          `${pdfPaths.length} PDFs are ready. Please confirm metadata.`,
-        ),
-      );
-
-      if (nextDrafts.length > 0) {
-        void hydrateImportDraftsFromLocalPdf(nextDrafts);
-      }
-    },
-    [
-      categories,
-      demoMode,
-      hydrateImportDraftsFromLocalPdf,
-      importDrafts,
-      l,
-      selectedCategoryId,
-      showDemoLockedMessage,
-    ],
-  );
-
-  useDesktopPdfDrop({
-    onPdfPaths: beginImportDrafts,
-    onDragStateChange: setDropActive,
+    mineruCacheDir,
+    autoLoadSiblingJson,
+    l,
+    onPaperStatusesChange,
+  });
+  const selection = usePaperSelection({
+    demoLibrary,
+    papers: catalog.papers,
+    papersRef: catalog.papersRef,
+    papersTotal: catalog.papersTotal,
+    selectedPaperId: catalog.selectedPaperId,
+    setSelectedPaperId: catalog.setSelectedPaperId,
+    selectedCategoryId: catalog.selectedCategoryId,
+    searchQuery: catalog.searchQuery,
+    filters: catalog.filters,
+    mineruPaperIds: catalog.mineruPaperIds,
+    paperSort: catalog.paperSort,
+    resolveDemoPapers: catalog.resolveDemoPapers,
+    l,
+    setBatchWorking,
+    setStatusMessage: catalog.setStatusMessage,
+    setError: catalog.setError,
+  });
+  const metadataJobs = useMetadataJobs({
+    catalog,
+    demoMode,
+    l,
+    metadataLlmPreset,
+    setStatusMessage: catalog.setStatusMessage,
+    setError: catalog.setError,
+    setPaperSaving,
+    setDialogBusy,
+    setConfirmDialog,
+  });
+  const importFlow = useImportFlow({
+    catalog,
+    demoMode,
+    l,
+    metadataWorking: metadataJobs.metadataWorking,
+    setMetadataWorking: metadataJobs.setMetadataWorking,
+    resolveLlmMetadataFallback: metadataJobs.resolveLlmMetadataFallback,
+    setStatusMessage: catalog.setStatusMessage,
+    setError: catalog.setError,
+    working,
+    setWorking,
+  });
+  const pdfAssetAudit = usePdfAssetAudit();
+  const batch = useBatchOperations({
+    catalog,
+    demoMode,
+    l,
+    setStatusMessage: catalog.setStatusMessage,
+    setError: catalog.setError,
+    setBatchWorking,
+    setDialogBusy,
+    setPaperSaving,
+    setConfirmDialog,
+    setPaperContextMenu,
+    paperSelectionRef: selection.paperSelectionRef,
+    resolveSelectedPapers: selection.resolveSelectedPapers,
+    clearMultiSelection: selection.clearMultiSelection,
+    ragBadgeByDocumentKey,
+  });
+  const categoryActions = useCategoryActions({
+    catalog,
+    demoMode,
+    l,
+    setStatusMessage: catalog.setStatusMessage,
+    setError: catalog.setError,
+    setDialogBusy,
+    setConfirmDialog,
   });
 
+  const {
+    categories,
+    papers,
+    papersTotal,
+    papersLoadingMore,
+    paperStatuses,
+    loading,
+    papersRefreshing,
+    statusMessage,
+    error,
+    searchQuery,
+    setSearchQuery,
+    selectedCategoryId,
+    selectedPaper,
+    flatCategories,
+    libraryStorageDir,
+    paperSort,
+    setPaperSort,
+    filters,
+    setFilters,
+    libraryTags,
+    refreshAll,
+    loadMorePapers,
+    handleSelectCategory,
+    showDemoLockedMessage,
+    setStatusMessage,
+    setError,
+    setSelectedPaperId,
+  } = catalog;
+
+  // citationKey 查重只需 id + key；不再为详情表单保留整库 LiteraturePaper 快照。
   useEffect(() => {
-    try {
-      localStorage.setItem(PAPER_SORT_STORAGE_KEY, JSON.stringify(paperSort));
-    } catch {
+    if (demoLibrary) {
+      setCitationKeys(demoLibrary.papers.map((paper) => ({
+        id: paper.id,
+        citationKey: paper.citationKey ?? null,
+      })));
+      return undefined;
     }
-  }, [paperSort]);
+
+    let cancelled = false;
+    void listLibraryCitationKeys()
+      .then((keys) => { if (!cancelled) setCitationKeys(keys); })
+      .catch(() => { if (!cancelled) setCitationKeys([]); });
+    return () => { cancelled = true; };
+  }, [demoLibrary, selectedPaper?.updatedAt]);
+  const {
+    multiSelectedPaperIds,
+    selectedCount,
+    selectAllState,
+    multiSelectedPapers,
+    paperSelectionRef,
+    clearMultiSelection,
+    handleSelectPaperWithModifiers,
+    resolveSelectedPapers,
+    handleToggleSelectAll,
+  } = selection;
 
   useEffect(() => {
     try {
@@ -1005,10 +279,6 @@ export default function LiteratureLibraryView({
     } catch {
     }
   }, [detailsPanelWidth]);
-
-  useEffect(() => {
-    selectedCategoryIdRef.current = selectedCategoryId;
-  }, [selectedCategoryId]);
 
   useEffect(() => {
     if (!detailsPanelResizing) {
@@ -1098,1622 +368,6 @@ export default function LiteratureLibraryView({
     setDetailsPanelResizing(true);
   };
 
-  useEffect(() => {
-    let cancelled = false;
-
-    void (async () => {
-      setLoading(true);
-      setError('');
-
-      try {
-        if (demoLibrary) {
-          const allCategory = demoLibrary.categories.find((category) => category.systemKey === 'all');
-          const currentCategoryId = selectedCategoryIdRef.current;
-          const nextSelectedCategoryId =
-            currentCategoryId &&
-            demoLibrary.categories.some((category) => category.id === currentCategoryId)
-              ? currentCategoryId
-              : allCategory?.id ?? demoLibrary.categories[0]?.id ?? null;
-          const nextPapers = filterDemoPapers(demoLibrary, nextSelectedCategoryId, searchQuery);
-
-          if (cancelled) {
-            return;
-          }
-
-          setSettings(demoLibrary.settings);
-          setCategories(demoLibrary.categories);
-          setSelectedCategoryId(nextSelectedCategoryId);
-          setPapers(nextPapers);
-          setSelectedPaperId(nextPapers[0]?.id ?? null);
-          setStatusMessage(demoLibrary.statusMessage);
-          return;
-        }
-
-        const snapshot = await initializeLiteratureLibrary();
-
-        if (cancelled) {
-          return;
-        }
-
-        const allCategory = snapshot.categories.find((category) => category.systemKey === 'all');
-
-        setSettings(snapshot.settings);
-        setCategories(snapshot.categories);
-        setSelectedCategoryId(allCategory?.id ?? snapshot.categories[0]?.id ?? null);
-        setPapers(snapshot.papers);
-        setSelectedPaperId(snapshot.papers[0]?.id ?? null);
-        setStatusMessage(l('文献库已就绪', 'Library is ready'));
-        allPapersSnapshotRef.current = snapshot.papers;
-      } catch (nextError) {
-        if (!cancelled) {
-          const message =
-            nextError instanceof Error
-              ? nextError.message
-              : l('初始化文献库失败', 'Failed to initialize the library');
-          setError(message);
-          setStatusMessage(message);
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [demoLibrary]);
-
-  useEffect(() => {
-    const handleNativeSummaryUpdated = (event: Event) => {
-      const detail = (event as CustomEvent<NativeSummaryUpdatedEventDetail>).detail;
-
-      if (!detail?.paperId) {
-        return;
-      }
-
-      setPapers((current) =>
-        current.map((paper) =>
-          paper.id === detail.paperId ? { ...paper, aiSummary: detail.aiSummary } : paper,
-        ),
-      );
-      setPaperStatuses((current) =>
-        applyPaperSummaryStatusUpdate(current, detail.paperId, detail.aiSummary),
-      );
-    };
-
-    const handleNativeMineruStatusUpdated = (event: Event) => {
-      const detail = (event as CustomEvent<NativeMineruStatusUpdatedEventDetail>).detail;
-
-      if (!detail?.paperId) {
-        return;
-      }
-
-      checkedMineruPaperIdsRef.current.add(detail.paperId);
-      setPaperStatuses((current) =>
-        applyPaperMineruStatusUpdate(current, detail.paperId, detail.mineruParsed),
-      );
-    };
-
-    const handleNativePaperUpdated = (event: Event) => {
-      const detail = (event as CustomEvent<NativePaperUpdatedEventDetail>).detail;
-
-      if (!detail?.paper?.id) {
-        return;
-      }
-
-      setPapers((current) =>
-        current.some((paper) => paper.id === detail.paper.id)
-          ? current.map((paper) => (paper.id === detail.paper.id ? detail.paper : paper))
-          : current,
-      );
-    };
-
-    window.addEventListener('paperquay:native-summary-updated', handleNativeSummaryUpdated);
-    window.addEventListener('paperquay:native-mineru-status-updated', handleNativeMineruStatusUpdated);
-    window.addEventListener(NATIVE_PAPER_UPDATED_EVENT, handleNativePaperUpdated);
-
-    return () => {
-      window.removeEventListener('paperquay:native-summary-updated', handleNativeSummaryUpdated);
-      window.removeEventListener('paperquay:native-mineru-status-updated', handleNativeMineruStatusUpdated);
-      window.removeEventListener(NATIVE_PAPER_UPDATED_EVENT, handleNativePaperUpdated);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (demoLibrary) {
-      setPaperStatuses(
-        demoLibrary.paperStatuses ??
-          buildInitialPaperStatuses(demoLibrary.papers),
-      );
-      return undefined;
-    }
-
-    if (loading) {
-      return undefined;
-    }
-
-    if (mineruStatusConfigKeyRef.current !== mineruStatusConfigKey) {
-      mineruStatusConfigKeyRef.current = mineruStatusConfigKey;
-      checkedMineruPaperIdsRef.current = new Set();
-    }
-
-    let cancelled = false;
-
-    // 复用 init/refreshAll 已拉取的全量文献快照，避免启动时额外一次全库查询。
-    void refreshMineruStatusesForPapers(allPapersSnapshotRef.current, () => cancelled);
-
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    demoLibrary,
-    loading,
-    mineruStatusConfigKey,
-    refreshMineruStatusesForPapers,
-  ]);
-
-  useEffect(() => {
-    if (loading) {
-      return;
-    }
-
-    const timer = window.setTimeout(() => {
-      void refreshPapers().catch((nextError) => {
-        const message =
-          nextError instanceof Error ? nextError.message : l('搜索文献失败', 'Failed to search papers');
-        setError(message);
-      });
-    }, 180);
-
-    return () => window.clearTimeout(timer);
-  }, [loading, l, refreshPapers]);
-
-  const handleSelectCategory = (categoryId: string) => {
-    setSelectedCategoryId(categoryId);
-    setError('');
-    void refreshPapers(categoryId).catch((nextError) => {
-      const message =
-        nextError instanceof Error
-          ? nextError.message
-          : l('读取分类文献失败', 'Failed to load category papers');
-      setError(message);
-      setStatusMessage(message);
-    });
-  };
-
-  const handleImportZoteroLibrary = async (preferredDataDir?: string) => {
-    if (demoMode) {
-      showDemoLockedMessage();
-      return;
-    }
-
-    setWorking(true);
-    setError('');
-
-    try {
-      const activeSettings = settings ?? await getLibrarySettings();
-      let dataDir = preferredDataDir?.trim() || activeSettings.zoteroLocalDataDir.trim();
-
-      if (!dataDir) {
-        dataDir = (await detectLocalZoteroDataDir()) ?? '';
-      }
-
-      if (!dataDir) {
-        setStatusMessage(
-          l(
-            '未找到 Zotero 本地数据目录。请先选择包含 zotero.sqlite 的文件夹。',
-            'No Zotero local data directory was found. Choose the folder containing zotero.sqlite first.',
-          ),
-        );
-        return;
-      }
-
-      const nextSettings = await updateLibrarySettings({
-        ...activeSettings,
-        zoteroLocalDataDir: dataDir,
-      });
-      setSettings(nextSettings);
-      emitLibrarySettingsUpdated(nextSettings, 'literature-zotero-import');
-
-      setStatusMessage(l('正在读取 Zotero 分类树...', 'Reading Zotero collection tree...'));
-      const zoteroCollections = await listLocalZoteroCollections({ dataDir });
-      setStatusMessage(l('正在读取 Zotero PDF 条目...', 'Reading Zotero PDF items...'));
-      const allZoteroItems = uniqueZoteroItems(await listLocalZoteroLibraryItems({ dataDir }));
-
-      if (zoteroCollections.length === 0 && allZoteroItems.length === 0) {
-        setStatusMessage(l('没有可导入的 Zotero PDF。', 'No Zotero PDFs are available to import.'));
-        return;
-      }
-
-      let currentCategories = await listLibraryCategories();
-      const categoryIdByZoteroKey = new Map<string, string>();
-      const collectionByKey = new Map(
-        zoteroCollections.map((collection) => [collection.collectionKey, collection]),
-      );
-
-      const ensureCategoryForCollection = async (
-        collection: ZoteroCollection,
-        visiting = new Set<string>(),
-      ): Promise<string> => {
-        const existingId = categoryIdByZoteroKey.get(collection.collectionKey);
-
-        if (existingId) {
-          return existingId;
-        }
-
-        if (visiting.has(collection.collectionKey)) {
-          throw new Error(
-            l(
-              'Zotero 分类树存在循环引用，无法导入。',
-              'The Zotero collection tree has a cycle and cannot be imported.',
-            ),
-          );
-        }
-
-        visiting.add(collection.collectionKey);
-
-        const parentCollection = collection.parentCollectionKey
-          ? collectionByKey.get(collection.parentCollectionKey)
-          : null;
-        const parentId = parentCollection
-          ? await ensureCategoryForCollection(parentCollection, visiting)
-          : null;
-        const normalizedName = collection.name.trim() || l('未命名 Zotero 分类', 'Untitled Zotero Collection');
-        const existingCategory = currentCategories.find(
-          (category) =>
-            !category.isSystem &&
-            category.parentId === parentId &&
-            categorySignature(category.name, category.parentId) === categorySignature(normalizedName, parentId),
-        );
-        const category = existingCategory ?? await createLibraryCategory({
-          name: normalizedName,
-          parentId,
-        });
-
-        if (!existingCategory) {
-          currentCategories = [...currentCategories, category];
-        }
-
-        categoryIdByZoteroKey.set(collection.collectionKey, category.id);
-        return category.id;
-      };
-
-      const ensureTopLevelCategory = async (name: string): Promise<string> => {
-        const normalizedName = name.trim();
-        const existingCategory = currentCategories.find(
-          (category) =>
-            !category.isSystem &&
-            category.parentId === null &&
-            categorySignature(category.name, category.parentId) === categorySignature(normalizedName, null),
-        );
-        const category = existingCategory ?? await createLibraryCategory({
-          name: normalizedName,
-          parentId: null,
-        });
-
-        if (!existingCategory) {
-          currentCategories = [...currentCategories, category];
-        }
-
-        return category.id;
-      };
-
-      for (const collection of zoteroCollections) {
-        await ensureCategoryForCollection(collection);
-      }
-
-      let importedCount = 0;
-      let duplicateCount = 0;
-      let failedCount = 0;
-      let missingPdfCount = 0;
-      let unfiledCount = 0;
-      const collectionItems: ZoteroLibraryItem[] = [];
-
-      for (const collection of zoteroCollections) {
-        const categoryId = categoryIdByZoteroKey.get(collection.collectionKey);
-
-        if (!categoryId) {
-          continue;
-        }
-
-        const items = await listLocalZoteroCollectionItems({
-          dataDir,
-          collectionKey: collection.collectionKey,
-        });
-        collectionItems.push(...items);
-
-        const importableItems = items.filter((item) => item.localPdfPath);
-        missingPdfCount += items.length - importableItems.length;
-
-        if (importableItems.length === 0) {
-          continue;
-        }
-
-        const metadata = Object.fromEntries(
-          importableItems.map((item) => [item.localPdfPath as string, metadataFromZoteroItem(item)]),
-        );
-        const results = await importPdfsToLibrary({
-          paths: importableItems.map((item) => item.localPdfPath as string),
-          targetCategoryId: categoryId,
-          importMode: 'copy',
-          source: 'zotero',
-          metadata,
-        });
-
-        for (const result of results) {
-          if (result.status === 'imported') {
-            importedCount += 1;
-          } else if (result.status === 'duplicate') {
-            duplicateCount += 1;
-
-            if (result.existingPaperId) {
-              await assignPaperToLibraryCategory({
-                paperId: result.existingPaperId,
-                categoryId,
-              });
-            }
-          } else {
-            failedCount += 1;
-          }
-        }
-      }
-
-      const unfiledItems = filterZoteroItemsOutsideCollections(allZoteroItems, collectionItems);
-      unfiledCount = unfiledItems.length;
-
-      if (unfiledItems.length > 0) {
-        const unfiledCategoryId = await ensureTopLevelCategory(l('Zotero 未归档', 'Zotero Unfiled'));
-        const importableItems = unfiledItems.filter((item) => item.localPdfPath);
-        missingPdfCount += unfiledItems.length - importableItems.length;
-
-        if (importableItems.length > 0) {
-          const metadata = Object.fromEntries(
-            importableItems.map((item) => [item.localPdfPath as string, metadataFromZoteroItem(item)]),
-          );
-          const results = await importPdfsToLibrary({
-            paths: importableItems.map((item) => item.localPdfPath as string),
-            targetCategoryId: unfiledCategoryId,
-            importMode: 'copy',
-            source: 'zotero',
-            metadata,
-          });
-
-          for (const result of results) {
-            if (result.status === 'imported') {
-              importedCount += 1;
-            } else if (result.status === 'duplicate') {
-              duplicateCount += 1;
-
-              if (result.existingPaperId) {
-                await assignPaperToLibraryCategory({
-                  paperId: result.existingPaperId,
-                  categoryId: unfiledCategoryId,
-                });
-              }
-            } else {
-              failedCount += 1;
-            }
-          }
-        }
-      }
-
-      await refreshAll();
-      setStatusMessage(
-        l(
-          `Zotero 导入完成：${zoteroCollections.length} 个分类，${unfiledCount} 个未归档条目，导入 ${importedCount}，重复 ${duplicateCount}，失败 ${failedCount}，缺少本地 PDF ${missingPdfCount}。`,
-          `Zotero import finished: ${zoteroCollections.length} collections, ${unfiledCount} unfiled items, ${importedCount} imported, ${duplicateCount} duplicated, ${failedCount} failed, ${missingPdfCount} missing local PDFs.`,
-        ),
-      );
-    } catch (nextError) {
-      const message =
-        nextError instanceof Error ? nextError.message : l('导入 Zotero 文库失败', 'Failed to import the Zotero library');
-      setError(message);
-      setStatusMessage(message);
-    } finally {
-      setWorking(false);
-    }
-  };
-
-  useEffect(() => {
-    const handleLibrarySettingsUpdated = (event: Event) => {
-      const detail = (event as CustomEvent<LibrarySettingsUpdatedEventDetail>).detail;
-
-      if (!detail?.settings || detail.source?.startsWith('literature')) {
-        return;
-      }
-
-      setSettings(detail.settings);
-    };
-
-    const handleZoteroImportRequest = (event: Event) => {
-      const detail = (event as CustomEvent<ZoteroImportRequestEventDetail>).detail;
-
-      void handleImportZoteroLibrary(detail?.dataDir);
-    };
-
-    window.addEventListener(LIBRARY_SETTINGS_UPDATED_EVENT, handleLibrarySettingsUpdated);
-    window.addEventListener(ZOTERO_IMPORT_REQUEST_EVENT, handleZoteroImportRequest);
-
-    return () => {
-      window.removeEventListener(LIBRARY_SETTINGS_UPDATED_EVENT, handleLibrarySettingsUpdated);
-      window.removeEventListener(ZOTERO_IMPORT_REQUEST_EVENT, handleZoteroImportRequest);
-    };
-  }, [handleImportZoteroLibrary]);
-
-  const handleImportPdfs = async () => {
-    if (demoMode) {
-      showDemoLockedMessage();
-      return;
-    }
-
-    setError('');
-
-    try {
-      const paths = await selectLibraryPdfFiles();
-
-      if (paths.length === 0) {
-        setStatusMessage(l('未选择 PDF', 'No PDFs selected'));
-        return;
-      }
-
-      beginImportDrafts(paths);
-    } catch (nextError) {
-      const message =
-        nextError instanceof Error ? nextError.message : l('导入 PDF 失败', 'Failed to import PDFs');
-      setError(message);
-      setStatusMessage(message);
-    }
-  };
-
-  const handleInspectPdfAssets = async () => {
-    setPdfAssetAuditOpen(true);
-    setPdfAssetAuditLoading(true);
-    setPdfAssetAuditError('');
-    try {
-      const [inventory, names] = await Promise.all([
-        inspectLibraryPdfAssets(),
-        previewLibraryPdfAssetNames(),
-      ]);
-      setPdfAssetInventory(inventory);
-      setPdfAssetNamePlan(names);
-    } catch (nextError) {
-      setPdfAssetAuditError(nextError instanceof Error ? nextError.message : String(nextError));
-    } finally {
-      setPdfAssetAuditLoading(false);
-    }
-  };
-
-  const handleImportDraftChange = (path: string, patch: Partial<ImportDraftItem>) => {
-    setImportDrafts((current) =>
-      current.map((draft) => (draft.path === path ? { ...draft, ...patch } : draft)),
-    );
-  };
-
-  const handleRemoveImportDraft = (path: string) => {
-    setImportDrafts((current) => current.filter((draft) => draft.path !== path));
-  };
-
-  // 中文文献元数据 LLM 兑底：Crossref/OpenAlex 对中文论文覆盖有限，远程检索未命中时，
-  // 使用配置的大模型从文献首页文本直接抽取标题、作者、期刊、摘要、关键词等字段。
-  // 只对中文文献启用，避免对英文文献的检索 miss 浪费模型调用。
-  const resolveLlmMetadataFallback = useCallback(
-    async (input: {
-      title: string;
-      excerptText: string | null | undefined;
-    }): Promise<MetadataLookupResult | null> => {
-      const preset = metadataLlmPreset;
-
-      if (!preset?.apiKey?.trim() || !preset.baseUrl?.trim() || !preset.model?.trim()) {
-        return null;
-      }
-
-      const excerptText = input.excerptText?.trim() ?? '';
-
-      if (!excerptText) {
-        return null;
-      }
-
-      if (!isChineseText(input.title) && !isChineseDominant(excerptText)) {
-        return null;
-      }
-
-      return extractLiteratureMetadataWithLlm({
-        baseUrl: preset.baseUrl.trim(),
-        apiKey: preset.apiKey.trim(),
-        model: preset.model.trim(),
-        apiMode: preset.apiMode,
-        title: input.title,
-        excerptText,
-      }).catch(() => null);
-    },
-    [metadataLlmPreset],
-  );
-
-  const handleAutoFillImportMetadata = useCallback(
-    // allowLlm=false 用于对话框打开后的静默自动补全：免费远程检索照跑，
-    // 但可能产生模型费用的 LLM 兑底只在用户手动点击「自动补全」时启用。
-    async (targetDrafts = importDrafts, silent = false, allowLlm = true) => {
-      if (demoMode) {
-        showDemoLockedMessage();
-        return;
-      }
-
-      const draftsToLookup = targetDrafts.filter((draft) => draft.path.trim());
-
-      if (draftsToLookup.length === 0) {
-        return;
-      }
-
-      setMetadataWorking(true);
-      setError('');
-
-      let filledCount = 0;
-      let missedCount = 0;
-      let llmFilledCount = 0;
-
-      try {
-        for (const draft of draftsToLookup) {
-          let metadata = await lookupLiteratureMetadata({
-            doi: draft.doi || null,
-            title: draft.title || titleFromPdfPath(draft.path),
-            path: draft.path,
-          });
-
-          // 中文文献在 Crossref/OpenAlex 中通常检索不到，用 LLM 从首页文本提取作为兑底。
-          if (!metadata && allowLlm) {
-            metadata = await resolveLlmMetadataFallback({
-              title: draft.title || titleFromPdfPath(draft.path),
-              excerptText: importFirstPageTextRef.current.get(draft.path),
-            });
-
-            if (metadata) {
-              llmFilledCount += 1;
-            }
-          }
-
-          if (!metadata) {
-            missedCount += 1;
-            continue;
-          }
-
-          const mergedDraft = mergeRemoteMetadataIntoDraft(draft, metadata);
-          const changed =
-            mergedDraft.title !== draft.title ||
-            mergedDraft.authors !== draft.authors ||
-            mergedDraft.year !== draft.year ||
-            mergedDraft.publication !== draft.publication ||
-            mergedDraft.doi !== draft.doi ||
-            mergedDraft.url !== draft.url ||
-            mergedDraft.abstractText !== draft.abstractText;
-
-          if (!changed) {
-            missedCount += 1;
-            continue;
-          }
-
-          setImportDrafts((current) =>
-            current.map((item) =>
-              item.path === draft.path ? mergeRemoteMetadataIntoDraft(item, metadata) : item,
-            ),
-          );
-          filledCount += 1;
-        }
-
-        if (!silent) {
-          setStatusMessage(
-            l(
-              `元数据补全完成：匹配 ${filledCount}（其中智能提取 ${llmFilledCount}），未匹配 ${missedCount}。`,
-              `Metadata enrichment finished: ${filledCount} matched (${llmFilledCount} via AI extraction), ${missedCount} not matched.`,
-            ),
-          );
-        }
-      } catch (nextError) {
-        const message =
-          nextError instanceof Error ? nextError.message : l('自动补全元数据失败', 'Failed to auto-fill metadata');
-        setError(message);
-        setStatusMessage(message);
-      } finally {
-        setMetadataWorking(false);
-      }
-    },
-    [demoMode, importDrafts, l, resolveLlmMetadataFallback, showDemoLockedMessage],
-  );
-
-  useEffect(() => {
-    if (
-      !importDialogOpen ||
-      importDrafts.length === 0 ||
-      metadataWorking ||
-      localImportMetadataWorking
-    ) {
-      return;
-    }
-
-    const nextDrafts = importDrafts.filter((draft) => !metadataAttemptedPaths.has(draft.path));
-
-    if (nextDrafts.length === 0) {
-      return;
-    }
-
-    setMetadataAttemptedPaths((current) => {
-      const next = new Set(current);
-
-      nextDrafts.forEach((draft) => next.add(draft.path));
-      return next;
-    });
-    void handleAutoFillImportMetadata(nextDrafts, true, false);
-  }, [
-    handleAutoFillImportMetadata,
-    importDialogOpen,
-    demoMode,
-    importDrafts,
-    localImportMetadataWorking,
-    showDemoLockedMessage,
-    metadataAttemptedPaths,
-    metadataWorking,
-  ]);
-
-  const handleCloseImportDialog = () => {
-    if (working) {
-      return;
-    }
-
-    setImportDialogOpen(false);
-    setImportDrafts([]);
-    setMetadataAttemptedPaths(new Set());
-    setLocalImportMetadataWorking(false);
-    importFirstPageTextRef.current.clear();
-  };
-
-  const handleConfirmImportDrafts = async () => {
-    if (demoMode) {
-      showDemoLockedMessage();
-      return;
-    }
-
-    if (importDrafts.length === 0) {
-      return;
-    }
-
-    setWorking(true);
-    setError('');
-
-    try {
-      const groupedDrafts = new Map<string, ImportDraftItem[]>();
-
-      for (const draft of importDrafts) {
-        const categoryKey = draft.categoryId.trim();
-        groupedDrafts.set(categoryKey, [...(groupedDrafts.get(categoryKey) ?? []), draft]);
-      }
-
-      const results = [];
-
-      for (const [categoryId, drafts] of groupedDrafts) {
-        const metadata = Object.fromEntries(
-          drafts.map((draft) => [draft.path, metadataFromDraft(draft)]),
-        );
-        const imported = await importPdfsToLibrary({
-          paths: drafts.map((draft) => draft.path),
-          targetCategoryId: categoryId || null,
-          metadata,
-        });
-
-        results.push(...imported);
-      }
-
-      const importedCount = results.filter((result) => result.status === 'imported').length;
-      const duplicateCount = results.filter((result) => result.status === 'duplicate').length;
-      const failedCount = results.filter((result) => result.status === 'failed').length;
-      const duplicateNames = results
-        .filter((result) => result.status === 'duplicate')
-        .map((result) => getFileNameFromPath(result.sourcePath))
-        .slice(0, 3);
-      const failedNames = results
-        .filter((result) => result.status === 'failed')
-        .map((result) => `${getFileNameFromPath(result.sourcePath)}: ${result.message}`)
-        .slice(0, 2);
-
-      await refreshAll();
-      setImportDialogOpen(false);
-      setImportDrafts([]);
-      importFirstPageTextRef.current.clear();
-      setMetadataAttemptedPaths(new Set());
-      setLocalImportMetadataWorking(false);
-      const duplicateSummary =
-        duplicateNames.length > 0
-          ? l(` 重复：${duplicateNames.join('、')}`, ` Duplicates: ${duplicateNames.join(', ')}`)
-          : '';
-      const failedSummary =
-        failedNames.length > 0
-          ? l(` 失败：${failedNames.join('；')}`, ` Failed: ${failedNames.join('; ')}`)
-          : '';
-      setStatusMessage(
-        l(
-          `导入完成：新增 ${importedCount}，重复 ${duplicateCount}，失败 ${failedCount}。${duplicateSummary}${failedSummary}`,
-          `Import finished: ${importedCount} imported, ${duplicateCount} duplicated, ${failedCount} failed.${duplicateSummary}${failedSummary}`,
-        ),
-      );
-    } catch (nextError) {
-      const message =
-        nextError instanceof Error ? nextError.message : l('导入 PDF 失败', 'Failed to import PDFs');
-      setError(message);
-      setStatusMessage(message);
-    } finally {
-      setWorking(false);
-    }
-  };
-
-  const handleEnrichAllMetadata = async () => {
-    if (demoMode) {
-      showDemoLockedMessage();
-      return;
-    }
-
-    if (bulkMetadataWorking) {
-      return;
-    }
-
-    setBulkMetadataWorking(true);
-    setError('');
-
-    try {
-      const allPapers = await fetchAllLibraryPapers();
-
-      if (allPapers.length === 0) {
-        setStatusMessage(l('当前文库没有可解析的文献', 'There are no papers to parse.'));
-        return;
-      }
-
-      let updatedCount = 0;
-      let unchangedCount = 0;
-      let missedCount = 0;
-      let failedCount = 0;
-
-      for (const [index, paper] of allPapers.entries()) {
-        setStatusMessage(
-          l(
-            `正在解析元数据：${index + 1}/${allPapers.length} - ${paper.title}`,
-            `Parsing metadata: ${index + 1}/${allPapers.length} - ${paper.title}`,
-          ),
-        );
-
-        try {
-          let metadata = await lookupLiteratureMetadata({
-            doi: paper.doi,
-            title: paper.title,
-            path: paperPdfPath(paper, libraryStorageDir),
-          });
-
-          // 中文文献在远程数据库中通常检索不到：读取首页文本后用 LLM 提取兑底。
-          // 是否为中文文献由 resolveLlmMetadataFallback 内部根据标题与正文判定，
-          // 以覆盖标题为英文但正文为中文的文献；英文文献不会产生模型调用。
-          if (!metadata) {
-            const pdfPath = paperPdfPath(paper, libraryStorageDir);
-            const firstPageText = pdfPath
-              ? (await extractLocalPdfMetadataPreview(pdfPath).catch(() => null))?.firstPageText
-              : null;
-
-            metadata = await resolveLlmMetadataFallback({
-              title: paper.title,
-              excerptText: firstPageText,
-            });
-          }
-
-          if (!metadata) {
-            missedCount += 1;
-            continue;
-          }
-
-          const updateRequest = metadataUpdateForPaper(paper, metadata);
-
-          if (!updateRequest) {
-            unchangedCount += 1;
-            continue;
-          }
-
-          await updateLibraryPaper(updateRequest);
-          updatedCount += 1;
-        } catch {
-          failedCount += 1;
-        }
-      }
-
-      await refreshAll();
-
-      const message = l(
-        `元数据解析完成：更新 ${updatedCount}，无需更新 ${unchangedCount}，未匹配 ${missedCount}，失败 ${failedCount}。`,
-        `Metadata parsing finished: ${updatedCount} updated, ${unchangedCount} unchanged, ${missedCount} not matched, ${failedCount} failed.`,
-      );
-
-      setStatusMessage(message);
-
-      if (failedCount > 0) {
-        setError(message);
-      }
-    } catch (nextError) {
-        const message =
-          nextError instanceof Error
-            ? nextError.message
-            : l('批量解析文献元数据失败', 'Failed to parse metadata for all papers');
-      setError(message);
-      setStatusMessage(message);
-    } finally {
-      setBulkMetadataWorking(false);
-    }
-  };
-
-  useEffect(() => {
-    const handleMetadataEnrichRequest = () => {
-      void handleEnrichAllMetadata();
-    };
-
-    window.addEventListener(LIBRARY_METADATA_ENRICH_REQUEST_EVENT, handleMetadataEnrichRequest);
-
-    return () => {
-      window.removeEventListener(LIBRARY_METADATA_ENRICH_REQUEST_EVENT, handleMetadataEnrichRequest);
-    };
-  }, [handleEnrichAllMetadata]);
-
-  const handleCreateCategory = (parentCategory?: LiteratureCategory | null) => {
-    if (demoMode) {
-      showDemoLockedMessage();
-      return;
-    }
-
-    setCategoryNameDialog({
-      mode: 'create',
-      parentCategory: parentCategory && !parentCategory.isSystem ? parentCategory : null,
-    });
-  };
-
-  const handleRenameCategory = (category: LiteratureCategory) => {
-    if (demoMode) {
-      showDemoLockedMessage();
-      return;
-    }
-
-    if (category.isSystem) {
-      return;
-    }
-
-    setCategoryNameDialog({
-      mode: 'rename',
-      category,
-    });
-  };
-
-  const handleSubmitCategoryName = async (name: string) => {
-    if (demoMode) {
-      showDemoLockedMessage();
-      setCategoryNameDialog(null);
-      return;
-    }
-
-    if (!categoryNameDialog) {
-      return;
-    }
-
-    setDialogBusy(true);
-    setError('');
-    try {
-      if (categoryNameDialog.mode === 'create') {
-        const category = await createLibraryCategory({
-          name,
-          parentId: categoryNameDialog.parentCategory?.id ?? null,
-        });
-
-        const nextCategories = await listLibraryCategories();
-        setCategories(nextCategories);
-        setSelectedCategoryId(category.id);
-        await refreshPapers(category.id);
-        setCategoryNameDialog(null);
-        setStatusMessage(
-          categoryNameDialog.parentCategory
-            ? l(`已创建子分类：${category.name}`, `Created subcategory: ${category.name}`)
-            : l(`已创建分类：${category.name}`, `Created category: ${category.name}`),
-        );
-        return;
-      }
-
-      if (name !== categoryNameDialog.category.name) {
-        await updateLibraryCategory({
-          id: categoryNameDialog.category.id,
-          name,
-        });
-        setCategories(await listLibraryCategories());
-        setStatusMessage(l('分类已重命名', 'Category renamed'));
-      }
-
-      setCategoryNameDialog(null);
-    } catch (nextError) {
-      const message =
-        nextError instanceof Error
-          ? nextError.message
-          : categoryNameDialog.mode === 'create'
-            ? l('创建分类失败', 'Failed to create category')
-            : l('重命名分类失败', 'Failed to rename category');
-      setError(message);
-      setStatusMessage(message);
-    } finally {
-      setDialogBusy(false);
-    }
-  };
-
-  const handleDeleteCategory = (category: LiteratureCategory) => {
-    if (demoMode) {
-      showDemoLockedMessage();
-      return;
-    }
-
-    if (category.isSystem) {
-      return;
-    }
-
-    setConfirmDialog({
-      kind: 'delete-category',
-      category,
-    });
-  };
-
-  const deleteCategoryAfterConfirm = async (category: LiteratureCategory) => {
-    setDialogBusy(true);
-    setError('');
-    try {
-      await deleteLibraryCategory(category.id);
-      const nextCategories = await listLibraryCategories();
-      const allCategory = nextCategories.find((item) => item.systemKey === 'all');
-      const nextSelectedCategoryId = allCategory?.id ?? nextCategories[0]?.id ?? null;
-
-      setCategories(nextCategories);
-      setSelectedCategoryId(nextSelectedCategoryId);
-      await refreshPapers(nextSelectedCategoryId);
-      setStatusMessage(l('分类已删除', 'Category deleted'));
-      setConfirmDialog(null);
-    } catch (nextError) {
-      const message =
-        nextError instanceof Error ? nextError.message : l('删除分类失败', 'Failed to delete category');
-      setError(message);
-      setStatusMessage(message);
-    } finally {
-      setDialogBusy(false);
-    }
-  };
-
-  const handleMoveCategory = async (categoryId: string, parentId: string | null) => {
-    if (demoMode) {
-      showDemoLockedMessage();
-      return;
-    }
-
-    setError('');
-
-    try {
-      const movedCategory = await moveLibraryCategory({
-        categoryId,
-        parentId,
-      });
-
-      setCategories(await listLibraryCategories());
-      setSelectedCategoryId(movedCategory.id);
-      setStatusMessage(
-        parentId
-          ? l(`已调整分类层级：${movedCategory.name}`, `Updated category hierarchy: ${movedCategory.name}`)
-          : l(`已移到顶层分类：${movedCategory.name}`, `Moved category to root: ${movedCategory.name}`),
-      );
-    } catch (nextError) {
-      const message =
-        nextError instanceof Error ? nextError.message : l('移动分类失败', 'Failed to move category');
-      setError(message);
-      setStatusMessage(message);
-    }
-  };
-
-  const reloadAfterPaperUpdate = async (updatedPaper: LiteraturePaper) => {
-    const generation = papersQueryGenerationRef.current + 1;
-    papersQueryGenerationRef.current = generation;
-    const [nextCategories, queryResult] = await Promise.all([
-      listLibraryCategories(),
-      queryLibraryPapers({
-        ...buildPaperQuery(filters, paperSort, selectedCategoryId, searchQuery, mineruPaperIds),
-        limit: PAPER_PAGE_SIZE,
-        offset: 0,
-      }),
-    ]);
-
-    if (generation !== papersQueryGenerationRef.current) {
-      return;
-    }
-
-    const nextPapers = queryResult.papers;
-    setCategories(nextCategories);
-    setPapers(nextPapers);
-    setPapersTotal(queryResult.total);
-    setSelectedPaperId(
-      nextPapers.some((paper) => paper.id === updatedPaper.id)
-        ? updatedPaper.id
-        : nextPapers[0]?.id ?? null,
-    );
-  };
-
-  const handleSavePaper = async (request: UpdatePaperRequest, categoryIds?: string[]) => {
-    if (demoMode) {
-      showDemoLockedMessage();
-      throw new Error(l('演示模式不可修改文献。', 'Paper changes are disabled in demo mode.'));
-    }
-
-    if (paperSaveInFlightRef.current) {
-      throw new Error(l('文献信息正在保存。', 'Paper metadata is already being saved.'));
-    }
-    paperSaveInFlightRef.current = true;
-    setPaperSaving(true);
-    setError('');
-
-    try {
-      let updatedPaper = await updateLibraryPaper(request);
-      if (categoryIds) {
-        const currentCategoryIds = [...updatedPaper.categoryIds].sort();
-        const nextCategoryIds = [...new Set(categoryIds)].sort();
-        if (JSON.stringify(currentCategoryIds) !== JSON.stringify(nextCategoryIds)) {
-          updatedPaper = await setLibraryPaperCategories({
-            paperId: updatedPaper.id,
-            categoryIds: nextCategoryIds,
-          });
-        }
-      }
-
-      const currentSnapshot = allPapersSnapshotRef.current;
-      const hasPaper = currentSnapshot.some((paper) => paper.id === updatedPaper.id);
-      const nextSnapshot = hasPaper
-        ? currentSnapshot.map((paper) => paper.id === updatedPaper.id ? updatedPaper : paper)
-        : [...currentSnapshot, updatedPaper];
-      allPapersSnapshotRef.current = nextSnapshot;
-      onAllPapersChange?.(nextSnapshot);
-
-      await reloadAfterPaperUpdate(updatedPaper);
-      setStatusMessage(l('文献信息已保存', 'Paper metadata saved'));
-      return updatedPaper;
-    } catch (nextError) {
-      const message =
-        nextError instanceof Error ? nextError.message : l('保存文献信息失败', 'Failed to save paper metadata');
-      setError(message);
-      setStatusMessage(message);
-      throw nextError;
-    } finally {
-      paperSaveInFlightRef.current = false;
-      setPaperSaving(false);
-    }
-  };
-
-  const handleDeletePaper = (paper: LiteraturePaper) => {
-    if (demoMode) {
-      showDemoLockedMessage();
-      return;
-    }
-
-    setConfirmDialog({
-      kind: 'delete-paper',
-      paper,
-      deleteFiles: selectedCategory?.systemKey === 'all',
-    });
-  };
-
-  const handleAttachTranslatedPdf = async (paper: LiteraturePaper) => {
-    if (demoMode) {
-      showDemoLockedMessage();
-      return;
-    }
-
-    setError('');
-
-    try {
-      const paths = await selectLibraryPdfFiles();
-      const sourcePath = paths[0];
-
-      if (!sourcePath) {
-        return;
-      }
-      setTranslatedPdfAttachDraft({ paper, sourcePath });
-    } catch (nextError) {
-      const message = nextError instanceof Error
-        ? nextError.message
-        : l('附加翻译版 PDF 失败', 'Failed to attach the translated PDF');
-      setError(message);
-      setStatusMessage(message);
-    } finally {
-      setPaperSaving(false);
-    }
-  };
-
-  const handleGenerateTranslatedPdf = async (paper: LiteraturePaper) => {
-    if (demoMode) {
-      showDemoLockedMessage();
-      return;
-    }
-
-    setError('');
-    try {
-      await startRetainPdfTranslation(paper.id);
-      const message = l(`已提交 RetainPDF 翻译：${paper.title}`, `RetainPDF translation started: ${paper.title}`);
-      setStatusMessage(message);
-      toast.info(message, {
-        description: l(
-          '任务在后台执行，完成后会自动下载并附加译版 PDF。',
-          'The task runs in the background. The translated PDF will be attached automatically when ready.',
-        ),
-      });
-    } catch (nextError) {
-      const message = nextError instanceof Error
-        ? nextError.message
-        : l('启动 RetainPDF 翻译失败', 'Failed to start RetainPDF translation');
-      setError(message);
-      setStatusMessage(message);
-      toast.error(message);
-    }
-  };
-
-  const handleConfirmTranslatedPdfAttach = async (language: string | null) => {
-    if (!translatedPdfAttachDraft) return;
-    const { paper, sourcePath } = translatedPdfAttachDraft;
-    setPaperSaving(true);
-    try {
-      const originalPath = paperPdfPath(paper, libraryStorageDir);
-      const [originalPages, translatedPages] = await Promise.all([
-        originalPath ? readPdfPageCount(originalPath) : Promise.resolve(null),
-        readPdfPageCount(sourcePath),
-      ]);
-      if (originalPages && translatedPages && originalPages !== translatedPages) {
-        const proceed = await confirmAction({
-          title: l('翻译版 PDF 页数与原文不一致', 'Translated PDF page count differs'),
-          description: l(
-            `翻译版 PDF 页数（${translatedPages} 页）与原版（${originalPages} 页）不一致，对照阅读时页码可能错位。仍要附加吗？`,
-            `The translated PDF has ${translatedPages} pages, but the original has ${originalPages}. Page alignment in compare mode may be off. Attach anyway?`,
-          ),
-        });
-        if (!proceed) { setStatusMessage(l('已取消附加翻译版 PDF', 'Translated PDF attachment cancelled')); setTranslatedPdfAttachDraft(null); return; }
-      }
-      const existingTranslatedIds = new Set(paper.attachments.filter((item) => item.kind === ATTACHMENT_KIND_TRANSLATED_PDF).map((item) => item.id));
-      const updatedPaper = await addLibraryAttachment({ paperId: paper.id, sourcePath, kind: ATTACHMENT_KIND_TRANSLATED_PDF, language });
-      if (updatedPaper.attachments.some((attachment) => attachment.kind === ATTACHMENT_KIND_TRANSLATED_PDF && existingTranslatedIds.has(attachment.id))) {
-        setStatusMessage(l('该译版已存在，可通过设置语言修改', 'This translated PDF already exists. Use Set language to update its metadata.'));
-      } else {
-        setStatusMessage(l('已附加翻译版 PDF', 'Translated PDF attached'));
-      }
-      await reloadAfterPaperUpdate(updatedPaper);
-      emitNativePaperUpdated(updatedPaper);
-      setTranslatedPdfAttachDraft(null);
-    } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : l('附加翻译版 PDF 失败', 'Failed to attach the translated PDF'));
-    } finally { setPaperSaving(false); }
-  };
-
-  const handleRemoveTranslatedPdf = (paper: LiteraturePaper) => {
-    if (demoMode) {
-      showDemoLockedMessage();
-      return;
-    }
-
-    const attachment = paperTranslatedPdfAttachment(paper, libraryStorageDir)?.attachment;
-
-    if (!attachment) {
-      return;
-    }
-
-    setConfirmDialog({
-      kind: 'remove-translated-pdf',
-      paper,
-      attachmentId: attachment.id,
-      fileName: attachment.fileName,
-    });
-  };
-
-  const handleUpdateTranslatedPdfLanguage = async (
-    paper: LiteraturePaper,
-    attachmentId: string,
-    language: string | null,
-  ) => {
-    if (demoMode) { showDemoLockedMessage(); throw new Error(l('演示模式不可修改', 'Changes are disabled in demo mode')); }
-    const attachment = paper.attachments.find((item) => item.id === attachmentId && item.kind === ATTACHMENT_KIND_TRANSLATED_PDF);
-    if (!attachment) throw new Error(l('译版附件已不存在，请刷新后重试', 'Translated attachment no longer exists; refresh and retry'));
-    setPaperSaving(true);
-    try {
-      const result = await updateTranslatedPdfLanguages({ changes: [{
-        paperId: paper.id,
-        attachmentId,
-        expectedLanguage: attachment.language ?? null,
-        language,
-      }] });
-      for (const updatedPaper of result.papers) {
-        await reloadAfterPaperUpdate(updatedPaper);
-        emitNativePaperUpdated(updatedPaper);
-      }
-      setStatusMessage(l('译版语言已更新', 'Translated PDF language updated'));
-    } finally { setPaperSaving(false); }
-  };
-
-  const handleBeginBatchTranslatedPdfLanguage = async () => {
-    if (demoMode) { showDemoLockedMessage(); return; }
-    setBatchWorking(true);
-    try {
-      const selectedPapers = await resolveSelectedPapers(paperSelectionRef.current.ids);
-      const entries = selectedPapers.flatMap((paper) => paper.attachments
-        .filter((attachment) => attachment.kind === ATTACHMENT_KIND_TRANSLATED_PDF)
-        .map((attachment) => ({ paper, attachmentId: attachment.id, fileName: attachment.fileName, language: attachment.language ?? null })));
-      setTranslatedPdfLanguageBatch({
-        entries,
-        skippedCount: selectedPapers.filter((paper) => !paper.attachments.some((attachment) => attachment.kind === ATTACHMENT_KIND_TRANSLATED_PDF)).length,
-      });
-    } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : l('读取选中文献失败', 'Failed to load selected papers'));
-    } finally { setBatchWorking(false); }
-  };
-
-  const handleSaveBatchTranslatedPdfLanguage = async (changes: import('../../types/library').TranslatedPdfLanguageChange[]) => {
-    setBatchWorking(true);
-    try {
-      const result = await updateTranslatedPdfLanguages({ changes });
-      for (const paper of result.papers) {
-        await reloadAfterPaperUpdate(paper);
-        emitNativePaperUpdated(paper);
-      }
-      setTranslatedPdfLanguageBatch(null);
-      setStatusMessage(l(`已更新 ${result.changedCount} 个译版语言`, `Updated ${result.changedCount} translated PDF languages`));
-    } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : l('批量更新失败，请刷新预览后重试', 'Batch update failed; refresh the preview and retry'));
-    } finally { setBatchWorking(false); }
-  };
-
-  const removeTranslatedPdfAfterConfirm = async (attachmentId: string) => {
-    setPaperSaving(true);
-    setDialogBusy(true);
-    setError('');
-
-    try {
-      const updatedPaper = await removeLibraryAttachment({ attachmentId, deleteFile: true });
-      await reloadAfterPaperUpdate(updatedPaper);
-      emitNativePaperUpdated(updatedPaper);
-      setStatusMessage(l('已移除翻译版 PDF', 'Translated PDF removed'));
-      setConfirmDialog(null);
-    } catch (nextError) {
-      const message = nextError instanceof Error
-        ? nextError.message
-        : l('移除翻译版 PDF 失败', 'Failed to remove the translated PDF');
-      setError(message);
-      setStatusMessage(message);
-    } finally {
-      setPaperSaving(false);
-      setDialogBusy(false);
-    }
-  };
-
-  const deletePaperAfterConfirm = async (paper: LiteraturePaper, deleteFiles: boolean) => {
-    setPaperSaving(true);
-    setDialogBusy(true);
-    setError('');
-
-    try {
-      await deleteLibraryPaper({ paperId: paper.id, deleteFiles });
-      await refreshAll();
-      setStatusMessage(
-        deleteFiles
-          ? l('文献记录和 PDF 文件已删除。', 'Paper record and PDF files deleted.')
-          : l('文献记录已删除，PDF 文件未删除。', 'Paper record deleted. PDF files were not deleted.'),
-      );
-      setConfirmDialog(null);
-    } catch (nextError) {
-      const message =
-        nextError instanceof Error ? nextError.message : l('删除文献记录失败', 'Failed to delete paper record');
-      setError(message);
-      setStatusMessage(message);
-    } finally {
-      setPaperSaving(false);
-      setDialogBusy(false);
-    }
-  };
-
-  const handleBatchDeletePapers = () => {
-    if (demoMode) {
-      showDemoLockedMessage();
-      return;
-    }
-
-    const paperIds = paperSelectionRef.current.ids;
-    if (paperIds.length === 0) {
-      return;
-    }
-
-    setConfirmDialog({
-      kind: 'delete-papers',
-      paperIds,
-      deleteFiles: selectedCategory?.systemKey === 'all',
-    });
-  };
-
-  const deletePapersAfterConfirm = async (paperIds: string[], deleteFiles: boolean) => {
-    setBatchWorking(true);
-    setDialogBusy(true);
-    setError('');
-    let failedCount = 0;
-
-    try {
-      for (const paperId of paperIds) {
-        try {
-          await deleteLibraryPaper({ paperId, deleteFiles });
-        } catch {
-          failedCount += 1;
-        }
-      }
-
-      await refreshAll();
-      clearMultiSelection();
-      setStatusMessage(
-        failedCount > 0
-          ? l(
-            `已删除 ${paperIds.length - failedCount} 篇文献，${failedCount} 篇失败。`,
-            `Deleted ${paperIds.length - failedCount} papers; ${failedCount} failed.`,
-          )
-          : l(
-            `已删除 ${paperIds.length} 篇文献${deleteFiles ? '及其 PDF 文件' : '记录'}。`,
-            `Deleted ${paperIds.length} paper${paperIds.length > 1 ? 's' : ''}${deleteFiles ? ' and their PDF files' : ' records'}.`,
-          ),
-      );
-      setConfirmDialog(null);
-    } finally {
-      setBatchWorking(false);
-      setDialogBusy(false);
-    }
-  };
-
-  const applyRagMembership = async (paperIds: string[], enabled: boolean) => {
-    if (demoMode) {
-      showDemoLockedMessage();
-      return;
-    }
-
-    if (paperIds.length === 0) return;
-
-    setBatchWorking(true);
-    setDialogBusy(true);
-    setError('');
-
-    try {
-      const result = await setLibraryRagMembership(paperIds, enabled);
-      await refreshAll();
-      const failedCount = result.failures.length;
-      const successCount = result.papers.length;
-      setStatusMessage(
-        failedCount > 0
-          ? enabled
-            ? l(
-              `已加入 ${successCount} 篇，${failedCount} 篇失败。`,
-              `Included ${successCount} papers; ${failedCount} failed.`,
-            )
-            : l(
-              `已移出 ${successCount} 篇，${failedCount} 篇失败。`,
-              `Excluded ${successCount} papers; ${failedCount} failed.`,
-            )
-          : enabled
-            ? l(
-              `已加入 ${successCount} 篇。未自动建立索引。`,
-              `Included ${successCount} papers. Indexes were not rebuilt.`,
-            )
-            : l(
-              `已移出 ${successCount} 篇。`,
-              `Excluded ${successCount} papers.`,
-            ),
-      );
-      setConfirmDialog(null);
-      setPaperContextMenu(null);
-    } catch (nextError) {
-      const message = nextError instanceof Error
-        ? nextError.message
-        : enabled
-          ? l('加入本地知识库失败', 'Failed to include papers in the local knowledge base')
-          : l('移出本地知识库失败', 'Failed to exclude papers from the local knowledge base');
-      setError(message);
-      setStatusMessage(message);
-    } finally {
-      setBatchWorking(false);
-      setDialogBusy(false);
-    }
-  };
-
-  const handleBatchIncludeRag = () => {
-    void applyRagMembership(paperSelectionRef.current.ids, true);
-  };
-
-  const handleBatchExcludeRag = () => {
-    if (demoMode) {
-      showDemoLockedMessage();
-      return;
-    }
-
-    const paperIds = paperSelectionRef.current.ids;
-    if (paperIds.length === 0) return;
-
-    const indexedCount = paperIds.filter((id) => {
-      const status = ragBadgeByDocumentKey?.[id];
-      return status === 'ready' || status === 'pending' || status === 'failed';
-    }).length;
-    setConfirmDialog({ kind: 'exclude-rag-papers', paperIds, indexedCount });
-  };
-
-  const handleBatchSetFavorite = async (favorite: boolean) => {
-    if (demoMode) {
-      showDemoLockedMessage();
-      return;
-    }
-
-    const paperIds = paperSelectionRef.current.ids;
-    if (paperIds.length === 0) {
-      return;
-    }
-
-    setBatchWorking(true);
-    setError('');
-    let failedCount = 0;
-
-    try {
-      for (const paperId of paperIds) {
-        try {
-          await updateLibraryPaper({ paperId, isFavorite: favorite });
-        } catch {
-          failedCount += 1;
-        }
-      }
-
-      await refreshAll();
-      setStatusMessage(
-        failedCount > 0
-          ? l(
-            `已更新 ${paperIds.length - failedCount} 篇收藏状态，${failedCount} 篇失败。`,
-            `Updated ${paperIds.length - failedCount} papers; ${failedCount} failed.`,
-          )
-          : favorite
-            ? l(`已收藏 ${paperIds.length} 篇文献。`, `Favorited ${paperIds.length} papers.`)
-            : l(`已取消收藏 ${paperIds.length} 篇文献。`, `Unfavorited ${paperIds.length} papers.`),
-      );
-    } finally {
-      setBatchWorking(false);
-    }
-  };
-
-  const handleBatchMoveToCategory = async (categoryId: string) => {
-    if (demoMode) {
-      showDemoLockedMessage();
-      return;
-    }
-
-    const targetCategory = flatCategories.find((category) => category.id === categoryId);
-
-    const paperIds = paperSelectionRef.current.ids;
-    if (!targetCategory || targetCategory.isSystem || paperIds.length === 0) {
-      return;
-    }
-
-    setBatchWorking(true);
-    setError('');
-    let failedCount = 0;
-
-    try {
-      for (const paperId of paperIds) {
-        try {
-          await assignPaperToLibraryCategory({ paperId, categoryId });
-        } catch {
-          failedCount += 1;
-        }
-      }
-
-      const nextCategories = await listLibraryCategories();
-      setCategories(nextCategories);
-      await refreshAll();
-      setStatusMessage(
-        failedCount > 0
-          ? l(
-            `已移动 ${paperIds.length - failedCount} 篇到「${targetCategory.name}」，${failedCount} 篇失败。`,
-            `Moved ${paperIds.length - failedCount} papers to "${targetCategory.name}"; ${failedCount} failed.`,
-          )
-          : l(
-            `已移动 ${paperIds.length} 篇文献到「${targetCategory.name}」。`,
-            `Moved ${paperIds.length} papers to "${targetCategory.name}".`,
-          ),
-      );
-    } finally {
-      setBatchWorking(false);
-    }
-  };
-
-  const handlePaperDragStart = (
-    event: DragEvent<HTMLDivElement>,
-    paper: LiteraturePaper,
-  ) => {
-    event.dataTransfer.setData('application/x-paperquay-paper-id', paper.id);
-    event.dataTransfer.setData('text/plain', paper.id);
-    event.dataTransfer.effectAllowed = 'move';
-  };
-
-  const assignPaperToCategory = async (paperId: string, category: LiteratureCategory) => {
-    if (demoMode) {
-      showDemoLockedMessage();
-      return;
-    }
-
-    if (category.isSystem) {
-      return;
-    }
-
-    try {
-      await assignPaperToLibraryCategory({
-        paperId,
-        categoryId: category.id,
-      });
-      const nextCategories = await listLibraryCategories();
-
-      setCategories(nextCategories);
-      setSelectedCategoryId(category.id);
-      await refreshPapers(category.id);
-      setSelectedPaperId(paperId);
-      setStatusMessage(l(`已添加到分类：${category.name}`, `Added to category: ${category.name}`));
-    } catch (nextError) {
-      const message =
-        nextError instanceof Error ? nextError.message : l('移动文献失败', 'Failed to move paper');
-      setError(message);
-      setStatusMessage(message);
-    } finally {
-      setPaperDragOverCategoryId(null);
-    }
-  };
-
-  const handlePaperDropOnCategory = (paperId: string, categoryId: string) => {
-    const category = categories.find((item) => item.id === categoryId);
-
-    if (!category) {
-      setPaperDragOverCategoryId(null);
-      return;
-    }
-
-    void assignPaperToCategory(paperId, category);
-  };
-
-  const handlePaperReorder = async (
-    draggedPaperId: string,
-    targetPaperId: string,
-    placement: 'before' | 'after',
-  ) => {
-    if (demoMode) {
-      showDemoLockedMessage();
-      return;
-    }
-
-    if (paperSort.sortBy !== 'manual') {
-      setStatusMessage(l('请切换到手动排序后再拖拽调整顺序', 'Switch to manual order before drag-sorting papers'));
-      return;
-    }
-
-    const nextPapers = reorderPaperList(papers, draggedPaperId, targetPaperId, placement);
-
-    if (nextPapers === papers) {
-      return;
-    }
-
-    setPapers(nextPapers);
-    setError('');
-
-    try {
-      await reorderLibraryPapers({
-        paperIds: nextPapers.map((paper) => paper.id),
-      });
-      setStatusMessage(l('文献排序已保存', 'Paper order saved'));
-    } catch (nextError) {
-      const message =
-        nextError instanceof Error ? nextError.message : l('保存文献排序失败', 'Failed to save paper order');
-      setError(message);
-      setStatusMessage(message);
-      await refreshPapers();
-    }
-  };
-
   const handlePaperContextMenu = (
     event: MouseEvent<HTMLDivElement>,
     paper: LiteraturePaper,
@@ -2740,7 +394,7 @@ export default function LiteratureLibraryView({
     setPaperContextMenu(null);
 
     if (paper) {
-      setTagDialogPaper(paper);
+      metadataJobs.setTagDialogPaper(paper);
     }
   };
 
@@ -2756,7 +410,7 @@ export default function LiteratureLibraryView({
     setPaperContextMenu(null);
 
     if (paper) {
-      setMetadataDialog({
+      metadataJobs.setMetadataDialog({
         paper,
         title: paper.title,
         doi: paper.doi ?? '',
@@ -2780,86 +434,7 @@ export default function LiteratureLibraryView({
     }
   };
 
-  const handleSubmitMetadataDialog = async () => {
-    if (demoMode) {
-      showDemoLockedMessage();
-      setMetadataDialog(null);
-      return;
-    }
-
-    if (!metadataDialog || metadataDialogBusy) {
-      return;
-    }
-
-    const title = metadataDialog.title.trim();
-    const doi = metadataDialog.doi.trim();
-
-    if (!title && !doi) {
-      setError(l('请输入标题或 DOI 后再解析元数据。', 'Enter a title or DOI before parsing metadata.'));
-      return;
-    }
-
-    setMetadataDialogBusy(true);
-    setError('');
-
-    try {
-      let metadata = await lookupLiteratureMetadata({
-        doi: doi || null,
-        title: title || metadataDialog.paper.title,
-        path: paperPdfPath(metadataDialog.paper, libraryStorageDir),
-      });
-
-      // 中文文献远程检索通常未命中，用 LLM 从首页文本提取兑底；
-      // 是否为中文文献由 resolveLlmMetadataFallback 内部判定，英文文献不会产生模型调用。
-      if (!metadata) {
-        const pdfPath = paperPdfPath(metadataDialog.paper, libraryStorageDir);
-        const firstPageText = pdfPath
-          ? (await extractLocalPdfMetadataPreview(pdfPath).catch(() => null))?.firstPageText
-          : null;
-
-        metadata = await resolveLlmMetadataFallback({
-          title: title || metadataDialog.paper.title,
-          excerptText: firstPageText,
-        });
-      }
-
-      const updateRequest = buildManualMetadataUpdateRequest(
-        metadataDialog.paper,
-        metadata,
-        { title, doi },
-      );
-
-      if (!metadata && !updateRequest) {
-        setStatusMessage(l('未匹配到元数据，请调整标题或 DOI 后重试。', 'No metadata matched. Adjust the title or DOI and try again.'));
-        setError(l('未匹配到元数据。', 'No metadata matched.'));
-        return;
-      }
-
-      if (!updateRequest) {
-        setMetadataDialog(null);
-        setStatusMessage(l('文献元数据已是最新。', 'Paper metadata is already up to date.'));
-        return;
-      }
-
-      const updatedPaper = await updateLibraryPaper(updateRequest);
-      await reloadAfterPaperUpdate(updatedPaper);
-      setMetadataDialog(null);
-      setStatusMessage(
-        metadata
-          ? l('文献元数据已更新。', 'Paper metadata updated.')
-          : l('未匹配到远程元数据，已保存手动输入的标题或 DOI。', 'No remote metadata matched. Manual title or DOI saved.'),
-      );
-    } catch (nextError) {
-      const message =
-        nextError instanceof Error ? nextError.message : l('解析文献元数据失败', 'Failed to parse paper metadata');
-      setError(message);
-      setStatusMessage(message);
-    } finally {
-      setMetadataDialogBusy(false);
-    }
-  };
-
-  const handleToggleFavoriteFromContextMenu = async () => {
+  const handleToggleFavoriteFromContextMenu = () => {
     if (demoMode) {
       showDemoLockedMessage();
       setPaperContextMenu(null);
@@ -2874,30 +449,7 @@ export default function LiteratureLibraryView({
       return;
     }
 
-    const nextFavorite = !paper.isFavorite;
-    setPaperSaving(true);
-    setError('');
-
-    try {
-      const updatedPaper = await updateLibraryPaper({
-        paperId: paper.id,
-        isFavorite: nextFavorite,
-      });
-
-      await reloadAfterPaperUpdate(updatedPaper);
-      setStatusMessage(
-        nextFavorite
-          ? l('已加入收藏', 'Added to favorites')
-          : l('已取消收藏', 'Removed from favorites'),
-      );
-    } catch (nextError) {
-      const message =
-        nextError instanceof Error ? nextError.message : l('更新收藏状态失败', 'Failed to update favorite status');
-      setError(message);
-      setStatusMessage(message);
-    } finally {
-      setPaperSaving(false);
-    }
+    void metadataJobs.handleToggleFavorite(paper);
   };
 
   const handleDeletePaperFromContextMenu = () => {
@@ -2906,107 +458,8 @@ export default function LiteratureLibraryView({
     setPaperContextMenu(null);
 
     if (paper) {
-      handleDeletePaper(paper);
+      batch.handleDeletePaper(paper);
     }
-  };
-
-  const handleSubmitPaperTag = async (tagName: string) => {
-    if (demoMode) {
-      showDemoLockedMessage();
-      setTagDialogPaper(null);
-      return;
-    }
-
-    if (!tagDialogPaper) {
-      return;
-    }
-
-    const normalizedTag = tagName.trim();
-
-    if (!normalizedTag) {
-      return;
-    }
-
-    const existingTags = tagDialogPaper.tags.map((tag) => tag.name.trim()).filter(Boolean);
-    const hasTag = existingTags.some(
-      (tag) => tag.toLocaleLowerCase() === normalizedTag.toLocaleLowerCase(),
-    );
-
-    if (hasTag) {
-      setTagDialogPaper(null);
-      setStatusMessage(l(`标签已存在：${normalizedTag}`, `Tag already exists: ${normalizedTag}`));
-      return;
-    }
-
-    setDialogBusy(true);
-    setError('');
-
-    try {
-      const updatedPaper = await updateLibraryPaper({
-        paperId: tagDialogPaper.id,
-        tags: [...existingTags, normalizedTag],
-      });
-      const generation = papersQueryGenerationRef.current + 1;
-      papersQueryGenerationRef.current = generation;
-      const [nextCategories, queryResult] = await Promise.all([
-        listLibraryCategories(),
-        queryLibraryPapers({
-          ...buildPaperQuery(filters, paperSort, selectedCategoryId, searchQuery, mineruPaperIds),
-          limit: PAPER_PAGE_SIZE,
-          offset: 0,
-        }),
-      ]);
-
-      if (generation !== papersQueryGenerationRef.current) {
-        return;
-      }
-
-      const nextPapers = queryResult.papers;
-      setCategories(nextCategories);
-      setPapers(nextPapers);
-      setPapersTotal(queryResult.total);
-      setSelectedPaperId(
-        nextPapers.some((paper) => paper.id === updatedPaper.id)
-          ? updatedPaper.id
-          : nextPapers[0]?.id ?? null,
-      );
-      setTagDialogPaper(null);
-      setStatusMessage(l(`已添加标签：${normalizedTag}`, `Added tag: ${normalizedTag}`));
-    } catch (nextError) {
-      const message =
-        nextError instanceof Error ? nextError.message : l('添加标签失败', 'Failed to add tag');
-      setError(message);
-      setStatusMessage(message);
-    } finally {
-      setDialogBusy(false);
-    }
-  };
-
-  const handleCategoryDrop = async (
-    event: DragEvent<HTMLButtonElement>,
-    category: LiteratureCategory,
-  ) => {
-    event.preventDefault();
-    event.stopPropagation();
-
-    if (demoMode) {
-      showDemoLockedMessage();
-      return;
-    }
-
-    if (category.isSystem) {
-      return;
-    }
-
-    const paperId =
-      event.dataTransfer.getData('application/x-paperquay-paper-id') ||
-      event.dataTransfer.getData('text/plain');
-
-    if (!paperId) {
-      return;
-    }
-
-    await assignPaperToCategory(paperId, category);
   };
 
   const paperFileLocationEntries = usePaperFileLocationMenu({
@@ -3037,9 +490,7 @@ export default function LiteratureLibraryView({
             strokeWidth={1.9}
           />
         ),
-        onSelect: () => {
-          void handleToggleFavoriteFromContextMenu();
-        },
+        onSelect: handleToggleFavoriteFromContextMenu,
       },
       {
         id: 'add-tag',
@@ -3052,7 +503,7 @@ export default function LiteratureLibraryView({
         label: l('解析元数据', 'Parse Metadata'),
         icon: <Sparkles className="h-4 w-4 text-[var(--pq-accent)]" strokeWidth={1.9} />,
         onSelect: () => {
-          void handleOpenMetadataDialogFromContextMenu();
+          handleOpenMetadataDialogFromContextMenu();
         },
       },
       {
@@ -3070,7 +521,7 @@ export default function LiteratureLibraryView({
         onSelect: () => {
           setPaperContextMenu(null);
           if (paper.ragEnabled === false) {
-            void applyRagMembership([paper.id], true);
+            void batch.applyRagMembership([paper.id], true);
             return;
           }
           setConfirmDialog({ kind: 'exclude-rag-paper', paper });
@@ -3118,13 +569,13 @@ export default function LiteratureLibraryView({
         <LiteratureCategorySidebar
           categories={flatCategories}
           selectedCategoryId={selectedCategoryId}
-          onCreateCategory={handleCreateCategory}
+          onCreateCategory={categoryActions.handleCreateCategory}
           onSelectCategory={handleSelectCategory}
-          onRenameCategory={handleRenameCategory}
-          onDeleteCategory={handleDeleteCategory}
-          onCategoryMove={(categoryId, parentId) => void handleMoveCategory(categoryId, parentId)}
-          externalDragOverCategoryId={paperDragOverCategoryId}
-          onCategoryDrop={(event, category) => void handleCategoryDrop(event, category)}
+          onRenameCategory={categoryActions.handleRenameCategory}
+          onDeleteCategory={categoryActions.handleDeleteCategory}
+          onCategoryMove={(categoryId, parentId) => void categoryActions.handleMoveCategory(categoryId, parentId)}
+          externalDragOverCategoryId={categoryActions.paperDragOverCategoryId}
+          onCategoryDrop={(event, category) => void categoryActions.handleCategoryDrop(event, category)}
         />
       </div>
 
@@ -3135,7 +586,7 @@ export default function LiteratureLibraryView({
               {l(`已选 ${selectedCount} 篇`, `${selectedCount} selected`)}
             </span>
             <div className="mx-1 h-4 w-px bg-[var(--pq-border)]" />
-            <button type="button" disabled={batchWorking || demoMode} onClick={() => void handleBeginBatchTranslatedPdfLanguage()} className="pq-button px-2.5 py-1 text-xs disabled:opacity-50">{l('设置译版语言', 'Set translated PDF language')}</button>
+            <button type="button" disabled={batchWorking || demoMode} onClick={() => void batch.handleBeginBatchTranslatedPdfLanguage()} className="pq-button px-2.5 py-1 text-xs disabled:opacity-50">{l('设置译版语言', 'Set translated PDF language')}</button>
             {onBatchTranslatePaperTitles ? (
               <button
                 type="button"
@@ -3215,7 +666,7 @@ export default function LiteratureLibraryView({
                 const categoryId = event.target.value;
                 event.target.value = '';
                 if (categoryId) {
-                  void handleBatchMoveToCategory(categoryId);
+                  void batch.handleBatchMoveToCategory(categoryId);
                 }
               }}
               className="pq-input h-7 max-w-[140px] px-2 text-xs disabled:opacity-50"
@@ -3233,7 +684,7 @@ export default function LiteratureLibraryView({
             <button
               type="button"
               disabled={batchWorking || demoMode}
-              onClick={handleBatchIncludeRag}
+              onClick={batch.handleBatchIncludeRag}
               className="pq-button px-2.5 py-1 text-xs disabled:opacity-50"
             >
               {l('加入知识库', 'Include in Library')}
@@ -3241,7 +692,7 @@ export default function LiteratureLibraryView({
             <button
               type="button"
               disabled={batchWorking || demoMode}
-              onClick={handleBatchExcludeRag}
+              onClick={batch.handleBatchExcludeRag}
               className="pq-button px-2.5 py-1 text-xs disabled:opacity-50"
             >
               {l('移出知识库', 'Exclude from Library')}
@@ -3249,7 +700,7 @@ export default function LiteratureLibraryView({
             <button
               type="button"
               disabled={batchWorking}
-              onClick={() => void handleBatchSetFavorite(true)}
+              onClick={() => void batch.handleBatchSetFavorite(true)}
               className="pq-button px-2.5 py-1 text-xs disabled:opacity-50"
             >
               {l('收藏', 'Favorite')}
@@ -3257,7 +708,7 @@ export default function LiteratureLibraryView({
             <button
               type="button"
               disabled={batchWorking}
-              onClick={handleBatchDeletePapers}
+              onClick={batch.handleBatchDeletePapers}
               className="pq-button px-2.5 py-1 text-xs text-[var(--pq-danger)] disabled:opacity-50 "
             >
               {l('删除', 'Delete')}
@@ -3276,6 +727,7 @@ export default function LiteratureLibraryView({
           <LiteraturePaperList
             loading={loading}
             working={working}
+            refreshing={papersRefreshing}
             papers={papers}
             papersTotal={papersTotal}
             loadingMore={papersLoadingMore}
@@ -3300,19 +752,19 @@ export default function LiteratureLibraryView({
             onSearchQueryChange={setSearchQuery}
             onSortChange={(sortBy, sortDirection) => setPaperSort({ sortBy, sortDirection })}
             onTitleDisplayModeChange={setTitleDisplayMode}
-            onImportPdfs={() => void handleImportPdfs()}
-            onInspectPdfAssets={() => void handleInspectPdfAssets()}
+            onImportPdfs={() => void importFlow.handleImportPdfs()}
+            onInspectPdfAssets={() => void pdfAssetAudit.handleInspectPdfAssets()}
             onRefresh={() => void refreshAll()
               .then(() => toast.success(l('文献库已刷新', 'Library refreshed')))
               .catch((nextError: unknown) => toast.error(nextError instanceof Error ? nextError.message : l('刷新失败', 'Refresh failed')))}
             onSelectPaper={handleSelectPaperWithModifiers}
             onOpenPaper={onOpenPaper}
-            onPaperDragStart={handlePaperDragStart}
+            onPaperDragStart={categoryActions.handlePaperDragStart}
             onPaperReorder={(draggedPaperId, targetPaperId, placement) =>
-            void handlePaperReorder(draggedPaperId, targetPaperId, placement)
+            void batch.handlePaperReorder(draggedPaperId, targetPaperId, placement)
           }
-          onPaperDropOnCategory={handlePaperDropOnCategory}
-          onPaperPointerDragOverCategory={setPaperDragOverCategoryId}
+          onPaperDropOnCategory={categoryActions.handlePaperDropOnCategory}
+          onPaperPointerDragOverCategory={categoryActions.setPaperDragOverCategoryId}
           onPaperContextMenu={handlePaperContextMenu}
           ragBadgeByDocumentKey={ragBadgeByDocumentKey}
           ragIndexingDocumentKey={ragIndexingDocumentKey}
@@ -3384,22 +836,22 @@ export default function LiteratureLibraryView({
             saving={paperSaving}
             categories={categories}
             libraryTags={libraryTags}
-            allPapers={demoLibrary?.papers ?? allPapersSnapshotRef.current}
+            citationKeys={citationKeys}
             paperStatus={selectedPaper ? paperStatuses[selectedPaper.id] : undefined}
             storageDir={libraryStorageDir}
             mineruCacheDir={mineruCacheDir}
             autoLoadSiblingJson={autoLoadSiblingJson}
             onOpenPaper={onOpenPaper}
-            onSavePaper={handleSavePaper}
+            onSavePaper={metadataJobs.handleSavePaper}
             onRestorePaperSelection={setSelectedPaperId}
             actionState={selectedPaper ? paperActionStates[selectedPaper.id] ?? null : null}
             onRunMineruParse={onRunMineruParse}
             onTranslatePaper={onTranslatePaper}
             onTranslatePaperTitle={onTranslatePaperTitle}
-            onGenerateTranslatedPdf={(paper) => void handleGenerateTranslatedPdf(paper)}
-            onAttachTranslatedPdf={(paper) => void handleAttachTranslatedPdf(paper)}
-            onRemoveTranslatedPdf={handleRemoveTranslatedPdf}
-            onUpdateTranslatedPdfLanguage={handleUpdateTranslatedPdfLanguage}
+            onGenerateTranslatedPdf={(paper) => void metadataJobs.handleGenerateTranslatedPdf(paper)}
+            onAttachTranslatedPdf={(paper) => void metadataJobs.handleAttachTranslatedPdf(paper)}
+            onRemoveTranslatedPdf={metadataJobs.handleRemoveTranslatedPdf}
+            onUpdateTranslatedPdfLanguage={metadataJobs.handleUpdateTranslatedPdfLanguage}
             onGenerateSummary={onGenerateSummary}
             ragStatus={
               selectedPaper?.ragEnabled === false
@@ -3410,10 +862,10 @@ export default function LiteratureLibraryView({
             }
             ragMembershipBusy={batchWorking}
             onSetRagMembership={(paper, enabled) => {
-              void applyRagMembership([paper.id], enabled);
+              void batch.applyRagMembership([paper.id], enabled);
             }}
             onIndexPaperRag={onIndexPaperRag ? (paper) => onIndexPaperRag(paper.id) : undefined}
-            onDeletePaper={handleDeletePaper}
+            onDeletePaper={batch.handleDeletePaper}
           />
         )}
       </div>
@@ -3444,7 +896,7 @@ export default function LiteratureLibraryView({
         />
       </div>
 
-      {dropActive ? (
+      {importFlow.dropActive ? (
         <div className="pointer-events-none absolute inset-3 z-40 flex items-center justify-center rounded-2xl border-2 border-dashed border-[var(--pq-accent-border-strong)] bg-[var(--pq-accent-bg)] text-center backdrop-blur-[2px]">
           <div className="pq-acrylic px-8 py-6">
             <div className="text-xl font-semibold">
@@ -3468,260 +920,100 @@ export default function LiteratureLibraryView({
         />
       ) : null}
 
-      <Dialog
-        open={metadataDialog !== null}
-        onClose={() => {
-          if (!metadataDialogBusy) setMetadataDialog(null);
-        }}
-        dismissOnBackdrop={!metadataDialogBusy}
-        size="md"
-        labelledBy="pq-metadata-dialog-title"
-      >
-        {metadataDialog ? (
-          <form
-            onSubmit={(event) => {
-              event.preventDefault();
-              void handleSubmitMetadataDialog();
-            }}
-          >
-            <div className="flex items-start gap-3 p-4">
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[var(--pq-accent-bg)] text-[var(--pq-accent)]">
-                <Sparkles className="h-4.5 w-4.5" strokeWidth={1.9} />
-              </span>
-              <div className="min-w-0 flex-1">
-                <h2 id="pq-metadata-dialog-title" className="text-base font-semibold text-[var(--pq-text)]">
-                  {l('解析元数据', 'Parse Metadata')}
-                </h2>
-                <p className="mt-1 text-sm leading-6 text-[var(--pq-text-muted)]">
-                  {l('先修正标题或 DOI，再用这些信息重新匹配并更新文献元数据。', 'Correct the title or DOI first, then use them to match and update paper metadata.')}
-                </p>
-              </div>
-            </div>
-
-            <div className="px-4">
-              <label className="block">
-                <span className="mb-1.5 block text-xs font-medium text-[var(--pq-text-muted)]">
-                  {l('标题', 'Title')}
-                </span>
-                <input
-                  value={metadataDialog.title}
-                  onChange={(event) =>
-                    setMetadataDialog((current) =>
-                      current ? { ...current, title: event.target.value } : current,
-                    )
-                  }
-                  className="pq-input h-10 w-full px-3 text-sm"
-                />
-              </label>
-
-              <label className="mt-3 block">
-                <span className="mb-1.5 block text-xs font-medium text-[var(--pq-text-muted)]">
-                  DOI
-                </span>
-                <input
-                  value={metadataDialog.doi}
-                  onChange={(event) =>
-                    setMetadataDialog((current) =>
-                      current ? { ...current, doi: event.target.value } : current,
-                    )
-                  }
-                  placeholder="10.xxxx/xxxxx"
-                  className="pq-input h-10 w-full px-3 text-sm"
-                />
-              </label>
-
-              <div className="mt-3 rounded-[var(--pq-radius-sm)] border border-[var(--pq-border-subtle)] bg-[var(--pq-bg-secondary)] px-3 py-2 text-xs leading-5 text-[var(--pq-text-faint)]">
-                <div className="font-medium text-[var(--pq-text-muted)]">{l('PDF 文件', 'PDF File')}</div>
-                <div
-                  className="mt-0.5 truncate"
-                  title={paperPdfPath(metadataDialog.paper, libraryStorageDir) || undefined}
-                >
-                  {paperPdfPath(metadataDialog.paper, libraryStorageDir) ||
-                    l('未找到 PDF 路径', 'No PDF path found')}
-                </div>
-              </div>
-            </div>
-
-            <div className="mt-5 flex justify-end gap-2 p-4 pt-0">
-              <button
-                type="button"
-                onClick={() => setMetadataDialog(null)}
-                disabled={metadataDialogBusy}
-                className="pq-button h-9 px-3 text-sm"
-              >
-                {l('取消', 'Cancel')}
-              </button>
-              <button
-                type="submit"
-                disabled={metadataDialogBusy}
-                className="pq-button-primary h-9 px-3 text-sm disabled:opacity-60"
-              >
-                <Sparkles className="h-4 w-4" strokeWidth={1.9} />
-                {metadataDialogBusy ? l('解析中...', 'Parsing...') : l('解析并更新', 'Parse and Update')}
-              </button>
-            </div>
-          </form>
-        ) : null}
-      </Dialog>
-
-      <ImportConfirmationDialog
-        open={importDialogOpen}
-        drafts={importDrafts}
-        categories={categories}
-        working={working}
-        metadataWorking={metadataWorking || localImportMetadataWorking}
-        onDraftChange={handleImportDraftChange}
-        onRemoveDraft={handleRemoveImportDraft}
-        onAutoFillMetadata={() => void handleAutoFillImportMetadata(importDrafts)}
-        onClose={handleCloseImportDialog}
-        onConfirm={() => void handleConfirmImportDrafts()}
+      <MetadataParseDialog
+        state={metadataJobs.metadataDialog}
+        busy={metadataJobs.metadataDialogBusy}
+        storageDir={libraryStorageDir}
+        onChangeTitle={(value) =>
+          metadataJobs.setMetadataDialog((current) =>
+            current ? { ...current, title: value } : current,
+          )
+        }
+        onChangeDoi={(value) =>
+          metadataJobs.setMetadataDialog((current) =>
+            current ? { ...current, doi: value } : current,
+          )
+        }
+        onClose={() => metadataJobs.setMetadataDialog(null)}
+        onSubmit={() => void metadataJobs.handleSubmitMetadataDialog()}
       />
 
-      {translatedPdfAttachDraft ? <TranslatedPdfLanguageConfirmDialog
-        paperTitle={translatedPdfAttachDraft.paper.title}
-        fileName={getFileNameFromPath(translatedPdfAttachDraft.sourcePath)}
+      <ImportConfirmationDialog
+        open={importFlow.importDialogOpen}
+        drafts={importFlow.importDrafts}
+        categories={categories}
+        working={working}
+        metadataWorking={metadataJobs.metadataWorking || importFlow.localImportMetadataWorking}
+        onDraftChange={importFlow.handleImportDraftChange}
+        onRemoveDraft={importFlow.handleRemoveImportDraft}
+        onAutoFillMetadata={() => void importFlow.handleAutoFillImportMetadata(importFlow.importDrafts)}
+        onClose={importFlow.handleCloseImportDialog}
+        onConfirm={() => void importFlow.handleConfirmImportDrafts()}
+      />
+
+      {metadataJobs.translatedPdfAttachDraft ? <TranslatedPdfLanguageConfirmDialog
+        paperTitle={metadataJobs.translatedPdfAttachDraft.paper.title}
+        fileName={getFileNameFromPath(metadataJobs.translatedPdfAttachDraft.sourcePath)}
         busy={paperSaving}
-        onClose={() => setTranslatedPdfAttachDraft(null)}
-        onConfirm={handleConfirmTranslatedPdfAttach}
+        onClose={() => metadataJobs.setTranslatedPdfAttachDraft(null)}
+        onConfirm={metadataJobs.handleConfirmTranslatedPdfAttach}
       /> : null}
 
-      {translatedPdfLanguageBatch ? <TranslatedPdfLanguageBatchDialog
-        entries={translatedPdfLanguageBatch.entries}
-        skippedCount={translatedPdfLanguageBatch.skippedCount}
+      {batch.translatedPdfLanguageBatch ? <TranslatedPdfLanguageBatchDialog
+        entries={batch.translatedPdfLanguageBatch.entries}
+        skippedCount={batch.translatedPdfLanguageBatch.skippedCount}
         saving={batchWorking}
-        onClose={() => setTranslatedPdfLanguageBatch(null)}
-        onSave={handleSaveBatchTranslatedPdfLanguage}
+        onClose={() => batch.setTranslatedPdfLanguageBatch(null)}
+        onSave={batch.handleSaveBatchTranslatedPdfLanguage}
       /> : null}
 
-      <Dialog
-        open={pdfAssetAuditOpen}
-        onClose={() => setPdfAssetAuditOpen(false)}
-        size="xl"
-        labelledBy="pdf-asset-audit-title"
-        className="max-h-[88vh]"
-      >
-        <div className="flex items-center justify-between border-b border-[var(--pq-border)] px-5 py-4">
-          <div className="min-w-0">
-            <h2 id="pdf-asset-audit-title" className="text-base font-semibold">
-              {l('PDF 存储体检', 'PDF storage audit')}
-            </h2>
-            <p className="mt-1 text-xs text-[var(--pq-text-muted)]">
-              {l('只核查文库已登记的附件；此报告不会移动或删除文件。', 'Checks registered attachments only. This report does not move or delete files.')}
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={() => setPdfAssetAuditOpen(false)}
-            className="pq-icon-button h-8 w-8 shrink-0"
-            aria-label={l('关闭', 'Close')}
-          >
-            <X className="h-4 w-4" strokeWidth={1.9} />
-          </button>
-        </div>
-        <div className="max-h-[calc(88vh-72px)] overflow-auto px-5 py-4">
-          {pdfAssetAuditLoading ? (
-            <div className="py-10 text-center text-sm text-[var(--pq-text-muted)]">{l('正在核验已登记的 PDF…', 'Verifying registered PDFs…')}</div>
-          ) : pdfAssetAuditError ? (
-            <div role="alert" className="rounded border border-[var(--pq-danger)]/30 bg-[var(--pq-error-bg)] p-3 text-sm text-[var(--pq-danger)]">{pdfAssetAuditError}</div>
-          ) : pdfAssetInventory && pdfAssetNamePlan ? (
-            <>
-              <dl className="grid grid-cols-2 gap-x-5 gap-y-3 border-b border-[var(--pq-border)] pb-4 text-sm sm:grid-cols-4">
-                <div><dt className="text-xs text-[var(--pq-text-muted)]">{l('附件', 'Attachments')}</dt><dd className="mt-1 font-medium">{pdfAssetInventory.attachmentCount}</dd></div>
-                <div><dt className="text-xs text-[var(--pq-text-muted)]">{l('已核验 / 唯一内容', 'Verified / unique')}</dt><dd className="mt-1 font-medium">{pdfAssetInventory.verifiedCount} / {pdfAssetInventory.uniqueVerifiedAssetCount}</dd></div>
-                <div><dt className="text-xs text-[var(--pq-text-muted)]">{l('准确重复组', 'Exact duplicate groups')}</dt><dd className="mt-1 font-medium">{pdfAssetInventory.duplicateGroups.length}</dd></div>
-                <div><dt className="text-xs text-[var(--pq-text-muted)]">{l('缺失 / 不可读 / hash 不符', 'Missing / unreadable / hash mismatch')}</dt><dd className="mt-1 font-medium">{pdfAssetInventory.missingCount} / {pdfAssetInventory.unreadableCount} / {pdfAssetInventory.hashMismatchCount}</dd></div>
-              </dl>
-              <div className="mt-4 flex flex-wrap gap-x-5 gap-y-1 text-xs text-[var(--pq-text-muted)]">
-                <span>{l('可管理路径的命名预览', 'Managed-path naming preview')}: {pdfAssetNamePlan.renameCount}</span>
-                <span>{l('外链或未知归属', 'External or unknown ownership')}: {pdfAssetNamePlan.externalCount}</span>
-              </div>
-              <div className="mt-3 overflow-x-auto border-y border-[var(--pq-border)]">
-                <table className="w-full min-w-[760px] table-fixed text-left text-xs">
-                  <thead className="sticky top-0 bg-[var(--pq-bg-primary)] text-[var(--pq-text-muted)]">
-                    <tr>
-                      <th className="w-[22%] px-2 py-2 font-medium">{l('文献 / 角色', 'Paper / role')}</th>
-                      <th className="w-[30%] px-2 py-2 font-medium">{l('当前文件', 'Current file')}</th>
-                      <th className="w-[30%] px-2 py-2 font-medium">{l('命名预览', 'Name preview')}</th>
-                      <th className="w-[18%] px-2 py-2 font-medium">{l('核验 / 归属', 'Verification / ownership')}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {pdfAssetInventory.entries.map((entry) => {
-                      const proposed = pdfAssetNamePlan.operations.find((item) => item.attachmentId === entry.attachmentId);
-                      const isExactDuplicate = duplicatePdfAttachmentIds.has(entry.attachmentId);
-                      const status = entry.status === 'verified'
-                        ? l('已核验', 'Verified')
-                        : entry.status === 'missing'
-                          ? l('缺失', 'Missing')
-                          : entry.status === 'hash-mismatch'
-                            ? l('hash 不符', 'Hash mismatch')
-                            : l('不可读', 'Unreadable');
-                      return (
-                        <tr key={entry.attachmentId} className="border-t border-[var(--pq-border-subtle)] align-top">
-                          <td className="px-2 py-2">
-                            <div className="truncate font-medium" title={entry.paperTitle}>{entry.paperTitle}</div>
-                            <div className="mt-1 text-[var(--pq-text-muted)]">{entry.role}</div>
-                          </td>
-                          <td className="px-2 py-2">
-                            <div className="truncate" title={entry.path}>{entry.path}</div>
-                            <div className="mt-1 text-[var(--pq-text-muted)]">{entry.byteLength == null ? '—' : `${entry.byteLength.toLocaleString()} B`}</div>
-                          </td>
-                          <td className="px-2 py-2">
-                            <div className="truncate" title={proposed?.proposedPath}>{proposed ? getFileNameFromPath(proposed.proposedPath) : '—'}</div>
-                            <div className="mt-1 text-[var(--pq-text-muted)]">{proposed?.action === 'unchanged' ? l('已符合规则', 'Already compliant') : proposed?.ownership ? l('预览；未执行', 'Preview only') : l('外部文件不改名', 'External file unchanged')}</div>
-                          </td>
-                          <td className="px-2 py-2">
-                            <div>{status}{isExactDuplicate ? ` · ${l('准确重复', 'Exact duplicate')}` : ''}</div>
-                            <div className="mt-1 text-[var(--pq-text-muted)]">{entry.ownership ? l('受管路径', 'Managed path') : l('外链 / 未知', 'External / unknown')}</div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </>
-          ) : null}
-        </div>
-      </Dialog>
+      <PdfAssetAuditDialog
+        open={pdfAssetAudit.pdfAssetAuditOpen}
+        loading={pdfAssetAudit.pdfAssetAuditLoading}
+        error={pdfAssetAudit.pdfAssetAuditError}
+        inventory={pdfAssetAudit.pdfAssetInventory}
+        namePlan={pdfAssetAudit.pdfAssetNamePlan}
+        duplicateAttachmentIds={pdfAssetAudit.duplicatePdfAttachmentIds}
+        onClose={() => pdfAssetAudit.setPdfAssetAuditOpen(false)}
+      />
 
       <LibraryTextInputDialog
-        open={categoryNameDialog !== null}
+        open={categoryActions.categoryNameDialog !== null}
         title={
-          categoryNameDialog?.mode === 'rename'
+          categoryActions.categoryNameDialog?.mode === 'rename'
             ? l('重命名分类', 'Rename Category')
-            : categoryNameDialog?.parentCategory
+            : categoryActions.categoryNameDialog?.parentCategory
               ? l('新建子分类', 'New Subcategory')
               : l('新建分类', 'New Category')
         }
         description={
-          categoryNameDialog?.mode === 'create' && categoryNameDialog.parentCategory
-            ? l(`在“${categoryNameDialog.parentCategory.name}”下创建子分类。`, `Create a subcategory under "${categoryNameDialog.parentCategory.name}".`,
+          categoryActions.categoryNameDialog?.mode === 'create' && categoryActions.categoryNameDialog.parentCategory
+            ? l(`在“${categoryActions.categoryNameDialog.parentCategory.name}”下创建子分类。`, `Create a subcategory under "${categoryActions.categoryNameDialog.parentCategory.name}".`,
               )
-            : categoryNameDialog?.mode === 'create'
+            : categoryActions.categoryNameDialog?.mode === 'create'
               ? l('分类会显示在文库目录树中，可通过拖拽调整位置。', 'The category will appear in the library tree and can be rearranged by drag and drop.')
               : l('只会修改分类名称，不会移动或删除 PDF 文件。', 'Only the category name changes. Paper files are not moved or deleted.')
         }
         label={l('分类名称', 'Category Name')}
-        initialValue={categoryNameDialog?.mode === 'rename' ? categoryNameDialog.category.name : ''}
+        initialValue={categoryActions.categoryNameDialog?.mode === 'rename' ? categoryActions.categoryNameDialog.category.name : ''}
         placeholder={l('例如：文献综述', 'e.g. Literature Review')}
-        confirmLabel={categoryNameDialog?.mode === 'rename' ? l('保存', 'Save') : l('创建', 'Create')}
+        confirmLabel={categoryActions.categoryNameDialog?.mode === 'rename' ? l('保存', 'Save') : l('创建', 'Create')}
         cancelLabel={l('取消', 'Cancel')}
         busy={dialogBusy}
         onClose={() => {
           if (!dialogBusy) {
-            setCategoryNameDialog(null);
+            categoryActions.setCategoryNameDialog(null);
           }
         }}
-        onSubmit={(value) => void handleSubmitCategoryName(value)}
+        onSubmit={(value) => void categoryActions.handleSubmitCategoryName(value)}
       />
 
       <LibraryTextInputDialog
-        open={tagDialogPaper !== null}
+        open={metadataJobs.tagDialogPaper !== null}
         title={l('添加自定义标签', 'Add Custom Tag')}
         description={
-          tagDialogPaper
-            ? l(`为“${tagDialogPaper.title}”添加自定义标签。状态徽章不会保存为文献标签。`, `Add a custom tag to "${tagDialogPaper.title}". Status badges are not saved as paper tags.`,
+          metadataJobs.tagDialogPaper
+            ? l(`为“${metadataJobs.tagDialogPaper.title}”添加自定义标签。状态徽章不会保存为文献标签。`, `Add a custom tag to "${metadataJobs.tagDialogPaper.title}". Status badges are not saved as paper tags.`,
               )
             : ''
         }
@@ -3733,10 +1025,10 @@ export default function LiteratureLibraryView({
         busy={dialogBusy}
         onClose={() => {
           if (!dialogBusy) {
-            setTagDialogPaper(null);
+            metadataJobs.setTagDialogPaper(null);
           }
         }}
-        onSubmit={(value) => void handleSubmitPaperTag(value)}
+        onSubmit={(value) => void metadataJobs.handleSubmitPaperTag(value)}
       />
 
       <LibraryConfirmDialog
@@ -3804,34 +1096,33 @@ export default function LiteratureLibraryView({
           }
 
           if (confirmDialog.kind === 'delete-category') {
-            void deleteCategoryAfterConfirm(confirmDialog.category);
+            void categoryActions.deleteCategoryAfterConfirm(confirmDialog.category);
             return;
           }
 
           if (confirmDialog.kind === 'remove-translated-pdf') {
-            void removeTranslatedPdfAfterConfirm(confirmDialog.attachmentId);
+            void metadataJobs.removeTranslatedPdfAfterConfirm(confirmDialog.attachmentId);
             return;
           }
 
           if (confirmDialog.kind === 'delete-papers') {
-            void deletePapersAfterConfirm(confirmDialog.paperIds, confirmDialog.deleteFiles);
+            void batch.deletePapersAfterConfirm(confirmDialog.paperIds, confirmDialog.deleteFiles);
             return;
           }
 
           if (confirmDialog.kind === 'exclude-rag-papers') {
-            void applyRagMembership(confirmDialog.paperIds, false);
+            void batch.applyRagMembership(confirmDialog.paperIds, false);
             return;
           }
 
           if (confirmDialog.kind === 'exclude-rag-paper') {
-            void applyRagMembership([confirmDialog.paper.id], false);
+            void batch.applyRagMembership([confirmDialog.paper.id], false);
             return;
           }
 
-          void deletePaperAfterConfirm(confirmDialog.paper, confirmDialog.deleteFiles);
+          void batch.deletePaperAfterConfirm(confirmDialog.paper, confirmDialog.deleteFiles);
         }}
       />
     </div>
   );
 }
-

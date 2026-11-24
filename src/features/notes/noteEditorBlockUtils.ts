@@ -30,19 +30,25 @@ export function getCurrentBlockRange(editor: Editor) {
   return getTopLevelBlockRangeAtPos(editor, editor.state.selection.from);
 }
 
-export function getBlockLabelFromNode(node: ProseMirrorNode) {
-  if (node.type.name === 'heading') return `Heading ${node.attrs.level ?? 1}`;
-  if (node.type.name === 'paragraph') return 'Paragraph';
-  if (node.type.name === 'bulletList') return 'Bullet list';
-  if (node.type.name === 'orderedList') return 'Ordered list';
-  if (node.type.name === 'taskList') return 'Task list';
-  if (node.type.name === 'blockquote') return 'Quote';
-  if (node.type.name === 'codeBlock') return 'Code block';
-  if (node.type.name === 'table') return 'Table';
-  if (node.type.name === 'image') return 'Image';
-  if (node.type.name === 'noteAnchorBlock') return '引用';
-  if (node.type.name === 'noteComponentBlock') return 'Component';
-  return 'Block';
+/** 不传 localizer 时保持历史输出（英文块名 + 中文「引用」），避免破坏既有调用与测试。 */
+export type NoteBlockLabelLocalizer = (zh: string, en: string) => string;
+
+export function getBlockLabelFromNode(node: ProseMirrorNode, l?: NoteBlockLabelLocalizer) {
+  if (node.type.name === 'heading') {
+    const level = node.attrs.level ?? 1;
+    return l ? l(`标题 ${level}`, `Heading ${level}`) : `Heading ${level}`;
+  }
+  if (node.type.name === 'paragraph') return l ? l('正文', 'Paragraph') : 'Paragraph';
+  if (node.type.name === 'bulletList') return l ? l('无序列表', 'Bullet list') : 'Bullet list';
+  if (node.type.name === 'orderedList') return l ? l('有序列表', 'Ordered list') : 'Ordered list';
+  if (node.type.name === 'taskList') return l ? l('任务列表', 'Task list') : 'Task list';
+  if (node.type.name === 'blockquote') return l ? l('引用', 'Quote') : 'Quote';
+  if (node.type.name === 'codeBlock') return l ? l('代码块', 'Code block') : 'Code block';
+  if (node.type.name === 'table') return l ? l('表格', 'Table') : 'Table';
+  if (node.type.name === 'image') return l ? l('图片', 'Image') : 'Image';
+  if (node.type.name === 'noteAnchorBlock') return l ? l('引用', 'Source anchor') : '引用';
+  if (node.type.name === 'noteComponentBlock') return l ? l('组件块', 'Component') : 'Component';
+  return l ? l('块', 'Block') : 'Block';
 }
 
 export function getTopLevelBlocks(editor: Editor) {
@@ -113,13 +119,17 @@ export function resolveActiveBlock(editor: Editor, block: NoteBlockRange | null)
   return getCurrentBlockRange(editor);
 }
 
-export function toActiveNoteBlock(editor: Editor, block: NoteBlockRange): ActiveNoteBlock {
+export function toActiveNoteBlock(
+  editor: Editor,
+  block: NoteBlockRange,
+  l?: NoteBlockLabelLocalizer,
+): ActiveNoteBlock {
   const blocks = getTopLevelBlocks(editor);
   const index = blocks.findIndex((item) => item.from === block.from && item.to === block.to);
 
   return {
     ...block,
-    label: getBlockLabelFromNode(block.node),
+    label: getBlockLabelFromNode(block.node, l),
     canMoveUp: index > 0,
     canMoveDown: index >= 0 && index < blocks.length - 1,
   };

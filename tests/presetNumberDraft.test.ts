@@ -88,7 +88,7 @@ test('preset number draft does not normalize temperature until commit', () => {
 });
 
 test('editing a preset number draft ignores external sync and reset discards it', () => {
-  let state: PresetNumberDraft = reducePresetNumberDraft(
+  const state: PresetNumberDraft = reducePresetNumberDraft(
     createPresetNumberDraft(8192),
     { type: 'change', text: '12' },
   ).state;

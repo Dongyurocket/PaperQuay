@@ -4,7 +4,6 @@ import path from 'node:path';
 import os from 'node:os';
 import test from 'node:test';
 
-// @ts-ignore
 import {
   repairMineruCacheImages,
   prepareMineruCacheForReparse,

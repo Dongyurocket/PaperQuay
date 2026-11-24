@@ -1,0 +1,465 @@
+{
+  "generatedAt": "2026-11-24T14:48:17.107Z",
+  "electron": "42.2.0",
+  "views": {
+    "light": {
+      "library": {
+        "violations": [],
+        "passes": 25,
+        "incomplete": [
+          {
+            "id": "color-contrast",
+            "impact": "serious",
+            "help": "Elements must meet minimum color contrast ratio thresholds",
+            "nodes": 1,
+            "details": [
+              {
+                "target": "button[role=\"checkbox\"] > span[aria-hidden=\"true\"]",
+                "html": "<span aria-hidden=\"true\">□</span>",
+                "summary": "Fix any of the following:\n  Element content contains only non-text characters"
+              }
+            ]
+          }
+        ],
+        "screenshot": "docs\\assets\\audit-2026-11-24\\library-light.png"
+      },
+      "notes": {
+        "violations": [],
+        "passes": 23,
+        "incomplete": [],
+        "screenshot": "docs\\assets\\audit-2026-11-24\\notes-light.png"
+      },
+      "graph": {
+        "violations": [],
+        "passes": 22,
+        "incomplete": [],
+        "screenshot": "docs\\assets\\audit-2026-11-24\\graph-light.png"
+      },
+      "settings": {
+        "violations": [],
+        "passes": 23,
+        "incomplete": [],
+        "screenshot": "docs\\assets\\audit-2026-11-24\\settings-light.png"
+      },
+      "settings-backup": {
+        "violations": [],
+        "passes": 24,
+        "incomplete": [],
+        "screenshot": "docs\\assets\\audit-2026-11-24\\settings-backup-light.png"
+      },
+      "settings-mcp": {
+        "violations": [],
+        "passes": 23,
+        "incomplete": [],
+        "screenshot": "docs\\assets\\audit-2026-11-24\\settings-mcp-light.png"
+      },
+      "settings-updates": {
+        "violations": [],
+        "passes": 23,
+        "incomplete": [],
+        "screenshot": "docs\\assets\\audit-2026-11-24\\settings-updates-light.png"
+      },
+      "reader": {
+        "violations": [],
+        "passes": 23,
+        "incomplete": [
+          {
+            "id": "color-contrast",
+            "impact": "serious",
+            "help": "Elements must meet minimum color contrast ratio thresholds",
+            "nodes": 30,
+            "details": [
+              {
+                "target": "div[data-page-number=\"1\"] > .textLayer[data-main-rotation=\"0\"] > span[dir=\"ltr\"][role=\"presentation\"]:nth-child(1)",
+                "html": "<span role=\"presentation\" dir=\"ltr\" style=\"left: 10.76%; top: 7.66%; font-size: calc(var(--scale-factor)*22.00px); font-family: sans-serif; transform: scaleX(1.04258);\">PaperQuay Audit Fixture 1</span>",
+                "summary": "Fix any of the following:\n  Element's background color could not be determined because it is overlapped by another element"
+              },
+              {
+                "target": "div[data-page-number=\"1\"] > .textLayer[data-main-rotation=\"0\"] > span[dir=\"ltr\"][role=\"presentation\"]:nth-child(3)",
+                "html": "<span role=\"presentation\" dir=\"ltr\" style=\"left: 10.76%; top: 13.36%; font-size: calc(var(--scale-factor)*12.00px); font-family: sans-serif; transform: scaleX(0.966995);\">This PDF is generated at test time and never committed.</span>",
+                "summary": "Fix any of the following:\n  Element's background color could not be determined because it is overlapped by another element"
+              },
+              {
+                "target": "div[data-page-number=\"1\"] > .textLayer[data-main-rotation=\"0\"] > span[dir=\"ltr\"][role=\"presentation\"]:nth-child(5)",
+                "html": "<span role=\"presentation\" dir=\"ltr\" style=\"left: 10.76%; top: 17.11%; font-size: calc(var(--scale-factor)*10.00px); font-family: sans-serif; transform: scaleX(0.972902);\">Abstract: a deterministic fixture for reader, notes, RAG and backup smoke tests.</span>",
+                "summary": "Fix any of the following:\n  Element's background color could not be determined because it is overlapped by another element"
+              },
+              {
+                "target": "div[data-page-number=\"1\"] > .textLayer[data-main-rotation=\"0\"] > span[dir=\"ltr\"][role=\"presentation\"]:nth-child(7)",
+                "html": "<span role=\"presentation\" dir=\"ltr\" style=\"left: 10.76%; top: 21.86%; font-size: calc(var(--scale-factor)*10.00px); font-family: sans-serif; transform: scaleX(0.947983);\">Line 1: lorem ipsum dolor sit amet, consectetur adipiscing elit.</span>",
+                "summary": "Fix any of the following:\n  Element's background color could not be determined because it is overlapped by another element"
+              },
+              {
+                "target": "div[data-page-number=\"1\"] > .textLayer[data-main-rotation=\"0\"] > span[dir=\"ltr\"][role=\"presentation\"]:nth-child(9)",
+                "html": "<span role=\"presentation\" dir=\"ltr\" style=\"left: 10.76%; top: 24%; font-size: calc(var(--scale-factor)*10.00px); font-family: sans-serif; transform: scaleX(0.947983);\">Line 2: lorem ipsum dolor sit amet, consectetur adipiscing elit.</span>",
+                "summary": "Fix any of the following:\n  Element's background color could not be determined because it is overlapped by another element"
+              },
+              {
+                "target": "div[data-page-number=\"1\"] > .textLayer[data-main-rotation=\"0\"] > span[dir=\"ltr\"][role=\"presentation\"]:nth-child(11)",
+                "html": "<span role=\"presentation\" dir=\"ltr\" style=\"left: 10.76%; top: 26.13%; font-size: calc(var(--scale-factor)*10.00px); font-family: sans-serif; transform: scaleX(0.947983);\">Line 3: lorem ipsum dolor sit amet, consectetur adipiscing elit.</span>",
+                "summary": "Fix any of the following:\n  Element's background color could not be determined because it is overlapped by another element"
+              },
+              {
+                "target": "div[data-page-number=\"1\"] > .textLayer[data-main-rotation=\"0\"] > span[dir=\"ltr\"][role=\"presentation\"]:nth-child(13)",
+                "html": "<span role=\"presentation\" dir=\"ltr\" style=\"left: 10.76%; top: 28.27%; font-size: calc(var(--scale-factor)*10.00px); font-family: sans-serif; transform: scaleX(0.947983);\">Line 4: lorem ipsum dolor sit amet, consectetur adipiscing elit.</span>",
+                "summary": "Fix any of the following:\n  Element's background color could not be determined because it is overlapped by another element"
+              },
+              {
+                "target": "div[data-page-number=\"1\"] > .textLayer[data-main-rotation=\"0\"] > span[dir=\"ltr\"][role=\"presentation\"]:nth-child(15)",
+                "html": "<span role=\"presentation\" dir=\"ltr\" style=\"left: 10.76%; top: 30.41%; font-size: calc(var(--scale-factor)*10.00px); font-family: sans-serif; transform: scaleX(0.947983);\">Line 5: lorem ipsum dolor sit amet, consectetur adipiscing elit.</span>",
+                "summary": "Fix any of the following:\n  Element's background color could not be determined because it is overlapped by another element"
+              },
+              {
+                "target": "div[data-page-number=\"1\"] > .textLayer[data-main-rotation=\"0\"] > span[dir=\"ltr\"][role=\"presentation\"]:nth-child(17)",
+                "html": "<span role=\"presentation\" dir=\"ltr\" style=\"left: 10.76%; top: 32.55%; font-size: calc(var(--scale-factor)*10.00px); font-family: sans-serif; transform: scaleX(0.947983);\">Line 6: lorem ipsum dolor sit amet, consectetur adipiscing elit.</span>",
+                "summary": "Fix any of the following:\n  Element's background color could not be determined because it is overlapped by another element"
+              },
+              {
+                "target": "div[data-page-number=\"1\"] > .textLayer[data-main-rotation=\"0\"] > span[dir=\"ltr\"][role=\"presentation\"]:nth-child(19)",
+                "html": "<span role=\"presentation\" dir=\"ltr\" style=\"left: 10.76%; top: 34.68%; font-size: calc(var(--scale-factor)*10.00px); font-family: sans-serif; transform: scaleX(0.947983);\">Line 7: lorem ipsum dolor sit amet, consectetur adipiscing elit.</span>",
+                "summary": "Fix any of the following:\n  Element's background color could not be determined because it is overlapped by another element"
+              },
+              {
+                "target": "div[data-page-number=\"1\"] > .textLayer[data-main-rotation=\"0\"] > span[dir=\"ltr\"][role=\"presentation\"]:nth-child(21)",
+                "html": "<span role=\"presentation\" dir=\"ltr\" style=\"left: 10.76%; top: 36.82%; font-size: calc(var(--scale-factor)*10.00px); font-family: sans-serif; transform: scaleX(0.947983);\">Line 8: lorem ipsum dolor sit amet, consectetur adipiscing elit.</span>",
+                "summary": "Fix any of the following:\n  Element's background color could not be determined because it is overlapped by another element"
+              },
+              {
+                "target": "div[data-page-number=\"1\"] > .textLayer[data-main-rotation=\"0\"] > span[dir=\"ltr\"][role=\"presentation\"]:nth-child(23)",
+                "html": "<span role=\"presentation\" dir=\"ltr\" style=\"left: 10.76%; top: 38.96%; font-size: calc(var(--scale-factor)*10.00px); font-family: sans-serif; transform: scaleX(0.947983);\">Line 9: lorem ipsum dolor sit amet, consectetur adipiscing elit.</span>",
+                "summary": "Fix any of the following:\n  Element's background color could not be determined because it is overlapped by another element"
+              },
+              {
+                "target": "div[data-page-number=\"1\"] > .textLayer[data-main-rotation=\"0\"] > span[dir=\"ltr\"][role=\"presentation\"]:nth-child(25)",
+                "html": "<span role=\"presentation\" dir=\"ltr\" style=\"left: 10.76%; top: 41.1%; font-size: calc(var(--scale-factor)*10.00px); font-family: sans-serif; transform: scaleX(0.949022);\">Line 10: lorem ipsum dolor sit amet, consectetur adipiscing elit.</span>",
+                "summary": "Fix any of the following:\n  Element's background color could not be determined because it is overlapped by another element"
+              },
+              {
+                "target": "div[data-page-number=\"1\"] > .textLayer[data-main-rotation=\"0\"] > span[dir=\"ltr\"][role=\"presentation\"]:nth-child(27)",
+                "html": "<span role=\"presentation\" dir=\"ltr\" style=\"left: 10.76%; top: 43.24%; font-size: calc(var(--scale-factor)*10.00px); font-family: sans-serif; transform: scaleX(0.949022);\">Line 11: lorem ipsum dolor sit amet, consectetur adipiscing elit.</span>",
+                "summary": "Fix any of the following:\n  Element's background color could not be determined because it is overlapped by another element"
+              },
+              {
+                "target": "div[data-page-number=\"1\"] > .textLayer[data-main-rotation=\"0\"] > span[dir=\"ltr\"][role=\"presentation\"]:nth-child(29)",
+                "html": "<span role=\"presentation\" dir=\"ltr\" style=\"left: 10.76%; top: 45.37%; font-size: calc(var(--scale-factor)*10.00px); font-family: sans-serif; transform: scaleX(0.949022);\">Line 12: lorem ipsum dolor sit amet, consectetur adipiscing elit.</span>",
+                "summary": "Fix any of the following:\n  Element's background color could not be determined because it is overlapped by another element"
+              },
+              {
+                "target": "div[data-page-number=\"2\"] > .textLayer[data-main-rotation=\"0\"] > span[dir=\"ltr\"][role=\"presentation\"]:nth-child(1)",
+                "html": "<span role=\"presentation\" dir=\"ltr\" style=\"left: 10.76%; top: 7.66%; font-size: calc(var(--scale-factor)*22.00px); font-family: sans-serif; transform: scaleX(1.04258);\">PaperQuay Audit Fixture 2</span>",
+                "summary": "Fix any of the following:\n  Element's background color could not be determined because it is overlapped by another element"
+              },
+              {
+                "target": "div[data-page-number=\"2\"] > .textLayer[data-main-rotation=\"0\"] > span[dir=\"ltr\"][role=\"presentation\"]:nth-child(3)",
+                "html": "<span role=\"presentation\" dir=\"ltr\" style=\"left: 10.76%; top: 13.36%; font-size: calc(var(--scale-factor)*12.00px); font-family: sans-serif; transform: scaleX(0.966995);\">This PDF is generated at test time and never committed.</span>",
+                "summary": "Fix any of the following:\n  Element's background color could not be determined because it is overlapped by another element"
+              },
+              {
+                "target": "div[data-page-number=\"2\"] > .textLayer[data-main-rotation=\"0\"] > span[dir=\"ltr\"][role=\"presentation\"]:nth-child(5)",
+                "html": "<span role=\"presentation\" dir=\"ltr\" style=\"left: 10.76%; top: 17.11%; font-size: calc(var(--scale-factor)*10.00px); font-family: sans-serif; transform: scaleX(0.972902);\">Abstract: a deterministic fixture for reader, notes, RAG and backup smoke tests.</span>",
+                "summary": "Fix any of the following:\n  Element's background color could not be determined because it is overlapped by another element"
+              },
+              {
+                "target": "div[data-page-number=\"2\"] > .textLayer[data-main-rotation=\"0\"] > span[dir=\"ltr\"][role=\"presentation\"]:nth-child(7)",
+                "html": "<span role=\"presentation\" dir=\"ltr\" style=\"left: 10.76%; top: 21.86%; font-size: calc(var(--scale-factor)*10.00px); font-family: sans-serif; transform: scaleX(0.947983);\">Line 1: lorem ipsum dolor sit amet, consectetur adipiscing elit.</span>",
+                "summary": "Fix any of the following:\n  Element's background color could not be determined because it is overlapped by another element"
+              },
+              {
+                "target": "div[data-page-number=\"2\"] > .textLayer[data-main-rotation=\"0\"] > span[dir=\"ltr\"][role=\"presentation\"]:nth-child(9)",
+                "html": "<span role=\"presentation\" dir=\"ltr\" style=\"left: 10.76%; top: 24%; font-size: calc(var(--scale-factor)*10.00px); font-family: sans-serif; transform: scaleX(0.947983);\">Line 2: lorem ipsum dolor sit amet, consectetur adipiscing elit.</span>",
+                "summary": "Fix any of the following:\n  Element's background color could not be determined because it is overlapped by another element"
+              },
+              {
+                "target": "div[data-page-number=\"2\"] > .textLayer[data-main-rotation=\"0\"] > span[dir=\"ltr\"][role=\"presentation\"]:nth-child(11)",
+                "html": "<span role=\"presentation\" dir=\"ltr\" style=\"left: 10.76%; top: 26.13%; font-size: calc(var(--scale-factor)*10.00px); font-family: sans-serif; transform: scaleX(0.947983);\">Line 3: lorem ipsum dolor sit amet, consectetur adipiscing elit.</span>",
+                "summary": "Fix any of the following:\n  Element's background color could not be determined because it is overlapped by another element"
+              },
+              {
+                "target": "div[data-page-number=\"2\"] > .textLayer[data-main-rotation=\"0\"] > span[dir=\"ltr\"][role=\"presentation\"]:nth-child(13)",
+                "html": "<span role=\"presentation\" dir=\"ltr\" style=\"left: 10.76%; top: 28.27%; font-size: calc(var(--scale-factor)*10.00px); font-family: sans-serif; transform: scaleX(0.947983);\">Line 4: lorem ipsum dolor sit amet, consectetur adipiscing elit.</span>",
+                "summary": "Fix any of the following:\n  Element's background color could not be determined because it is overlapped by another element"
+              },
+              {
+                "target": "div[data-page-number=\"2\"] > .textLayer[data-main-rotation=\"0\"] > span[dir=\"ltr\"][role=\"presentation\"]:nth-child(15)",
+                "html": "<span role=\"presentation\" dir=\"ltr\" style=\"left: 10.76%; top: 30.41%; font-size: calc(var(--scale-factor)*10.00px); font-family: sans-serif; transform: scaleX(0.947983);\">Line 5: lorem ipsum dolor sit amet, consectetur adipiscing elit.</span>",
+                "summary": "Fix any of the following:\n  Element's background color could not be determined because it is overlapped by another element"
+              },
+              {
+                "target": "div[data-page-number=\"2\"] > .textLayer[data-main-rotation=\"0\"] > span[dir=\"ltr\"][role=\"presentation\"]:nth-child(17)",
+                "html": "<span role=\"presentation\" dir=\"ltr\" style=\"left: 10.76%; top: 32.55%; font-size: calc(var(--scale-factor)*10.00px); font-family: sans-serif; transform: scaleX(0.947983);\">Line 6: lorem ipsum dolor sit amet, consectetur adipiscing elit.</span>",
+                "summary": "Fix any of the following:\n  Element's background color could not be determined because it is overlapped by another element"
+              },
+              {
+                "target": "div[data-page-number=\"2\"] > .textLayer[data-main-rotation=\"0\"] > span[dir=\"ltr\"][role=\"presentation\"]:nth-child(19)",
+                "html": "<span role=\"presentation\" dir=\"ltr\" style=\"left: 10.76%; top: 34.68%; font-size: calc(var(--scale-factor)*10.00px); font-family: sans-serif; transform: scaleX(0.947983);\">Line 7: lorem ipsum dolor sit amet, consectetur adipiscing elit.</span>",
+                "summary": "Fix any of the following:\n  Element's background color could not be determined because it is overlapped by another element"
+              },
+              {
+                "target": "div[data-page-number=\"2\"] > .textLayer[data-main-rotation=\"0\"] > span[dir=\"ltr\"][role=\"presentation\"]:nth-child(21)",
+                "html": "<span role=\"presentation\" dir=\"ltr\" style=\"left: 10.76%; top: 36.82%; font-size: calc(var(--scale-factor)*10.00px); font-family: sans-serif; transform: scaleX(0.947983);\">Line 8: lorem ipsum dolor sit amet, consectetur adipiscing elit.</span>",
+                "summary": "Fix any of the following:\n  Element's background color could not be determined because it is overlapped by another element"
+              },
+              {
+                "target": "div[data-page-number=\"2\"] > .textLayer[data-main-rotation=\"0\"] > span[dir=\"ltr\"][role=\"presentation\"]:nth-child(23)",
+                "html": "<span role=\"presentation\" dir=\"ltr\" style=\"left: 10.76%; top: 38.96%; font-size: calc(var(--scale-factor)*10.00px); font-family: sans-serif; transform: scaleX(0.947983);\">Line 9: lorem ipsum dolor sit amet, consectetur adipiscing elit.</span>",
+                "summary": "Fix any of the following:\n  Element's background color could not be determined because it is overlapped by another element"
+              },
+              {
+                "target": "div[data-page-number=\"2\"] > .textLayer[data-main-rotation=\"0\"] > span[dir=\"ltr\"][role=\"presentation\"]:nth-child(25)",
+                "html": "<span role=\"presentation\" dir=\"ltr\" style=\"left: 10.76%; top: 41.1%; font-size: calc(var(--scale-factor)*10.00px); font-family: sans-serif; transform: scaleX(0.949022);\">Line 10: lorem ipsum dolor sit amet, consectetur adipiscing elit.</span>",
+                "summary": "Fix any of the following:\n  Element's background color could not be determined because it is overlapped by another element"
+              },
+              {
+                "target": "div[data-page-number=\"2\"] > .textLayer[data-main-rotation=\"0\"] > span[dir=\"ltr\"][role=\"presentation\"]:nth-child(27)",
+                "html": "<span role=\"presentation\" dir=\"ltr\" style=\"left: 10.76%; top: 43.24%; font-size: calc(var(--scale-factor)*10.00px); font-family: sans-serif; transform: scaleX(0.949022);\">Line 11: lorem ipsum dolor sit amet, consectetur adipiscing elit.</span>",
+                "summary": "Fix any of the following:\n  Element's background color could not be determined because it is overlapped by another element"
+              },
+              {
+                "target": "div[data-page-number=\"2\"] > .textLayer[data-main-rotation=\"0\"] > span[dir=\"ltr\"][role=\"presentation\"]:nth-child(29)",
+                "html": "<span role=\"presentation\" dir=\"ltr\" style=\"left: 10.76%; top: 45.37%; font-size: calc(var(--scale-factor)*10.00px); font-family: sans-serif; transform: scaleX(0.949022);\">Line 12: lorem ipsum dolor sit amet, consectetur adipiscing elit.</span>",
+                "summary": "Fix any of the following:\n  Element's background color could not be determined because it is overlapped by another element"
+              }
+            ]
+          }
+        ],
+        "screenshot": "docs\\assets\\audit-2026-11-24\\reader-light.png"
+      }
+    },
+    "dark": {
+      "library": {
+        "violations": [],
+        "passes": 25,
+        "incomplete": [
+          {
+            "id": "color-contrast",
+            "impact": "serious",
+            "help": "Elements must meet minimum color contrast ratio thresholds",
+            "nodes": 1,
+            "details": [
+              {
+                "target": "button[role=\"checkbox\"] > span[aria-hidden=\"true\"]",
+                "html": "<span aria-hidden=\"true\">□</span>",
+                "summary": "Fix any of the following:\n  Element content contains only non-text characters"
+              }
+            ]
+          }
+        ],
+        "screenshot": "docs\\assets\\audit-2026-11-24\\library-dark.png"
+      },
+      "notes": {
+        "violations": [],
+        "passes": 23,
+        "incomplete": [],
+        "screenshot": "docs\\assets\\audit-2026-11-24\\notes-dark.png"
+      },
+      "graph": {
+        "violations": [],
+        "passes": 22,
+        "incomplete": [],
+        "screenshot": "docs\\assets\\audit-2026-11-24\\graph-dark.png"
+      },
+      "settings": {
+        "violations": [],
+        "passes": 23,
+        "incomplete": [],
+        "screenshot": "docs\\assets\\audit-2026-11-24\\settings-dark.png"
+      },
+      "settings-backup": {
+        "violations": [],
+        "passes": 24,
+        "incomplete": [],
+        "screenshot": "docs\\assets\\audit-2026-11-24\\settings-backup-dark.png"
+      },
+      "settings-mcp": {
+        "violations": [],
+        "passes": 23,
+        "incomplete": [],
+        "screenshot": "docs\\assets\\audit-2026-11-24\\settings-mcp-dark.png"
+      },
+      "settings-updates": {
+        "violations": [],
+        "passes": 23,
+        "incomplete": [],
+        "screenshot": "docs\\assets\\audit-2026-11-24\\settings-updates-dark.png"
+      },
+      "reader": {
+        "violations": [],
+        "passes": 23,
+        "incomplete": [
+          {
+            "id": "color-contrast",
+            "impact": "serious",
+            "help": "Elements must meet minimum color contrast ratio thresholds",
+            "nodes": 30,
+            "details": [
+              {
+                "target": "div[data-page-number=\"1\"] > .textLayer[data-main-rotation=\"0\"] > span[dir=\"ltr\"][role=\"presentation\"]:nth-child(1)",
+                "html": "<span role=\"presentation\" dir=\"ltr\" style=\"left: 10.76%; top: 7.66%; font-size: calc(var(--scale-factor)*22.00px); font-family: sans-serif; transform: scaleX(1.04258);\">PaperQuay Audit Fixture 1</span>",
+                "summary": "Fix any of the following:\n  Element's background color could not be determined because it is overlapped by another element"
+              },
+              {
+                "target": "div[data-page-number=\"1\"] > .textLayer[data-main-rotation=\"0\"] > span[dir=\"ltr\"][role=\"presentation\"]:nth-child(3)",
+                "html": "<span role=\"presentation\" dir=\"ltr\" style=\"left: 10.76%; top: 13.36%; font-size: calc(var(--scale-factor)*12.00px); font-family: sans-serif; transform: scaleX(0.966995);\">This PDF is generated at test time and never committed.</span>",
+                "summary": "Fix any of the following:\n  Element's background color could not be determined because it is overlapped by another element"
+              },
+              {
+                "target": "div[data-page-number=\"1\"] > .textLayer[data-main-rotation=\"0\"] > span[dir=\"ltr\"][role=\"presentation\"]:nth-child(5)",
+                "html": "<span role=\"presentation\" dir=\"ltr\" style=\"left: 10.76%; top: 17.11%; font-size: calc(var(--scale-factor)*10.00px); font-family: sans-serif; transform: scaleX(0.972902);\">Abstract: a deterministic fixture for reader, notes, RAG and backup smoke tests.</span>",
+                "summary": "Fix any of the following:\n  Element's background color could not be determined because it is overlapped by another element"
+              },
+              {
+                "target": "div[data-page-number=\"1\"] > .textLayer[data-main-rotation=\"0\"] > span[dir=\"ltr\"][role=\"presentation\"]:nth-child(7)",
+                "html": "<span role=\"presentation\" dir=\"ltr\" style=\"left: 10.76%; top: 21.86%; font-size: calc(var(--scale-factor)*10.00px); font-family: sans-serif; transform: scaleX(0.947983);\">Line 1: lorem ipsum dolor sit amet, consectetur adipiscing elit.</span>",
+                "summary": "Fix any of the following:\n  Element's background color could not be determined because it is overlapped by another element"
+              },
+              {
+                "target": "div[data-page-number=\"1\"] > .textLayer[data-main-rotation=\"0\"] > span[dir=\"ltr\"][role=\"presentation\"]:nth-child(9)",
+                "html": "<span role=\"presentation\" dir=\"ltr\" style=\"left: 10.76%; top: 24%; font-size: calc(var(--scale-factor)*10.00px); font-family: sans-serif; transform: scaleX(0.947983);\">Line 2: lorem ipsum dolor sit amet, consectetur adipiscing elit.</span>",
+                "summary": "Fix any of the following:\n  Element's background color could not be determined because it is overlapped by another element"
+              },
+              {
+                "target": "div[data-page-number=\"1\"] > .textLayer[data-main-rotation=\"0\"] > span[dir=\"ltr\"][role=\"presentation\"]:nth-child(11)",
+                "html": "<span role=\"presentation\" dir=\"ltr\" style=\"left: 10.76%; top: 26.13%; font-size: calc(var(--scale-factor)*10.00px); font-family: sans-serif; transform: scaleX(0.947983);\">Line 3: lorem ipsum dolor sit amet, consectetur adipiscing elit.</span>",
+                "summary": "Fix any of the following:\n  Element's background color could not be determined because it is overlapped by another element"
+              },
+              {
+                "target": "div[data-page-number=\"1\"] > .textLayer[data-main-rotation=\"0\"] > span[dir=\"ltr\"][role=\"presentation\"]:nth-child(13)",
+                "html": "<span role=\"presentation\" dir=\"ltr\" style=\"left: 10.76%; top: 28.27%; font-size: calc(var(--scale-factor)*10.00px); font-family: sans-serif; transform: scaleX(0.947983);\">Line 4: lorem ipsum dolor sit amet, consectetur adipiscing elit.</span>",
+                "summary": "Fix any of the following:\n  Element's background color could not be determined because it is overlapped by another element"
+              },
+              {
+                "target": "div[data-page-number=\"1\"] > .textLayer[data-main-rotation=\"0\"] > span[dir=\"ltr\"][role=\"presentation\"]:nth-child(15)",
+                "html": "<span role=\"presentation\" dir=\"ltr\" style=\"left: 10.76%; top: 30.41%; font-size: calc(var(--scale-factor)*10.00px); font-family: sans-serif; transform: scaleX(0.947983);\">Line 5: lorem ipsum dolor sit amet, consectetur adipiscing elit.</span>",
+                "summary": "Fix any of the following:\n  Element's background color could not be determined because it is overlapped by another element"
+              },
+              {
+                "target": "div[data-page-number=\"1\"] > .textLayer[data-main-rotation=\"0\"] > span[dir=\"ltr\"][role=\"presentation\"]:nth-child(17)",
+                "html": "<span role=\"presentation\" dir=\"ltr\" style=\"left: 10.76%; top: 32.55%; font-size: calc(var(--scale-factor)*10.00px); font-family: sans-serif; transform: scaleX(0.947983);\">Line 6: lorem ipsum dolor sit amet, consectetur adipiscing elit.</span>",
+                "summary": "Fix any of the following:\n  Element's background color could not be determined because it is overlapped by another element"
+              },
+              {
+                "target": "div[data-page-number=\"1\"] > .textLayer[data-main-rotation=\"0\"] > span[dir=\"ltr\"][role=\"presentation\"]:nth-child(19)",
+                "html": "<span role=\"presentation\" dir=\"ltr\" style=\"left: 10.76%; top: 34.68%; font-size: calc(var(--scale-factor)*10.00px); font-family: sans-serif; transform: scaleX(0.947983);\">Line 7: lorem ipsum dolor sit amet, consectetur adipiscing elit.</span>",
+                "summary": "Fix any of the following:\n  Element's background color could not be determined because it is overlapped by another element"
+              },
+              {
+                "target": "div[data-page-number=\"1\"] > .textLayer[data-main-rotation=\"0\"] > span[dir=\"ltr\"][role=\"presentation\"]:nth-child(21)",
+                "html": "<span role=\"presentation\" dir=\"ltr\" style=\"left: 10.76%; top: 36.82%; font-size: calc(var(--scale-factor)*10.00px); font-family: sans-serif; transform: scaleX(0.947983);\">Line 8: lorem ipsum dolor sit amet, consectetur adipiscing elit.</span>",
+                "summary": "Fix any of the following:\n  Element's background color could not be determined because it is overlapped by another element"
+              },
+              {
+                "target": "div[data-page-number=\"1\"] > .textLayer[data-main-rotation=\"0\"] > span[dir=\"ltr\"][role=\"presentation\"]:nth-child(23)",
+                "html": "<span role=\"presentation\" dir=\"ltr\" style=\"left: 10.76%; top: 38.96%; font-size: calc(var(--scale-factor)*10.00px); font-family: sans-serif; transform: scaleX(0.947983);\">Line 9: lorem ipsum dolor sit amet, consectetur adipiscing elit.</span>",
+                "summary": "Fix any of the following:\n  Element's background color could not be determined because it is overlapped by another element"
+              },
+              {
+                "target": "div[data-page-number=\"1\"] > .textLayer[data-main-rotation=\"0\"] > span[dir=\"ltr\"][role=\"presentation\"]:nth-child(25)",
+                "html": "<span role=\"presentation\" dir=\"ltr\" style=\"left: 10.76%; top: 41.1%; font-size: calc(var(--scale-factor)*10.00px); font-family: sans-serif; transform: scaleX(0.949022);\">Line 10: lorem ipsum dolor sit amet, consectetur adipiscing elit.</span>",
+                "summary": "Fix any of the following:\n  Element's background color could not be determined because it is overlapped by another element"
+              },
+              {
+                "target": "div[data-page-number=\"1\"] > .textLayer[data-main-rotation=\"0\"] > span[dir=\"ltr\"][role=\"presentation\"]:nth-child(27)",
+                "html": "<span role=\"presentation\" dir=\"ltr\" style=\"left: 10.76%; top: 43.24%; font-size: calc(var(--scale-factor)*10.00px); font-family: sans-serif; transform: scaleX(0.949022);\">Line 11: lorem ipsum dolor sit amet, consectetur adipiscing elit.</span>",
+                "summary": "Fix any of the following:\n  Element's background color could not be determined because it is overlapped by another element"
+              },
+              {
+                "target": "div[data-page-number=\"1\"] > .textLayer[data-main-rotation=\"0\"] > span[dir=\"ltr\"][role=\"presentation\"]:nth-child(29)",
+                "html": "<span role=\"presentation\" dir=\"ltr\" style=\"left: 10.76%; top: 45.37%; font-size: calc(var(--scale-factor)*10.00px); font-family: sans-serif; transform: scaleX(0.949022);\">Line 12: lorem ipsum dolor sit amet, consectetur adipiscing elit.</span>",
+                "summary": "Fix any of the following:\n  Element's background color could not be determined because it is overlapped by another element"
+              },
+              {
+                "target": "div[data-page-number=\"2\"] > .textLayer[data-main-rotation=\"0\"] > span[dir=\"ltr\"][role=\"presentation\"]:nth-child(1)",
+                "html": "<span role=\"presentation\" dir=\"ltr\" style=\"left: 10.76%; top: 7.66%; font-size: calc(var(--scale-factor)*22.00px); font-family: sans-serif; transform: scaleX(1.04258);\">PaperQuay Audit Fixture 2</span>",
+                "summary": "Fix any of the following:\n  Element's background color could not be determined because it is overlapped by another element"
+              },
+              {
+                "target": "div[data-page-number=\"2\"] > .textLayer[data-main-rotation=\"0\"] > span[dir=\"ltr\"][role=\"presentation\"]:nth-child(3)",
+                "html": "<span role=\"presentation\" dir=\"ltr\" style=\"left: 10.76%; top: 13.36%; font-size: calc(var(--scale-factor)*12.00px); font-family: sans-serif; transform: scaleX(0.966995);\">This PDF is generated at test time and never committed.</span>",
+                "summary": "Fix any of the following:\n  Element's background color could not be determined because it is overlapped by another element"
+              },
+              {
+                "target": "div[data-page-number=\"2\"] > .textLayer[data-main-rotation=\"0\"] > span[dir=\"ltr\"][role=\"presentation\"]:nth-child(5)",
+                "html": "<span role=\"presentation\" dir=\"ltr\" style=\"left: 10.76%; top: 17.11%; font-size: calc(var(--scale-factor)*10.00px); font-family: sans-serif; transform: scaleX(0.972902);\">Abstract: a deterministic fixture for reader, notes, RAG and backup smoke tests.</span>",
+                "summary": "Fix any of the following:\n  Element's background color could not be determined because it is overlapped by another element"
+              },
+              {
+                "target": "div[data-page-number=\"2\"] > .textLayer[data-main-rotation=\"0\"] > span[dir=\"ltr\"][role=\"presentation\"]:nth-child(7)",
+                "html": "<span role=\"presentation\" dir=\"ltr\" style=\"left: 10.76%; top: 21.86%; font-size: calc(var(--scale-factor)*10.00px); font-family: sans-serif; transform: scaleX(0.947983);\">Line 1: lorem ipsum dolor sit amet, consectetur adipiscing elit.</span>",
+                "summary": "Fix any of the following:\n  Element's background color could not be determined because it is overlapped by another element"
+              },
+              {
+                "target": "div[data-page-number=\"2\"] > .textLayer[data-main-rotation=\"0\"] > span[dir=\"ltr\"][role=\"presentation\"]:nth-child(9)",
+                "html": "<span role=\"presentation\" dir=\"ltr\" style=\"left: 10.76%; top: 24%; font-size: calc(var(--scale-factor)*10.00px); font-family: sans-serif; transform: scaleX(0.947983);\">Line 2: lorem ipsum dolor sit amet, consectetur adipiscing elit.</span>",
+                "summary": "Fix any of the following:\n  Element's background color could not be determined because it is overlapped by another element"
+              },
+              {
+                "target": "div[data-page-number=\"2\"] > .textLayer[data-main-rotation=\"0\"] > span[dir=\"ltr\"][role=\"presentation\"]:nth-child(11)",
+                "html": "<span role=\"presentation\" dir=\"ltr\" style=\"left: 10.76%; top: 26.13%; font-size: calc(var(--scale-factor)*10.00px); font-family: sans-serif; transform: scaleX(0.947983);\">Line 3: lorem ipsum dolor sit amet, consectetur adipiscing elit.</span>",
+                "summary": "Fix any of the following:\n  Element's background color could not be determined because it is overlapped by another element"
+              },
+              {
+                "target": "div[data-page-number=\"2\"] > .textLayer[data-main-rotation=\"0\"] > span[dir=\"ltr\"][role=\"presentation\"]:nth-child(13)",
+                "html": "<span role=\"presentation\" dir=\"ltr\" style=\"left: 10.76%; top: 28.27%; font-size: calc(var(--scale-factor)*10.00px); font-family: sans-serif; transform: scaleX(0.947983);\">Line 4: lorem ipsum dolor sit amet, consectetur adipiscing elit.</span>",
+                "summary": "Fix any of the following:\n  Element's background color could not be determined because it is overlapped by another element"
+              },
+              {
+                "target": "div[data-page-number=\"2\"] > .textLayer[data-main-rotation=\"0\"] > span[dir=\"ltr\"][role=\"presentation\"]:nth-child(15)",
+                "html": "<span role=\"presentation\" dir=\"ltr\" style=\"left: 10.76%; top: 30.41%; font-size: calc(var(--scale-factor)*10.00px); font-family: sans-serif; transform: scaleX(0.947983);\">Line 5: lorem ipsum dolor sit amet, consectetur adipiscing elit.</span>",
+                "summary": "Fix any of the following:\n  Element's background color could not be determined because it is overlapped by another element"
+              },
+              {
+                "target": "div[data-page-number=\"2\"] > .textLayer[data-main-rotation=\"0\"] > span[dir=\"ltr\"][role=\"presentation\"]:nth-child(17)",
+                "html": "<span role=\"presentation\" dir=\"ltr\" style=\"left: 10.76%; top: 32.55%; font-size: calc(var(--scale-factor)*10.00px); font-family: sans-serif; transform: scaleX(0.947983);\">Line 6: lorem ipsum dolor sit amet, consectetur adipiscing elit.</span>",
+                "summary": "Fix any of the following:\n  Element's background color could not be determined because it is overlapped by another element"
+              },
+              {
+                "target": "div[data-page-number=\"2\"] > .textLayer[data-main-rotation=\"0\"] > span[dir=\"ltr\"][role=\"presentation\"]:nth-child(19)",
+                "html": "<span role=\"presentation\" dir=\"ltr\" style=\"left: 10.76%; top: 34.68%; font-size: calc(var(--scale-factor)*10.00px); font-family: sans-serif; transform: scaleX(0.947983);\">Line 7: lorem ipsum dolor sit amet, consectetur adipiscing elit.</span>",
+                "summary": "Fix any of the following:\n  Element's background color could not be determined because it is overlapped by another element"
+              },
+              {
+                "target": "div[data-page-number=\"2\"] > .textLayer[data-main-rotation=\"0\"] > span[dir=\"ltr\"][role=\"presentation\"]:nth-child(21)",
+                "html": "<span role=\"presentation\" dir=\"ltr\" style=\"left: 10.76%; top: 36.82%; font-size: calc(var(--scale-factor)*10.00px); font-family: sans-serif; transform: scaleX(0.947983);\">Line 8: lorem ipsum dolor sit amet, consectetur adipiscing elit.</span>",
+                "summary": "Fix any of the following:\n  Element's background color could not be determined because it is overlapped by another element"
+              },
+              {
+                "target": "div[data-page-number=\"2\"] > .textLayer[data-main-rotation=\"0\"] > span[dir=\"ltr\"][role=\"presentation\"]:nth-child(23)",
+                "html": "<span role=\"presentation\" dir=\"ltr\" style=\"left: 10.76%; top: 38.96%; font-size: calc(var(--scale-factor)*10.00px); font-family: sans-serif; transform: scaleX(0.947983);\">Line 9: lorem ipsum dolor sit amet, consectetur adipiscing elit.</span>",
+                "summary": "Fix any of the following:\n  Element's background color could not be determined because it is overlapped by another element"
+              },
+              {
+                "target": "div[data-page-number=\"2\"] > .textLayer[data-main-rotation=\"0\"] > span[dir=\"ltr\"][role=\"presentation\"]:nth-child(25)",
+                "html": "<span role=\"presentation\" dir=\"ltr\" style=\"left: 10.76%; top: 41.1%; font-size: calc(var(--scale-factor)*10.00px); font-family: sans-serif; transform: scaleX(0.949022);\">Line 10: lorem ipsum dolor sit amet, consectetur adipiscing elit.</span>",
+                "summary": "Fix any of the following:\n  Element's background color could not be determined because it is overlapped by another element"
+              },
+              {
+                "target": "div[data-page-number=\"2\"] > .textLayer[data-main-rotation=\"0\"] > span[dir=\"ltr\"][role=\"presentation\"]:nth-child(27)",
+                "html": "<span role=\"presentation\" dir=\"ltr\" style=\"left: 10.76%; top: 43.24%; font-size: calc(var(--scale-factor)*10.00px); font-family: sans-serif; transform: scaleX(0.949022);\">Line 11: lorem ipsum dolor sit amet, consectetur adipiscing elit.</span>",
+                "summary": "Fix any of the following:\n  Element's background color could not be determined because it is overlapped by another element"
+              },
+              {
+                "target": "div[data-page-number=\"2\"] > .textLayer[data-main-rotation=\"0\"] > span[dir=\"ltr\"][role=\"presentation\"]:nth-child(29)",
+                "html": "<span role=\"presentation\" dir=\"ltr\" style=\"left: 10.76%; top: 45.37%; font-size: calc(var(--scale-factor)*10.00px); font-family: sans-serif; transform: scaleX(0.949022);\">Line 12: lorem ipsum dolor sit amet, consectetur adipiscing elit.</span>",
+                "summary": "Fix any of the following:\n  Element's background color could not be determined because it is overlapped by another element"
+              }
+            ]
+          }
+        ],
+        "screenshot": "docs\\assets\\audit-2026-11-24\\reader-dark.png"
+      }
+    }
+  },
+  "totals": {
+    "views": 16,
+    "violations": 0,
+    "seriousCritical": 0,
+    "incomplete": 4,
+    "seriousCriticalIncomplete": 4
+  },
+  "app": {
+    "stdoutTail": "\r\n[paperquay:perf] backend:init library-store: 35.3ms (since backend:init-start)\n[paperquay:perf] backend:init note-store: 58.8ms (since backend:init-start)\n[paperquay:perf] backend:init rag-store: 63.3ms (since backend:init-start)\n[paperquay] Retired agent data cleaned. { memoryFilesRemoved: 0, runsRemoved: 0, eventsRemoved: 0 }\n[paperquay:perf] startup:backend-init: 154.3ms (since app:ready)\n[paperquay:perf] startup:window-created: 173.2ms (since app:ready)\n[paperquay:perf] startup:window-visible: 264.0ms (since app:ready)\n",
+    "stderrTail": "\r\nDevTools listening on ws://127.0.0.1:9444/devtools/browser/58ab2889-ac75-4395-a6e1-4592d47d3fd0\r\n",
+    "consoleTail": [],
+    "exceptions": []
+  }
+}

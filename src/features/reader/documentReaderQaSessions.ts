@@ -1,5 +1,17 @@
 import type { DocumentChatSession, QaModelPreset } from '../../types/reader';
 
+/** Persisted history must not contain empty assistant placeholders from aborted streams. */
+export function stripEmptyAssistantMessages(
+  sessions: DocumentChatSession[],
+): DocumentChatSession[] {
+  return sessions.map((session) => {
+    const messages = session.messages.filter(
+      (message) => message.role !== 'assistant' || message.content.trim().length > 0,
+    );
+    return messages.length === session.messages.length ? session : { ...session, messages };
+  });
+}
+
 export function resolveActiveQaSession(
   sessions: DocumentChatSession[],
   selectedSessionId: string,

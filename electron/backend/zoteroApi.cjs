@@ -1,6 +1,6 @@
-const fsp = require('node:fs/promises');
 const path = require('node:path');
 const { cleanString, readRequestJson, safeFileName } = require('./utils.cjs');
+const { downloadUrlToFile } = require('./httpIO.cjs');
 
 const ZOTERO_API_BASE = 'https://api.zotero.org';
 
@@ -128,20 +128,16 @@ async function downloadZoteroAttachmentPdf(options, appPaths) {
   if (!userId) throw new Error('Zotero user id cannot be empty');
   if (!attachmentKey) throw new Error('Zotero attachment key cannot be empty');
 
-  await fsp.mkdir(appPaths.remotePdfDownloadDir, { recursive: true });
   const filename = safePdfFilename(options.filename, attachmentKey);
   const outputPath = path.join(appPaths.remotePdfDownloadDir, `${Buffer.from(attachmentKey).toString('base64url')}-${filename}`);
-  const response = await fetch(
+  await downloadUrlToFile(
     `${ZOTERO_API_BASE}/users/${encodeURIComponent(userId)}/items/${encodeURIComponent(attachmentKey)}/file`,
-    { headers: zoteroHeaders(apiKey) },
+    outputPath,
+    {
+      headers: zoteroHeaders(apiKey),
+      label: 'Zotero PDF download',
+    },
   );
-
-  if (!response.ok) {
-    const text = await response.text().catch(() => '');
-    throw new Error(`Zotero download failed: HTTP ${response.status} ${text}`);
-  }
-
-  await fsp.writeFile(outputPath, Buffer.from(await response.arrayBuffer()));
   return { path: outputPath, filename };
 }
 

@@ -164,6 +164,8 @@ export function ModelPresetPicker({
     </div>
   ) : null;
 
+  const selectedLabel = selectedPreset?.label || selectedPreset?.model || l('未配置模型', 'No model');
+
   return (
     <div ref={rootRef} className={cn('relative shrink-0', className)}>
       <button
@@ -177,7 +179,7 @@ export function ModelPresetPicker({
           setOpen((current) => !current);
         }}
         title={title}
-        aria-label={title}
+        aria-label={compact ? title : `${title}: ${selectedLabel}`}
         aria-expanded={open}
         className={cn(
           'group flex max-w-[190px] items-center gap-2 text-sm transition-all',
@@ -205,7 +207,7 @@ export function ModelPresetPicker({
               pill ? 'text-[var(--pq-text-muted)]' : 'text-[var(--pq-text)]',
             )}
           >
-            {selectedPreset?.label || selectedPreset?.model || l('未配置模型', 'No model')}
+            {selectedLabel}
           </span>
         )}
         {compact ? null : (

@@ -1,6 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const { hasUnsafePathSyntax, isUncPath, isWithinRoot } = require('./pathPolicy.cjs');
 const { runBackupExport, estimateBackupSources, readBackupHistory } = require('./backupExport.cjs');
 
 const PROGRESS_EVENT = 'paperquay://backup-progress';
@@ -8,6 +9,7 @@ const ERROR_MESSAGES = {
   BACKUP_BUSY: '另一个备份或恢复任务正在进行，请稍候。',
   APP_RUNNING: '请关闭其他 PaperQuay 实例和使用文库的外部 Agent 后重试。',
   INVALID_PACKAGE: '不是有效的 PaperQuay 备份包。',
+  UNAUTHORIZED_PACKAGE: '请通过应用的文件对话框选择备份包。',
   WRONG_PASSWORD_OR_CORRUPT: '密码错误或备份包已损坏。',
   UNSUPPORTED_VERSION: '备份包需要更新版本的 PaperQuay，请先升级。',
   UNSAFE_ENTRY_PATH: '备份包包含不安全路径，已拒绝导入。',
@@ -35,14 +37,14 @@ function normalizePath(value) {
   return typeof value === 'string' && value.trim() ? path.resolve(value) : '';
 }
 
+function restoreTargetError(code, message) {
+  return Object.assign(new Error(message), { code });
+}
+
 function emitProgress(sender, payload) {
   try {
     sender?.send('paperquay:event', PROGRESS_EVENT, payload);
   } catch {}
-}
-
-function safeName(value) {
-  return path.basename(String(value || '')).slice(0, 180);
 }
 
 function createBackupCommands(context) {
@@ -55,6 +57,73 @@ function createBackupCommands(context) {
   const sourceEstimator = context.backupEstimate || estimateBackupSources;
   let activeTask = null;
   let estimateCache = null;
+  // 恢复目标只认主进程文件对话框本次返回的目录。渲染层可以伪造任意绝对路径，
+  // 不能因为它在同一台机器上存在就允许覆盖/重命名。
+  const authorizedRestoreTargets = [];
+  // 备份包路径同样只认 backup_select_package 本次会话返回的值：渲染层可以伪造
+  // 任意绝对路径，inspect 在打开容器（尤其是 UNC 的 SMB 探测）之前必须拒绝。
+  const authorizedPackages = new Set();
+
+  function comparablePackagePath(value) {
+    const resolved = path.resolve(value);
+    return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+  }
+
+  function registerPackagePath(packagePath) {
+    if (typeof packagePath !== 'string' || !packagePath.trim() || !path.isAbsolute(packagePath)) return;
+    if (isUncPath(packagePath) || hasUnsafePathSyntax(packagePath)) return;
+    authorizedPackages.add(comparablePackagePath(packagePath));
+  }
+
+  function authorizedPackagePath(value) {
+    const raw = typeof value === 'string' ? value.trim() : '';
+    if (!raw || !path.isAbsolute(raw) || isUncPath(raw) || hasUnsafePathSyntax(raw)) {
+      throw restoreTargetError('UNAUTHORIZED_PACKAGE', 'Backup package must be selected through the application dialog');
+    }
+    if (!authorizedPackages.has(comparablePackagePath(raw))) {
+      throw restoreTargetError('UNAUTHORIZED_PACKAGE', 'Backup package must be selected through the application dialog');
+    }
+    return path.resolve(raw);
+  }
+
+  function registerRestoreTarget(directory) {
+    if (typeof directory !== 'string' || !directory.trim() || !path.isAbsolute(directory)) return;
+    if (isUncPath(directory) || hasUnsafePathSyntax(directory)) return;
+    const resolved = path.resolve(directory);
+    if (authorizedRestoreTargets.some((root) => isWithinRoot(root, resolved) && isWithinRoot(resolved, root))) return;
+    authorizedRestoreTargets.push(resolved);
+    try {
+      context.pathPolicy?.approveWritePath?.(resolved);
+    } catch {}
+  }
+
+  function authorizedRestoreTarget(value, label) {
+    const raw = typeof value === 'string' ? value.trim() : '';
+    if (!raw || !path.isAbsolute(raw)) {
+      throw restoreTargetError('TARGET_NOT_WRITABLE', `${label} must be an absolute path selected through the application dialog`);
+    }
+    if (isUncPath(raw) || hasUnsafePathSyntax(raw)) {
+      throw restoreTargetError('UNSAFE_DESTINATION', `${label} cannot be a UNC or device path`);
+    }
+    const resolved = path.resolve(raw);
+    if (!authorizedRestoreTargets.some((root) => isWithinRoot(resolved, root))) {
+      throw restoreTargetError('UNSAFE_DESTINATION', `${label} must be selected through the application dialog`);
+    }
+    return resolved;
+  }
+
+  function sanitizeRestoreTargets(targets) {
+    const sanitized = {};
+    for (const key of ['libraryStorageDir', 'translatedPdfDir', 'notesVaultDir']) {
+      const value = targets?.[key];
+      if (typeof value !== 'string' || !value.trim()) continue;
+      sanitized[key] = authorizedRestoreTarget(value, key);
+    }
+    if (!sanitized.libraryStorageDir) {
+      throw restoreTargetError('TARGET_NOT_WRITABLE', 'libraryStorageDir must be selected through the application dialog');
+    }
+    return sanitized;
+  }
 
   function ownerWindow(event) {
     try {
@@ -104,10 +173,14 @@ function createBackupCommands(context) {
         properties: ['openFile'],
         filters: [{ name: 'PaperQuay backup', extensions: ['pqbackup'] }],
       });
-      return result.canceled ? null : result.filePaths?.[0] || null;
+      const selected = result.canceled ? null : result.filePaths?.[0] || null;
+      if (selected) registerPackagePath(selected);
+      return selected;
     }
     const result = await dialog.showOpenDialog(window, { properties: ['openDirectory', 'createDirectory'] });
-    return result.canceled ? null : result.filePaths?.[0] || null;
+    const selected = result.canceled ? null : result.filePaths?.[0] || null;
+    if (selected) registerRestoreTarget(selected);
+    return selected;
   }
 
   function statusSnapshot() {
@@ -232,7 +305,7 @@ function createBackupCommands(context) {
       return withTask('inspect', async (signal) => {
         try {
           return await importer.inspectBackupPackage({
-            packagePath: args?.packagePath,
+            packagePath: authorizedPackagePath(args?.packagePath),
             password: args?.password,
             signal,
           });
@@ -246,9 +319,10 @@ function createBackupCommands(context) {
       const result = await withTask('import', async (signal) => {
         try {
           return await importer.stageBackupImport(context, {
-            packagePath: args?.packagePath,
+            packagePath: authorizedPackagePath(args?.packagePath),
             password: args?.password,
-            targets: args?.targets || {},
+            targets: sanitizeRestoreTargets(args?.targets),
+            authorizedTargets: authorizedRestoreTargets.slice(),
             currentRendererState: args?.currentRendererState || {},
             signal,
             onProgress: (payload) => emitProgress(event?.sender, { direction: 'import', ...payload }),

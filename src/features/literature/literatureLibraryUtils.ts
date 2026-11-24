@@ -3,9 +3,8 @@ import type {
   LibrarySettings,
   LiteratureCategory,
   LiteratureItemType,
-  LiteratureAuthorInput,
   LiteraturePaper,
-  LiteraturePaperTaskState,
+  PaperListSummary,
   UpdatePaperRequest,
 } from '../../types/library';
 import type { MetadataLookupResult } from '../../types/metadata';
@@ -20,7 +19,8 @@ import { paperPdfPath, resolvePaperPdfAttachment } from '../../utils/libraryPape
 import { canAutoReplaceTitle, titleFromPdfPath } from './importMetadata.ts';
 import type { ImportDraftItem } from './importTypes';
 import type { LiteraturePaperListStatus } from './components/LiteraturePaperList';
-import { canonicalizeBcp47Language, isValidCitationKey, normalizeOrcid } from './metadataValidation.ts';
+import { canonicalizeBcp47Language, normalizeOrcid } from './metadataValidation.ts';
+import { buildZoteroItemMetadata } from '../../shared/zoteroItemMetadata.cjs';
 
 export interface LiteratureLibraryDemoState {
   settings: LibrarySettings;
@@ -167,43 +167,7 @@ export function metadataFromDraft(draft: ImportDraftItem): ImportPdfMetadata {
 }
 
 export function metadataFromZoteroItem(item: ZoteroLibraryItem): ImportPdfMetadata {
-  const year = item.year.trim();
-  const detailedAuthors: LiteratureAuthorInput[] = (item.authors ?? [])
-    .map((author) => ({
-      name: author.name.trim(),
-      givenName: author.givenName?.trim() || null,
-      familyName: author.familyName?.trim() || null,
-      affiliation: author.affiliation?.trim() || null,
-      orcid: normalizeOrcid(author.orcid) ?? null,
-    }))
-    .filter((author) => author.name);
-  const authors = detailedAuthors.length > 0
-    ? detailedAuthors.map((author) => author.name)
-    : splitAuthors(item.creators).filter((author) => author !== 'Unknown Authors');
-  const metadata: ImportPdfMetadata = {
-    title: item.title.trim() || item.attachmentFilename || item.itemKey,
-    authors,
-    year: year && year !== '未知年份' && year !== 'Unknown Year' ? year : null,
-    publication: null,
-    doi: null,
-  };
-
-  if (item.itemType && item.itemType !== 'journalArticle') {
-    metadata.itemType = normalizeItemType(item.itemType);
-  }
-
-  if (detailedAuthors.length > 0) metadata.authorDetails = detailedAuthors;
-
-  const language = canonicalizeBcp47Language(item.language);
-  if (language) metadata.language = language;
-
-  const citationLine = item.extra
-    ?.split(/\r?\n/)
-    .find((line) => /^citation\s+key\s*:/i.test(line));
-  const citationKey = citationLine?.replace(/^citation\s+key\s*:/i, '').trim() || '';
-  if (citationKey && isValidCitationKey(citationKey)) metadata.citationKey = citationKey;
-
-  return metadata;
+  return buildZoteroItemMetadata(item) as ImportPdfMetadata;
 }
 
 export function categorySignature(name: string, parentId: string | null): string {
@@ -596,4 +560,48 @@ export async function hasMineruOutputForPaper(
   }
 
   return false;
+}
+
+const PAPER_LIST_SUMMARY_KEYS: Array<keyof PaperListSummary> = [
+  'id',
+  'title',
+  'titleZh',
+  'year',
+  'publication',
+  'itemType',
+  'importedAt',
+  'updatedAt',
+  'lastReadAt',
+  'readingProgress',
+  'isFavorite',
+  'aiSummary',
+  'source',
+  'sortOrder',
+  'ragEnabled',
+  'authors',
+  'tags',
+  'categoryIds',
+  'attachments',
+];
+
+/**
+ * 把主进程返回的列表摘要合并进已有行：只覆盖摘要包含的字段，
+ * 保留 abstract/doi/keywords 等详情字段，避免详情面板被摘要清空。
+ */
+export function mergePaperListSummary(
+  paper: LiteraturePaper,
+  summary: PaperListSummary,
+): LiteraturePaper {
+  let changed = false;
+  const next: LiteraturePaper = { ...paper };
+
+  for (const key of PAPER_LIST_SUMMARY_KEYS) {
+    if (!(key in summary)) continue;
+    const nextValue = summary[key];
+    if (Object.is(next[key], nextValue)) continue;
+    (next as unknown as Record<string, unknown>)[key] = nextValue;
+    changed = true;
+  }
+
+  return changed ? next : paper;
 }

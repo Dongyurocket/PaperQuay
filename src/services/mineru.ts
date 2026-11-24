@@ -9,13 +9,13 @@ import type {
 } from '../types/reader';
 import { isValidBBox } from '../utils/bbox.ts';
 import {
-  normalizeLatexExpression,
   normalizeMarkdownMath,
   normalizeRawLatexExpression,
   sanitizeDropCapArtifacts,
   sanitizeFakeSuperscripts,
 } from '../utils/markdown.ts';
 import { joinReadableText } from '../utils/text.ts';
+import { sanitizeMineruAssetReference } from '../shared/mineruCachePaths.cjs';
 
 // MinerU content 对象中的结构性字段：资产路径、几何与排版元数据。
 // 文本提取与 Markdown fallback 都必须忽略它们，避免把 images/<hash>.jpg
@@ -91,7 +91,8 @@ function stripHtml(input: string): string {
 function removeSpelledMineruTokenNoise(value: string): string {
   const chars = ['t', 'e', 'x', 't', 'l', 'i', 's', 't'];
   const spacedTokenPattern = new RegExp(
-    `(?:^|\s)${chars.join('[\s\u200b\u200c\u200d\ufeff_\-]*')}(?=\s|[\x00\u2022\u25cf\u25aa\u25ab\u25e6\ufffd])`,
+    // eslint-disable-next-line no-misleading-character-class -- 需要匹配零宽连接符等组合字符，保持原有语义
+    `(?:^|\\s)${chars.join('[\\s\u200b\u200c\u200d\ufeff_-]*')}(?=\\s|[\x00\u2022\u25cf\u25aa\u25ab\u25e6\ufffd])`,
     'gi',
   );
 
@@ -308,12 +309,14 @@ function renderInlineMarkdownContent(input: unknown): string {
 
 function cleanMineruListText(value: string): string {
   return removeSpelledMineruTokenNoise(value)
+    // eslint-disable-next-line no-misleading-character-class -- 需要匹配零宽连接符等组合字符，保持原有语义
     .replace(/[\u200b\u200c\u200d\ufeff]/g, '')
     .replace(/\btext\s*[_-]?\s*l\s*ist\s*text\b/gi, '')
     .replace(/\btext\s*[_-]\s*list\s*text\b/gi, '')
     .replace(/\btext\s*list\s*text\b/gi, '')
     .replace(/\btext\s*ist\s*text\b/gi, '')
     .replace(/\btextlist\s*text\b/gi, '')
+    // eslint-disable-next-line no-control-regex -- 需要匹配并剔除不可见控制字符，保持原有字节级语义
     .replace(/\btext\s*(?=[\x00\u2022\u25cf\u25aa\u25ab\u25e6\ufffd*+-])/gi, '')
     .replace(/\s+/g, ' ')
     .trim();
@@ -321,6 +324,7 @@ function cleanMineruListText(value: string): string {
 
 function isMineruListMetadataNoise(value: string): boolean {
   const normalized = value
+    // eslint-disable-next-line no-misleading-character-class -- 需要匹配零宽连接符等组合字符，保持原有语义
     .replace(/[\u200b\u200c\u200d\ufeff]/g, '')
     .replace(/[^a-z]/gi, '')
     .toLowerCase();
@@ -335,6 +339,7 @@ function splitBulletListItems(value: string): string[] {
   }
 
   const normalized = cleaned
+    // eslint-disable-next-line no-control-regex -- 需要匹配并剔除不可见控制字符，保持原有字节级语义
     .replace(/\s*[\x00\u2022\u25cf\u25aa\u25ab\u25e6\ufffd]\s*/g, '\n- ')
     .replace(/\btext\s+(?=[\u4e00-\u9fff])/gi, '\n- ')
     .replace(/\s+(?=\d+[.)]\s+)/g, '\n');
@@ -430,19 +435,18 @@ export function resolveMineruAssetPath(
     return undefined;
   }
 
-  if (/^[a-zA-Z]:[\\/]/.test(assetPath) || assetPath.startsWith('/') || assetPath.startsWith('\\')) {
-    return assetPath;
-  }
-
-  if (/^[a-zA-Z]+:\/\//.test(assetPath)) {
-    return assetPath;
-  }
-
   if (mineruPath.startsWith('cloud:')) {
     return undefined;
   }
 
-  return joinPath(getDirectoryPath(mineruPath), assetPath);
+  // content_list 是不可信数据：绝对路径、盘符、UNC、ADS 与 `..` 一律拒绝，
+  // 不允许把任意路径直接交给 read_binary_file_base64。
+  const reference = sanitizeMineruAssetReference(assetPath);
+  if (!reference) {
+    return undefined;
+  }
+
+  return joinPath(getDirectoryPath(mineruPath), ...reference.split('/'));
 }
 
 export function extractCaptionFromMineruBlock(block: PositionedMineruBlock): string {
@@ -1187,6 +1191,13 @@ export function buildRenderableBlocks(
         ? extractCaptionFromMineruBlock(block)
         : undefined;
     const relativeAssetPath = extractMineruAssetPathFromBlock(block);
+    const assetReference = relativeAssetPath
+      ? sanitizeMineruAssetReference(relativeAssetPath) ?? undefined
+      : undefined;
+    const usableMineruPath =
+      mineruPath && !mineruPath.startsWith('cloud:') ? mineruPath : undefined;
+    const assetCacheDir =
+      usableMineruPath && assetReference ? getDirectoryPath(usableMineruPath) : undefined;
 
     return {
       block,
@@ -1196,9 +1207,11 @@ export function buildRenderableBlocks(
       tableHtml,
       captionText,
       assetPath:
-        mineruPath && relativeAssetPath
-          ? resolveMineruAssetPath(mineruPath, relativeAssetPath)
+        usableMineruPath && assetReference
+          ? resolveMineruAssetPath(usableMineruPath, assetReference)
           : undefined,
+      assetCacheDir,
+      assetReference,
       isInteractive: isValidBBox(block.bbox),
     };
   });

@@ -1,0 +1,46 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowJs": true,
+    "checkJs": true,
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "strict": false,
+    "resolveJsonModule": true,
+    "types": [
+      "node"
+    ]
+  },
+  "include": [
+    "tests/appSettingsModuleStructure.test.mjs",
+    "tests/axeAudit.test.mjs",
+    "tests/checkjsAllowlist.test.mjs",
+    "tests/dialogFocusTrap.test.mjs",
+    "tests/electronMainIntegration.test.mjs",
+    "tests/electronSandboxStructure.test.mjs",
+    "tests/initialChunks.test.mjs",
+    "tests/installerScript.test.mjs",
+    "tests/lintConfig.test.mjs",
+    "tests/literatureToolbarRefresh.test.mjs",
+    "tests/packagingDependencies.test.mjs",
+    "tests/readerChatInputOverride.test.mjs",
+    "tests/readerSettingsHydration.test.mjs",
+    "tests/rendererDeadModules.test.mjs",
+    "tests/support/electronCdp.mjs",
+    "tests/support/installerSmoke.mjs",
+    "tests/support/pdfFixtures.mjs",
+    "tests/support/perfAudit.mjs",
+    "tests/support/windowsDialog.mjs",
+    "tests/testTempHygiene.test.mjs",
+    "tests/windowMinWidth.test.mjs",
+    "tests/workspaceRestore.test.mjs"
+  ]
+}

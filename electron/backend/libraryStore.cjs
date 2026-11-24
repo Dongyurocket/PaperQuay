@@ -95,22 +95,29 @@ function categoryCounts(library) {
   counts.set('uncategorized', papers.filter((paper) => paper.categoryIds.length === 0).length);
   counts.set('favorites', papers.filter((paper) => paper.isFavorite).length);
 
+  // 一次遍历预计算：每篇文献沿父链向上累计一次，避免「每个分类重建后代集
+  // 再扫描全库」的 O(分类² × 文献) 写法。seen 防止同一篇文献经由多个子分类
+  // 重复计入同一祖先。
+  const parentById = new Map();
   for (const category of library.categories) {
-    if (category.isSystem) continue;
-    const descendants = new Set([category.id]);
-    let changed = true;
-
-    while (changed) {
-      changed = false;
-      for (const child of library.categories) {
-        if (!child.isSystem && child.parentId && descendants.has(child.parentId) && !descendants.has(child.id)) {
-          descendants.add(child.id);
-          changed = true;
-        }
+    if (!category.isSystem) parentById.set(category.id, category.parentId ?? null);
+  }
+  const countsById = new Map();
+  for (const paper of papers) {
+    const seen = new Set();
+    for (const categoryId of paper.categoryIds ?? []) {
+      let cursor = categoryId;
+      let guard = 0;
+      while (cursor && guard < 1000 && !seen.has(cursor)) {
+        seen.add(cursor);
+        countsById.set(cursor, (countsById.get(cursor) ?? 0) + 1);
+        cursor = parentById.get(cursor) ?? null;
+        guard += 1;
       }
     }
-
-    counts.set(category.id, papers.filter((paper) => paper.categoryIds.some((id) => descendants.has(id))).length);
+  }
+  for (const categoryId of parentById.keys()) {
+    counts.set(categoryId, countsById.get(categoryId) ?? 0);
   }
 
   return counts;

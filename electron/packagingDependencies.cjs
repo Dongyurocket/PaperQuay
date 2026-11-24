@@ -2,26 +2,34 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 /**
- * F3：打包依赖归类与白名单校验。
+ * F3 / D8-4：打包依赖闭包与 build.files 覆盖校验。
  *
  * 渲染层依赖（React、Tiptap、Cytoscape、KaTeX 等）由 Vite 打进 dist/，不需要作为
  * 生产依赖复制进 asar；只有主进程与 MCP 在运行时 require 的包才必须保留。
  *
- * 本模块只读 package.json，供测试与 afterPack 断言使用：
- * - RUNTIME_DEPENDENCIES 是主进程/MCP 真正 require 的包；
- * - 出现新的运行时 require 而没登记时，测试会失败，避免再次出现
- *   「依赖移入 devDependencies 导致安装版缺模块」的回归。
+ * 旧实现用硬编码白名单 RUNTIME_DEPENDENCIES，无法发现传递依赖（如 pdf-lib 的
+ * pako/tslib、electron-updater 的 sax）漏打包。现在：
+ * 1. 从 electron/、bin/、src/shared/ 的实际 require 得到运行时根依赖；
+ * 2. 按 Node 解析规则（含嵌套 node_modules）展开 dependencies/optionalDependencies
+ *    得到传递闭包；
+ * 3. 用 build.files 的 glob 逐个验证闭包内每个包都被覆盖；
+ * 4. afterPack 再对真实 asar/安装目录断言 package.json 存在。
  */
 
-/** 主进程或 MCP 运行时 require 的第三方包（node: 内置模块除外）。 */
-const RUNTIME_DEPENDENCIES = [
+/**
+ * 期望的运行时根依赖清单。实际根由 `collectRuntimeRequires` 扫描代码得出；
+ * 二者必须一致（sql.js 没有静态 require，但 MCP bundle 复制其 wasm 资产，
+ * 因此保留为显式根）。本清单只用于发现“依赖被误删/误移”这类回归，不是
+ * 打包闭包的唯一来源。
+ */
+const RUNTIME_DEPENDENCIES = Object.freeze([
   'adm-zip',
   'electron-updater',
   'eventsource-parser',
   'pdf-lib',
   'sql.js',
   'sqlite-vec',
-];
+]);
 
 /** 这些包只服务于渲染层，Vite 已打包进 dist/，不应出现在 dependencies。 */
 const RENDERER_ONLY_DEPENDENCIES = [
@@ -46,6 +54,18 @@ const RENDERER_ONLY_DEPENDENCIES = [
 
 /** 已移除的未使用依赖：任何位置再次出现都视为回归。 */
 const REMOVED_DEPENDENCIES = ['temml'];
+
+/** 构建期/打包器提供的包：会在 electron/ 代码里出现，但不需要复制进 asar。 */
+const BUILD_ONLY_DEPENDENCIES = new Set([
+  '@electron/asar',
+  '@electron/fuses',
+  'app-builder-lib',
+  'builder-util',
+  'electron',
+  'electron-winstaller',
+  'esbuild',
+  'resedit',
+]);
 
 const MAIN_PROCESS_DIRS = ['electron', 'bin', 'src/shared'];
 
@@ -109,12 +129,130 @@ function readPackageJson(root) {
 }
 
 /**
- * 断言依赖归类正确：
- * 1. 运行时包都在 dependencies；
+ * 从 fromDir 开始按 Node 规则向上查找 `<dir>/node_modules/<name>/package.json`。
+ * fromDir 可以是根目录（顶层依赖）或某个包目录（嵌套依赖）。
+ */
+function resolvePackageDir(root, fromDir, packageName) {
+  const absoluteRoot = path.resolve(root);
+  let current = path.resolve(fromDir);
+  const segments = packageName.split('/');
+
+  while (true) {
+    const candidate = path.join(current, 'node_modules', ...segments);
+    if (fs.existsSync(path.join(candidate, 'package.json'))) {
+      return candidate;
+    }
+    if (current === absoluteRoot || !current.startsWith(absoluteRoot)) return null;
+    const parent = path.dirname(current);
+    if (parent === current) return null;
+    current = parent;
+  }
+}
+
+function toPosixRelative(root, absolutePath) {
+  return path.relative(root, absolutePath).split(path.sep).join('/');
+}
+
+/**
+ * 展开依赖闭包。根依赖必须能被解析（缺失记为问题）；optionalDependencies
+ * 缺失（例如其它平台的 sqlite-vec 包）静默跳过。
+ */
+function resolveDependencyClosure(root, roots) {
+  /** @type {Map<string, { name: string, version: string, path: string }>} */
+  const closure = new Map();
+  /** @type {string[]} */
+  const problems = [];
+  const queue = [...roots].map((name) => ({ name, fromDir: root, optional: false }));
+
+  while (queue.length > 0) {
+    const item = queue.shift();
+    const packageDir = resolvePackageDir(root, item.fromDir, item.name);
+    if (!packageDir) {
+      if (!item.optional) {
+        problems.push(`runtime dependency "${item.name}" is required but not installed under node_modules`);
+      }
+      continue;
+    }
+
+    const relativePath = toPosixRelative(root, packageDir);
+    if (closure.has(relativePath)) continue;
+
+    const packageJson = JSON.parse(fs.readFileSync(path.join(packageDir, 'package.json'), 'utf8'));
+    closure.set(relativePath, {
+      name: String(packageJson.name ?? item.name),
+      version: String(packageJson.version ?? ''),
+      path: relativePath,
+    });
+
+    for (const [dependency] of Object.entries(packageJson.dependencies ?? {})) {
+      queue.push({ name: dependency, fromDir: packageDir, optional: false });
+    }
+    for (const [dependency] of Object.entries(packageJson.optionalDependencies ?? {})) {
+      queue.push({ name: dependency, fromDir: packageDir, optional: true });
+    }
+  }
+
+  return { closure, problems };
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.+^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * 把 electron-builder 的 build.files glob 转成正则：
+ * `**` 跨目录（非末段时匹配 0..n 个目录），`*` 匹配单段内任意字符。
+ */
+function globToRegExp(pattern) {
+  const segments = pattern.split(path.sep).join('/').replace(/^\.\//, '').split('/');
+  let source = '^';
+  segments.forEach((segment, index) => {
+    const isLast = index === segments.length - 1;
+    if (segment === '**') {
+      source += isLast ? '.*' : '(?:[^/]+/)*';
+      return;
+    }
+    source += escapeRegExp(segment).replace(/\*/g, '[^/]*').replace(/\?/g, '[^/]');
+    if (!isLast) source += '/';
+  });
+  return new RegExp(`${source}$`);
+}
+
+/**
+ * build.files 模式是否覆盖整个包目录。
+ * 用包内 package.json 作为探针：`node_modules/foo/**` 必须匹配
+ * node_modules/foo/package.json；嵌套 node_modules 也按同一规则匹配。
+ */
+function patternCoversPackage(pattern, packagePath) {
+  if (!pattern || pattern.startsWith('!')) return false;
+  return globToRegExp(pattern).test(`${packagePath}/package.json`);
+}
+
+/**
+ * 正/负模式同时生效：包必须被至少一个正向模式覆盖，且不能被任何负向模式命中。
+ * （package.json 里的 canvas 排除规则就是真实负模式。）
+ */
+function packageCoveredByFiles(files, packagePath) {
+  const probe = `${packagePath}/package.json`;
+  let covered = false;
+  for (const pattern of files) {
+    if (!pattern) continue;
+    if (pattern.startsWith('!')) {
+      if (globToRegExp(pattern.slice(1)).test(probe)) return false;
+    } else if (globToRegExp(pattern).test(probe)) {
+      covered = true;
+    }
+  }
+  return covered;
+}
+
+/**
+ * 断言依赖归类与打包覆盖正确：
+ * 1. 代码里 require 的运行时根依赖都在 dependencies；
  * 2. 渲染层包都不在 dependencies；
  * 3. 已删除依赖没有回来；
- * 4. 主进程代码里 require 的第三方包都登记在 RUNTIME_DEPENDENCIES；
- * 5. 打包 files 白名单覆盖所有运行时依赖。
+ * 4. 根依赖与传递依赖都能在 node_modules 解析；
+ * 5. build.files 覆盖闭包内每个包。
  */
 function auditPackagingDependencies(root) {
   const packageJson = readPackageJson(root);
@@ -141,30 +279,54 @@ function auditPackagingDependencies(root) {
   }
 
   const requires = collectRuntimeRequires(root);
-  const known = new Set(RUNTIME_DEPENDENCIES);
-  // electron 由打包器提供；builder-util 只在 afterPack（构建期）使用；
-  // esbuild 只在 scripts/bundle-mcp.cjs（构建期）使用。
-  const ignored = new Set(['electron', 'builder-util', 'builder-util-runtime', 'esbuild']);
-  for (const name of requires) {
-    if (known.has(name) || ignored.has(name)) continue;
-    problems.push(`main-process code requires "${name}" but it is not registered in RUNTIME_DEPENDENCIES`);
-  }
+  // sql.js 没有静态 require：MCP bundle 仍复制 sql-wasm.wasm 作为旧库兼容资产，
+  // 所以它继续算作需要随包发布的运行时依赖。
+  const roots = [...new Set([
+    ...[...requires].filter((name) => !BUILD_ONLY_DEPENDENCIES.has(name)),
+    'sql.js',
+  ])].sort();
 
-  const files = packageJson.build?.files ?? [];
-  for (const name of RUNTIME_DEPENDENCIES) {
-    const covered = files.some((pattern) => pattern === `node_modules/${name}/**/*` || pattern.startsWith(`node_modules/${name}/`));
-    if (!covered) {
-      problems.push(`build.files must include node_modules/${name}/**/* so the packaged app can require it`);
+  for (const name of requires) {
+    if (BUILD_ONLY_DEPENDENCIES.has(name)) continue;
+    if (!dependencies.includes(name)) {
+      problems.push(`main-process code requires "${name}" but it is not declared in dependencies`);
     }
   }
 
-  return { problems, requires, dependencies };
+  // 反向漂移：期望清单里的包若已不再被 require，应同步清理（sql.js 例外）。
+  const scannedRoots = new Set(roots);
+  for (const name of RUNTIME_DEPENDENCIES) {
+    if (name === 'sql.js') continue;
+    if (!scannedRoots.has(name)) {
+      problems.push(`RUNTIME_DEPENDENCIES lists "${name}" but no main-process require was found; update the expected list`);
+    }
+  }
+
+  const { closure, problems: resolutionProblems } = resolveDependencyClosure(root, roots);
+  problems.push(...resolutionProblems);
+
+  const files = packageJson.build?.files ?? [];
+  for (const entry of closure.values()) {
+    if (!packageCoveredByFiles(files, entry.path)) {
+      problems.push(
+        `build.files must include ${entry.path}/**/* so the packaged app can require "${entry.name}"`,
+      );
+    }
+  }
+
+  return { problems, requires, roots, dependencies, closure };
 }
 
 module.exports = {
   RUNTIME_DEPENDENCIES,
   RENDERER_ONLY_DEPENDENCIES,
   REMOVED_DEPENDENCIES,
+  BUILD_ONLY_DEPENDENCIES,
   collectRuntimeRequires,
+  resolvePackageDir,
+  resolveDependencyClosure,
+  globToRegExp,
+  patternCoversPackage,
+  packageCoveredByFiles,
   auditPackagingDependencies,
 };

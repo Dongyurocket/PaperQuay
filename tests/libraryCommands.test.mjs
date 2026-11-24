@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
@@ -270,7 +271,7 @@ test('library_get_paper exposes papers beyond the 1000-row list clamp', async ()
 
     const commands = createLibraryCommands({ appPaths, store });
     const clamped = await commands.library_list_papers({ request: { limit: 5000 } });
-    assert.equal(clamped.length, 1000, 'library_list_papers keeps its explicit 1000 clamp');
+    assert.equal(clamped.length, 1200, 'library_list_papers no longer truncates at 1000 rows');
 
     const paper = await commands.library_get_paper({ paperId: 'paper-1199' });
     assert.equal(paper?.id, 'paper-1199');
@@ -322,6 +323,87 @@ test('startup cycle repair detaches a cycle node and keeps innocent descendants 
     await reopenedCommands.library_update_category({ request: { id: x.id, parentId: null } });
     assert.equal(store.listCategoriesWithCounts().find((item) => item.id === x.id).parentId, null);
   } finally {
+    store?.close();
+    rmSync(appPaths.dataDir, { recursive: true, force: true });
+  }
+});
+
+test('library_import_pdfs rejects files over the configured size limit', async () => {
+  const appPaths = createAppPaths();
+  let store = null;
+
+  try {
+    store = createLibraryStore(appPaths);
+    const commands = createLibraryCommands({ appPaths, store, importLimits: { maxPdfBytes: 8 } });
+    const sourcePath = path.join(appPaths.dataDir, 'oversized.pdf');
+    writeFileSync(sourcePath, `%PDF-1.7\n${'x'.repeat(64)}`);
+
+    const results = await commands.library_import_pdfs({
+      request: { paths: [sourcePath], source: 'local' },
+    });
+
+    assert.equal(results.length, 1);
+    assert.equal(results[0].status, 'failed');
+    assert.match(results[0].message, /size limit/i);
+    assert.equal(store.load().papers.length, 0);
+  } finally {
+    store?.close();
+    rmSync(appPaths.dataDir, { recursive: true, force: true });
+  }
+});
+
+test('library_import_pdfs hashes the file while streaming and imports it', async () => {
+  const appPaths = createAppPaths();
+  let store = null;
+
+  try {
+    store = createLibraryStore(appPaths);
+    const commands = createLibraryCommands({ appPaths, store });
+    const content = `%PDF-1.7\n${'paper body\n'.repeat(200)}`;
+    const sourcePath = path.join(appPaths.dataDir, 'streamed.pdf');
+    writeFileSync(sourcePath, content);
+
+    const results = await commands.library_import_pdfs({
+      request: { paths: [sourcePath], source: 'local' },
+    });
+
+    assert.equal(results[0].status, 'imported');
+    assert.equal(
+      results[0].paper.attachments[0].contentHash,
+      createHash('sha256').update(content).digest('hex'),
+    );
+  } finally {
+    store?.close();
+    rmSync(appPaths.dataDir, { recursive: true, force: true });
+  }
+});
+
+test('lookup_literature_metadata gives metadata HTTP requests a timeout signal', async () => {
+  const appPaths = createAppPaths();
+  let store = null;
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), init });
+    const body = String(url).includes('openalex')
+      ? { id: 'https://openalex.org/W1', title: 'Paper' }
+      : { message: { title: ['Paper'] } };
+    return new Response(JSON.stringify(body), {
+      headers: { 'content-type': 'application/json' },
+    });
+  };
+
+  try {
+    store = createLibraryStore(appPaths);
+    const commands = createLibraryCommands({ appPaths, store, httpLimits: { metadataTimeoutMs: 20 } });
+
+    await commands.lookup_literature_metadata({ request: { doi: '10.1000/paper' } });
+
+    assert.ok(calls.length >= 2);
+    assert.ok(calls.every((call) => call.init?.signal instanceof AbortSignal));
+  } finally {
+    globalThis.fetch = originalFetch;
     store?.close();
     rmSync(appPaths.dataDir, { recursive: true, force: true });
   }

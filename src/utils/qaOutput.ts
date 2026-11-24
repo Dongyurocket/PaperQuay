@@ -13,7 +13,7 @@ function containsReasoningLeak(text: string): boolean {
 }
 
 function stripThinkContent(text: string): string {
-  let result = String(text ?? '').replace(/<think\b[^>]*>[\s\S]*?<\/think>/gi, '').trim();
+  const result = String(text ?? '').replace(/<think\b[^>]*>[\s\S]*?<\/think>/gi, '').trim();
   const openThink = result.match(/<think\b[^>]*>/i);
 
   if (!openThink || openThink.index === undefined) {

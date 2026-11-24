@@ -1,9 +1,16 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const esbuild = require('esbuild');
+const {
+  MCP_BUNDLE_OUT_FILE,
+  MCP_BUNDLE_WORKER_OUT_FILE,
+  createMcpBundleOptions,
+  createMcpWorkerBundleOptions,
+  resolveMcpBundlePaths,
+} = require('./bundleMcpConfig.cjs');
+const { writeMcpBundleManifest } = require('../electron/mcpBundleManifest.cjs');
 
-const root = path.resolve(__dirname, '..');
-const outDir = path.join(root, 'packaging', 'mcp');
+const projectRoot = resolveMcpBundlePaths().root;
 
 function copyIfExists(source, target) {
   if (!fs.existsSync(source)) return false;
@@ -12,7 +19,7 @@ function copyIfExists(source, target) {
 }
 
 function copySqliteVec(targetNodeModules) {
-  const sourceRoot = path.join(root, 'node_modules');
+  const sourceRoot = path.join(projectRoot, 'node_modules');
   const names = fs.readdirSync(sourceRoot).filter((name) => name === 'sqlite-vec' || name.startsWith('sqlite-vec-'));
   fs.mkdirSync(targetNodeModules, { recursive: true });
   for (const name of names) {
@@ -21,36 +28,40 @@ function copySqliteVec(targetNodeModules) {
   return names;
 }
 
-async function bundleMcp() {
-  fs.rmSync(outDir, { recursive: true, force: true });
-  fs.mkdirSync(outDir, { recursive: true });
+/**
+ * Bundle the stdio server into packaging/mcp by default. Tests pass `outDir` to
+ * build into a temporary directory with identical options.
+ */
+async function bundleMcp({ outDir } = {}) {
+  const defaultPaths = resolveMcpBundlePaths();
+  const targetOutDir = outDir ? path.resolve(outDir) : defaultPaths.outDir;
 
-  await esbuild.build({
-    absWorkingDir: root,
-    entryPoints: ['bin/paperquay-mcp.cjs'],
-    bundle: true,
-    platform: 'node',
-    format: 'cjs',
-    target: 'node22',
-    outfile: path.join(outDir, 'server.cjs'),
-    external: ['sqlite-vec', 'sqlite-vec-*'],
-    legalComments: 'none',
-    logLevel: 'warning',
-  });
+  fs.rmSync(targetOutDir, { recursive: true, force: true });
+  fs.mkdirSync(targetOutDir, { recursive: true });
 
-  const wasmSource = path.join(root, 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm');
-  if (!copyIfExists(wasmSource, path.join(outDir, 'sql-wasm.wasm'))) {
+  await esbuild.build(createMcpBundleOptions({ outDir: targetOutDir }));
+  // D3-2：MCP 的 ragWorkerHost 以 __dirname/ragWorker.cjs 启动 worker；
+  // 安装版必须把 worker 与 server.cjs 放在同一目录，并让它自带依赖闭包。
+  await esbuild.build(createMcpWorkerBundleOptions({ outDir: targetOutDir }));
+
+  const wasmSource = path.join(projectRoot, 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm');
+  if (!copyIfExists(wasmSource, path.join(targetOutDir, 'sql-wasm.wasm'))) {
     throw new Error(`sql.js wasm was not found at ${wasmSource}`);
   }
 
-  const sqlitePackages = copySqliteVec(path.join(outDir, 'node_modules'));
+  const sqlitePackages = copySqliteVec(path.join(targetOutDir, 'node_modules'));
   if (!sqlitePackages.includes('sqlite-vec')) {
     throw new Error('sqlite-vec was not found in node_modules');
   }
 
+  // D3-13：记录源入口/产物 hash 与工具数，afterPack 校验 stale bundle。
+  const manifest = writeMcpBundleManifest({ root: projectRoot, outDir: targetOutDir });
+
   return {
-    outDir,
-    entry: path.join(outDir, 'server.cjs'),
+    outDir: targetOutDir,
+    entry: path.join(targetOutDir, MCP_BUNDLE_OUT_FILE),
+    workerEntry: path.join(targetOutDir, MCP_BUNDLE_WORKER_OUT_FILE),
+    manifest,
     sqlitePackages,
   };
 }

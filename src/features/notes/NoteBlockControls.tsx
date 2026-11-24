@@ -21,6 +21,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { cn } from '../../utils/cn';
+import { useLocaleText } from '../../i18n/uiLanguage';
 import { copyTextToClipboard } from './NotesContextMenu';
 import {
   deleteNoteBlock,
@@ -95,6 +96,7 @@ export function NoteBlockControls({
 }) {
   const [activeBlock, setActiveBlock] = useState<ActiveNoteBlock | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const l = useLocaleText();
   const draggingRef = useRef(false);
   const menuOpenRef = useRef(false);
 
@@ -105,8 +107,8 @@ export function NoteBlockControls({
   const syncSelectionBlock = useCallback(() => {
     if (!editor) return;
     const block = getCurrentBlockRange(editor);
-    if (block) setActiveBlock(toActiveNoteBlock(editor, block));
-  }, [editor]);
+    if (block) setActiveBlock(toActiveNoteBlock(editor, block, l));
+  }, [editor, l]);
 
   useEffect(() => {
     if (!editor) return undefined;
@@ -150,9 +152,9 @@ export function NoteBlockControls({
 
     const block = getTopLevelBlockRangeAtPos(editor, data.pos);
     if (block) {
-      setActiveBlock(toActiveNoteBlock(editor, block));
+      setActiveBlock(toActiveNoteBlock(editor, block, l));
     }
-  }, [editor]);
+  }, [editor, l]);
   const clearDragArtifacts = useCallback(() => {
     window.requestAnimationFrame(() => {
       if (!editor || editor.isDestroyed) return;
@@ -185,7 +187,7 @@ export function NoteBlockControls({
     callback(block);
     window.requestAnimationFrame(() => {
       const nextBlock = resolveActiveBlock(editor, block);
-      if (nextBlock) setActiveBlock(toActiveNoteBlock(editor, nextBlock));
+      if (nextBlock) setActiveBlock(toActiveNoteBlock(editor, nextBlock, l));
     });
   };
   const convertBlock = (callback: () => void) => {
@@ -255,7 +257,7 @@ export function NoteBlockControls({
           type="button"
           draggable={false}
           className="pq-note-block-control-button"
-          title="Insert block below"
+          title={l('在下方插入块', 'Insert block below')}
           onMouseDown={(event) => {
             event.preventDefault();
             event.stopPropagation();
@@ -267,7 +269,10 @@ export function NoteBlockControls({
         <button
           type="button"
           className="pq-note-block-control-button pq-note-block-grip-button"
-          title={`${activeBlock?.label ?? 'Block'} menu`}
+          title={l(
+            `${activeBlock?.label ?? l('块', 'Block')} 菜单`,
+            `${activeBlock?.label ?? l('块', 'Block')} menu`,
+          )}
           onClick={(event) => {
             event.preventDefault();
             if (draggingRef.current) return;
@@ -279,64 +284,64 @@ export function NoteBlockControls({
         {menuOpen ? (
           <div className="pq-note-toolbar-menu pq-note-block-menu">
             <div className="px-2 py-1 text-[11px] font-semibold text-[var(--pq-text-faint)]">
-              {activeBlock?.label ?? 'Block'}
+              {activeBlock?.label ?? l('块', 'Block')}
             </div>
             <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => convertBlock(() => editor.chain().focus().setParagraph().run())}>
               <Pilcrow className="h-4 w-4" strokeWidth={1.8} />
-              Paragraph
+              {l('正文', 'Paragraph')}
             </button>
             <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => convertBlock(() => editor.chain().focus().toggleHeading({ level: 1 }).run())}>
               <Heading1 className="h-4 w-4" strokeWidth={1.8} />
-              Heading 1
+              {l('一级标题', 'Heading 1')}
             </button>
             <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => convertBlock(() => editor.chain().focus().toggleHeading({ level: 2 }).run())}>
               <Heading2 className="h-4 w-4" strokeWidth={1.8} />
-              Heading 2
+              {l('二级标题', 'Heading 2')}
             </button>
             <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => convertBlock(() => editor.chain().focus().toggleBulletList().run())}>
               <List className="h-4 w-4" strokeWidth={1.8} />
-              Bullet list
+              {l('无序列表', 'Bullet list')}
             </button>
             <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => convertBlock(() => editor.chain().focus().toggleOrderedList().run())}>
               <ListOrdered className="h-4 w-4" strokeWidth={1.8} />
-              Ordered list
+              {l('有序列表', 'Ordered list')}
             </button>
             <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => convertBlock(() => editor.chain().focus().toggleTaskList().run())}>
               <ListChecks className="h-4 w-4" strokeWidth={1.8} />
-              Task list
+              {l('任务列表', 'Task list')}
             </button>
             <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => convertBlock(() => editor.chain().focus().toggleBlockquote().run())}>
               <Quote className="h-4 w-4" strokeWidth={1.8} />
-              Quote
+              {l('引用', 'Quote')}
             </button>
             <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => convertBlock(() => editor.chain().focus().toggleCodeBlock().run())}>
               <Code2 className="h-4 w-4" strokeWidth={1.8} />
-              Code block
+              {l('代码块', 'Code block')}
             </button>
             <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={insertComponentBelow}>
               <FileText className="h-4 w-4" strokeWidth={1.8} />
-              Component
+              {l('组件块', 'Component')}
             </button>
             <div className="my-1 border-t border-[var(--pq-border-subtle)]" />
             <button type="button" disabled={!activeBlock?.canMoveUp} onMouseDown={(event) => event.preventDefault()} onClick={() => moveBlock('up')}>
               <ArrowUp className="h-4 w-4" strokeWidth={1.8} />
-              Move up
+              {l('上移', 'Move up')}
             </button>
             <button type="button" disabled={!activeBlock?.canMoveDown} onMouseDown={(event) => event.preventDefault()} onClick={() => moveBlock('down')}>
               <ArrowDown className="h-4 w-4" strokeWidth={1.8} />
-              Move down
+              {l('下移', 'Move down')}
             </button>
             <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={copyBlock}>
               <Copy className="h-4 w-4" strokeWidth={1.8} />
-              Copy block text
+              {l('复制块文本', 'Copy block text')}
             </button>
             <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={duplicateBlock}>
               <FileText className="h-4 w-4" strokeWidth={1.8} />
-              Duplicate block
+              {l('复制块', 'Duplicate block')}
             </button>
             <button type="button" className="is-danger" onMouseDown={(event) => event.preventDefault()} onClick={deleteBlock}>
               <Trash2 className="h-4 w-4" strokeWidth={1.8} />
-              Delete block
+              {l('删除块', 'Delete block')}
             </button>
           </div>
         ) : null}

@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { parseMineruTokens } from '../src/services/mineru.ts';
-// @ts-ignore
 import { parseMineruTokens as backendParseMineruTokens } from '../electron/backend/utils.cjs';
 
 test('parseMineruTokens parses single token correctly', () => {

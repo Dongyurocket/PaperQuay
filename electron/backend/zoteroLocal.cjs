@@ -2,32 +2,125 @@ const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const { cleanString } = require('./utils.cjs');
 const { yearFromDate } = require('./zoteroApi.cjs');
+const { DatabaseSync, sqlStringLiteral } = require('./nodeSqlite.cjs');
 
-let sqlModulePromise = null;
+// 每次查询都会先做一份一致性快照。并发上限避免多个 300MB+ 的 Zotero 库
+// 同时 VACUUM/复制拖垮主进程或占满临时盘；内存由 SQLite 页缓存控制，
+// 不再把整个数据库读进 sql.js/WASM。
+const MAX_CONCURRENT_SNAPSHOTS = 2;
+const SNAPSHOT_ATTEMPTS = 3;
+const SNAPSHOT_RETRY_DELAY_MS = 25;
 
-function resolveSqlJsWasm() {
-  const besideBundle = path.join(__dirname, 'sql-wasm.wasm');
-  if (fs.existsSync(besideBundle)) {
-    return besideBundle;
+let activeSnapshots = 0;
+const snapshotWaiters = [];
+
+function acquireSnapshotSlot() {
+  if (activeSnapshots < MAX_CONCURRENT_SNAPSHOTS) {
+    activeSnapshots += 1;
+    return Promise.resolve();
   }
 
-  // Keep the specifier non-literal so the MCP bundle does not bake a machine-local path.
-  const specifier = ['sql.js', 'dist', 'sql-wasm.wasm'].join('/');
-  return require.resolve(specifier);
+  return new Promise((resolve) => snapshotWaiters.push(resolve));
 }
 
-function getSqlModule() {
-  if (!sqlModulePromise) {
-    const initSqlJs = require('sql.js');
-    const wasmPath = resolveSqlJsWasm();
-    sqlModulePromise = initSqlJs({
-      locateFile: (file) => file.endsWith('.wasm') ? wasmPath : file,
+function releaseSnapshotSlot() {
+  const next = snapshotWaiters.shift();
+  if (next) {
+    next();
+    return;
+  }
+  activeSnapshots = Math.max(0, activeSnapshots - 1);
+}
+
+function delay(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function snapshotPaths(sqlitePath) {
+  return [sqlitePath, `${sqlitePath}-wal`, `${sqlitePath}-shm`];
+}
+
+async function removeSnapshotFiles(sqlitePath) {
+  await Promise.all(snapshotPaths(sqlitePath).map((filePath) => fsp.rm(filePath, { force: true }).catch(() => {})));
+}
+
+function openReadOnlyDatabase(filePath) {
+  return new DatabaseSync(filePath, { readOnly: true, timeout: 5000 });
+}
+
+function assertSnapshotIntegrity(sqlitePath, { readOnly = true } = {}) {
+  const db = readOnly
+    ? openReadOnlyDatabase(sqlitePath)
+    // 复制出来的临时副本可以安全地以读写方式恢复 WAL；缺少 -shm 时
+    // SQLite 需要自己创建，只读打开会直接失败。
+    : new DatabaseSync(sqlitePath, { timeout: 5000 });
+  try {
+    const row = db.prepare('PRAGMA quick_check').get();
+    const value = row ? Object.values(row)[0] : '';
+    if (value !== 'ok') {
+      throw new Error(`Zotero snapshot failed quick_check: ${value}`);
+    }
+  } finally {
+    db.close();
+  }
+}
+
+async function copySnapshotFiles(sourcePath, targetPath) {
+  await fsp.copyFile(sourcePath, targetPath);
+  for (const suffix of ['-wal', '-shm']) {
+    await fsp.copyFile(`${sourcePath}${suffix}`, `${targetPath}${suffix}`).catch((error) => {
+      if (error?.code !== 'ENOENT') throw error;
     });
   }
+}
 
-  return sqlModulePromise;
+/**
+ * 只读连接上的 `VACUUM INTO` 会读取 WAL 中尚未 checkpoint 的行，并写出一个
+ * 一致的单文件快照；Zotero 运行中也可以安全执行。若当前 SQLite/文件系统
+ * 不支持（或拿不到读锁），退回复制 sqlite + wal + shm 后再做 quick_check，
+ * 并有限重试，避免把半写入的文件当成数据库。
+ */
+async function createConsistentSnapshot(sourcePath, tempDir) {
+  await fsp.mkdir(tempDir, { recursive: true });
+  const sqlitePath = path.join(
+    tempDir,
+    `zotero-${process.pid}-${crypto.randomBytes(8).toString('hex')}.sqlite`,
+  );
+  let lastError = null;
+
+  for (let attempt = 0; attempt < SNAPSHOT_ATTEMPTS; attempt += 1) {
+    await removeSnapshotFiles(sqlitePath);
+    try {
+      const db = openReadOnlyDatabase(sourcePath);
+      try {
+        db.exec(`VACUUM main INTO ${sqlStringLiteral(sqlitePath)}`);
+      } finally {
+        db.close();
+      }
+      assertSnapshotIntegrity(sqlitePath);
+      return sqlitePath;
+    } catch (error) {
+      lastError = error;
+    }
+
+    try {
+      await removeSnapshotFiles(sqlitePath);
+      await copySnapshotFiles(sourcePath, sqlitePath);
+      assertSnapshotIntegrity(sqlitePath, { readOnly: false });
+      return sqlitePath;
+    } catch (error) {
+      lastError = error;
+      await removeSnapshotFiles(sqlitePath);
+      if (attempt + 1 < SNAPSHOT_ATTEMPTS) {
+        await delay(SNAPSHOT_RETRY_DELAY_MS * (attempt + 1));
+      }
+    }
+  }
+
+  throw lastError ?? new Error('Could not create a consistent Zotero database snapshot');
 }
 
 function isReadableFile(filePath) {
@@ -198,38 +291,42 @@ async function withLocalZoteroDatabase(dataDirInput, callback) {
   const dataDir = resolveLocalZoteroDataDir(dataDirInput);
   const source = path.join(dataDir, 'zotero.sqlite');
   const tempDir = path.join(os.tmpdir(), 'paperquay-zotero');
-  const sqliteCopy = path.join(tempDir, `zotero-${Date.now()}-${process.pid}.sqlite`);
 
-  await fsp.mkdir(tempDir, { recursive: true });
-  await fsp.copyFile(source, sqliteCopy);
-
-  const SQL = await getSqlModule();
-  const bytes = await fsp.readFile(sqliteCopy);
-  const db = new SQL.Database(bytes);
-  const baseAttachmentPath = readBaseAttachmentPath(dataDir);
+  await acquireSnapshotSlot();
+  let sqlitePath = '';
+  let db = null;
 
   try {
-    return await callback(db, dataDir, baseAttachmentPath);
+    sqlitePath = await createConsistentSnapshot(source, tempDir);
+    db = openReadOnlyDatabase(sqlitePath);
+    const baseAttachmentPath = readBaseAttachmentPath(dataDir);
+    return await callback(createQueryDatabase(db), dataDir, baseAttachmentPath);
   } finally {
-    db.close();
-    await fsp.rm(sqliteCopy, { force: true }).catch(() => {});
+    if (db) db.close();
+    if (sqlitePath) await removeSnapshotFiles(sqlitePath);
+    releaseSnapshotSlot();
   }
 }
 
+/**
+ * sql.js 风格的窄适配层：只暴露 prepare(sql).all(...params)。查询代码
+ * 不需要知道底层是 node:sqlite，也避免把整个数据库载入 WASM 内存。
+ */
+function createQueryDatabase(database) {
+  return {
+    prepare(sql) {
+      const statement = database.prepare(sql);
+      return {
+        all(...params) {
+          return statement.all(...params);
+        },
+      };
+    },
+  };
+}
+
 function rows(db, sql, params = []) {
-  const statement = db.prepare(sql);
-  const output = [];
-
-  try {
-    statement.bind(params);
-    while (statement.step()) {
-      output.push(statement.getAsObject());
-    }
-  } finally {
-    statement.free();
-  }
-
-  return output;
+  return db.prepare(sql).all(...params);
 }
 
 function one(db, sql, params = []) {

@@ -1,4 +1,11 @@
-import { readReaderConfigFile } from './readerConfig';
+import {
+  getAppSettings,
+  getAppSettingsSecrets,
+} from './appSettings';
+import {
+  getAppSettingsSecretsSnapshot,
+  getAppSettingsSnapshot,
+} from '../app/settings/appSettingsCache';
 import type {
   QaModelPreset,
   ReaderSecrets,
@@ -11,30 +18,9 @@ import type {
  * 阅读器问答、块重解析、选区提炼和笔记提炼共用同一份持久化预设：
  * 显式传入 preset id 时优先使用它，否则按问答 → 概览 → 翻译的顺序回退，
  * 最后才使用列表中的第一个预设。旧配置里的 `agentModelPresetId` 不再参与回退。
+ *
+ * 数据来源是主进程的单一设置文档；渲染层缓存未 hydrate 时退回 IPC 读取。
  */
-const SETTINGS_STORAGE_KEY = 'paper-reader-settings-v3';
-const SECRETS_STORAGE_KEY = 'paper-reader-secrets-v1';
-
-function readStorageJson<T>(key: string): Partial<T> {
-  if (typeof window === 'undefined' || !window.localStorage) return {};
-
-  try {
-    const raw = window.localStorage.getItem(key);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === 'object' ? parsed as Partial<T> : {};
-  } catch {
-    return {};
-  }
-}
-
-async function loadPersistedReaderConfig() {
-  try {
-    return await readReaderConfigFile();
-  } catch {
-    return null;
-  }
-}
 
 function normalizeModelApiMode(value: unknown) {
   return value === 'responses' ? 'responses' as const : 'chat_completions' as const;
@@ -48,19 +34,28 @@ export function normalizeModelPreset(preset: QaModelPreset): QaModelPreset {
 }
 
 async function loadMergedConfig() {
-  const persistedConfig = await loadPersistedReaderConfig();
-  const storedSettings = readStorageJson<ReaderSettings>(SETTINGS_STORAGE_KEY);
-  const storedSecrets = readStorageJson<ReaderSecrets>(SECRETS_STORAGE_KEY);
-  return {
-    settings: {
-      ...(persistedConfig?.settings ?? {}),
-      ...storedSettings,
-    } as Partial<ReaderSettings>,
-    secrets: {
-      ...(persistedConfig?.secrets ?? {}),
-      ...storedSecrets,
-    } as Partial<ReaderSecrets>,
-  };
+  const snapshot = getAppSettingsSnapshot();
+  const cachedSecrets = getAppSettingsSecretsSnapshot();
+
+  if (snapshot && cachedSecrets) {
+    return {
+      settings: snapshot.settings as Partial<ReaderSettings>,
+      secrets: cachedSecrets as Partial<ReaderSecrets>,
+    };
+  }
+
+  try {
+    const [document, secrets] = await Promise.all([
+      getAppSettings(),
+      getAppSettingsSecrets(),
+    ]);
+    return {
+      settings: document.settings as Partial<ReaderSettings>,
+      secrets: secrets as Partial<ReaderSecrets>,
+    };
+  } catch {
+    return { settings: {}, secrets: {} };
+  }
 }
 
 export async function loadAvailableModelPresets(): Promise<QaModelPreset[]> {

@@ -24,7 +24,7 @@ import remarkMath from 'remark-math';
 import 'katex/dist/katex.min.css';
 
 import { useLocaleText } from '../../i18n/uiLanguage';
-import { loadLocalAssetDataUrl } from '../../services/assets';
+import { loadMineruAssetDataUrl } from '../../services/assets';
 import { renderListMarkdownContent } from '../../services/mineru';
 import type {
   PdfSource,
@@ -50,14 +50,18 @@ function hasActiveTextSelection() {
   return Boolean(selection && !selection.isCollapsed && selection.toString().trim());
 }
 
-function useMineruAssetDataUrl(assetPath?: string) {
+function useMineruAssetDataUrl(
+  assetPath?: string,
+  assetCacheDir?: string,
+  assetReference?: string,
+) {
   const l = useLocaleText();
   const [dataUrl, setDataUrl] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
-    if (!assetPath) {
+    if (!assetPath || !assetCacheDir || !assetReference) {
       setDataUrl('');
       setLoading(false);
       setError('');
@@ -69,7 +73,7 @@ function useMineruAssetDataUrl(assetPath?: string) {
     setLoading(true);
     setError('');
 
-    void loadLocalAssetDataUrl(assetPath)
+    void loadMineruAssetDataUrl(assetCacheDir, assetReference)
       .then((nextDataUrl) => {
         if (cancelled) {
           return;
@@ -100,7 +104,7 @@ function useMineruAssetDataUrl(assetPath?: string) {
     return () => {
       cancelled = true;
     };
-  }, [assetPath, l]);
+  }, [assetPath, assetCacheDir, assetReference, l]);
 
   return {
     dataUrl,
@@ -306,12 +310,16 @@ const MarkdownContent = memo(MarkdownContentComponent);
 
 function AssetFigure({
   assetPath,
+  assetCacheDir,
+  assetReference,
   label,
   emptyText,
   emptyIcon,
   scale,
 }: {
   assetPath?: string;
+  assetCacheDir?: string;
+  assetReference?: string;
   label: string;
   emptyText: string;
   emptyIcon: ReactNode;
@@ -322,6 +330,8 @@ function AssetFigure({
   const [shouldLoadAsset, setShouldLoadAsset] = useState(false);
   const { dataUrl, loading, error } = useMineruAssetDataUrl(
     shouldLoadAsset ? assetPath : undefined,
+    shouldLoadAsset ? assetCacheDir : undefined,
+    shouldLoadAsset ? assetReference : undefined,
   );
   const [previewOpen, setPreviewOpen] = useState(false);
 
@@ -428,6 +438,8 @@ function AssetFigure({
 
 function TableContentComponent({
   assetPath,
+  assetCacheDir,
+  assetReference,
   captionText,
   tableHtml,
   fallbackMarkdown,
@@ -437,6 +449,8 @@ function TableContentComponent({
   scale,
 }: {
   assetPath?: string;
+  assetCacheDir?: string;
+  assetReference?: string;
   captionText?: string;
   tableHtml?: string;
   fallbackMarkdown: string;
@@ -455,6 +469,8 @@ function TableContentComponent({
     <div className="space-y-4">
       <AssetFigure
         assetPath={assetPath}
+        assetCacheDir={assetCacheDir}
+        assetReference={assetReference}
         label={captionText || l('表格截图', 'Table Snapshot')}
         emptyText={l('没有找到对应的表格截图', 'No matching table snapshot was found')}
         emptyIcon={<Table2 className="h-7 w-7" strokeWidth={1.8} />}
@@ -508,6 +524,8 @@ const TableContent = memo(TableContentComponent);
 
 function ImageContentComponent({
   assetPath,
+  assetCacheDir,
+  assetReference,
   captionText,
   fallbackMarkdown,
   translatedText,
@@ -516,6 +534,8 @@ function ImageContentComponent({
   scale,
 }: {
   assetPath?: string;
+  assetCacheDir?: string;
+  assetReference?: string;
   captionText?: string;
   fallbackMarkdown: string;
   translatedText?: string;
@@ -529,6 +549,8 @@ function ImageContentComponent({
     <div className="space-y-4">
       <AssetFigure
         assetPath={assetPath}
+        assetCacheDir={assetCacheDir}
+        assetReference={assetReference}
         label={captionText || l('图片截图', 'Image Snapshot')}
         emptyText={l('没有找到对应的图片资源', 'No matching image asset was found')}
         emptyIcon={<ImageIcon className="h-7 w-7" strokeWidth={1.8} />}
@@ -558,7 +580,6 @@ const ImageContent = memo(ImageContentComponent);
 function BlockPdfCropViewer({
   source,
   block,
-  scale,
   onClose,
 }: {
   source: PdfSource;
@@ -710,7 +731,7 @@ function BlockItemComponent({
   registerRef,
 }: BlockItemProps) {
   const l = useLocaleText();
-  const { block, markdown, mathText, plainText, tableHtml, captionText, assetPath } = renderable;
+  const { block, markdown, mathText, plainText, tableHtml, captionText, assetPath, assetCacheDir, assetReference } = renderable;
   const pointerStartRef = useRef<{ x: number; y: number } | null>(null);
   const clickTimerRef = useRef<number | null>(null);
   const hasTranslation = Boolean(translatedText?.trim());
@@ -906,6 +927,8 @@ function BlockItemComponent({
           {block.type === 'image' ? (
             <ImageContent
               assetPath={assetPath}
+              assetCacheDir={assetCacheDir}
+              assetReference={assetReference}
               captionText={captionText}
               fallbackMarkdown={markdown}
               translatedText={translatedText}
@@ -918,6 +941,8 @@ function BlockItemComponent({
           {block.type === 'table' ? (
             <TableContent
               assetPath={assetPath}
+              assetCacheDir={assetCacheDir}
+              assetReference={assetReference}
               captionText={captionText}
               tableHtml={tableHtml}
               fallbackMarkdown={markdown}

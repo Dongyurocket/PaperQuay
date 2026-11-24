@@ -14,9 +14,8 @@ import {
 } from './readerShared';
 import type { UseReaderLibraryActionsOptions } from './readerLibraryActionTypes';
 
-interface UseReaderLibraryBatchActionsOptions
-  extends Pick<
-    UseReaderLibraryActionsOptions,
+type UseReaderLibraryBatchActionsOptions = Pick<
+  UseReaderLibraryActionsOptions,
     | 'allKnownItems'
     | 'configHydrated'
     | 'embeddingApiKey'
@@ -32,7 +31,7 @@ interface UseReaderLibraryBatchActionsOptions
     | 'settings'
     | 'summaryConfigured'
     | 'syncLibraryParsedState'
-  > {}
+  >;
 
 export interface UseReaderLibraryBatchActionsResult {
   batchMineruPaused: boolean;

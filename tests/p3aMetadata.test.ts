@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import crypto from 'node:crypto';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -245,12 +245,14 @@ async function restoreLibraryBackup(sourceDir: string, packagePath: string, targ
     noteFolders: 0,
   });
 
+  const restoredLibraryDir = path.join(path.dirname(targetDir), 'RestoredLibrary');
   const staged = await stageBackupImport(targetPaths, {
     packagePath,
     password: PASSWORD,
     targets: {
-      libraryStorageDir: path.join(path.dirname(targetDir), 'RestoredLibrary'),
+      libraryStorageDir: restoredLibraryDir,
     },
+    authorizedTargets: [restoredLibraryDir],
     currentRendererState: {},
   });
   assert.equal(staged.ok, true);
@@ -341,9 +343,14 @@ test('legacy library schema gains nullable metadata columns without losing paper
 });
 
 test('desktop and MCP metadata update allowlists share one field definition', () => {
+  // 第 7 批把元数据 patch 收敛到 electron/shared/libraryDomain.cjs，
+  // libraryCommands 只调用 applyPaperMetadataPatch；白名单的唯一实现仍在
+  // paperMetadataFields.cjs，MCP 也直接引用它。断言跟随实际依赖链。
   const desktopSource = readFileSync(path.resolve('electron/backend/libraryCommands.cjs'), 'utf8');
+  const sharedDomainSource = readFileSync(path.resolve('electron/shared/libraryDomain.cjs'), 'utf8');
   const mcpSource = readFileSync(path.resolve('electron/mcp/knowledgeMcpService.cjs'), 'utf8');
-  assert.match(desktopSource, /UPDATABLE_PAPER_FIELDS/);
+  assert.match(desktopSource, /applyPaperMetadataPatch/);
+  assert.match(sharedDomainSource, /UPDATABLE_PAPER_FIELDS/);
   assert.match(mcpSource, /UPDATABLE_PAPER_FIELDS/);
   assert.deepEqual(UPDATABLE_PAPER_FIELDS, [
     'title', 'titleZh', 'year', 'publication', 'doi', 'url', 'abstractText', 'itemType',
@@ -460,18 +467,22 @@ test('desktop and MCP updates validate new fields and prefer authorDetails over 
     store = null;
 
     const service = new PaperQuayKnowledgeService({ dataDir: directory, isAppRunning: () => false });
-    service.updatePaper({
-      paperId: 'paper-metadata',
-      authors: ['MCP compatibility author'],
-      authorDetails: [{ name: 'MCP detailed author', orcid: VALID_ORCID }],
-      language: 'fr',
-      citationKey: 'mcp-key',
-    });
-    store = createLibraryStore(appPaths);
-    saved = store.getPaper('paper-metadata');
-    assert.equal(saved.language, 'fr');
-    assert.equal(saved.citationKey, 'mcp-key');
-    assert.equal(saved.authors[0].name, 'MCP detailed author');
+    try {
+      service.updatePaper({
+        paperId: 'paper-metadata',
+        authors: ['MCP compatibility author'],
+        authorDetails: [{ name: 'MCP detailed author', orcid: VALID_ORCID }],
+        language: 'fr',
+        citationKey: 'mcp-key',
+      });
+      store = createLibraryStore(appPaths);
+      saved = store.getPaper('paper-metadata');
+      assert.equal(saved.language, 'fr');
+      assert.equal(saved.citationKey, 'mcp-key');
+      assert.equal(saved.authors[0].name, 'MCP detailed author');
+    } finally {
+      service.close();
+    }
   } finally {
     store?.close();
     removeDirectory(directory);

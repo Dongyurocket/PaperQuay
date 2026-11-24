@@ -1,5 +1,5 @@
 import type { Note, NoteAnchor, UpdateNoteRequest, CreateNoteRequest } from '../../types/notes.ts';
-import type { SelectedExcerpt } from '../../types/reader.ts';
+import type { SelectedExcerpt, UiLanguage } from '../../types/reader.ts';
 import {
   buildDistilledExcerptAppendPatch,
   buildDistilledExcerptNoteCreateRequest,
@@ -70,6 +70,7 @@ export function buildDistillPreviewCommit(input: {
   paperId: string;
   sourceTitle?: string;
   appendTarget?: Note | null;
+  locale?: UiLanguage;
 }): { kind: 'create'; request: CreateNoteRequest } | { kind: 'append'; noteId: string; patch: UpdateNoteRequest; anchor: NoteAnchor } | null {
   const { state } = input;
   if (!['ready', 'confirmed'].includes(state.phase) || !state.distilledText.trim()) {
@@ -99,6 +100,7 @@ export function buildDistillPreviewCommit(input: {
       distilledText: state.distilledText,
       sourceText: state.sourceText,
       aiEnhanced: state.aiEnhanced,
+      locale: input.locale,
     }),
   };
 }
