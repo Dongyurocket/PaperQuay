@@ -4,6 +4,7 @@ import type {
   OpenAICompatibleModelListResult,
   OpenAICompatibleTestResult,
   QaModelPreset,
+  RagStorageStats,
   ReaderSettings,
 } from '../../types/reader';
 import type { LibrarySettings } from '../../types/library';
@@ -86,7 +87,10 @@ export interface ReaderPreferencesWindowProps {
   ragIndexPaused?: boolean;
   ragIndexProgress?: BatchProgressState;
   ragIndexRunning?: boolean;
-  onBatchRagIndex?: (options?: { onlyFailed?: boolean }) => void;
+  ragStorageStats?: RagStorageStats | null;
+  ragCompacting?: boolean;
+  onBatchRagIndex?: (options?: { onlyFailed?: boolean; onlyStale?: boolean }) => void;
   onToggleRagIndexPause?: () => void;
   onCancelRagIndex?: () => void;
+  onCompactRagStorage?: () => void;
 }

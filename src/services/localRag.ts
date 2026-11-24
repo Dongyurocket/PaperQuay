@@ -27,9 +27,11 @@ import {
   ragListIndexedChunkIds,
   ragReportDocumentIndexFailure,
   ragRetrieveDocumentChunksWithDiagnostics,
+  ragStampExtractorVersion,
   type RagEmbeddingOptions,
 } from './rag';
 import { emitRagIndexStatusUpdated } from './ragIndexStatus.ts';
+import { rebuildSourceStaged } from '../features/reader/ragStagedRebuild.ts';
 
 const RAG_INDEX_FAILURE_COOLDOWN_MS = 60_000;
 
@@ -121,6 +123,8 @@ export async function ensurePreparedSourceIndexed(input: {
   title: string;
   sourceType: 'mineru-markdown' | 'pdf-text';
   sourceSignature: string;
+  /** mineru-markdown 的抽取器版本；用于「待更新」判定与懒重建。 */
+  extractorVersion?: string | null;
   chunks: Array<{
     chunkId: string;
     chunkIndex: number;
@@ -145,6 +149,7 @@ export async function ensurePreparedSourceIndexed(input: {
     throw error;
   }
   const embeddingModelKey = buildRagEmbeddingModelKey(input.embedding);
+  const extractorVersion = input.extractorVersion ?? null;
   const currentStatus = await ragGetDocumentIndexStatus(input.documentKey, input.sourceType);
   const cachedFailure = getCachedRagIndexFailure(
     input.documentKey,
@@ -153,14 +158,58 @@ export async function ensurePreparedSourceIndexed(input: {
     embeddingModelKey,
   );
 
-  if (
-    input.skipIfSignatureMismatch === true &&
+  const statusVersionMismatch =
+    input.sourceType === 'mineru-markdown' &&
     currentStatus?.status === 'ready' &&
-    currentStatus.embeddingModelKey === embeddingModelKey &&
-    currentStatus.sourceSignature !== input.sourceSignature
+    (currentStatus.extractorVersion ?? null) !== extractorVersion;
+
+  if (
+    currentStatus?.status === 'ready' &&
+    (currentStatus.sourceSignature !== input.sourceSignature ||
+      currentStatus.embeddingModelKey !== embeddingModelKey)
+    // 仅版本号缺失且签名一致时不重建：走下面的快速路径补写版本。
   ) {
-    // 旧索引仍完整，只是抽取器签名变化；不在自动批处理中重建。
-    return { outcome: 'skipped' };
+    if (input.skipIfSignatureMismatch === true) {
+      // 旧索引仍完整，只是签名/模型/抽取器版本变化；不在自动批处理中重建。
+      return { outcome: 'skipped' };
+    }
+
+    // 已有可用旧索引：走暂存重建，重建期间旧索引继续可检索，失败也不丢索引。
+    const rebuilt = await rebuildSourceStaged({
+      documentKey: input.documentKey,
+      title: input.title,
+      sourceType: input.sourceType,
+      sourceSignature: input.sourceSignature,
+      extractorVersion,
+      chunks: input.chunks,
+      embedding: input.embedding,
+      batchSize: input.batchSize,
+      signal: input.signal,
+      recordFailure: true,
+    });
+
+    if (rebuilt.outcome === 'failed') {
+      emitRagIndexStatusUpdated({
+        documentKey: input.documentKey,
+        title: input.title,
+        sourceType: input.sourceType,
+      });
+      return { outcome: 'failed', errorMessage: rebuilt.errorMessage };
+    }
+
+    clearCachedRagIndexFailure(
+      input.documentKey,
+      input.sourceType,
+      input.sourceSignature,
+      embeddingModelKey,
+    );
+    emitRagIndexStatusUpdated({
+      documentKey: input.documentKey,
+      status: 'ready',
+      title: input.title,
+      sourceType: input.sourceType,
+    });
+    return { outcome: 'ready' };
   }
 
   if (
@@ -169,6 +218,18 @@ export async function ensurePreparedSourceIndexed(input: {
     currentStatus.indexedChunkCount >= input.chunks.length &&
     currentStatus.status === 'ready'
   ) {
+    if (statusVersionMismatch || (input.sourceType === 'mineru-markdown' && !currentStatus.extractorVersion)) {
+      // 内容签名一致，只是旧数据没有版本号：补写即可，不重新嵌入。
+      try {
+        await ragStampExtractorVersion({
+          documentKey: input.documentKey,
+          sourceType: input.sourceType,
+          extractorVersion,
+        });
+      } catch {
+        // 版本号补写失败只影响角标提示，不阻塞索引使用。
+      }
+    }
     clearCachedRagIndexFailure(
       input.documentKey,
       input.sourceType,
@@ -287,6 +348,7 @@ export async function ensurePreparedSourceIndexed(input: {
       sourceSignature: input.sourceSignature,
       embeddingModelKey,
       totalChunkCount: input.chunks.length,
+      extractorVersion,
       expectedChunkIds: input.chunks.map((chunk) => chunk.chunkId),
     });
 
@@ -332,6 +394,7 @@ export async function ensurePreparedSourceIndexed(input: {
         sourceSignature: input.sourceSignature,
         embeddingModelKey,
         totalChunkCount: input.chunks.length,
+        extractorVersion,
         errorMessage: message,
         retryAfterMs: RAG_INDEX_FAILURE_COOLDOWN_MS,
       });
@@ -416,40 +479,106 @@ export async function resolveLocalRag(input: {
   }
 
   try {
-    if (input.syncIndexing === false) {
-      for (const source of preparedDocument.sources) {
+    const embeddingModelKey = buildRagEmbeddingModelKey(input.embedding);
+    const batchSize = Math.max(1, input.settings.embeddingBatchSize || 24);
+    const initialStatuses = await Promise.all(
+      preparedDocument.sources.map((source) =>
+        ragGetDocumentIndexStatus(preparedDocument.documentKey, source.sourceType),
+      ),
+    );
+
+    // 旧索引可用但内容/模型/抽取器已变化：本轮直接用旧索引回答，
+    // 后台按暂存流程重建，避免提问要等整篇重新向量化。
+    const needsBackgroundRebuild = (index: number) => {
+      const source = preparedDocument.sources[index];
+      const status = initialStatuses[index];
+
+      if (!status || status.status !== 'ready' || status.embeddingModelKey !== embeddingModelKey) {
+        return false;
+      }
+
+      return status.sourceSignature !== source.sourceSignature;
+    };
+    const hasUsableIndex = (index: number) => {
+      const status = initialStatuses[index];
+      return Boolean(
+        status &&
+          status.status === 'ready' &&
+          status.embeddingModelKey === embeddingModelKey,
+      );
+    };
+
+    for (let index = 0; index < preparedDocument.sources.length; index += 1) {
+      const source = preparedDocument.sources[index];
+
+      if (hasUsableIndex(index)) {
+        if (
+          source.sourceType === 'mineru-markdown' &&
+          initialStatuses[index]?.sourceSignature === source.sourceSignature &&
+          (initialStatuses[index]?.extractorVersion ?? null) !== source.extractorVersion
+        ) {
+          // 内容签名一致，只是旧数据没有版本号：补写即可，不重建。
+          void ragStampExtractorVersion({
+            documentKey: preparedDocument.documentKey,
+            sourceType: source.sourceType,
+            extractorVersion: source.extractorVersion ?? null,
+          }).catch(() => {
+            // 版本号补写失败只影响角标，不阻塞回答。
+          });
+        }
+
+        if (needsBackgroundRebuild(index)) {
+          void rebuildSourceStaged({
+            documentKey: preparedDocument.documentKey,
+            title: preparedDocument.title,
+            sourceType: source.sourceType,
+            sourceSignature: source.sourceSignature,
+            extractorVersion: source.extractorVersion ?? null,
+            chunks: source.chunks,
+            embedding: input.embedding,
+            batchSize,
+            recordFailure: true,
+          }).catch((err) => {
+            console.warn('[paperquay] Background RAG rebuild failed:', err);
+          });
+        }
+        continue;
+      }
+
+      if (input.syncIndexing === false) {
         void ensurePreparedSourceIndexed({
           documentKey: preparedDocument.documentKey,
           title: preparedDocument.title,
           sourceType: source.sourceType,
           sourceSignature: source.sourceSignature,
+          extractorVersion: source.extractorVersion ?? null,
           chunks: source.chunks,
           embedding: input.embedding,
-          batchSize: Math.max(1, input.settings.embeddingBatchSize || 24),
+          batchSize,
         }).catch((err) => {
           console.warn('[paperquay] Background RAG indexing failed:', err);
         });
+        continue;
       }
-    } else {
-      for (const source of preparedDocument.sources) {
-        if (input.signal?.aborted) {
-          const error = new Error('RAG resolution aborted');
-          error.name = 'AbortError';
-          throw error;
-        }
-        const ensured = await ensurePreparedSourceIndexed({
-          documentKey: preparedDocument.documentKey,
-          title: preparedDocument.title,
-          sourceType: source.sourceType,
-          sourceSignature: source.sourceSignature,
-          chunks: source.chunks,
-          embedding: input.embedding,
-          batchSize: Math.max(1, input.settings.embeddingBatchSize || 24),
-          signal: input.signal,
-        });
-        if (ensured.outcome === 'excluded') {
-          return { kind: 'excluded' };
-        }
+
+      if (input.signal?.aborted) {
+        const error = new Error('RAG resolution aborted');
+        error.name = 'AbortError';
+        throw error;
+      }
+      const ensured = await ensurePreparedSourceIndexed({
+        documentKey: preparedDocument.documentKey,
+        title: preparedDocument.title,
+        sourceType: source.sourceType,
+        sourceSignature: source.sourceSignature,
+        extractorVersion: source.extractorVersion ?? null,
+        chunks: source.chunks,
+        embedding: input.embedding,
+        batchSize,
+        signal: input.signal,
+      });
+      if (ensured.outcome === 'excluded') {
+        return { kind: 'excluded' };
       }
     }
   } catch (error) {
@@ -475,14 +604,20 @@ export async function resolveLocalRag(input: {
   );
   const statusSummary = summarizeRagIndexStatuses(statuses);
   const embeddingModelKey = buildRagEmbeddingModelKey(input.embedding);
+  let usingPreviousIndex = false;
   const readySources = preparedDocument.sources.filter((source, index) => {
     const status = statuses[index];
 
-    return (
-      status?.status === 'ready' &&
-      status.sourceSignature === source.sourceSignature &&
-      status.embeddingModelKey === embeddingModelKey
-    );
+    if (!status || status.status !== 'ready' || status.embeddingModelKey !== embeddingModelKey) {
+      return false;
+    }
+
+    // 签名不一致说明后台重建尚未完成：旧索引仍完整可检索，本轮先用它回答。
+    if (status.sourceSignature !== source.sourceSignature) {
+      usingPreviousIndex = true;
+    }
+
+    return true;
   });
   const hasFailedSource = statuses.some((status, index) => {
     const source = preparedDocument.sources[index];
@@ -537,17 +672,22 @@ export async function resolveLocalRag(input: {
 
   try {
     retrievals = await Promise.all(
-      readySources.map((source) =>
-        ragRetrieveDocumentChunksWithDiagnostics({
+      readySources.map((source) => {
+        // 后台重建未完成时，库里仍是旧签名；检索必须按已存签名过滤。
+        const storedSignature =
+          statuses[preparedDocument.sources.indexOf(source)]?.sourceSignature ??
+          source.sourceSignature;
+
+        return ragRetrieveDocumentChunksWithDiagnostics({
           documentKey: preparedDocument.documentKey,
           sourceType: source.sourceType,
           embeddingModelKey,
-          sourceSignature: source.sourceSignature,
+          sourceSignature: storedSignature,
           queryEmbedding,
           queryText,
           topK: input.settings.localRagTopK,
-        }),
-      ),
+        });
+      }),
     );
   } catch (error) {
     return {
@@ -608,6 +748,7 @@ export async function resolveLocalRag(input: {
     budgetSkippedCount: contextDocument.budgetSkippedCount,
     indexedChunkCount: statusSummary.indexedChunkCount,
     totalChunkCount: statusSummary.totalChunkCount,
+    ...(usingPreviousIndex ? { usingPreviousIndex: true } : {}),
     ...diagnostics,
   };
 }

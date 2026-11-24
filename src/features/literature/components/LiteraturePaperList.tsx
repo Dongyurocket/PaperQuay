@@ -38,7 +38,13 @@ export interface LiteraturePaperListStatus {
 }
 
 /** 本地 RAG 索引聚合状态（与 src/services/ragIndexStatus.ts 的 RagAggregateStatus 对齐）。 */
-export type LiteraturePaperRagStatus = 'ready' | 'pending' | 'failed' | 'none' | 'excluded';
+export type LiteraturePaperRagStatus =
+  | 'ready'
+  | 'stale'
+  | 'pending'
+  | 'failed'
+  | 'none'
+  | 'excluded';
 
 export type LiteratureRagMembershipFilter = 'all' | 'included' | 'excluded';
 

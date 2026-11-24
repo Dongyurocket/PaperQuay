@@ -1002,6 +1002,42 @@ function createAiCommands(context) {
       return Promise.resolve(ragStore.listIndexStatuses());
     },
 
+    async rag_prepare_staged_rebuild({ request }) {
+      return Promise.resolve(ragStore.prepareStagedRebuild(request));
+    },
+
+    async rag_stage_reused_chunks({ request }) {
+      return Promise.resolve(ragStore.stageReusedChunks(request));
+    },
+
+    async rag_stage_embedded_chunks({ request }) {
+      return Promise.resolve(ragStore.stageEmbeddedChunks(request));
+    },
+
+    async rag_commit_staged_rebuild({ request }) {
+      return Promise.resolve(ragStore.commitStagedRebuild(request));
+    },
+
+    async rag_fail_staged_rebuild({ request }) {
+      return Promise.resolve(ragStore.failStagedRebuild(request));
+    },
+
+    async rag_discard_staged_rebuild({ request }) {
+      return Promise.resolve(ragStore.discardStagedRebuild(request));
+    },
+
+    async rag_stamp_extractor_version({ request }) {
+      return Promise.resolve(ragStore.stampIndexExtractorVersion(request));
+    },
+
+    async rag_storage_stats() {
+      return Promise.resolve(ragStore.storageStats());
+    },
+
+    async rag_compact_storage() {
+      return Promise.resolve(ragStore.compactStorage());
+    },
+
     async rag_retrieve_document_chunks({ request }) {
       return retrieveAllowedChunks(request);
     },

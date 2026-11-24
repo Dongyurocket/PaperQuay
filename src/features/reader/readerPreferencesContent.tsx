@@ -17,6 +17,7 @@ import {
 import clsx from 'clsx';
 
 import { getPathAuthorizationStatus, openExternalUrl } from '../../services/desktop';
+import { formatFileSize } from '../../utils/files';
 import type {
   PathAuthorizationStatus,
   PathAuthorizationStatusEntry,
@@ -109,9 +110,12 @@ interface ReaderPreferencesContentProps
     | 'ragIndexPaused'
     | 'ragIndexProgress'
     | 'ragIndexRunning'
+    | 'ragStorageStats'
+    | 'ragCompacting'
     | 'onBatchRagIndex'
     | 'onToggleRagIndexPause'
     | 'onCancelRagIndex'
+    | 'onCompactRagStorage'
   > {
   activeSection: PreferencesSectionKey;
   l: ReaderPreferencesLocalizer;
@@ -338,9 +342,12 @@ export function ReaderPreferencesContent({
   ragIndexPaused = false,
   ragIndexProgress,
   ragIndexRunning = false,
+  ragStorageStats,
+  ragCompacting = false,
   onBatchRagIndex,
   onToggleRagIndexPause,
   onCancelRagIndex,
+  onCompactRagStorage,
 }: ReaderPreferencesContentProps) {
   const languageOptions = buildLanguageOptions(settings.uiLanguage);
   const summaryLanguageOptions = buildSummaryLanguageOptions(settings.uiLanguage);
@@ -1744,8 +1751,8 @@ export function ReaderPreferencesContent({
                     {ragIndexOverview ? (
                       <div className="text-[11px] leading-5 text-[var(--pq-text-faint)]">
                         {l(
-                          `已索引 ${ragIndexOverview.ready} · 待索引 ${ragIndexOverview.pending + ragIndexOverview.unindexed} · 失败 ${ragIndexOverview.failed} · 已排除 ${ragIndexOverview.excluded}`,
-                          `Indexed ${ragIndexOverview.ready} · Pending ${ragIndexOverview.pending + ragIndexOverview.unindexed} · Failed ${ragIndexOverview.failed} · Excluded ${ragIndexOverview.excluded}`,
+                          `已索引 ${ragIndexOverview.ready} · 待更新 ${ragIndexOverview.stale} · 待索引 ${ragIndexOverview.pending + ragIndexOverview.unindexed} · 失败 ${ragIndexOverview.failed} · 已排除 ${ragIndexOverview.excluded}`,
+                          `Indexed ${ragIndexOverview.ready} · Update pending ${ragIndexOverview.stale} · Pending ${ragIndexOverview.pending + ragIndexOverview.unindexed} · Failed ${ragIndexOverview.failed} · Excluded ${ragIndexOverview.excluded}`,
                         )}
                       </div>
                     ) : null}
@@ -1761,6 +1768,16 @@ export function ReaderPreferencesContent({
                         ? l('索引中...', 'Indexing...')
                         : l('为未索引文献建立索引', 'Index Unindexed Papers')}
                     </button>
+                    {ragIndexOverview && ragIndexOverview.stale > 0 && !ragIndexRunning ? (
+                      <button
+                        type="button"
+                        onClick={() => onBatchRagIndex?.({ onlyStale: true })}
+                        disabled={!ragIndexAvailable}
+                        className="rounded-xl border border-[color-mix(in_srgb,var(--pq-warning)_28%,transparent)] bg-[var(--pq-warning-bg)] px-4 py-2 text-sm text-[var(--pq-warning)] transition hover:bg-[var(--pq-warning-bg)] disabled:opacity-60"
+                      >
+                        {l('更新过期索引', 'Update Outdated Indexes')}
+                      </button>
+                    ) : null}
                     {ragIndexOverview && ragIndexOverview.failed > 0 && !ragIndexRunning ? (
                       <button
                         type="button"
@@ -1790,6 +1807,26 @@ export function ReaderPreferencesContent({
                       </button>
                     ) : null}
                   </div>
+                  {ragStorageStats ? (
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[var(--pq-border)] pt-2">
+                      <div className="text-[11px] leading-5 text-[var(--pq-text-faint)]">
+                        {l(
+                          `索引库 ${formatFileSize(ragStorageStats.fileBytes)} · 可回收 ${formatFileSize(ragStorageStats.reclaimableBytes)}`,
+                          `Index database ${formatFileSize(ragStorageStats.fileBytes)} · Reclaimable ${formatFileSize(ragStorageStats.reclaimableBytes)}`,
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={onCompactRagStorage}
+                        disabled={!onCompactRagStorage || ragIndexRunning || ragCompacting}
+                        className="rounded-xl border border-[var(--pq-border)] bg-[var(--pq-surface-1)] px-4 py-2 text-sm text-[var(--pq-text-muted)] transition hover:bg-[var(--pq-surface-2)] disabled:opacity-60"
+                      >
+                        {ragCompacting
+                          ? l('整理中...', 'Compacting...')
+                          : l('整理索引存储', 'Compact Index Storage')}
+                      </button>
+                    </div>
+                  ) : null}
                   {ragIndexProgress ? (
                     <BatchProgressCard
                       title={l('RAG 索引进度', 'RAG Indexing Progress')}

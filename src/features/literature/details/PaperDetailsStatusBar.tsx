@@ -122,7 +122,7 @@ export default function PaperDetailsStatusBar({
     }
   };
 
-  const ragDone = paper.ragEnabled === false || ragStatus === 'ready';
+  const ragDone = paper.ragEnabled === false || ragStatus === 'ready' || ragStatus === 'stale';
   const mineruDone = Boolean(paperStatus?.mineruParsed || mineruTask?.status === 'success');
   const translationDone = translationTask?.status === 'success';
   const overviewDone = Boolean(paper.aiSummary?.trim() || overviewTask?.status === 'success');
@@ -137,7 +137,7 @@ export default function PaperDetailsStatusBar({
       disabled: !onSetRagMembership || anyTaskRunning,
       onSelect: () => onSetRagMembership?.(paper, paper.ragEnabled === false),
     },
-    ...(paper.ragEnabled === false || !onIndexPaperRag ? [] : [{ id: 'build-rag-index', label: l('建立 / 重建索引', 'Build / Rebuild Index'), icon: <RefreshCw className="h-4 w-4" />, onSelect: () => onIndexPaperRag(paper) }]),
+    ...(paper.ragEnabled === false || !onIndexPaperRag ? [] : [{ id: 'build-rag-index', label: ragStatus === 'stale' ? l('更新过期索引', 'Update Outdated Index') : l('建立 / 重建索引', 'Build / Rebuild Index'), icon: <RefreshCw className="h-4 w-4" />, onSelect: () => onIndexPaperRag(paper) }]),
     { id: 'rag-view', label: l('查看文献', 'Open Paper'), icon: <BookOpenText className="h-4 w-4" />, onSelect: () => onOpenPaper(paper) },
   ];
 

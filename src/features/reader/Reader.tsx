@@ -17,8 +17,10 @@ import {
   type OpenLibraryPaperEventDetail,
   type OpenPreferencesEventDetail,
 } from '../../app/appEvents';
-import { repairMineruCacheImages, selectDirectory, selectLocalPdfSource } from '../../services/desktop';
+import { localPathsExist, repairMineruCacheImages, selectDirectory, selectLocalPdfSource } from '../../services/desktop';
+import { ragCompactStorage, ragStorageStats } from '../../services/rag';
 import { buildMineruCachePathCandidates } from '../../utils/mineruCache';
+import { formatFileSize } from '../../utils/files';
 import {
   addLibraryAttachment,
   getLibraryPaper,
@@ -37,15 +39,18 @@ import type {
 } from '../../types/library';
 import { ATTACHMENT_KIND_TRANSLATED_PDF } from '../../utils/libraryPaper';
 import type {
+  RagStorageStats,
   DocumentChatSession,
   TranslationDisplayMode,
   WorkspaceItem,
 } from '../../types/reader';
 import DocumentReaderTab from './DocumentReaderTab';
 import { chooseMountedReaderTabIds, collectBusyReaderTabIds } from './readerResourceBudget';
+import { canSeedInitialQaSession } from './readerQaSessionLifecycle';
 import { AssistantSidebar } from './AssistantSidebar';
 import { usePointerDragResize } from './usePointerDragResize';
 import LiteratureLibraryView from '../literature/LiteratureLibraryView';
+import { mineruOutputPathCandidatesForPaper } from '../literature/literatureLibraryUtils';
 import TranslatedPdfLanguageConfirmDialog from '../literature/components/TranslatedPdfLanguageConfirmDialog';
 import {
   emitLibraryMetadataEnrichRequest,
@@ -202,6 +207,13 @@ function Reader({ workspaceActive = true }: ReaderProps) {
   const [libraryPaperStatuses, setLibraryPaperStatuses] = useState<Record<string, { mineruParsed?: boolean }>>({});
   const [notePaperCandidates, setNotePaperCandidates] = useState<LiteraturePaper[]>([]);
   const [resolvedLibraryPapers, setResolvedLibraryPapers] = useState<Record<string, LiteraturePaper>>({});
+  // 全库 RAG 候选：只有打开设置里的索引管理或执行批量任务时才加载，保持启动轻量。
+  const [ragLibraryItems, setRagLibraryItems] = useState<WorkspaceItem[]>([]);
+  const [ragLibraryMineruParsed, setRagLibraryMineruParsed] =
+    useState<Record<string, boolean | undefined>>({});
+  const ragLibraryLoadedRef = useRef(false);
+  const [ragStorageInfo, setRagStorageInfo] = useState<RagStorageStats | null>(null);
+  const [ragCompacting, setRagCompacting] = useState(false);
   const notePaperCandidatesRequestedRef = useRef(false);
   const resolvedLibraryPaperIdsRef = useRef<Set<string>>(new Set());
   const [pendingNoteAnchorJump, setPendingNoteAnchorJump] =
@@ -240,6 +252,75 @@ function Reader({ workspaceActive = true }: ReaderProps) {
   }, [setHomeTabTitle, settings.uiLanguage]);
 
   useEffect(() => {
+    if (!preferencesOpen || !configHydrated || ragLibraryLoadedRef.current) {
+      return undefined;
+    }
+
+    ragLibraryLoadedRef.current = true;
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const papers = await listAllLibraryPapers({
+          sortBy: 'updatedAt',
+          sortDirection: 'desc',
+        });
+        const entries = papers
+          .map((paper) => ({
+            paper,
+            item: createNativeLibraryWorkspaceItem(paper, librarySettings?.storageDir),
+          }))
+          .filter((entry): entry is { paper: LiteraturePaper; item: WorkspaceItem } =>
+            Boolean(entry.item),
+          );
+
+        if (cancelled) return;
+        setRagLibraryItems(entries.map((entry) => entry.item));
+
+        const pathSets = entries.map((entry) =>
+          mineruOutputPathCandidatesForPaper(
+            entry.paper,
+            settings.mineruCacheDir,
+            settings.autoLoadSiblingJson,
+            librarySettings?.storageDir,
+          ),
+        );
+        const allPaths = Array.from(new Set(pathSets.flat()));
+        const existence = new Map<string, boolean>();
+        const batchSize = 200;
+
+        for (let index = 0; index < allPaths.length; index += batchSize) {
+          const slice = allPaths.slice(index, index + batchSize);
+          const found = await localPathsExist(slice);
+          slice.forEach((path, pathIndex) => existence.set(path, found[pathIndex] === true));
+          if (cancelled) return;
+        }
+
+        const parsed: Record<string, boolean | undefined> = {};
+        entries.forEach((entry, index) => {
+          parsed[entry.item.workspaceId] = pathSets[index].some(
+            (path) => existence.get(path) === true,
+          );
+        });
+        setRagLibraryMineruParsed(parsed);
+      } catch {
+        // 允许下次打开设置时重试。
+        ragLibraryLoadedRef.current = false;
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    configHydrated,
+    librarySettings?.storageDir,
+    preferencesOpen,
+    settings.autoLoadSiblingJson,
+    settings.mineruCacheDir,
+  ]);
+
+  useEffect(() => {
     if (!activeReaderTabId) {
       return;
     }
@@ -262,6 +343,13 @@ function Reader({ workspaceActive = true }: ReaderProps) {
 
   useEffect(() => {
     if (!activeReaderTabId) {
+      return;
+    }
+
+    // 历史恢复由 DocumentReaderTab 的 effect 完成（restorePaperQaHistory 至少写入一个会话）。
+    // 这里若在恢复完成前抢先写入初始会话，会覆盖刚恢复的历史，
+    // 并让问答就绪标记永远对不上，提交的提问会被静默丢弃。
+    if (!canSeedInitialQaSession(useReaderQaStore.getState().tabs[activeReaderTabId])) {
       return;
     }
 
@@ -581,6 +669,57 @@ function Reader({ workspaceActive = true }: ReaderProps) {
     return merged;
   }, [itemParseStatusMap, libraryPaperStatuses]);
 
+  const resolveIndexableItemForRag = useCallback(async (documentKey: string) => {
+    try {
+      const paper = await getLibraryPaper(documentKey);
+      return paper ? createNativeLibraryWorkspaceItem(paper, librarySettings?.storageDir) : null;
+    } catch {
+      return null;
+    }
+  }, [librarySettings?.storageDir]);
+
+  const refreshRagStorageStats = useCallback(async () => {
+    try {
+      setRagStorageInfo(await ragStorageStats());
+    } catch {
+      // 存储统计仅用于展示，失败时保留旧值。
+    }
+  }, []);
+
+  useEffect(() => {
+    if (preferencesOpen) {
+      void refreshRagStorageStats();
+    }
+  }, [preferencesOpen, refreshRagStorageStats]);
+
+  const handleCompactRagStorage = useCallback(async () => {
+    if (ragCompacting) {
+      return;
+    }
+
+    setRagCompacting(true);
+
+    try {
+      const result = await ragCompactStorage();
+      setStatusMessage(
+        l(
+          `索引存储整理完成：${formatFileSize(result.beforeBytes)} → ${formatFileSize(result.afterBytes)}。`,
+          `Index storage compacted: ${formatFileSize(result.beforeBytes)} → ${formatFileSize(result.afterBytes)}.`,
+        ),
+      );
+      await refreshRagStorageStats();
+    } catch (error) {
+      setStatusMessage(
+        l(
+          `整理索引存储失败：${error instanceof Error ? error.message : String(error)}`,
+          `Failed to compact index storage: ${error instanceof Error ? error.message : String(error)}`,
+        ),
+      );
+    } finally {
+      setRagCompacting(false);
+    }
+  }, [l, ragCompacting, refreshRagStorageStats, setStatusMessage]);
+
   const {
     ragIndexAvailable,
     ragBadgeByDocumentKey,
@@ -598,6 +737,9 @@ function Reader({ workspaceActive = true }: ReaderProps) {
     configHydrated,
     embeddingApiKey,
     findExistingMineruJson,
+    libraryItems: ragLibraryItems,
+    libraryMineruParsed: ragLibraryMineruParsed,
+    resolveIndexableItem: resolveIndexableItemForRag,
     itemParseStatusMap: effectiveItemParseStatusMap,
     l,
     setStatusMessage,
@@ -1219,7 +1361,10 @@ function Reader({ workspaceActive = true }: ReaderProps) {
           ragIndexPaused={ragIndexPaused}
           ragIndexProgress={ragIndexProgress}
           ragIndexRunning={ragIndexRunning}
+          ragStorageStats={ragStorageInfo}
+          ragCompacting={ragCompacting}
           onBatchRagIndex={(options) => void handleBatchRagIndex(options)}
+          onCompactRagStorage={() => void handleCompactRagStorage()}
           onToggleRagIndexPause={handleToggleRagIndexPause}
           onCancelRagIndex={handleCancelRagIndex}
         />

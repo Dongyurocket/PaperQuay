@@ -216,6 +216,8 @@ export interface RagIndexDocumentRequest {
   sourceSignature: string;
   embeddingModelKey: string;
   totalChunkCount: number;
+  /** 抽取器版本；mineru-markdown 用于「待更新」判定，pdf-text 不设置。 */
+  extractorVersion?: string | null;
   /** 同一次索引共用的代次。缺省时由库写成空字符串，不因此强制重嵌。 */
   generationId?: string;
   chunks: RagIndexedChunkInput[];
@@ -238,6 +240,37 @@ export interface RagDocumentIndexStatus {
   failedAt?: number | null;
   retryAfterMs?: number | null;
   cooldownUntil?: number | null;
+  /** 建立该索引时的抽取器版本；旧数据为 null，按「待更新」处理。 */
+  extractorVersion?: string | null;
+  /** 最近一次暂存重建的错误；旧索引仍然可用。 */
+  rebuildError?: string | null;
+  rebuildAttemptedAt?: number | null;
+}
+
+export interface RagStagedRebuildRequest {
+  documentKey: string;
+  sourceType: Exclude<RagSourceMode, "off" | "hybrid" | "note">;
+  title?: string;
+  sourceSignature: string;
+  embeddingModelKey: string;
+  extractorVersion?: string | null;
+  totalChunkCount: number;
+}
+
+export interface RagStageReusedChunksResult {
+  stagedChunkIds: string[];
+  missingChunkIds: string[];
+}
+
+export interface RagStorageStats {
+  fileBytes: number;
+  reclaimableBytes: number;
+}
+
+export interface RagCompactStorageResult {
+  beforeBytes: number;
+  afterBytes: number;
+  tables: Array<{ dimension: number; skipped: boolean; rows: number }>;
 }
 
 export interface RagRetrievalResult {
@@ -296,6 +329,7 @@ export interface RagReportDocumentIndexFailureRequest {
   sourceSignature: string;
   embeddingModelKey: string;
   totalChunkCount: number;
+  extractorVersion?: string | null;
   errorMessage: string;
   retryAfterMs?: number | null;
 }
@@ -307,6 +341,7 @@ export interface RagFinalizeDocumentIndexRequest {
   sourceSignature: string;
   embeddingModelKey: string;
   totalChunkCount: number;
+  extractorVersion?: string | null;
   /** 当前内容期望的 chunkId 全集；提供时清理不在集合内的陈旧分块行。 */
   expectedChunkIds?: string[];
 }
@@ -433,6 +468,8 @@ export interface DocumentChatQaContext {
   ftsStatuses?: RagFtsStatus[];
   ftsHitCount?: number;
   partialSources?: boolean;
+  /** 本轮使用旧版索引回答，后台正在重建。 */
+  usingPreviousIndex?: boolean;
 }
 
 export type DocumentChatEvidenceKind = "text" | "image" | "table" | "equation";
