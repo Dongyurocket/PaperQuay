@@ -310,7 +310,9 @@ function createPathPolicy({
     }
 
     // 默认 MinerU 缓存根始终可用，调用方不必重复传入。
-    const builtinDefaults = appPaths.mineruCacheDir ? [appPaths.mineruCacheDir] : [];
+    // 必须和调用方传入的 defaultPaths 一样走 expandRoots，否则 Windows 8.3
+    // 短路径（RUNNER~1）下内置根只有短形式，realpath 后的绝对路径匹配不上。
+    const builtinDefaults = expandRoots(appPaths.mineruCacheDir ? [appPaths.mineruCacheDir] : []);
     const isDefault = [...builtinDefaults, ...expandRoots(defaultPaths)]
       .some((root) => isWithinRoot(absolute, root));
     const isApproved = isApprovedPath(absolute, mode);

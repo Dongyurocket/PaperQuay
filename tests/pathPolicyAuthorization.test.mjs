@@ -34,9 +34,17 @@ function createPolicy({
   knownAttachmentDirs = [],
   knownAttachmentPaths = [],
 }) {
-  const samePath = (left, right) => (
-    path.resolve(left).toLowerCase() === path.resolve(right).toLowerCase()
-  );
+  const samePath = (left, right) => {
+    const canonical = (value) => {
+      try {
+        const real = realpathSync.native ? realpathSync.native(value) : realpathSync(value);
+        return real.toLowerCase();
+      } catch {
+        return path.resolve(value).toLowerCase();
+      }
+    };
+    return canonical(left) === canonical(right);
+  };
   return createPathPolicy({
     appPaths,
     store: {
