@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -10,6 +10,14 @@ const { RENDERER_ALLOWED_COMMANDS, isRendererCommandAllowed } = require('../elec
 const { createIpcSenderGuard, isTrustedRendererNavigation, isTrustedRendererUrl } = require('../electron/ipcSecurity.cjs');
 const { createPathPolicy } = require('../electron/backend/pathPolicy.cjs');
 const { handleLocalPdfRequest } = require('../electron/localPdfProtocol.cjs');
+
+function canonicalPath(filePath) {
+  try {
+    return realpathSync.native ? realpathSync.native(filePath) : realpathSync(filePath);
+  } catch {
+    return path.resolve(filePath);
+  }
+}
 const { createMineruCommands, isAllowedMineruEndpoint, resolveExtractDir } = require('../electron/backend/mineruCommands.cjs');
 const { readZipWithAdm } = require('../electron/backend/utils.cjs');
 
@@ -126,8 +134,8 @@ test('path policy allows only known roots, attachments and dialog approvals', ()
     store: {
       loadSettings: () => ({ storageDir, translatedPdfDir: '' }),
       load: () => ({ settings: { storageDir }, papers: [] }),
-      isKnownAttachmentLocation: (filePath) => filePath.startsWith(attachmentDir),
-      isKnownAttachmentDirectory: (directory) => path.resolve(directory) === path.resolve(attachmentDir),
+      isKnownAttachmentLocation: (filePath) => canonicalPath(filePath).startsWith(canonicalPath(attachmentDir)),
+      isKnownAttachmentDirectory: (directory) => canonicalPath(directory) === canonicalPath(attachmentDir),
     },
     approvedReadPaths,
     approvedWritePaths,

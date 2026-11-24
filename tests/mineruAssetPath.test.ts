@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -126,7 +126,7 @@ test('backend resolver requires the real asset path to stay inside the cache dir
 
   try {
     assert.deepEqual(resolveBackendAsset(cacheDir, 'images/figure.png'), {
-      path: insideFile,
+      path: realpathSync.native ? realpathSync.native(insideFile) : realpathSync(insideFile),
       reason: '',
     });
     assert.equal(resolveBackendAsset(cacheDir, '../outside/secret.png').path, null);

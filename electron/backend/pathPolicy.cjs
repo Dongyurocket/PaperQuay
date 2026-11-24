@@ -76,6 +76,27 @@ function safeRealpathSync(filePath) {
   }
 }
 
+/**
+ * 规范路径：存在的路径取 realpath；不存在的路径沿父目录找到最近存在的
+ * 祖先再拼回后缀。这样 Windows 的 8.3 短路径（RUNNER~1）与长路径、以及
+ * 尚未创建的缓存目录都能与 realpath 后的候选路径按同一形式比较。
+ */
+function canonicalizeExistingAncestor(filePath) {
+  const absolute = path.resolve(filePath);
+  const real = safeRealpathSync(absolute);
+  if (real) return real;
+  const suffix = [path.basename(absolute)];
+  let ancestor = path.dirname(absolute);
+  while (true) {
+    const realAncestor = safeRealpathSync(ancestor);
+    if (realAncestor) return path.join(realAncestor, ...suffix);
+    const parent = path.dirname(ancestor);
+    if (parent === ancestor) return absolute;
+    suffix.unshift(path.basename(ancestor));
+    ancestor = parent;
+  }
+}
+
 function createPathPolicy({
   appPaths,
   store,
@@ -124,7 +145,8 @@ function createPathPolicy({
   }
 
   function isProtectedMainFile(absolutePath) {
-    return comparablePath(absolutePath) === comparablePath(approvalsFilePath);
+    return comparablePath(canonicalizeExistingAncestor(absolutePath))
+      === comparablePath(canonicalizeExistingAncestor(approvalsFilePath));
   }
 
   function loadSettings() {
@@ -142,9 +164,10 @@ function createPathPolicy({
       const root = cleanString(value);
       if (!root) continue;
       roots.push(root);
-      // 配置的目录可能是符号链接/junction；realpath 也要作为根参与比较。
-      const real = safeRealpathSync(root);
-      if (real) roots.push(real);
+      // 配置的目录可能是符号链接/junction，也可能是 Windows 8.3 短路径；
+      // realpath/最近存在祖先的规范形式也要作为根参与比较。
+      const canonical = canonicalizeExistingAncestor(root);
+      if (canonical && !roots.includes(canonical)) roots.push(canonical);
     }
 
     return roots;
@@ -204,24 +227,7 @@ function createPathPolicy({
     // realpath 只能用于真实存在的路径；写入目标可能尚未创建，此时沿父目录
     // 向上找到最近一个存在的祖先再拼回后缀，避免 approved\link\newdir\file
     // 这类中间目录不存在时按字面路径放行、随后 mkdir 跟随 junction 写出去。
-    const real = safeRealpathSync(absolute);
-    if (real) {
-      return real;
-    }
-    const suffix = [path.basename(absolute)];
-    let ancestor = path.dirname(absolute);
-    while (true) {
-      const realAncestor = safeRealpathSync(ancestor);
-      if (realAncestor) {
-        return path.join(realAncestor, ...suffix);
-      }
-      const parent = path.dirname(ancestor);
-      if (parent === ancestor) {
-        return absolute;
-      }
-      suffix.unshift(path.basename(ancestor));
-      ancestor = parent;
-    }
+    return canonicalizeExistingAncestor(absolute);
   }
 
   function isReadAllowed(filePath) {

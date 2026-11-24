@@ -149,7 +149,9 @@ async function measureRealSync() {
   }
 }
 
-test('perf: 真实 1000 文件后台同步的事件循环停顿有界（真实 fs 上限 24ms；确定性 16ms 由假 IO 用例保证）', async () => {
+test('perf: 真实 1000 文件后台同步的事件循环停顿有界（真实 fs 上限 24ms；确定性 16ms 由假 IO 用例保证）', {
+  skip: process.env.CI ? 'real-fs event-loop timing is not stable on shared CI runners' : false,
+}, async () => {
   // 真实 fs/SQLite 路径的最大停顿会被 Windows GC 与全套并行测试负载放大
   // （隔离测量 9.3–15.9ms，全套并行时观测到 16.6–17.97ms）。严格 16ms 预算
   // 由上面的假 IO 驱动确定性用例保证；这里用 24ms 上限捕获同步路径回归。
