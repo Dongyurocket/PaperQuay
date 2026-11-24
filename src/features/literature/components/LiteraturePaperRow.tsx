@@ -273,7 +273,9 @@ function LiteraturePaperRowImpl({
                     ? l('正在建立 RAG 索引', 'Building RAG index')
                     : ragStatus === 'failed'
                       ? l('RAG 索引失败，可在设置中重建', 'RAG indexing failed; rebuild it in settings')
-                      : ragStatus === 'excluded'
+                      : ragStatus === 'stale'
+                        ? l('索引已过期，会在打开或提问时自动重建', 'Index is outdated; it rebuilds when the paper is opened or queried')
+                        : ragStatus === 'excluded'
                         ? l('该文献已移出本地知识库', 'This paper is excluded from the local knowledge base')
                         : undefined
                 }
@@ -285,7 +287,9 @@ function LiteraturePaperRowImpl({
                       ? 'border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-[var(--pq-accent-bg)] text-[var(--pq-accent)] '
                       : ragStatus === 'failed'
                         ? 'border-[color-mix(in_srgb,var(--pq-danger)_28%,transparent)] bg-[var(--pq-error-bg)] text-[var(--pq-danger)] '
-                        : 'border-[var(--pq-border-strong)] bg-[var(--pq-surface-2)] text-[var(--pq-text-muted)] dark:border-white/10 dark:bg-white/[0.06] dark:text-[var(--pq-text-muted)]',
+                        : ragStatus === 'stale'
+                          ? 'border-[color-mix(in_srgb,var(--pq-warning)_28%,transparent)] bg-[var(--pq-warning-bg)] text-[var(--pq-warning)] '
+                          : 'border-[var(--pq-border-strong)] bg-[var(--pq-surface-2)] text-[var(--pq-text-muted)] dark:border-white/10 dark:bg-white/[0.06] dark:text-[var(--pq-text-muted)]',
                 )}
               >
                 {ragIndexing && ragStatus !== 'excluded'
@@ -294,11 +298,13 @@ function LiteraturePaperRowImpl({
                     ? l('已排除', 'Excluded')
                     : ragStatus === 'ready'
                       ? l('RAG 已索引', 'RAG Indexed')
-                      : ragStatus === 'failed'
-                        ? l('RAG 索引失败', 'RAG Index Failed')
-                        : ragStatus === 'pending'
-                          ? l('RAG 待索引', 'RAG Pending')
-                          : l('RAG 未索引', 'RAG Not Indexed')}
+                      : ragStatus === 'stale'
+                        ? l('RAG 待更新', 'RAG Update Pending')
+                        : ragStatus === 'failed'
+                          ? l('RAG 索引失败', 'RAG Index Failed')
+                          : ragStatus === 'pending'
+                            ? l('RAG 待索引', 'RAG Pending')
+                            : l('RAG 未索引', 'RAG Not Indexed')}
               </span>
             ) : null}
             <span

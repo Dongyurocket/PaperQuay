@@ -20,6 +20,8 @@ import { textSignature } from './readerShared.ts';
 export interface ReaderRagPreparedSource {
   sourceType: Exclude<RagSourceMode, 'off' | 'hybrid'>;
   sourceSignature: string;
+  /** mineru-markdown 的抽取器版本；pdf-text 为 null。 */
+  extractorVersion?: string | null;
   chunks: RagChunkInput[];
 }
 
@@ -489,8 +491,9 @@ function uniqueChunks(chunks: RagChunkInput[]): RagChunkInput[] {
   });
 }
 
-/** MinerU 分块抽取器版本：上下文感知公式/短块合并与 LaTeX 清洗升级后递增，触发按需懒重建。 */
-export const MINERU_RAG_EXTRACTOR_VERSION = 'mineru-chunks-v3';
+import { MINERU_RAG_EXTRACTOR_VERSION } from '../../shared/ragIndexVersions.ts';
+
+export { MINERU_RAG_EXTRACTOR_VERSION };
 
 export function prepareReaderRagDocument(input: {
   item: WorkspaceItem;
@@ -516,6 +519,7 @@ export function prepareReaderRagDocument(input: {
       sources.push({
         sourceType: 'mineru-markdown',
         sourceSignature: textSignature(`${MINERU_RAG_EXTRACTOR_VERSION}\n${mineruSourceText}`),
+        extractorVersion: MINERU_RAG_EXTRACTOR_VERSION,
         chunks: mineruChunks,
       });
     }
@@ -529,6 +533,7 @@ export function prepareReaderRagDocument(input: {
       sources.push({
         sourceType: 'pdf-text',
         sourceSignature: textSignature(pdfSourceText),
+        extractorVersion: null,
         chunks: pdfChunks,
       });
     }

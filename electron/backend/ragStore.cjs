@@ -1,4 +1,5 @@
 const fsp = require('node:fs/promises');
+const fs = require('node:fs');
 const path = require('node:path');
 const { toError } = require('./utils.cjs');
 const { buildFtsMatchQuery } = require('../../src/shared/ragQueryUtils.cjs');
@@ -18,6 +19,8 @@ function createRagStore(appPaths, options = {}) {
   }, { backfillDocumentVectors: indexing.backfillDocumentVectors });
   let ftsAvailable = schema.initializeFtsSchema(db, { disabled: options.disableFts === true });
   let vectorBackfillClosed = false;
+
+  indexing.cleanupOrphanStaging(db);
 
   function scheduleVectorBackfill() {
     const timer = setImmediate(() => {
@@ -102,6 +105,48 @@ function createRagStore(appPaths, options = {}) {
     listIndexStatuses() {
       return indexing.listIndexStatuses(db);
     },
+    prepareStagedRebuild(request) {
+      return indexing.prepareStagedRebuild(db, request);
+    },
+    stageReusedChunks(request) {
+      return indexing.stageReusedChunks(db, request);
+    },
+    stageEmbeddedChunks(request) {
+      return indexing.stageEmbeddedChunks(db, request);
+    },
+    commitStagedRebuild(request) {
+      return indexing.commitStagedRebuild(db, request);
+    },
+    failStagedRebuild(request) {
+      return indexing.failStagedRebuild(db, request);
+    },
+    discardStagedRebuild(request) {
+      return indexing.discardStagedRebuild(db, request);
+    },
+    stampIndexExtractorVersion(request) {
+      return indexing.stampIndexExtractorVersion(db, request);
+    },
+    storageStats() {
+      let fileBytes = 0;
+      try {
+        fileBytes = fs.statSync(appPaths.ragDatabasePath).size;
+      } catch {
+        fileBytes = 0;
+      }
+      const pageSize = Number(db.prepare('PRAGMA page_size').get()?.page_size) || 0;
+      const freelist = Number(db.prepare('PRAGMA freelist_count').get()?.freelist_count) || 0;
+      return { fileBytes, reclaimableBytes: pageSize * freelist };
+    },
+    compactStorage() {
+      const before = fs.statSync(appPaths.ragDatabasePath).size;
+      const tables = [];
+      for (const dimension of schema.knownVectorDimensions(db)) {
+        tables.push(schema.compactVectorTable(db, dimension));
+      }
+      schema.compactDatabase(db);
+      const after = fs.statSync(appPaths.ragDatabasePath).size;
+      return { beforeBytes: before, afterBytes: after, tables };
+    },
     listInterruptedAgentRuns(request) {
       return runs.listInterruptedAgentRuns(db, request);
     },
@@ -144,6 +189,7 @@ function createRagStore(appPaths, options = {}) {
           deferVectorBackfill: options.deferVectorBackfill === true,
         }, { backfillDocumentVectors: indexing.backfillDocumentVectors });
         ftsAvailable = schema.initializeFtsSchema(db, { disabled: options.disableFts === true });
+        indexing.cleanupOrphanStaging(db);
         if (!schema.readStoreMeta(db, schema.VECTOR_BACKFILL_META_KEY) && options.deferVectorBackfill !== true) {
           scheduleVectorBackfill();
         }

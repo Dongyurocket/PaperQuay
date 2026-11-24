@@ -33,6 +33,8 @@ export interface LocalRagResolutionSuccess {
   ftsStatuses?: RagFtsStatus[];
   ftsHitCount?: number;
   partialSources?: boolean;
+  /** 本轮使用旧版索引回答，后台正在按新分块重建。 */
+  usingPreviousIndex?: boolean;
 }
 
 export interface LocalRagResolutionSkipped {
@@ -118,6 +120,8 @@ export function buildQaContext(options: {
     ftsStatuses: 'ftsStatuses' in options.rag ? options.rag.ftsStatuses : undefined,
     ftsHitCount: 'ftsHitCount' in options.rag ? options.rag.ftsHitCount : undefined,
     partialSources: 'partialSources' in options.rag ? options.rag.partialSources : undefined,
+    usingPreviousIndex:
+      options.rag.kind === 'retrieved' ? options.rag.usingPreviousIndex : undefined,
     budgetSkippedCount: options.rag.kind === 'retrieved' ? options.rag.budgetSkippedCount : undefined,
     skippedPaperTitles: options.skippedPaperTitles?.length ? options.skippedPaperTitles : undefined,
   };
@@ -342,6 +346,13 @@ export function formatQaContextStatus(
   const originLabel = formatOriginLabel(context.origin, l);
 
   if (isQaContextRagRetrieved(context)) {
+    if (context.usingPreviousIndex) {
+      return l(
+        '文档问答已完成，本轮使用旧版索引（新版索引后台更新中）',
+        'Document QA completed with the previous index version (the new index is rebuilding in the background)',
+      );
+    }
+
     return hasRetrievedChunks(context)
       ? l(
           `文档问答已完成，命中本地 RAG（${context.retrievedChunkCount} 组）`,

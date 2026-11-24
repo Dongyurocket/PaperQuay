@@ -17,6 +17,15 @@ const RAG_WORKER_METHODS = [
   'listDocumentSimilarities',
   'listIndexedChunkIds',
   'listIndexStatuses',
+  'prepareStagedRebuild',
+  'stageReusedChunks',
+  'stageEmbeddedChunks',
+  'commitStagedRebuild',
+  'failStagedRebuild',
+  'discardStagedRebuild',
+  'stampIndexExtractorVersion',
+  'storageStats',
+  'compactStorage',
   'listInterruptedAgentRuns',
   'migrateFromLibraryRagIndexes',
   'replaceWithSnapshot',
@@ -35,6 +44,8 @@ const RAG_WORKER_METHODS = [
 const DEFAULT_READ_TIMEOUT_MS = 30_000;
 const DEFAULT_LONG_TIMEOUT_MS = 10 * 60_000;
 const LONG_RUNNING_METHODS = new Set([
+  'commitStagedRebuild',
+  'compactStorage',
   'finalizeDocumentIndex',
   'indexDocument',
   'indexNote',

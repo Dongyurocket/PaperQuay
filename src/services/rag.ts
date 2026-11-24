@@ -11,6 +11,10 @@ import type {
   RagFinalizeDocumentIndexRequest,
   RagIndexDocumentRequest,
   RagIndexedChunkInput,
+  RagStageReusedChunksResult,
+  RagStagedRebuildRequest,
+  RagStorageStats,
+  RagCompactStorageResult,
   RagReportDocumentIndexFailureRequest,
   RagRetrievalResult,
   RagRetrievalDiagnostics,
@@ -165,6 +169,102 @@ export async function ragListIndexStatuses(): Promise<RagDocumentIndexStatus[]> 
     return await invoke<RagDocumentIndexStatus[]>('rag_list_index_statuses', {});
   } catch (error) {
     throw new Error(toErrorMessage(error, '读取本地 RAG 索引状态列表失败'));
+  }
+}
+
+export async function ragPrepareStagedRebuild(
+  request: RagStagedRebuildRequest,
+): Promise<{ stagedChunkIds: string[] }> {
+  try {
+    return await invoke<{ stagedChunkIds: string[] }>('rag_prepare_staged_rebuild', { request });
+  } catch (error) {
+    throw new Error(toErrorMessage(error, '准备 RAG 暂存重建失败'));
+  }
+}
+
+export async function ragStageReusedChunks(request: {
+  documentKey: string;
+  sourceType: Exclude<RagSourceMode, 'off' | 'hybrid' | 'note'>;
+  embeddingModelKey: string;
+  chunks: RagChunkInput[];
+}): Promise<RagStageReusedChunksResult> {
+  try {
+    return await invoke<RagStageReusedChunksResult>('rag_stage_reused_chunks', { request });
+  } catch (error) {
+    throw new Error(toErrorMessage(error, '复用旧 RAG 向量失败'));
+  }
+}
+
+export async function ragStageEmbeddedChunks(request: {
+  documentKey: string;
+  sourceType: Exclude<RagSourceMode, 'off' | 'hybrid' | 'note'>;
+  chunks: RagIndexedChunkInput[];
+}): Promise<{ stagedChunkIds: string[] }> {
+  try {
+    return await invoke<{ stagedChunkIds: string[] }>('rag_stage_embedded_chunks', { request });
+  } catch (error) {
+    throw new Error(toErrorMessage(error, '写入 RAG 暂存向量失败'));
+  }
+}
+
+export async function ragCommitStagedRebuild(
+  request: RagStagedRebuildRequest,
+): Promise<RagDocumentIndexStatus | null> {
+  try {
+    return await invoke<RagDocumentIndexStatus | null>('rag_commit_staged_rebuild', { request });
+  } catch (error) {
+    throw new Error(toErrorMessage(error, '提交 RAG 暂存重建失败'));
+  }
+}
+
+export async function ragFailStagedRebuild(request: {
+  documentKey: string;
+  sourceType: Exclude<RagSourceMode, 'off' | 'hybrid' | 'note'>;
+  errorMessage: string;
+}): Promise<void> {
+  try {
+    await invoke('rag_fail_staged_rebuild', { request });
+  } catch (error) {
+    throw new Error(toErrorMessage(error, '记录 RAG 重建失败状态失败'));
+  }
+}
+
+export async function ragDiscardStagedRebuild(request: {
+  documentKey: string;
+  sourceType: Exclude<RagSourceMode, 'off' | 'hybrid' | 'note'>;
+}): Promise<void> {
+  try {
+    await invoke('rag_discard_staged_rebuild', { request });
+  } catch (error) {
+    throw new Error(toErrorMessage(error, '清理 RAG 暂存重建失败'));
+  }
+}
+
+export async function ragStampExtractorVersion(request: {
+  documentKey: string;
+  sourceType: Exclude<RagSourceMode, 'off' | 'hybrid' | 'note'>;
+  extractorVersion: string | null;
+}): Promise<RagDocumentIndexStatus | null> {
+  try {
+    return await invoke<RagDocumentIndexStatus | null>('rag_stamp_extractor_version', { request });
+  } catch (error) {
+    throw new Error(toErrorMessage(error, '补写 RAG 抽取器版本失败'));
+  }
+}
+
+export async function ragStorageStats(): Promise<RagStorageStats> {
+  try {
+    return await invoke<RagStorageStats>('rag_storage_stats', {});
+  } catch (error) {
+    throw new Error(toErrorMessage(error, '读取 RAG 存储统计失败'));
+  }
+}
+
+export async function ragCompactStorage(): Promise<RagCompactStorageResult> {
+  try {
+    return await invoke<RagCompactStorageResult>('rag_compact_storage', {});
+  } catch (error) {
+    throw new Error(toErrorMessage(error, '整理 RAG 索引存储失败'));
   }
 }
 

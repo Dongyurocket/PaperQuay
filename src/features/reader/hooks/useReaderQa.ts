@@ -50,6 +50,7 @@ import { awaitQaRequest } from '../readerQaAbort';
 import {
   getReaderQaTabSnapshot,
 } from '../../../stores/useReaderQaStore';
+import { isQaHistoryRestoreReady } from '../readerQaSessionLifecycle';
 import {
   restorePaperQaHistory,
 } from '../documentReaderHistory';
@@ -632,7 +633,21 @@ export function useReaderQa(state: ReaderTabState, documentApi: ReaderDocumentAp
           resolveQaRequest(question, { tokenBudget }),
           controller.signal,
         );
-        if (!isRequestCurrent()) return;
+        if (!isRequestCurrent()) {
+          // 不能静默丢弃：移除空占位并明确告知用户重新发送。
+          setQaSessions((current) =>
+            removeFailedQaAssistantPlaceholder(current, currentSession.id, nextAssistantMessage.id),
+          );
+          if (!controller.signal.aborted) {
+            setQaError(
+              lRef.current(
+                '会话状态已切换，本次回答被丢弃，请重新发送问题。',
+                'The chat state changed, so this answer was discarded. Send the question again.',
+              ),
+            );
+          }
+          return;
+        }
 
         if (qaRequest.documentText === '__never__') {
           throw new Error(
@@ -813,22 +828,27 @@ export function useReaderQa(state: ReaderTabState, documentApi: ReaderDocumentAp
     setQaAttachments([]);
     setQaRunningSessionIds([]);
     setQaError('');
+    // zustand 写入同步生效：恢复完成即可提交问答与历史保存，
+    // 不依赖后续 effect 再比较会话数组引用。
+    qaHistoryReadyWorkspaceRef.current = workspaceId;
+    qaHistoryExpectedRef.current = null;
   }, [currentDocument.workspaceId]);
   const effect_245 = useCallback(() => {
     const expected = qaHistoryExpectedRef.current;
 
-    if (
-      !expected ||
-      expected.workspaceId !== currentDocument.workspaceId ||
-      qaSessions !== expected.qaSessions ||
-      selectedQaSessionId !== expected.selectedQaSessionId
-    ) {
+    if (!expected || expected.workspaceId !== currentDocument.workspaceId) {
+      return;
+    }
+
+    // zustand 写入是同步的：slice 的 workspaceId 已对齐就说明恢复已落地。
+    // 不再比较会话数组引用，避免别的写入（初始会话、范围切换）让就绪标记永远对不上。
+    if (!isQaHistoryRestoreReady(getReaderQaTabSnapshot(tabId), expected.workspaceId)) {
       return;
     }
 
     qaHistoryReadyWorkspaceRef.current = expected.workspaceId;
     qaHistoryExpectedRef.current = null;
-  }, [currentDocument.workspaceId, qaSessions, selectedQaSessionId]);
+  }, [currentDocument.workspaceId, tabId]);
   const handleAssistantQaSubmit = useCallback(
       (inputOverride?: string) => {
         void handleSubmitQa(inputOverride);

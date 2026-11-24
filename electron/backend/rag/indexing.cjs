@@ -188,6 +188,9 @@ function rowToStatus(row) {
     failedAt: row.failed_at ?? null,
     retryAfterMs: row.retry_after_ms ?? null,
     cooldownUntil: row.cooldown_until ?? null,
+    extractorVersion: row.extractor_version ?? null,
+    rebuildError: row.rebuild_error ?? null,
+    rebuildAttemptedAt: row.rebuild_attempted_at ?? null,
   };
 }
 
@@ -433,9 +436,12 @@ function upsertStatus(db, status) {
       last_error,
       failed_at,
       retry_after_ms,
-      cooldown_until
+      cooldown_until,
+      extractor_version,
+      rebuild_error,
+      rebuild_attempted_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT (document_key, source_type) DO UPDATE SET
       title = excluded.title,
       source_signature = excluded.source_signature,
@@ -449,7 +455,10 @@ function upsertStatus(db, status) {
       last_error = excluded.last_error,
       failed_at = excluded.failed_at,
       retry_after_ms = excluded.retry_after_ms,
-      cooldown_until = excluded.cooldown_until
+      cooldown_until = excluded.cooldown_until,
+      extractor_version = excluded.extractor_version,
+      rebuild_error = excluded.rebuild_error,
+      rebuild_attempted_at = excluded.rebuild_attempted_at
   `).run(
     status.documentKey,
     status.sourceType,
@@ -466,6 +475,9 @@ function upsertStatus(db, status) {
     status.failedAt,
     status.retryAfterMs,
     status.cooldownUntil,
+    status.extractorVersion ?? null,
+    status.rebuildError ?? null,
+    status.rebuildAttemptedAt ?? null,
   );
 }
 
@@ -507,7 +519,39 @@ function chunkIdsForSource(db, documentKey, sourceType) {
     .filter((id) => Number.isSafeInteger(id) && id > 0);
 }
 
+// 暂存复用会按批读取旧分块的文本索引；同一文献的一次重建内复用缓存，
+// 避免每个 200 条分块批次都重新扫描整篇文献的文本。
+const staleTextIndexCache = new Map();
+
+function clearStaleTextIndexCache(documentKey, sourceType) {
+  staleTextIndexCache.delete(documentKey + '::' + sourceType);
+}
+
+function oldChunkIdByText(db, documentKey, sourceType) {
+  const cacheKey = documentKey + '::' + sourceType;
+  const cached = staleTextIndexCache.get(cacheKey);
+
+  if (cached) {
+    return cached;
+  }
+
+  const map = new Map();
+  const rows = db
+    .prepare('SELECT id, text FROM rag_chunks WHERE document_key = ? AND source_type = ?')
+    .all(documentKey, sourceType);
+
+  for (const row of rows) {
+    if (!map.has(row.text)) {
+      map.set(row.text, Number(row.id));
+    }
+  }
+
+  staleTextIndexCache.set(cacheKey, map);
+  return map;
+}
+
 function deleteDocumentSourceData(db, documentKey, sourceType) {
+  clearStaleTextIndexCache(documentKey, sourceType);
   deleteVectorRowsByIds(db, chunkIdsForSource(db, documentKey, sourceType));
   db.prepare('DELETE FROM rag_chunks WHERE document_key = ? AND source_type = ?').run(documentKey, sourceType);
   db.prepare('DELETE FROM rag_indexes WHERE document_key = ? AND source_type = ?').run(documentKey, sourceType);
@@ -521,6 +565,7 @@ function indexDocument(db, request) {
   const embeddingModelKey = normalizeRequiredString(request?.embeddingModelKey, 'embeddingModelKey');
   const chunks = Array.isArray(request?.chunks) ? request.chunks : [];
   const totalChunkCount = normalizeNonNegativeInteger(request?.totalChunkCount, chunks.length);
+  const extractorVersion = normalizeBoundedString(request?.extractorVersion, 'extractorVersion') || null;
   const dimension = chunks.length > 0 ? validateEmbedding(chunks[0]?.embedding) : 0;
 
   if (dimension > 0) {
@@ -559,6 +604,9 @@ function indexDocument(db, request) {
         failedAt: null,
         retryAfterMs: null,
         cooldownUntil: null,
+        extractorVersion,
+        rebuildError: null,
+        rebuildAttemptedAt: null,
       });
       rebuildDocumentVectors(db, documentKey);
       return;
@@ -667,6 +715,9 @@ function indexDocument(db, request) {
       failedAt: null,
       retryAfterMs: null,
       cooldownUntil: null,
+      extractorVersion,
+      rebuildError: null,
+      rebuildAttemptedAt: null,
     });
 
     if (nextStatus === 'ready' && sourceType === 'mineru-markdown') {
@@ -711,6 +762,9 @@ function reportFailure(db, request) {
       failedAt,
       retryAfterMs,
       cooldownUntil: retryAfterMs ? failedAt + retryAfterMs : null,
+      extractorVersion: normalizeBoundedString(request?.extractorVersion, 'extractorVersion') || null,
+      rebuildError: null,
+      rebuildAttemptedAt: null,
     });
   });
 }
@@ -743,6 +797,7 @@ function finalizeDocumentIndex(db, request) {
   const sourceSignature = normalizeRequiredString(request?.sourceSignature, 'sourceSignature');
   const embeddingModelKey = normalizeRequiredString(request?.embeddingModelKey, 'embeddingModelKey');
   const totalChunkCount = normalizeNonNegativeInteger(request?.totalChunkCount);
+  const extractorVersion = normalizeBoundedString(request?.extractorVersion, 'extractorVersion') || null;
   const expectedChunkIds = Array.isArray(request?.expectedChunkIds)
     ? new Set(request.expectedChunkIds.map((id) => cleanString(id)).filter(Boolean))
     : null;
@@ -796,6 +851,9 @@ function finalizeDocumentIndex(db, request) {
       failedAt: null,
       retryAfterMs: null,
       cooldownUntil: null,
+      extractorVersion: extractorVersion ?? existing?.extractorVersion ?? null,
+      rebuildError: null,
+      rebuildAttemptedAt: null,
     });
 
     if (nextStatus === 'ready' && sourceType === 'mineru-markdown') {
@@ -870,6 +928,416 @@ function migrateFromLibraryRagIndexes(db, ragIndexes) {
   return summary;
 }
 
+
+function getStagingMeta(db, documentKey, sourceType) {
+  return db
+    .prepare('SELECT * FROM rag_index_staging_meta WHERE document_key = ? AND source_type = ?')
+    .get(documentKey, sourceType) ?? null;
+}
+
+/**
+ * 开始（或继续）一次暂存重建：配置一致时保留已有暂存行以支持断点续传，
+ * 签名、模型或抽取器版本变化时清空重来。返回已经带向量的 chunkId。
+ */
+function prepareStagedRebuild(db, request) {
+  const documentKey = normalizeDocumentKey(request?.documentKey);
+  const sourceType = normalizeSourceType(request?.sourceType);
+  const sourceSignature = normalizeRequiredString(request?.sourceSignature, 'sourceSignature');
+  const embeddingModelKey = normalizeRequiredString(request?.embeddingModelKey, 'embeddingModelKey');
+  const extractorVersion = normalizeBoundedString(request?.extractorVersion, 'extractorVersion') || null;
+  const totalChunkCount = normalizeNonNegativeInteger(request?.totalChunkCount);
+
+  if (sourceType === 'note') {
+    throw new Error('Staged rebuild does not support note indexes');
+  }
+
+  return withTransaction(db, () => {
+    const meta = getStagingMeta(db, documentKey, sourceType);
+    const reusable =
+      meta &&
+      meta.source_signature === sourceSignature &&
+      meta.embedding_model_key === embeddingModelKey &&
+      (meta.extractor_version ?? null) === extractorVersion;
+
+    if (!reusable) {
+      db.prepare('DELETE FROM rag_index_staging WHERE document_key = ? AND source_type = ?')
+        .run(documentKey, sourceType);
+      db.prepare('DELETE FROM rag_index_staging_meta WHERE document_key = ? AND source_type = ?')
+        .run(documentKey, sourceType);
+      db.prepare(
+        'INSERT INTO rag_index_staging_meta (' +
+        'document_key, source_type, source_signature, embedding_model_key, ' +
+        'extractor_version, total_chunk_count, started_at' +
+        ') VALUES (?, ?, ?, ?, ?, ?, ?)',
+      ).run(documentKey, sourceType, sourceSignature, embeddingModelKey,
+        extractorVersion, totalChunkCount, Date.now());
+    } else if (Number(meta.total_chunk_count) !== totalChunkCount) {
+      db.prepare(
+        'UPDATE rag_index_staging_meta SET total_chunk_count = ? ' +
+        'WHERE document_key = ? AND source_type = ?',
+      ).run(totalChunkCount, documentKey, sourceType);
+    }
+
+    const stagedChunkIds = db
+      .prepare('SELECT chunk_id FROM rag_index_staging WHERE document_key = ? AND source_type = ?')
+      .all(documentKey, sourceType)
+      .map((row) => row.chunk_id);
+
+    return { stagedChunkIds };
+  });
+}
+
+/**
+ * 复用旧索引中文本完全相同的分块向量，把结果写入暂存表；返回仍需调用 embedding 的 chunkId。
+ * 只有旧索引是 ready 且模型一致时才复用，避免跨模型/跨维度混用。
+ */
+function stageReusedChunks(db, request) {
+  const documentKey = normalizeDocumentKey(request?.documentKey);
+  const sourceType = normalizeSourceType(request?.sourceType);
+  const embeddingModelKey = normalizeRequiredString(request?.embeddingModelKey, 'embeddingModelKey');
+  const descriptors = Array.isArray(request?.chunks) ? request.chunks : [];
+  const status = getStatus(db, documentKey, sourceType);
+
+  const missingChunkIds = descriptors
+    .map((descriptor) => cleanString(descriptor?.chunkId))
+    .filter(Boolean);
+
+  if (
+    !status ||
+    status.status !== 'ready' ||
+    status.embeddingModelKey !== embeddingModelKey ||
+    !Number.isSafeInteger(status.embeddingDimension) ||
+    status.embeddingDimension <= 0
+  ) {
+    return { stagedChunkIds: [], missingChunkIds };
+  }
+
+  const dimension = status.embeddingDimension;
+  const vectorTable = vectorTableName(dimension);
+  const oldIdByText = oldChunkIdByText(db, documentKey, sourceType);
+
+  const stagingGenerationId = getStagingMeta(db, documentKey, sourceType)?.source_signature ?? '';
+  const stagedSet = new Set(
+    db.prepare('SELECT chunk_id FROM rag_index_staging WHERE document_key = ? AND source_type = ?')
+      .all(documentKey, sourceType)
+      .map((row) => row.chunk_id),
+  );
+  const selectVector = db.prepare('SELECT embedding FROM ' + vectorTable + ' WHERE rowid = ?');
+  const insertStaging = db.prepare(
+    'INSERT INTO rag_index_staging (' +
+    'document_key, source_type, chunk_id, chunk_index, page_index, block_id, text, ' +
+    'generation_id, section_id, section_path, start_offset, end_offset, text_version, ' +
+    'embedding, updated_at' +
+    ') VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ' +
+    'ON CONFLICT (document_key, source_type, chunk_id) DO UPDATE SET ' +
+    'chunk_index = excluded.chunk_index, page_index = excluded.page_index, ' +
+    'block_id = excluded.block_id, text = excluded.text, ' +
+    'generation_id = excluded.generation_id, section_id = excluded.section_id, ' +
+    'section_path = excluded.section_path, start_offset = excluded.start_offset, ' +
+    'end_offset = excluded.end_offset, text_version = excluded.text_version, ' +
+    'embedding = excluded.embedding, updated_at = excluded.updated_at',
+  );
+
+  const stagedChunkIds = [];
+  const stillMissing = [];
+  const now = Date.now();
+
+  withTransaction(db, () => {
+    for (const descriptor of descriptors) {
+      const chunkId = cleanString(descriptor?.chunkId);
+      if (!chunkId) continue;
+
+      if (stagedSet.has(chunkId)) {
+        stagedChunkIds.push(chunkId);
+        continue;
+      }
+
+      const text = typeof descriptor?.text === 'string' ? descriptor.text : '';
+      const oldId = oldIdByText.get(text);
+      const vectorRow = oldId ? selectVector.get(BigInt(oldId)) : null;
+      const decoded = vectorRow ? decodeEmbeddingValue(vectorRow.embedding, dimension) : null;
+
+      if (!decoded) {
+        stillMissing.push(chunkId);
+        continue;
+      }
+
+      insertStaging.run(
+        documentKey,
+        sourceType,
+        chunkId,
+        normalizeNonNegativeInteger(descriptor?.chunkIndex),
+        descriptor?.pageIndex === null || descriptor?.pageIndex === undefined
+          ? null
+          : normalizeNonNegativeInteger(descriptor.pageIndex),
+        cleanString(descriptor?.blockId) || null,
+        text,
+        cleanString(descriptor?.generationId) || stagingGenerationId,
+        cleanString(descriptor?.sectionId) || null,
+        Array.isArray(descriptor?.sectionPath) && descriptor.sectionPath.length > 0
+          ? JSON.stringify(descriptor.sectionPath.filter((part) => typeof part === 'string' && part.trim()))
+          : null,
+        normalizeOptionalOffset(descriptor?.startOffset),
+        normalizeOptionalOffset(descriptor?.endOffset),
+        cleanString(descriptor?.textVersion) || null,
+        Buffer.from(decoded.buffer, decoded.byteOffset, decoded.byteLength),
+        now,
+      );
+      stagedChunkIds.push(chunkId);
+    }
+  });
+
+  return { stagedChunkIds, missingChunkIds: stillMissing };
+}
+
+/** 写入新计算的向量。dimension 由第一批向量推断，之后每批都必须一致。 */
+function stageEmbeddedChunks(db, request) {
+  const documentKey = normalizeDocumentKey(request?.documentKey);
+  const sourceType = normalizeSourceType(request?.sourceType);
+  const chunks = Array.isArray(request?.chunks) ? request.chunks : [];
+
+  if (chunks.length === 0) {
+    return { stagedChunkIds: [] };
+  }
+
+  const dimension = validateEmbedding(chunks[0]?.embedding);
+  const existingEmbedding = db.prepare(
+    'SELECT embedding FROM rag_index_staging ' +
+    'WHERE document_key = ? AND source_type = ? AND embedding IS NOT NULL LIMIT 1',
+  ).get(documentKey, sourceType);
+  const existingDimension = existingEmbedding?.embedding
+    ? Math.floor(existingEmbedding.embedding.byteLength / 4)
+    : null;
+
+  if (existingDimension !== null && existingDimension !== dimension) {
+    throw new Error(
+      'RAG staging embedding dimension mismatch: expected ' + existingDimension + ', got ' + dimension,
+    );
+  }
+
+  const insertStaging = db.prepare(
+    'INSERT INTO rag_index_staging (' +
+    'document_key, source_type, chunk_id, chunk_index, page_index, block_id, text, ' +
+    'generation_id, section_id, section_path, start_offset, end_offset, text_version, ' +
+    'embedding, updated_at' +
+    ') VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ' +
+    'ON CONFLICT (document_key, source_type, chunk_id) DO UPDATE SET ' +
+    'chunk_index = excluded.chunk_index, page_index = excluded.page_index, ' +
+    'block_id = excluded.block_id, text = excluded.text, ' +
+    'generation_id = excluded.generation_id, section_id = excluded.section_id, ' +
+    'section_path = excluded.section_path, start_offset = excluded.start_offset, ' +
+    'end_offset = excluded.end_offset, text_version = excluded.text_version, ' +
+    'embedding = excluded.embedding, updated_at = excluded.updated_at',
+  );
+
+  const stagingGenerationId = getStagingMeta(db, documentKey, sourceType)?.source_signature ?? '';
+  const now = Date.now();
+  const stagedChunkIds = [];
+
+  withTransaction(db, () => {
+    for (const chunk of chunks) {
+      const chunkId = cleanString(chunk?.chunkId);
+      if (!chunkId) continue;
+      validateEmbedding(chunk?.embedding, dimension);
+      const sectionPath = Array.isArray(chunk?.sectionPath)
+        ? chunk.sectionPath.filter((part) => typeof part === 'string' && part.trim())
+        : null;
+
+      insertStaging.run(
+        documentKey,
+        sourceType,
+        chunkId,
+        normalizeNonNegativeInteger(chunk?.chunkIndex),
+        chunk?.pageIndex === null || chunk?.pageIndex === undefined
+          ? null
+          : normalizeNonNegativeInteger(chunk.pageIndex),
+        cleanString(chunk?.blockId) || null,
+        typeof chunk?.text === 'string' ? chunk.text : String(chunk?.text ?? ''),
+        cleanString(chunk?.generationId) || stagingGenerationId,
+        cleanString(chunk?.sectionId) || null,
+        sectionPath && sectionPath.length > 0 ? JSON.stringify(sectionPath) : null,
+        normalizeOptionalOffset(chunk?.startOffset),
+        normalizeOptionalOffset(chunk?.endOffset),
+        cleanString(chunk?.textVersion) || null,
+        Buffer.from(toFloat32Array(chunk.embedding).buffer),
+        now,
+      );
+      stagedChunkIds.push(chunkId);
+    }
+  });
+
+  return { stagedChunkIds };
+}
+
+/**
+ * 原子切换：删旧数据 → 写入暂存数据 → 更新状态 → 清空暂存。
+ * 调用前必须保证暂存覆盖全部期望分块，否则整体失败、旧索引保持不变。
+ */
+function commitStagedRebuild(db, request) {
+  const documentKey = normalizeDocumentKey(request?.documentKey);
+  const sourceType = normalizeSourceType(request?.sourceType);
+  const title = cleanString(request?.title);
+  const sourceSignature = normalizeRequiredString(request?.sourceSignature, 'sourceSignature');
+  const embeddingModelKey = normalizeRequiredString(request?.embeddingModelKey, 'embeddingModelKey');
+  const extractorVersion = normalizeBoundedString(request?.extractorVersion, 'extractorVersion') || null;
+  const totalChunkCount = normalizeNonNegativeInteger(request?.totalChunkCount);
+
+  return withTransaction(db, () => {
+    const meta = getStagingMeta(db, documentKey, sourceType);
+
+    if (
+      !meta ||
+      meta.source_signature !== sourceSignature ||
+      meta.embedding_model_key !== embeddingModelKey ||
+      (meta.extractor_version ?? null) !== extractorVersion
+    ) {
+      throw new Error('RAG staged rebuild config does not match the prepared staging rows');
+    }
+
+    const rows = db
+      .prepare(
+        'SELECT * FROM rag_index_staging ' +
+        'WHERE document_key = ? AND source_type = ? ORDER BY chunk_index',
+      )
+      .all(documentKey, sourceType);
+
+    if (rows.length < totalChunkCount) {
+      throw new Error(
+        'RAG staged rebuild incomplete: staged ' + rows.length + ' of ' + totalChunkCount + ' chunks',
+      );
+    }
+
+    const firstEmbedding = rows.find((row) => row.embedding)?.embedding ?? null;
+    const dimension = firstEmbedding ? Math.floor(firstEmbedding.byteLength / 4) : 0;
+
+    if (dimension > 0) {
+      for (const row of rows) {
+        if (!row.embedding || row.embedding.byteLength !== dimension * 4) {
+          throw new Error('RAG staged chunk ' + row.chunk_id + ' is missing a valid embedding');
+        }
+      }
+    }
+
+    deleteDocumentSourceData(db, documentKey, sourceType);
+
+    if (dimension > 0) {
+      const vectorTable = ensureVectorTable(db, dimension);
+      const insertChunk = db.prepare(
+        'INSERT INTO rag_chunks (' +
+        'document_key, source_type, chunk_id, chunk_index, page_index, block_id, text, ' +
+        'generation_id, section_id, section_path, start_offset, end_offset, text_version' +
+        ') VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      );
+      const lastInsertedId = db.prepare('SELECT last_insert_rowid() AS id');
+      const insertVector = db.prepare(
+        'INSERT INTO ' + vectorTable + ' (rowid, document_key, source_type, embedding) VALUES (?, ?, ?, ?)',
+      );
+
+      for (const row of rows) {
+        insertChunk.run(
+          documentKey,
+          sourceType,
+          row.chunk_id,
+          Number(row.chunk_index) || 0,
+          row.page_index === null ? null : Number(row.page_index),
+          row.block_id ?? null,
+          row.text ?? '',
+          row.generation_id ?? '',
+          row.section_id ?? null,
+          row.section_path ?? null,
+          row.start_offset === null ? null : Number(row.start_offset),
+          row.end_offset === null ? null : Number(row.end_offset),
+          row.text_version ?? null,
+        );
+        const chunkRowId = Number(lastInsertedId.get().id);
+        insertVector.run(BigInt(chunkRowId), documentKey, sourceType, row.embedding);
+      }
+    }
+
+    const indexedChunkCount = countChunks(db, documentKey, sourceType);
+    const nextStatus = indexedChunkCount >= totalChunkCount ? 'ready' : 'pending';
+    upsertStatus(db, {
+      documentKey,
+      sourceType,
+      title,
+      sourceSignature,
+      embeddingModelKey,
+      embeddingDimension: dimension,
+      totalChunkCount,
+      chunkCount: indexedChunkCount,
+      indexedChunkCount,
+      indexedAt: Date.now(),
+      status: nextStatus,
+      lastError: null,
+      failedAt: null,
+      retryAfterMs: null,
+      cooldownUntil: null,
+      extractorVersion,
+      rebuildError: null,
+      rebuildAttemptedAt: null,
+    });
+
+    db.prepare('DELETE FROM rag_index_staging WHERE document_key = ? AND source_type = ?')
+      .run(documentKey, sourceType);
+    db.prepare('DELETE FROM rag_index_staging_meta WHERE document_key = ? AND source_type = ?')
+      .run(documentKey, sourceType);
+    rebuildDocumentVectors(db, documentKey);
+    return getStatus(db, documentKey, sourceType);
+  });
+}
+
+/** 重建失败：旧索引继续可用，只记录错误供「待更新」提示展示。 */
+function failStagedRebuild(db, request) {
+  const documentKey = normalizeDocumentKey(request?.documentKey);
+  const sourceType = normalizeSourceType(request?.sourceType);
+  const message = cleanString(request?.errorMessage) || 'RAG rebuild failed';
+
+  db.prepare(
+    'UPDATE rag_indexes SET rebuild_error = ?, rebuild_attempted_at = ? ' +
+    'WHERE document_key = ? AND source_type = ?',
+  ).run(message, Date.now(), documentKey, sourceType);
+  return { ok: true };
+}
+
+function discardStagedRebuild(db, request) {
+  clearStaleTextIndexCache(cleanString(request?.documentKey), cleanString(request?.sourceType));
+  const documentKey = normalizeDocumentKey(request?.documentKey);
+  const sourceType = normalizeSourceType(request?.sourceType);
+  return withTransaction(db, () => {
+    db.prepare('DELETE FROM rag_index_staging WHERE document_key = ? AND source_type = ?')
+      .run(documentKey, sourceType);
+    db.prepare('DELETE FROM rag_index_staging_meta WHERE document_key = ? AND source_type = ?')
+      .run(documentKey, sourceType);
+    return { ok: true };
+  });
+}
+
+/** 启动清理：文献索引已被删除（或从未存在）的暂存行无法再提交。 */
+function cleanupOrphanStaging(db) {
+  try {
+    db.exec(
+      'DELETE FROM rag_index_staging ' +
+      'WHERE document_key NOT IN (SELECT document_key FROM rag_indexes);' +
+      'DELETE FROM rag_index_staging_meta ' +
+      'WHERE document_key NOT IN (SELECT document_key FROM rag_indexes);',
+    );
+  } catch (error) {
+    console.warn('[paperquay] Failed to clean orphan RAG staging rows.', toError(error));
+  }
+}
+
+/** 补写抽取器版本：签名已一致但旧行为 NULL 的索引，不需要重新嵌入。 */
+function stampIndexExtractorVersion(db, request) {
+  const documentKey = normalizeDocumentKey(request?.documentKey);
+  const sourceType = normalizeSourceType(request?.sourceType);
+  const extractorVersion = normalizeBoundedString(request?.extractorVersion, 'extractorVersion') || null;
+  db.prepare(
+    'UPDATE rag_indexes SET extractor_version = ? ' +
+    "WHERE document_key = ? AND source_type = ? AND status = 'ready'",
+  ).run(extractorVersion, documentKey, sourceType);
+  return getStatus(db, documentKey, sourceType);
+}
+
 function listIndexStatuses(db) {
   return db
     .prepare('SELECT * FROM rag_indexes ORDER BY indexed_at DESC')
@@ -939,13 +1407,22 @@ module.exports = {
   normalizeNullableInteger,
   normalizeRequiredString,
   normalizeSourceType,
+  cleanupOrphanStaging,
+  commitStagedRebuild,
+  discardStagedRebuild,
+  failStagedRebuild,
+  getStagingMeta,
   parseStoredSectionPath,
+  prepareStagedRebuild,
   rebuildAllDocumentVectors,
   rebuildDocumentVectors,
   removeDocumentIndex,
   removeNoteIndex,
   reportFailure,
   rowToStatus,
+  stageEmbeddedChunks,
+  stageReusedChunks,
+  stampIndexExtractorVersion,
   runBoundedVectorBackfill,
   stepDocumentVectorBackfill,
   toFloat32Array,

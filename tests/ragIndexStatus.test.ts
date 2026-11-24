@@ -12,6 +12,7 @@ import {
   summarizeRagIndexOverview,
 } from '../src/services/ragIndexStatus.ts';
 import type { RagDocumentIndexStatus } from '../src/types/reader.ts';
+import { MINERU_RAG_EXTRACTOR_VERSION } from '../src/shared/ragIndexVersions.ts';
 
 const require = createRequire(import.meta.url);
 const { createRagStore } = require('../electron/backend/ragStore.cjs');
@@ -37,6 +38,7 @@ function makeStatus(overrides: Partial<RagDocumentIndexStatus>): RagDocumentInde
     indexedChunkCount: 10,
     indexedAt: 1,
     status: 'ready',
+    extractorVersion: MINERU_RAG_EXTRACTOR_VERSION,
     ...overrides,
   };
 }
@@ -179,7 +181,49 @@ test('summarizeRagIndexOverview counts parsed papers by aggregate status', () =>
     },
   });
 
-  assert.deepEqual(overview, { ready: 1, pending: 1, failed: 1, unindexed: 1, excluded: 0 });
+  assert.deepEqual(overview, { ready: 1, stale: 0, pending: 1, failed: 1, unindexed: 1, excluded: 0 });
+});
+
+test('outdated extractor versions are aggregated as stale, not ready', () => {
+  assert.equal(
+    aggregateRagIndexStatus([
+      makeStatus({ status: 'ready', extractorVersion: null }),
+      makeStatus({ status: 'ready', sourceType: 'pdf-text' }),
+    ]),
+    'stale',
+  );
+  assert.equal(
+    aggregateRagIndexStatus([
+      makeStatus({ status: 'ready', extractorVersion: 'mineru-chunks-v2' }),
+    ], { embeddingModelKey: 'other-model' }),
+    'stale',
+  );
+  assert.equal(
+    aggregateRagIndexStatus([
+      makeStatus({ status: 'ready' }),
+    ]),
+    'ready',
+  );
+});
+
+test('selectRagIndexCandidates onlyStale picks outdated ready indexes', () => {
+  const items = [
+    { documentKey: 'current-doc', workspaceId: 'w1', title: 'A' },
+    { documentKey: 'stale-doc', workspaceId: 'w2', title: 'B' },
+    { documentKey: 'none-doc', workspaceId: 'w3', title: 'C' },
+  ];
+  const statusByDocumentKey = {
+    'current-doc': [makeStatus({ documentKey: 'current-doc', status: 'ready' })],
+    'stale-doc': [makeStatus({ documentKey: 'stale-doc', status: 'ready', extractorVersion: 'mineru-chunks-v2' })],
+  };
+  const stale = selectRagIndexCandidates({
+    items,
+    mineruParsedByWorkspaceId: { w1: true, w2: true, w3: true },
+    statusByDocumentKey,
+    onlyStale: true,
+  });
+
+  assert.deepEqual(stale.map((item) => item.documentKey), ['stale-doc']);
 });
 
 test('excluded papers skip indexing candidates and are counted separately', () => {
