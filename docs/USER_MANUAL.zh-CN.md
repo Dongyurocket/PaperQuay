@@ -1,6 +1,6 @@
 # PaperQuay 用户手册
 
-> 适用版本：**v0.4.38**。更新日期：2026-11-24。
+> 适用版本：**v0.4.39**。更新日期：2026-11-25。
 > 配套文档：[README](../README.md)、[笔记宪章](./notes-charter.md)、[MCP 接入指南](./MCP_AGENT_INTEGRATION.md)、[开发手册](./DEVELOPMENT.zh-CN.md)、[更新日志](../CHANGELOG.md)。
 
 本手册介绍导入、阅读、翻译、概览、问答、笔记和备份操作。开发、构建与发布流程见[开发手册](./DEVELOPMENT.zh-CN.md)。

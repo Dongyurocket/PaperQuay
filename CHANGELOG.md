@@ -4,12 +4,15 @@
 
 Windows 安装包见 [GitHub Releases](https://github.com/Dongyurocket/PaperQuay/releases)。自 0.4.24 起仅发布、维护和测试 Windows x64；其他平台由用户自行打包，作者不承担维护和测试。
 
-## [0.4.38] - 2026-11-24
+## [0.4.39] - 2026-11-25
 
 本版本收口 2026-11-22 开始的代码、架构与 UI 专项审计（第 1–12 批）及第 12R 批复核阻塞项。审计范围覆盖数据耐久与备份、IPC 安全、PDF/笔记正确性、启动与设计系统、性能热点、MCP 契约、打包完整性与 i18n/a11y。未修改 SQLite schema 或 `user_version`。
 
+0.4.38 标签因 GitHub Windows runner 的 8.3 短路径（`RUNNER~1`）与 CI 性能预算导致 Release verify 失败，未发布；0.4.39 修复后发布，内容包含原 0.4.38 的全部改动。
+
 ### 修复
 
+- **CI 短路径（0.4.39）**：路径策略的内置根（含 MinerU 默认缓存根）与测试夹具在比较前统一做 realpath canonicalization，Windows 8.3 短路径与长路径不再判为不同目录；两项真实文件系统计时断言在共享 CI runner 上跳过，本地仍执行。
 - **数据与启动**：文献元数据写入统一 UPSERT，关联表保留 `ON DELETE CASCADE`；修复导入/删除/备份恢复中的丢数据路径，MinerU 缓存与译版目录在升级后需要用户重新授权。
 - **目录授权（B1）**：目录对话框只授权所选目录自身，不再把父目录加入读根；`select_directory` 与 `prepare_mineru_cache_dir` 使用同一入口。自定义 `translatedPdfDir` 的授权状态与 `isReadAllowed`/`isWriteAllowed` 统一；旧 MinerU 目录未授权或 OS 拒绝列举时跳过迁移并提示，而不是让整次目录选择失败；写模式状态用写权限探测，渲染层附加译版前校验目标目录，未授权路径的状态查询不返回 realpath；不存在的中间目录沿最近存在的祖先做 realpath，堵住 junction 写出。
 - **笔记与 Vault（E5）**：Vault 导出识别并剔除已有的 `参考文献`/`References` 小节及其紧邻列表，回导再导出不再增长；无内联引用时保留手写列表。围栏按 CommonMark 跟踪字符/长度和 info string，列表项内代码块、嵌套围栏、后续另一份列表与多行续行不再误删；标题后是正文时保留正文且不追加第二份列表。提炼摘录卡的「我的想法」区与 `摘录卡` 标签按界面语言生成，追加时中英标题都能识别；系统页的多行操作摘要不再截断。
@@ -24,7 +27,7 @@ Windows 安装包见 [GitHub Releases](https://github.com/Dongyurocket/PaperQuay
 - 代码签名/公证与发布流水线尚未在本机验证；Windows 安装包未签名，`--no-sandbox` 仅用于本机验收（渲染器仍由 `webPreferences.sandbox` 限制），未验证篡改 `app.asar` 后的拒绝加载失败模式。
 - NSIS 注册式安装/卸载与安装版备份导入未执行（本机已有同 appId 安装且其 MCP 进程占用文件）；安装包 payload 冒烟覆盖启动、导入、中文 CID PDF、笔记、Vault、导出与 MCP 读图。
 - axe 对 PDF canvas 文本层、canvas 图形与动画中间态无法给出确定结论；这些 incomplete 保留在报告中，不等同于 violation。
-- Notes 首次打开相比基线的变化按实测记录：审计前工作区在启动时即挂载，点击只是显示；0.4.38 改为惰性加载，首次打开 Notes/Graph 分别为 100ms/60ms（基线 19ms/26ms），启动与 Library 首屏则相应下降。Electron 实际 fps 与安装版首屏未测量。
+- Notes 首次打开相比基线的变化按实测记录：审计前工作区在启动时即挂载，点击只是显示；0.4.39 改为惰性加载，首次打开 Notes/Graph 分别为 100ms/60ms（基线 19ms/26ms），启动与 Library 首屏则相应下降。Electron 实际 fps 与安装版首屏未测量。
 - macOS/Linux 打包与 Windows arm64 未验证。
 
 ### 验证
@@ -33,7 +36,11 @@ Windows 安装包见 [GitHub Releases](https://github.com/Dongyurocket/PaperQuay
 - `PAPERQUAY_AXE=1 node --test tests/axeAudit.test.mjs`：16 视图/主题 0 violations。
 - `node tests/support/perfAudit.mjs --baseline-ref 1283d82`：3+3 次交替测量，数据与方差见变更记录。
 - 干净检出（staged tree `f92fc7f`，`git -c core.autocrlf=false archive`）执行 `npm ci && npm run typecheck && npm run lint && npm run build && npm test` 通过（1,489 项：1,480 通过、9 跳过、0 失败；排除未提交的 `tests/knowledgeMcpFigure.test.ts` 3 项）。
-- NSIS 0.4.38 构建与 afterPack/fuse/ELECTRONASAR 断言通过；payload 冒烟结果见 `docs/assets/audit-2026-11-24/installer-smoke/`。
+- NSIS 0.4.39 构建与 afterPack/fuse/ELECTRONASAR 断言通过；payload 冒烟结果见 `docs/assets/audit-2026-11-24/installer-smoke/`。
+
+## [0.4.38] - 2026-11-24（未发布）
+
+`app-v0.4.38` 标签的 Release verify 失败，未发布安装包；全部改动并入 0.4.39。
 
 ## [0.4.37] - 2026-11-22
 

@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.4.38-2563eb?style=flat-square" alt="Version v0.4.38">
+  <img src="https://img.shields.io/badge/version-v0.4.39-2563eb?style=flat-square" alt="Version v0.4.39">
   <img src="https://img.shields.io/badge/platform-Windows%20x64-4b5563?style=flat-square" alt="Windows x64">
   <img src="https://img.shields.io/badge/built%20with-Electron-47848f?style=flat-square" alt="Electron">
   <img src="https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-0f766e?style=flat-square" alt="React TypeScript">
@@ -57,7 +57,7 @@ PaperQuay 面向研究生、科研人员和需要持续阅读论文的用户。�
 
 ## 近期更新
 
-- **v0.4.38**：完成 2026-11-22 启动的代码、架构与 UI 专项审计（第 1–12R 批）。目录授权不再扩散到父目录，Vault 参考文献不再重复，图谱深色标签可读，axe 覆盖扩展到笔记与设置子页；启动与 Library 首屏加快，Notes/Graph 改为首次打开时加载。详见 [CHANGELOG.md](./CHANGELOG.md)。
+- **v0.4.39**：完成 2026-11-22 启动的代码、架构与 UI 专项审计（第 1–12R 批）。目录授权不再扩散到父目录，Vault 参考文献不再重复，图谱深色标签可读，axe 覆盖扩展到笔记与设置子页；启动与 Library 首屏加快，Notes/Graph 改为首次打开时加载。详见 [CHANGELOG.md](./CHANGELOG.md)。
 - **v0.4.36**：新增“用 RetainPDF 生成译版”。应用调用本机 RetainPDF 完成整本翻译，并自动下载、附加译版 PDF；任务进度进入全局任务条，重启后可续跑。
 - **v0.4.35**：全文翻译缓存写入更稳。应用数据目录直接放行，`EPERM` / `EBUSY` 等瞬时错误自动重试；译文已完整落盘时不再误判失败。
 - **v0.4.32**：只保留外部 Agent 接入，移除应用内独立 Agent、Agent 记忆和笔记 AI 润色；MinerU OCR 重试成为唯一解析降级入口；阅读器问答支持当前文献、选定文献和全库三档范围。

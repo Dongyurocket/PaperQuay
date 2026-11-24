@@ -75,7 +75,7 @@
 
 ### 8. F2/§8 安装包与安装版冒烟
 
-- NSIS 构建：`npm run electron:build -- --win --x64 --publish never` 成功，产物 `release/PaperQuay-0.4.37-win-x64.exe`（116,156,494 字节，2026-11-24 16:18；这是第 12 批发包时点，最终 0.4.38 产物见第 12R 批记录）。afterPack 通过 fuse/ELECTRONASAR、asar 内 preload、MCP sqlite-vec、bundle manifest、PDF.js、28 个运行时包断言。
+- NSIS 构建：`npm run electron:build -- --win --x64 --publish never` 成功，产物 `release/PaperQuay-0.4.37-win-x64.exe`（116,156,494 字节，2026-11-24 16:18；这是第 12 批发包时点，最终发布产物（0.4.39，0.4.38 未发布）见第 12R 批记录）。afterPack 通过 fuse/ELECTRONASAR、asar 内 preload、MCP sqlite-vec、bundle manifest、PDF.js、28 个运行时包断言。
 - 安装阻塞：本机 `%LOCALAPPDATA%\Programs\PaperQuay` 已有同一 appId 的安装。NSIS 静默安装会先卸载旧版本，因旧安装的 MCP server 进程（PaperQuay.exe，14:40 启动）占用文件而失败，弹出 “Failed to uninstall old application files. Please try running the installer again.: 2”。继续安装会卸载/覆盖用户现有安装，故本批**未执行注册式安装**；不使用改注册表/杀用户进程的方式绕过。
 - 替代冒烟：用 7-Zip 解出安装包 payload 到 `.tmp-audit/nsis-extract`，对该 payload（与安装后文件同一 `app.asar`/`resources`）用空 `--user-data-dir` 逐项验收。最近一次结果（`docs/assets/audit-2026-11-24/installer-smoke/smoke-results.json`）为 **11 pass / 2 fail**：
   - 通过：启动与 preload 桥、导入 PDF、打开论文与 PDF 渲染、**中文 CID PDF 导入与渲染**（画布 ink ratio > 0.002）、笔记创建与读取、Vault 同步（生成 2 个文件：1 个 `.md` + 1 个 `.paperquay-vault.json`）、RetainPDF 状态（本机 `installed:true`）、备份导出（407,528 字节，5 个条目）、**未授权包路径被拒绝**（中文错误“请通过应用的文件对话框选择备份包”）、**MCP `read_paper_figure`（安装版 server 返回 28 工具并读到 page-1-block-2）**。
@@ -83,7 +83,7 @@
   - 失败 2：依赖上一步的 `backup_import_stage`（选择恢复目标 + 恢复）未执行。备份导出、未授权拒绝、密码/包格式检查已验收；恢复路径的安装版验收列为已知限制。
   - 修复的安装器缺陷：`installer.nsh` 的 `customCheckAppRunning` 原先在 PowerShell 检测失败时按进程名 `KillProcess`，会误杀其它安装目录的 PaperQuay/MCP 进程，并让临时目录安装在无关进程存在时反复重试/退出。现改为仅按 `$INSTDIR` 路径检测与结束；PowerShell 不可用时按未运行处理。
 - 已知限制：注册式 NSIS 安装/卸载、开始菜单快捷方式、覆盖升级未验证；备份导入的原生对话框自动化未通过；MCP `read_paper_figure` 已在安装包 payload 上通过（28 工具、page-1-block-2，见 `smoke-results.json` results[11]）。`installer.nsh` 仍用 `StartsWith('$INSTDIR')` 前缀匹配，同前缀目录（如 `PaperQuay Beta`）可能误判，待实机验证。这些不影响打包 payload 的启动/阅读/中文 PDF/笔记/Vault/导出验收结论。
-- **第 12R 批补记（2026-11-24）**：`installer.nsh` 已改为 `[IO.Path]::GetDirectoryName($_.Path) -ieq '$INSTDIR'` 的目录边界匹配；以最终 0.4.38 源码重建安装包并重跑 payload 冒烟，结果为 11 pass / 2 fail（两项均为原生备份导入对话框），备份导出为 407,528 字节/5 条，报告含 installer/app.asar SHA-256 且已脱敏。详见[第 12R 批记录](2026-11-24-audit-batch12r-release-blockers.md)。
+- **第 12R 批补记（2026-11-24）**：`installer.nsh` 已改为 `[IO.Path]::GetDirectoryName($_.Path) -ieq '$INSTDIR'` 的目录边界匹配；以 0.4.38 候选源码重建安装包并重跑 payload 冒烟（0.4.39 发布时再次重建，同为 11 pass / 2 fail），结果为 11 pass / 2 fail（两项均为原生备份导入对话框），备份导出为 407,528 字节/5 条，报告含 installer/app.asar SHA-256 且已脱敏。详见[第 12R 批记录](2026-11-24-audit-batch12r-release-blockers.md)。
 
 ### 9. 文档
 

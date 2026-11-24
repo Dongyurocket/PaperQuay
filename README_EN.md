@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.4.38-2563eb?style=flat-square" alt="Version v0.4.38">
+  <img src="https://img.shields.io/badge/version-v0.4.39-2563eb?style=flat-square" alt="Version v0.4.39">
   <img src="https://img.shields.io/badge/platform-Windows%20x64-4b5563?style=flat-square" alt="Windows x64">
   <img src="https://img.shields.io/badge/built%20with-Electron-47848f?style=flat-square" alt="Electron">
   <img src="https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-0f766e?style=flat-square" alt="React TypeScript">
@@ -57,7 +57,7 @@ PaperQuay is built for graduate students, researchers, and anyone who reads many
 
 ## Recent Updates
 
-- **v0.4.38**: completes the code, architecture and UI audit started on 2026-11-22 (batches 1–12R). Directory picks no longer expose the parent tree, vault exports no longer duplicate references, dark graph labels are readable, and axe coverage now includes the notes editor and settings subpages. Startup and first library paint are faster; Notes and Graph load on first open. See [CHANGELOG.md](./CHANGELOG.md).
+- **v0.4.39**: completes the code, architecture and UI audit started on 2026-11-22 (batches 1–12R). Directory picks no longer expose the parent tree, vault exports no longer duplicate references, dark graph labels are readable, and axe coverage now includes the notes editor and settings subpages. Startup and first library paint are faster; Notes and Graph load on first open. See [CHANGELOG.md](./CHANGELOG.md).
 - **v0.4.36**: the translated-PDF menu now offers "Generate with RetainPDF". PaperQuay calls the local RetainPDF app, downloads the result, and attaches it automatically. Progress appears in the global task bar and resumes after restart.
 - **v0.4.35**: full-text translation caches persist more reliably. App-data directories are trusted directly, transient `EPERM` / `EBUSY` errors are retried, and completed translations are no longer marked as failed.
 - **v0.4.32**: external agents are the only agent path. The in-app agent, agent memory, and note AI polish were removed. Reader Q&A supports current paper, selected papers, and whole library scopes.

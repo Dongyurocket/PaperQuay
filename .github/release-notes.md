@@ -31,7 +31,7 @@ This release closes the code, architecture and UI audit that started on 2026-11-
 - `npm run build` and `npm run mcp:bundle`: passed.
 - `PAPERQUAY_AXE=1 node --test tests/axeAudit.test.mjs`: 16 views/themes, 0 violations.
 - `node tests/support/perfAudit.mjs --baseline-ref 1283d82`: 3+3 alternating runs; table and variance in the change record.
-- NSIS 0.4.38 build plus afterPack/fuse/ELECTRONASAR assertions passed; payload smoke results are in `docs/assets/audit-2026-11-24/installer-smoke/`.
+- NSIS 0.4.39 build plus afterPack/fuse/ELECTRONASAR assertions passed; payload smoke results are in `docs/assets/audit-2026-11-24/installer-smoke/`.
 
 ## Windows Release
 
@@ -69,7 +69,7 @@ Only Windows x64 installers are published and maintained. Download the `.exe` fr
 - `npm run build`、`npm run mcp:bundle` 通过。
 - `PAPERQUAY_AXE=1 node --test tests/axeAudit.test.mjs`：16 个视图/主题 0 violations。
 - `node tests/support/perfAudit.mjs --baseline-ref 1283d82`：3+3 次交替测量，数据与方差见变更记录。
-- NSIS 0.4.38 构建及 afterPack/fuse/ELECTRONASAR 断言通过；payload 冒烟结果见 `docs/assets/audit-2026-11-24/installer-smoke/`。
+- NSIS 0.4.39 构建及 afterPack/fuse/ELECTRONASAR 断言通过；payload 冒烟结果见 `docs/assets/audit-2026-11-24/installer-smoke/`。
 
 ## Windows 发布范围
 
