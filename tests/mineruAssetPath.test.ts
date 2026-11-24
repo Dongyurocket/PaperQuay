@@ -202,9 +202,19 @@ test('read_mineru_asset_base64 reads only files inside a content-list cache dire
   writeFileSync(path.join(cacheDir, 'images', 'figure.png'), Buffer.from('89504e470d0a1a0a', 'hex'));
   writeFileSync(path.join(outsideDir, 'secret.png'), 'secret');
 
+  // GitHub Windows runners expose tmpdir() as an 8.3 short path (RUNNER~1) while
+  // resolveMineruAssetPath returns realpaths, so canonicalize both sides before comparing.
+  const canonical = (p: string) => {
+    try {
+      return (realpathSync.native ?? realpathSync)(p);
+    } catch {
+      return path.resolve(p);
+    }
+  };
+  const canonicalRoot = canonical(root);
   const commands = createMineruCacheCommands({
     appPaths: { mineruCacheDir: root, configPath: path.join(root, 'config.json') },
-    pathPolicy: { isReadAllowed: (target: string) => path.resolve(target).startsWith(path.resolve(root)) },
+    pathPolicy: { isReadAllowed: (target: string) => canonical(target).startsWith(canonicalRoot) },
   });
 
   try {
