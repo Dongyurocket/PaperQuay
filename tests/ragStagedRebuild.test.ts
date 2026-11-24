@@ -7,6 +7,7 @@ import path from 'node:path';
 
 const require = createRequire(import.meta.url);
 const { createRagStore } = require('../electron/backend/ragStore.cjs');
+const { DatabaseSync } = require('../electron/backend/nodeSqlite.cjs');
 
 function createStore() {
   const dataDir = mkdtempSync(path.join(tmpdir(), 'paperquay-rag-staged-'));
@@ -232,6 +233,13 @@ test('compactStorage keeps all vectors reachable', () => {
 
     const result = store.compactStorage();
     assert.ok(result.afterBytes > 0);
+
+    const readOnly = new DatabaseSync(path.join(dataDir, 'paperquay-rag.sqlite'), { readOnly: true });
+    const vectorSql = readOnly
+      .prepare("SELECT sql FROM sqlite_master WHERE name = 'rag_vec_4'")
+      .get()?.sql ?? '';
+    readOnly.close();
+    assert.match(vectorSql, /chunk_size=128/);
 
     const results = store.retrieveDocumentChunks({
       documentKey: 'doc-1',

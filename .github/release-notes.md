@@ -25,9 +25,11 @@ Old versions ignore the new columns and tables, so downgrading needs no migratio
 - `npm run lint`: 0 errors / 206 warnings.
 - `npm run build`: passed.
 - `npm test`: 1,500 tests, 1,491 passed, 9 skipped, 0 failed. New tests cover staged rebuild (vector reuse, atomic swap, failure keeping the old index, staging invalidation, storage compaction) and QA-session restore lifecycle; badge aggregation tests now cover the stale state and `onlyStale` candidates.
+- Real index-copy validation (7.79 GB `VACUUM INTO` snapshot): the new columns migrated, 307 index rows listed, “Compact Index Storage” migrated 221,893 vectors from `chunk_size=1024` to 128 in ~830 s and reduced the file to 4.56 GB (-3.22 GB) with all indexes/chunks/vectors preserved and `freelist_count=0`. A real paper’s staged rebuild reused all 133 vectors (43 ms), committed in 159 ms, removed old-signature hits, and an incomplete commit kept the previous index with `rebuild_error` recorded.
 
 ## Known Limitations
 
 - The “RAG Update Pending” badge appears for MinerU indexes created before this version until they are rebuilt (lazily on open/ask, or via the batch update). Rebuilding calls the configured embedding API for changed chunks only.
 - Outdated scan and index management data are loaded when the preferences window opens; the first open may take a moment on very large libraries.
+- “Compact Index Storage” rewrites the vector tables and runs `VACUUM`; on an 8 GB index it takes several minutes and temporarily needs free disk roughly the size of the database.
 - Only Windows x64 installers are published and maintained.

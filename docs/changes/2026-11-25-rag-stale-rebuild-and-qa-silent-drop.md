@@ -31,4 +31,7 @@
 - `npm run typecheck` 六个项目 0 诊断；`npm run lint` 0 error / 206 warning；`npm run build` 通过。
 - `npm test` 1,500 项：1,491 通过、9 跳过、0 失败。新增 `tests/ragStagedRebuild.test.ts`（复用向量、原子切换、失败保留旧索引、暂存作废、存储整理）与 `tests/readerQaSessionLifecycle.test.ts`（恢复竞态守卫），并扩展 `tests/ragIndexStatus.test.ts` 的 stale 聚合与 `onlyStale` 候选。
 - 本机只读排查：`paper_mufwwou2_5a014354` 两条索引均为 ready（133 / 94 分块），MinerU 与 PDF 文本签名与磁盘内容重算一致；189 条 mineru ready 中 184 条为 v2、2 条为 v3、3 条无法比对。
-- 真实库副本验证与安装包验收结果见发布说明与本次运行记录。
+- 真实库副本验证（`VACUUM INTO` 快照 7,788,318,720 字节，2026-11-25）：
+  - `createRagStore` 打开后新增列迁移完成，`listIndexStatuses` 返回 307 条，旧行 `extractorVersion` 为 null。
+  - 「整理索引存储」把 221,893 条向量从 `chunk_size=1024` 迁移到 128：耗时约 830 秒，文件从 7.79 GB 降到 4.56 GB（-3.22 GB），`rag_indexes` 307、`rag_chunks` 221,893、向量行 221,893 全部保留，`freelist_count=0`。
+  - 真实文献 `paper_mufwwou2_5a014354` 的暂存重建：133 个分块全部复用旧向量（43 ms），提交 159 ms，旧签名检索 0 条、新签名检索 5 条；随后一次不完整重建提交失败，索引保持 ready（133 分块）并记录 `rebuild_error`。
