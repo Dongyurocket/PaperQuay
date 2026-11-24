@@ -35,7 +35,7 @@ Windows 安装包见 [GitHub Releases](https://github.com/Dongyurocket/PaperQuay
 - `npm run typecheck` 六个项目 0 诊断；`npm test` 全量 0 失败；`npm run lint` 0 error / 206 warning；`npm run build`、`npm run mcp:bundle` 通过。
 - `PAPERQUAY_AXE=1 node --test tests/axeAudit.test.mjs`：16 视图/主题 0 violations。
 - `node tests/support/perfAudit.mjs --baseline-ref 1283d82`：3+3 次交替测量，数据与方差见变更记录。
-- 干净检出（staged tree `f92fc7f`，`git -c core.autocrlf=false archive`）执行 `npm ci && npm run typecheck && npm run lint && npm run build && npm test` 通过（1,489 项：1,480 通过、9 跳过、0 失败；排除未提交的 `tests/knowledgeMcpFigure.test.ts` 3 项）。
+- 干净检出（0.4.39 提交 `ad4b7b0`，tree `1aaaf87`，`git -c core.autocrlf=false archive`）执行 `npm ci && npm run typecheck && npm run lint && npm run build && npm test` 通过（1,489 项：1,480 通过、9 跳过、0 失败；排除未提交的 `tests/knowledgeMcpFigure.test.ts` 3 项）。
 - NSIS 0.4.39 构建与 afterPack/fuse/ELECTRONASAR 断言通过；payload 冒烟结果见 `docs/assets/audit-2026-11-24/installer-smoke/`。
 
 ## [0.4.38] - 2026-11-24（未发布）

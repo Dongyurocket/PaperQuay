@@ -86,6 +86,8 @@
 | NSIS 0.4.39 构建 + afterPack/fuse/ELECTRONASAR | 通过（installer 116,158,517 字节，sha256 `8bb7a2f4…046d`；app.asar 50,664,048 字节，sha256 `87bb3ce3…55c3`） |
 | `node tests/support/installerSmoke.mjs --installer release/PaperQuay-0.4.39-win-x64.exe --app-dir release/win-unpacked` | 11 pass / 2 fail（备份导入对话框，已知限制） |
 | 干净检出（staged tree `f92fc7f`）+ `npm ci && typecheck && lint && build && test` | 通过；`git -c core.autocrlf=false archive` 到仓库外目录，1,489 项（1,480 通过、9 跳过、0 失败，排除未提交的 `tests/knowledgeMcpFigure.test.ts` 3 项）。首次以默认 autocrlf 归档时 `libraryQueryPolicy.test.ts` 的源码正则按 LF 写死而失败，已改为 `\r?\n` 后重跑通过。 |
+| 0.4.39 干净检出（提交 `ad4b7b0`，tree `1aaaf87`）+ `npm ci && typecheck && lint && build && test` | 通过；`git -c core.autocrlf=false archive` 到仓库外目录，typecheck 0 诊断、lint 0 errors / 206 warnings、build 通过，1,489 项（1,480 通过、9 跳过、0 失败，排除未提交的 `tests/knowledgeMcpFigure.test.ts` 3 项）。 |
+| `main` Build workflow | `8fd9cd6`（run 45434216580）全绿；此前 `92d9f5c` 唯一失败为 `mineruAssetPath.test.ts` stub 的 8.3 短路径比较，已修。 |
 | `git diff --check` | 通过（仅 LF/CRLF 提示，退出码 0） |
 
 ## 三、独立复核与处置（2026-11-24）

@@ -26,7 +26,7 @@ This release closes the code, architecture and UI audit that started on 2026-11-
 
 - `npm run typecheck`: six tsc projects, 0 diagnostics.
 - `npm test`: full suite, 0 failures.
-- Clean checkout from staged tree `f92fc7f` (`git -c core.autocrlf=false archive`): `npm ci`, typecheck, lint, build and tests passed with 1,489 tests (1,480 passed, 9 skipped, 0 failed).
+- Clean checkout of 0.4.39 commit `ad4b7b0` (tree `1aaaf87`, `git -c core.autocrlf=false archive`): `npm ci`, typecheck, lint, build and tests passed with 1,489 tests (1,480 passed, 9 skipped, 0 failed).
 - `npm run lint`: 0 errors / 206 warnings (`--max-warnings 206`).
 - `npm run build` and `npm run mcp:bundle`: passed.
 - `PAPERQUAY_AXE=1 node --test tests/axeAudit.test.mjs`: 16 views/themes, 0 violations.
