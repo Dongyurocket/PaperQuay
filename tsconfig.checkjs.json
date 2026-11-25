@@ -11,6 +11,7 @@
     "electron/backend/externalWriteWatch.cjs",
     "electron/backend/legacyBackupCleanup.cjs",
     "electron/backend/libraryAttachmentAvailability.cjs",
+    "electron/backend/libraryRagStatusFilter.cjs",
     "electron/backend/mcpClientConfig.cjs",
     "electron/backend/metadataValidation.cjs",
     "electron/backend/mineruAssetPaths.cjs",

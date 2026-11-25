@@ -1,8 +1,7 @@
 /**
  * RAG 索引的抽取器版本号。
  *
- * 版本号参与 mineru-markdown 的 sourceSignature，并在 rag_indexes.extractor_version
- * 中留档：签名变化触发重建，版本不一致则角标显示「RAG 待更新」。
- * 分块规则（表格正文、图注、公式、参考文献条目）变化时必须递增。
+ * 实际常量在 ragIndexVersions.cjs 中，供渲染进程与主进程共用；
+ * 本文件保留原有 .ts 导入路径，避免调用方大范围改名。
  */
-export const MINERU_RAG_EXTRACTOR_VERSION = 'mineru-chunks-v3';
+export { MINERU_RAG_EXTRACTOR_VERSION } from './ragIndexVersions.cjs';

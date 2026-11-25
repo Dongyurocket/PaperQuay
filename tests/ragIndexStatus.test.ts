@@ -8,6 +8,7 @@ import path from 'node:path';
 import {
   aggregateRagIndexStatus,
   groupRagIndexStatuses,
+  isRagIndexStale,
   selectRagIndexCandidates,
   summarizeRagIndexOverview,
 } from '../src/services/ragIndexStatus.ts';
@@ -16,6 +17,7 @@ import { MINERU_RAG_EXTRACTOR_VERSION } from '../src/shared/ragIndexVersions.ts'
 
 const require = createRequire(import.meta.url);
 const { createRagStore } = require('../electron/backend/ragStore.cjs');
+const sharedStatus = require('../src/shared/ragIndexStatus.cjs');
 
 function createStore() {
   const dataDir = mkdtempSync(path.join(tmpdir(), 'paperquay-rag-list-test-'));
@@ -42,6 +44,32 @@ function makeStatus(overrides: Partial<RagDocumentIndexStatus>): RagDocumentInde
     ...overrides,
   };
 }
+
+test('shared CJS aggregation matches the renderer facade', () => {
+  const cases: RagDocumentIndexStatus[][] = [
+    [],
+    [makeStatus({ status: 'ready' })],
+    [makeStatus({ status: 'ready', extractorVersion: 'mineru-chunks-v2' })],
+    [makeStatus({ status: 'ready' }), makeStatus({ status: 'failed', sourceType: 'pdf-text' })],
+    [makeStatus({ status: 'ready' }), makeStatus({ status: 'pending', sourceType: 'pdf-text' })],
+  ];
+
+  for (const entries of cases) {
+    assert.equal(
+      sharedStatus.aggregateRagIndexStatus(entries, { embeddingModelKey: 'other-model' }),
+      aggregateRagIndexStatus(entries, { embeddingModelKey: 'other-model' }),
+    );
+    assert.equal(
+      sharedStatus.isRagIndexStale(entries[0] ?? makeStatus({}), { embeddingModelKey: 'other-model' }),
+      isRagIndexStale(entries[0] ?? makeStatus({}), { embeddingModelKey: 'other-model' }),
+    );
+  }
+
+  assert.deepEqual(
+    Object.keys(sharedStatus.groupRagIndexStatuses([makeStatus({ documentKey: 'a' })])),
+    Object.keys(groupRagIndexStatuses([makeStatus({ documentKey: 'a' })])),
+  );
+});
 
 test('RAG store lists index statuses across documents and sources', () => {
   const { dataDir, store } = createStore();

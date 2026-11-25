@@ -501,6 +501,7 @@ export function useLibraryCatalog({
   useLibraryQueryRefresh({
     enabled: !demoMode,
     ready: !loading,
+    ragStatusActive: filters.ragStatus !== 'all',
     refreshPapers,
     listCategories: listLibraryCategories,
     setCategories,

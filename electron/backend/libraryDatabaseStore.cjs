@@ -929,6 +929,14 @@ function setPapersRagEnabled(db, paperIds, enabled) {
   return ids.length;
 }
 
+/** 按 RAG 状态筛选只需要 id + 成员开关，不要为了一次筛选水合整库。 */
+function listRagStatusSnapshot(db) {
+  return db
+    .prepare('SELECT id, COALESCE(rag_enabled, 1) AS ragEnabled FROM papers')
+    .all()
+    .map((row) => ({ id: row.id, ragEnabled: row.ragEnabled !== 0 }));
+}
+
 function listRagDisabledPaperIds(db) {
   return db
     .prepare('SELECT id FROM papers WHERE rag_enabled = 0 ORDER BY id')
@@ -1810,6 +1818,10 @@ function createLibraryDatabaseStore(appPaths, helpers) {
 
     setPapersRagEnabled(paperIds, enabled) {
       return setPapersRagEnabled(db, paperIds, enabled);
+    },
+
+    listRagStatusSnapshot() {
+      return listRagStatusSnapshot(db);
     },
 
     listRagDisabledPaperIds() {

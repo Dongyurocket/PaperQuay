@@ -1,5 +1,9 @@
 const fsp = require('node:fs/promises');
+const fs = require('node:fs');
 const path = require('node:path');
+const { buildEmbeddingModelKey, resolveEmbeddingConfigFromDocument } = require('../../src/shared/embeddingConfig.cjs');
+const { resolveReaderConfigSecrets } = require('./secretStorage.cjs');
+const { applyRagStatusFilter } = require('./libraryRagStatusFilter.cjs');
 const { resolveAttachmentFilters, invalidateAttachmentAvailability } = require('./libraryAttachmentAvailability.cjs');
 const {
   paperMatches,
@@ -188,6 +192,56 @@ function createLibraryCommands(context) {
     maxBytes: resolveLimit(context.httpLimits?.metadataMaxBytes, DEFAULT_JSON_MAX_BYTES),
   };
   const maxImportBytes = resolveLimit(context.importLimits?.maxPdfBytes, DEFAULT_PDF_IMPORT_MAX_BYTES);
+  // RAG 状态行数百条，按状态筛选时可能被翻页/输入反复读取；2 秒 TTL 足够
+  // 掩盖连续查询，又不会让索引完成后的筛选明显滞后。
+  const ragStatusCache = { at: 0, statuses: null };
+
+  const resolveRagEmbeddingModelKey = () => {
+    try {
+      const raw = JSON.parse(fs.readFileSync(appPaths.configPath, 'utf8'));
+      const config = resolveEmbeddingConfigFromDocument({
+        settings: raw.settings || {},
+        secrets: resolveReaderConfigSecrets(raw, appPaths) || {},
+      }, { requireApiKey: false });
+      return config ? buildEmbeddingModelKey(config) : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const readRagStatuses = async () => {
+    if (!ragStore || ragStore.available === false || typeof ragStore.listIndexStatuses !== 'function') {
+      return null;
+    }
+    const nowMs = Date.now();
+    if (ragStatusCache.statuses && nowMs - ragStatusCache.at < 2000) {
+      return ragStatusCache.statuses;
+    }
+    try {
+      const statuses = await ragStore.listIndexStatuses();
+      ragStatusCache.statuses = Array.isArray(statuses) ? statuses : [];
+      ragStatusCache.at = nowMs;
+      return ragStatusCache.statuses;
+    } catch (error) {
+      console.warn('[paperquay] Failed to read RAG index statuses for library filtering.', error);
+      return null;
+    }
+  };
+
+  /** 只在实际带了 ragStatus 时读 RAG 库；普通列表查询不受影响。 */
+  const withRagStatusFilter = async (request) => {
+    if (!request || request.ragStatus == null) return request;
+    const snapshot = typeof store.listRagStatusSnapshot === 'function'
+      ? store.listRagStatusSnapshot()
+      : [];
+    const statuses = await readRagStatuses();
+    return applyRagStatusFilter(request, {
+      papers: snapshot,
+      statuses,
+      ragAvailable: statuses !== null,
+      embeddingModelKey: resolveRagEmbeddingModelKey(),
+    });
+  };
 
   /**
    * storageDir/translatedPdfDir 会成为 pathPolicy 的信任根，不能由渲染层
@@ -339,7 +393,7 @@ function createLibraryCommands(context) {
 
     async library_list_papers({ request = {} }) {
       const library = store.load();
-      const resolved = await resolvePaperRequest(request, library);
+      const resolved = await resolvePaperRequest(await withRagStatusFilter(request), library);
       const limit = Math.max(1, Math.min(5000, resolved.request.limit ?? 300));
       return resolved.applyToPapers(sortPapers(library.papers.filter((paper) => paperMatches(paper, resolved.request, library)), resolved.request).slice(0, limit));
     },
@@ -349,7 +403,7 @@ function createLibraryCommands(context) {
      * { papers, total, offset, limit }；total 为当前筛选的完整匹配数，不受分页限制。
      */
     async library_query_papers({ request = {} }) {
-      const resolved = await resolvePaperRequest(request);
+      const resolved = await resolvePaperRequest(await withRagStatusFilter(request));
       const result = store.queryPapers(resolved.request);
       return { ...result, papers: resolved.applyToPapers(result.papers) };
     },
@@ -467,12 +521,14 @@ function createLibraryCommands(context) {
 
     /** 与 library_query_papers 同筛选同排序，仅分批枚举 id（供全选/批量目标管理，P2-2）。 */
     async library_list_paper_ids({ request = {} }) {
-      return store.listPaperIds((await resolvePaperRequest(request)).request);
+      const resolved = await resolvePaperRequest(await withRagStatusFilter(request));
+      return store.listPaperIds(resolved.request);
     },
 
     /** 当前筛选的完整匹配计数（供全选三态与批量目标校验，P2-2）。 */
     async library_count_papers({ request = {} }) {
-      return store.countPapers((await resolvePaperRequest(request)).request);
+      const resolved = await resolvePaperRequest(await withRagStatusFilter(request));
+      return store.countPapers(resolved.request);
     },
 
     async library_reorder_papers({ request }) {

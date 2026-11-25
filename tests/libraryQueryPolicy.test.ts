@@ -30,6 +30,7 @@ const filters: LibraryFilterState = {
   mineruParsed: true,
   source: '',
   ragMembership: 'all',
+  ragStatus: 'all',
 };
 
 test('query conditions key ignores MinerU status discovery but tracks user conditions', () => {

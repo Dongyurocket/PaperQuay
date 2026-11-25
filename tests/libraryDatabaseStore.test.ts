@@ -595,6 +595,12 @@ test('rag_enabled survives savePaper and full save, and can be toggled', () => {
     store.setPapersRagEnabled(['paper-rag'], true);
     assert.equal(store.getPaper('paper-rag').ragEnabled, true);
     assert.deepEqual(store.listRagDisabledPaperIds(), []);
+    const ragSnapshot = store.listRagStatusSnapshot();
+    assert.deepEqual(ragSnapshot.find((paper: { id: string }) => paper.id === 'paper-rag'), {
+      id: 'paper-rag',
+      ragEnabled: true,
+    });
+    assert.deepEqual(Object.keys(ragSnapshot[0] ?? {}).sort(), ['id', 'ragEnabled']);
   } finally {
     store?.close();
     rmSync(appPaths.dataDir, { recursive: true, force: true });

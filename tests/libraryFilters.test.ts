@@ -28,10 +28,25 @@ test('builds the same query for category, search, sort and all active filters', 
   assert.deepEqual(buildPaperQuery(value, { sortBy: 'lastReadAt', sortDirection: 'desc' }, 'cat', 'term', ['p1']), {
     categoryId: 'cat', search: 'term', sortBy: 'lastReadAt', sortDirection: 'desc', favorite: true,
     tagIds: ['tag-a'], yearFrom: 2020, yearTo: 2025, itemTypes: ['thesis'], readStatus: 'finished',
-    hasPdf: true, hasTranslatedPdf: true, missingFile: true, hasSummary: true, source: 'zotero', ragEnabled: false, paperIds: ['p1'],
+    hasPdf: true, hasTranslatedPdf: true, missingFile: true, hasSummary: true, source: 'zotero', ragEnabled: false, ragStatus: null, paperIds: ['p1'],
   });
   assert.deepEqual(buildPaperQuery({ ...value, mineruParsed: true }, {}, null, '', []).paperIds, []);
   assert.equal(buildPaperQuery(filters(), {}, null, '').paperIds, undefined);
+});
+
+test('rag status survives serialization, drives the query and can be removed', () => {
+  const legacy = { ...filters(), favorite: true };
+  delete (legacy as Partial<typeof legacy>).ragStatus;
+  const parsedLegacy = parseLibraryFilters(JSON.stringify(legacy));
+  assert.equal(parsedLegacy.ragStatus, 'all');
+  assert.equal(parsedLegacy.favorite, true);
+
+  assert.equal(parseLibraryFilters(JSON.stringify({ ...filters(), ragStatus: 'unknown' })).ragStatus, 'all');
+
+  const value = { ...filters(), ragStatus: 'failed' as const };
+  assert.equal(buildPaperQuery(value, {}, null, '').ragStatus, 'failed');
+  assert.deepEqual(describeActiveFilters(value, l).map((chip) => chip.label), ['RAG 索引失败']);
+  assert.equal(removeLibraryFilter(value, 'ragStatus').ragStatus, 'all');
 });
 
 test('describes and individually removes active filters', () => {

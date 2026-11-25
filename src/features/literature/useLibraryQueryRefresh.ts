@@ -6,10 +6,13 @@ import {
   NATIVE_PAPER_UPDATED_EVENT,
   type LibraryReadingUpdatedEventDetail,
 } from './libraryEvents.ts';
+import { RAG_INDEX_STATUS_UPDATED_EVENT } from '../../services/ragIndexStatus.ts';
 
 interface Options {
   enabled: boolean;
   ready: boolean;
+  /** 正在按 RAG 状态筛选时，索引状态变化会改变成员资格。 */
+  ragStatusActive?: boolean;
   refreshPapers: () => Promise<unknown>;
   listCategories: () => Promise<LiteratureCategory[]>;
   setCategories: Dispatch<SetStateAction<LiteratureCategory[]>>;
@@ -62,15 +65,20 @@ export function useLibraryQueryRefresh(options: Options) {
       }
       schedule();
     };
+    const handleRagStatusUpdated = () => {
+      if (latest.current.ragStatusActive) schedule();
+    };
     resumeRef.current = () => { if (pending) schedule(); };
     for (const event of UPDATE_EVENTS) window.addEventListener(event, schedule);
     window.addEventListener(LIBRARY_READING_UPDATED_EVENT, handleReadingUpdated);
+    window.addEventListener(RAG_INDEX_STATUS_UPDATED_EVENT, handleRagStatusUpdated);
     return () => {
       cancelled = true;
       resumeRef.current = null;
       if (timer !== null) clearTimeout(timer);
       for (const event of UPDATE_EVENTS) window.removeEventListener(event, schedule);
       window.removeEventListener(LIBRARY_READING_UPDATED_EVENT, handleReadingUpdated);
+      window.removeEventListener(RAG_INDEX_STATUS_UPDATED_EVENT, handleRagStatusUpdated);
     };
   }, [options.enabled]);
 

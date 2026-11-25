@@ -3,6 +3,7 @@ import type { LibraryTagCount, ListPapersRequest, LiteraturePaper } from '../../
 export const LIBRARY_FILTERS_STORAGE_KEY = 'paperquay-literature-filters-v1';
 export type LibraryReadStatus = 'unread' | 'reading' | 'finished';
 export type LibraryMembership = 'all' | 'included' | 'excluded';
+export type LibraryRagStatusFilter = 'all' | 'ready' | 'stale' | 'pending' | 'failed' | 'none';
 export interface LibraryFilterState {
   favorite: boolean;
   recentlyRead: boolean;
@@ -18,12 +19,14 @@ export interface LibraryFilterState {
   mineruParsed: boolean;
   source: '' | 'local' | 'zotero';
   ragMembership: LibraryMembership;
+  ragStatus: LibraryRagStatusFilter;
 }
 
 export const DEFAULT_LIBRARY_FILTERS: LibraryFilterState = {
   favorite: false, recentlyRead: false, tagIds: [], yearFrom: null, yearTo: null,
   itemTypes: [], readStatus: null, hasPdf: false, hasTranslatedPdf: false,
   missingFile: false, hasSummary: false, mineruParsed: false, source: '', ragMembership: 'all',
+  ragStatus: 'all',
 };
 
 export function serializeLibraryFilters(filters: LibraryFilterState): string {
@@ -39,13 +42,16 @@ export function parseLibraryFilters(value: string | null): LibraryFilterState {
     const booleans = ['favorite', 'recentlyRead', 'hasPdf', 'hasTranslatedPdf', 'missingFile', 'hasSummary', 'mineruParsed'];
     const strings = (value: unknown) => Array.isArray(value) && value.every((entry) => typeof entry === 'string' && entry.trim().length > 0);
     const year = (value: unknown) => value === null || (typeof value === 'number' && Number.isInteger(value) && value >= 1000 && value <= 9999);
+    // 旧版本没有 ragStatus：缺省回落 all，不要因为一个新增筛选丢掉用户已有的标签/年份。
+    const ragStatus = item.ragStatus ?? 'all';
     if (booleans.some((key) => typeof item[key] !== 'boolean') || !strings(item.tagIds) || !strings(item.itemTypes)
       || !year(item.yearFrom) || !year(item.yearTo)
       || (typeof item.yearFrom === 'number' && typeof item.yearTo === 'number' && item.yearFrom > item.yearTo)
       || ![null, 'unread', 'reading', 'finished'].includes(item.readStatus as LibraryReadStatus | null)
       || !['', 'local', 'zotero'].includes(item.source as string)
-      || !['all', 'included', 'excluded'].includes(item.ragMembership as string)) return fallback();
-    return { ...DEFAULT_LIBRARY_FILTERS, ...item, tagIds: [...new Set(item.tagIds as string[])], itemTypes: [...new Set(item.itemTypes as string[])] } as LibraryFilterState;
+      || !['all', 'included', 'excluded'].includes(item.ragMembership as string)
+      || !['all', 'ready', 'stale', 'pending', 'failed', 'none'].includes(ragStatus as string)) return fallback();
+    return { ...DEFAULT_LIBRARY_FILTERS, ...item, ragStatus: ragStatus as LibraryRagStatusFilter, tagIds: [...new Set(item.tagIds as string[])], itemTypes: [...new Set(item.itemTypes as string[])] } as LibraryFilterState;
   } catch { return fallback(); }
 }
 
@@ -75,6 +81,7 @@ export function buildPaperQuery(
     missingFile: filters.missingFile || null, hasSummary: filters.hasSummary || null,
     source: filters.source || null,
     ragEnabled: filters.ragMembership === 'all' ? null : filters.ragMembership === 'included',
+    ragStatus: filters.ragStatus === 'all' ? null : filters.ragStatus,
     ...(filters.mineruParsed ? { paperIds: mineruPaperIds } : {}),
     ...(filters.recentlyRead ? { readAfter: Date.now() - 30 * 24 * 60 * 60 * 1000 } : {}),
   };
@@ -99,6 +106,16 @@ export function describeActiveFilters(filters: LibraryFilterState, l: LocaleText
   add(filters.mineruParsed, 'mineruParsed', 'MinerU 已解析', 'MinerU parsed');
   if (filters.source) result.push({ id: 'source', label: filters.source === 'local' ? l('本地', 'Local') : l('Zotero', 'Zotero') });
   if (filters.ragMembership !== 'all') result.push({ id: 'ragMembership', label: filters.ragMembership === 'included' ? l('已加入知识库', 'In knowledge base') : l('已排除知识库', 'Excluded from knowledge base') });
+  if (filters.ragStatus !== 'all') result.push({
+    id: 'ragStatus',
+    label: ({
+      ready: l('RAG 已索引', 'RAG indexed'),
+      stale: l('RAG 待更新', 'RAG update needed'),
+      pending: l('RAG 待索引', 'RAG pending'),
+      failed: l('RAG 索引失败', 'RAG index failed'),
+      none: l('RAG 未建立', 'RAG not built'),
+    })[filters.ragStatus],
+  });
   return result;
 }
 
@@ -137,5 +154,7 @@ export function matchesDemoLibraryFilters(paper: LiteraturePaper, filters: Libra
     && (!filters.hasSummary || Boolean(paper.aiSummary?.trim()))
     && (!filters.mineruParsed || mineruIds.includes(paper.id))
     && (!filters.source || paper.source === filters.source)
-    && (filters.ragMembership === 'all' || (paper.ragEnabled !== false) === (filters.ragMembership === 'included'));
+    && (filters.ragMembership === 'all' || (paper.ragEnabled !== false) === (filters.ragMembership === 'included'))
+    // 演示库没有真实 RAG 索引，状态筛选不应伪装成有结果。
+    && filters.ragStatus === 'all';
 }

@@ -1,22 +1,29 @@
 import type { RagDocumentIndexStatus } from '../types/reader';
-import { MINERU_RAG_EXTRACTOR_VERSION } from '../shared/ragIndexVersions.ts';
+import type { RagAggregateOptions, RagAggregateStatus } from '../shared/ragIndexStatus.cjs';
+import {
+  aggregateRagIndexStatus,
+  groupRagIndexStatuses,
+  isRagIndexStale,
+} from '../shared/ragIndexStatus.cjs';
 
 /**
  * 本地 RAG 索引状态的纯函数工具：
  * 文献库角标聚合、批量索引候选筛选、管理面板统计都在这里计算，
  * 便于单元测试，也避免在 UI 组件里重复实现。
+ *
+ * 聚合/过期判定已移到 src/shared/ragIndexStatus.cjs，与主进程的
+ * 「按 RAG 状态筛选」共用同一套实现。
  */
+
+export {
+  aggregateRagIndexStatus,
+  groupRagIndexStatuses,
+  isRagIndexStale,
+};
+export type { RagAggregateOptions, RagAggregateStatus };
 
 /** 索引状态发生变化（批量/单篇/自动索引完成，或一次索引开始）后派发的事件，供各工作区刷新角标。 */
 export const RAG_INDEX_STATUS_UPDATED_EVENT = 'paperquay:rag-index-status-updated';
-
-export type RagAggregateStatus =
-  | 'ready'
-  | 'stale'
-  | 'pending'
-  | 'failed'
-  | 'none'
-  | 'excluded';
 
 export interface RagIndexStatusUpdatedDetail {
   documentKey: string;
@@ -36,77 +43,6 @@ export function emitRagIndexStatusUpdated(detail: RagIndexStatusUpdatedDetail): 
   window.dispatchEvent(
     new CustomEvent<RagIndexStatusUpdatedDetail>(RAG_INDEX_STATUS_UPDATED_EVENT, { detail }),
   );
-}
-
-export interface RagAggregateOptions {
-  /** 当前配置的 embedding 模型；模型不一致的 ready 索引同样视为待更新。 */
-  embeddingModelKey?: string;
-}
-
-/**
- * 索引可用但已过期：抽取器升级或 embedding 模型更换后，旧向量仍可检索，
- * 但需要重建才能拿到新分块或新模型的语义。
- */
-export function isRagIndexStale(
-  entry: RagDocumentIndexStatus,
-  options?: RagAggregateOptions,
-): boolean {
-  if (entry.status !== 'ready') {
-    return false;
-  }
-
-  if (
-    options?.embeddingModelKey &&
-    entry.embeddingModelKey &&
-    entry.embeddingModelKey !== options.embeddingModelKey
-  ) {
-    return true;
-  }
-
-  if (
-    entry.sourceType === 'mineru-markdown' &&
-    (entry.extractorVersion ?? '') !== MINERU_RAG_EXTRACTOR_VERSION
-  ) {
-    return true;
-  }
-
-  return false;
-}
-
-/** 同一文献可能有 mineru-markdown / pdf-text 两个来源：任一失败视为失败，否则任一待建视为待建。 */
-export function aggregateRagIndexStatus(
-  entries: readonly RagDocumentIndexStatus[] | undefined,
-  options?: RagAggregateOptions,
-): RagAggregateStatus {
-  if (!entries || entries.length === 0) {
-    return 'none';
-  }
-
-  if (entries.some((entry) => entry.status === 'failed')) {
-    return 'failed';
-  }
-
-  if (entries.some((entry) => entry.status === 'pending')) {
-    return 'pending';
-  }
-
-  if (entries.every((entry) => entry.status === 'ready')) {
-    return entries.some((entry) => isRagIndexStale(entry, options)) ? 'stale' : 'ready';
-  }
-
-  return 'pending';
-}
-
-export function groupRagIndexStatuses(
-  entries: readonly RagDocumentIndexStatus[],
-): Record<string, RagDocumentIndexStatus[]> {
-  const grouped: Record<string, RagDocumentIndexStatus[]> = {};
-
-  for (const entry of entries) {
-    (grouped[entry.documentKey] ??= []).push(entry);
-  }
-
-  return grouped;
 }
 
 export interface RagIndexCandidateItem {

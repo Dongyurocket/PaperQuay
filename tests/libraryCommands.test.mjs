@@ -408,3 +408,98 @@ test('lookup_literature_metadata gives metadata HTTP requests a timeout signal',
     rmSync(appPaths.dataDir, { recursive: true, force: true });
   }
 });
+
+function makeRagFilterPaper(id) {
+  return {
+    id,
+    title: `Paper ${id}`,
+    year: null,
+    publication: null,
+    doi: null,
+    url: null,
+    abstractText: null,
+    keywords: [],
+    importedAt: 1,
+    updatedAt: 1,
+    lastReadAt: null,
+    readingProgress: 0,
+    isFavorite: false,
+    userNote: null,
+    aiSummary: null,
+    citation: null,
+    source: 'local',
+    sortOrder: 0,
+    authors: [],
+    tags: [],
+    categoryIds: [],
+    attachments: [],
+  };
+}
+
+test('library queries apply the RAG status filter to pages, ids and totals', async () => {
+  const appPaths = createAppPaths();
+  let store = null;
+
+  try {
+    store = createLibraryStore(appPaths);
+    const library = store.load();
+    library.papers.push(
+      makeRagFilterPaper('p-ready'),
+      makeRagFilterPaper('p-missing'),
+      makeRagFilterPaper('p-excluded'),
+    );
+    store.save(library);
+    store.setPapersRagEnabled(['p-excluded'], false);
+
+    const ragStore = {
+      available: true,
+      listIndexStatuses: async () => [{
+        documentKey: 'p-ready',
+        sourceType: 'mineru-markdown',
+        status: 'ready',
+        embeddingModelKey: 'embedding-a',
+        extractorVersion: 'mineru-chunks-v3',
+      }, {
+        documentKey: 'p-excluded',
+        sourceType: 'mineru-markdown',
+        status: 'ready',
+        embeddingModelKey: 'embedding-a',
+        extractorVersion: 'mineru-chunks-v3',
+      }],
+    };
+    const commands = createLibraryCommands({ appPaths, store, ragStore });
+
+    const ready = await commands.library_query_papers({ request: { ragStatus: 'ready', limit: 10 } });
+    assert.deepEqual(ready.papers.map((paper) => paper.id), ['p-ready']);
+    assert.equal(ready.total, 1);
+
+    const none = await commands.library_query_papers({ request: { ragStatus: 'none', limit: 10 } });
+    assert.deepEqual(none.papers.map((paper) => paper.id), ['p-missing']);
+
+    const failed = await commands.library_query_papers({ request: { ragStatus: 'failed', limit: 10 } });
+    assert.deepEqual(failed.papers, []);
+    assert.equal(failed.total, 0);
+
+    assert.deepEqual(
+      await commands.library_list_paper_ids({ request: { ragStatus: 'none' } }),
+      ['p-missing'],
+    );
+    assert.equal(await commands.library_count_papers({ request: { ragStatus: 'ready' } }), 1);
+
+    const intersected = await commands.library_query_papers({
+      request: { ragStatus: 'none', paperIds: ['p-ready', 'p-missing'], limit: 10 },
+    });
+    assert.deepEqual(intersected.papers.map((paper) => paper.id), ['p-missing']);
+
+    const noRag = createLibraryCommands({ appPaths, store });
+    const withoutRag = await noRag.library_query_papers({ request: { ragStatus: 'none', limit: 10 } });
+    assert.deepEqual(withoutRag.papers.map((paper) => paper.id).sort(), ['p-missing', 'p-ready']);
+    assert.deepEqual(
+      await noRag.library_list_paper_ids({ request: { ragStatus: 'ready' } }),
+      [],
+    );
+  } finally {
+    store?.close();
+    rmSync(appPaths.dataDir, { recursive: true, force: true });
+  }
+});

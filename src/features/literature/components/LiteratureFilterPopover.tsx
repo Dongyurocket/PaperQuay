@@ -9,11 +9,13 @@ interface Props {
   anchor: HTMLElement;
   filters: LibraryFilterState;
   tags: LibraryTagCount[];
+  /** 演示库没有真实 RAG 索引，状态筛选禁用。 */
+  ragStatusDisabled?: boolean;
   onChange: (filters: LibraryFilterState) => void;
   onClose: () => void;
 }
 
-export default function LiteratureFilterPopover({ id, anchor, filters, tags, onChange, onClose }: Props) {
+export default function LiteratureFilterPopover({ id, anchor, filters, tags, ragStatusDisabled, onChange, onClose }: Props) {
   const l = useLocaleText();
   const root = useRef<HTMLDivElement>(null);
   const [tagSearch, setTagSearch] = useState('');
@@ -121,6 +123,23 @@ export default function LiteratureFilterPopover({ id, anchor, filters, tags, onC
           <select className="pq-input mt-1 h-9 w-full px-2 text-sm" value={filters.ragMembership} onChange={(e) => set({ ragMembership: e.target.value as LibraryFilterState['ragMembership'] })}>
             <option value="all">{l('全部', 'All')}</option><option value="included">{l('已加入', 'Included')}</option><option value="excluded">{l('已排除', 'Excluded')}</option>
           </select>
+        </label>
+        <label className="block text-xs font-semibold text-[var(--pq-text-muted)]">{l('RAG 索引状态', 'RAG index status')}
+          <select
+            className="pq-input mt-1 h-9 w-full px-2 text-sm"
+            value={filters.ragStatus}
+            disabled={ragStatusDisabled}
+            title={ragStatusDisabled ? l('演示库不提供 RAG 状态', 'RAG status is unavailable in the demo library') : undefined}
+            onChange={(e) => set({ ragStatus: e.target.value as LibraryFilterState['ragStatus'] })}
+          >
+            <option value="all">{l('全部', 'All')}</option>
+            <option value="ready">{l('已索引', 'Indexed')}</option>
+            <option value="stale">{l('待更新', 'Update needed')}</option>
+            <option value="pending">{l('待索引', 'Pending')}</option>
+            <option value="failed">{l('失败', 'Failed')}</option>
+            <option value="none">{l('未建立（含未解析）', 'Not built (incl. unparsed)')}</option>
+          </select>
+          {ragStatusDisabled && <span className="mt-1 block font-normal text-[var(--pq-text-muted)]">{l('演示库不提供 RAG 状态。', 'RAG status is unavailable in the demo library.')}</span>}
         </label>
         <label className="block text-xs font-semibold text-[var(--pq-text-muted)]">{l('来源', 'Source')}
           <select className="pq-input mt-1 h-9 w-full px-2 text-sm" value={filters.source} onChange={(e) => set({ source: e.target.value as LibraryFilterState['source'] })}>

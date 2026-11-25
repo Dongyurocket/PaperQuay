@@ -97,6 +97,7 @@ interface LiteraturePaperListProps {
   searchQuery: string;
   filters: LibraryFilterState;
   onFiltersChange: (filters: LibraryFilterState) => void;
+  ragStatusDisabled?: boolean;
   tags: LibraryTagCount[];
   libraryTotal: number;
   sortBy: LiteraturePaperListSortBy;
@@ -153,6 +154,7 @@ export default function LiteraturePaperList({
   searchQuery,
   filters,
   onFiltersChange,
+  ragStatusDisabled = false,
   tags,
   libraryTotal,
   sortBy,
@@ -761,7 +763,7 @@ export default function LiteraturePaperList({
         working={working} refreshing={refreshing} total={resolvedTotal} libraryTotal={libraryTotal}
         selectAllState={selectAllState} onToggleSelectAll={onToggleSelectAll}
         search={searchQuery} onSearch={onSearchQueryChange}
-        filters={filters} onFilters={onFiltersChange} tags={tags}
+        filters={filters} onFilters={onFiltersChange} tags={tags} ragStatusDisabled={ragStatusDisabled}
         sortBy={sortBy} sortDirection={sortDirection} onSort={onSortChange}
         titleMode={titleDisplayMode} onTitleMode={onTitleDisplayModeChange}
         showHeatmap={showReadingHeatmap} onHeatmap={setShowReadingHeatmap}

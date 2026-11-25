@@ -742,6 +742,7 @@ export default function LiteratureLibraryView({
             searchQuery={searchQuery}
             filters={filters}
             onFiltersChange={setFilters}
+            ragStatusDisabled={Boolean(demoLibrary)}
             tags={libraryTags}
             libraryTotal={categories.find((category) => category.id === selectedCategoryId)?.paperCount ?? categories.find((category) => category.systemKey === 'all')?.paperCount ?? papersTotal}
             sortBy={paperSort.sortBy}

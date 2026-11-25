@@ -255,6 +255,11 @@ export interface ListPapersRequest {
   offset?: number;
   /** true 只看已加入，false 只看已排除，null/缺省为全部。 */
   ragEnabled?: boolean | null;
+  /**
+   * 按 RAG 索引聚合状态筛选；已排除文献不参与（由 ragEnabled 表达）。
+   * 缺省/null 表示不筛选。
+   */
+  ragStatus?: 'ready' | 'stale' | 'pending' | 'failed' | 'none' | null;
   favorite?: boolean | null;
   tagIds?: string[];
   yearFrom?: number | null;

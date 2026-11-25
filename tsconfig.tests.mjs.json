@@ -29,6 +29,7 @@
     "tests/initialChunks.test.mjs",
     "tests/installerScript.test.mjs",
     "tests/lintConfig.test.mjs",
+    "tests/libraryRagStatusFilter.test.mjs",
     "tests/literatureToolbarRefresh.test.mjs",
     "tests/packagingDependencies.test.mjs",
     "tests/readerChatInputOverride.test.mjs",
