@@ -11,6 +11,11 @@ import { useLocaleText } from '../../i18n/uiLanguage';
 import { listLibraryCitationKeys } from '../../services/library';
 import type { LiteraturePaper, LiteraturePaperTaskState } from '../../types/library';
 import type { QaModelPreset, RagDocumentIndexStatus } from '../../types/reader';
+import type {
+  RagBatchMode,
+  RagBatchRequest,
+  RagBatchSelection,
+} from '../../services/ragIndexStatus';
 import { getFileNameFromPath } from '../../utils/text';
 import ImportConfirmationDialog from './components/ImportConfirmationDialog';
 import LibraryConfirmDialog from './components/LibraryConfirmDialog';
@@ -80,6 +85,22 @@ interface LiteratureLibraryViewProps {
   ragIndexingDocumentKey?: string;
   /** 右键菜单：为单篇文献建立/重建 RAG 索引。 */
   onIndexPaperRag?: (paperId: string) => void;
+  /** 选中批量：按模式建立/重试/更新/重建 RAG 索引。 */
+  onBatchRagIndex?: (request: RagBatchRequest) => void;
+  /** 批量执行前预览候选与跳过原因，用于确认框。 */
+  onPreviewBatchRagIndex?: (request: RagBatchRequest) => Promise<RagBatchSelection | null>;
+  ragIndexRunning?: boolean;
+  ragIndexPaused?: boolean;
+  ragIndexProgress?: {
+    total: number;
+    completed: number;
+    succeeded: number;
+    skipped: number;
+    failed: number;
+    currentLabel: string;
+  };
+  onToggleRagIndexPause?: () => void;
+  onCancelRagIndex?: () => void;
   /** MinerU 批量检测状态字典同步至父级。 */
   onPaperStatusesChange?: (statuses: Record<string, LiteraturePaperListStatus>) => void;
 }
@@ -110,6 +131,13 @@ export default function LiteratureLibraryView({
   ragStatusEntriesByDocumentKey,
   ragIndexingDocumentKey = '',
   onIndexPaperRag,
+  onBatchRagIndex,
+  onPreviewBatchRagIndex,
+  ragIndexRunning = false,
+  ragIndexPaused = false,
+  ragIndexProgress,
+  onToggleRagIndexPause,
+  onCancelRagIndex,
   onPaperStatusesChange,
 }: LiteratureLibraryViewProps) {
   const l = useLocaleText();
@@ -462,6 +490,51 @@ export default function LiteratureLibraryView({
     }
   }, [batch, demoMode, onIndexPaperRag, onRunMineruParse, setSelectedPaperId, showDemoLockedMessage]);
 
+  const openBatchRagIndexConfirm = useCallback(async (mode: RagBatchMode) => {
+    if (demoMode) {
+      showDemoLockedMessage();
+      return;
+    }
+
+    const paperIds = paperSelectionRef.current.ids;
+    if (paperIds.length === 0 || !onPreviewBatchRagIndex) return;
+
+    try {
+      const selection = await onPreviewBatchRagIndex({ mode, paperIds });
+      if (!selection) {
+        setStatusMessage(l(
+          '请先在设置中启用本地 RAG 并完成 Embedding 配置。',
+          'Enable local RAG and finish the embedding configuration in settings first.',
+        ));
+        return;
+      }
+      if (selection.candidateIds.length === 0) {
+        const skipped = selection.skipped;
+        setStatusMessage(l(
+          `选中范围内没有可索引的文献（未解析 ${skipped.unparsed}，已排除 ${skipped.excluded}，已就绪 ${skipped.ready}，待索引 ${skipped.pending}）。`,
+          `No indexable papers in the selection (${skipped.unparsed} unparsed, ${skipped.excluded} excluded, ${skipped.ready} ready, ${skipped.pending} pending).`,
+        ));
+        return;
+      }
+      setConfirmDialog({ kind: 'batch-rag-index', paperIds, mode, selection });
+    } catch (nextError) {
+      const message = nextError instanceof Error
+        ? nextError.message
+        : l('无法准备 RAG 批量索引', 'Could not prepare the RAG batch');
+      setError(message);
+      setStatusMessage(message);
+    }
+  }, [
+    demoMode,
+    l,
+    onPreviewBatchRagIndex,
+    paperSelectionRef,
+    setConfirmDialog,
+    setError,
+    setStatusMessage,
+    showDemoLockedMessage,
+  ]);
+
   const handleToggleFavoriteFromContextMenu = () => {
     if (demoMode) {
       showDemoLockedMessage();
@@ -732,6 +805,23 @@ export default function LiteratureLibraryView({
             >
               {l('移出知识库', 'Exclude from Library')}
             </button>
+            <select
+              value=""
+              disabled={batchWorking || ragIndexRunning || demoMode || !onPreviewBatchRagIndex}
+              onChange={(event) => {
+                const mode = event.target.value as RagBatchMode;
+                event.target.value = '';
+                if (mode) void openBatchRagIndexConfirm(mode);
+              }}
+              className="pq-input h-7 max-w-[150px] px-2 text-xs disabled:opacity-50"
+              title={l('RAG 索引批量操作', 'Batch RAG indexing')}
+            >
+              <option value="">{l('RAG 索引…', 'RAG index…')}</option>
+              <option value="missing">{l('补建未建立', 'Build missing')}</option>
+              <option value="failed">{l('重试失败', 'Retry failed')}</option>
+              <option value="stale">{l('更新过期', 'Update stale')}</option>
+              <option value="rebuild">{l('重建全部', 'Rebuild all')}</option>
+            </select>
             <button
               type="button"
               disabled={batchWorking}
@@ -755,6 +845,33 @@ export default function LiteratureLibraryView({
               className="pq-button px-2.5 py-1 text-xs disabled:opacity-50"
             >
               {l('取消选择', 'Clear')}
+            </button>
+          </div>
+        ) : null}
+        {ragIndexRunning && ragIndexProgress ? (
+          <div className="mt-2 flex flex-wrap items-center gap-2 rounded-[var(--pq-radius-sm)] border border-[var(--pq-accent-border)] bg-[var(--pq-accent-bg)] px-2.5 py-1.5 text-xs text-[var(--pq-accent)]">
+            <span className="min-w-0 flex-1 truncate">
+              {l(
+                `RAG 索引 ${ragIndexProgress.completed}/${ragIndexProgress.total}：成功 ${ragIndexProgress.succeeded}，跳过 ${ragIndexProgress.skipped}，失败 ${ragIndexProgress.failed}`,
+                `RAG indexing ${ragIndexProgress.completed}/${ragIndexProgress.total}: ${ragIndexProgress.succeeded} succeeded, ${ragIndexProgress.skipped} skipped, ${ragIndexProgress.failed} failed`,
+              )}
+              {ragIndexProgress.currentLabel ? ` · ${ragIndexProgress.currentLabel}` : ''}
+            </span>
+            <button
+              type="button"
+              onClick={onToggleRagIndexPause}
+              disabled={!onToggleRagIndexPause}
+              className="pq-button !h-7 px-2 text-xs disabled:opacity-50"
+            >
+              {ragIndexPaused ? l('继续', 'Resume') : l('暂停', 'Pause')}
+            </button>
+            <button
+              type="button"
+              onClick={onCancelRagIndex}
+              disabled={!onCancelRagIndex}
+              className="pq-button !h-7 px-2 text-xs disabled:opacity-50"
+            >
+              {l('取消', 'Cancel')}
             </button>
           </div>
         ) : null}
@@ -1083,7 +1200,9 @@ export default function LiteratureLibraryView({
                 ? l('批量删除文献', 'Delete Selected Papers')
                 : confirmDialog?.kind === 'exclude-rag-papers' || confirmDialog?.kind === 'exclude-rag-paper'
                   ? l('移出本地知识库', 'Exclude from Local Knowledge Base')
-                  : l('删除文献', 'Delete Paper')
+                  : confirmDialog?.kind === 'batch-rag-index'
+                    ? l('批量建立 RAG 索引', 'Batch RAG Indexing')
+                    : l('删除文献', 'Delete Paper')
         }
         description={
           confirmDialog?.kind === 'delete-category'
@@ -1114,18 +1233,25 @@ export default function LiteratureLibraryView({
                       '将删除该文献已建立的索引；PDF、解析结果和笔记保留；之后需要重新建立索引才能再被检索。',
                       'This deletes the paper’s existing index. The PDF, parsed content, and notes stay. It must be indexed again before it can be retrieved.',
                     )
-                    : ''
+                    : confirmDialog?.kind === 'batch-rag-index'
+                      ? l(
+                        `将处理 ${confirmDialog.selection.candidateIds.length} 篇文献并调用 Embedding 服务。跳过：未解析 ${confirmDialog.selection.skipped.unparsed}、已排除 ${confirmDialog.selection.skipped.excluded}、已就绪 ${confirmDialog.selection.skipped.ready}、待索引 ${confirmDialog.selection.skipped.pending}、其他 ${confirmDialog.selection.skipped.other}。执行后可在批量栏暂停或取消。`,
+                        `This will process ${confirmDialog.selection.candidateIds.length} papers and call the embedding service. Skipped: ${confirmDialog.selection.skipped.unparsed} unparsed, ${confirmDialog.selection.skipped.excluded} excluded, ${confirmDialog.selection.skipped.ready} ready, ${confirmDialog.selection.skipped.pending} pending, ${confirmDialog.selection.skipped.other} other. You can pause or cancel from the batch bar.`,
+                      )
+                      : ''
         }
         confirmLabel={
-          confirmDialog?.kind === 'exclude-rag-papers' || confirmDialog?.kind === 'exclude-rag-paper'
-            ? l('移出', 'Exclude')
-            : confirmDialog?.kind === 'remove-translated-pdf'
-              ? l('移除', 'Remove')
-              : l('删除', 'Delete')
+          confirmDialog?.kind === 'batch-rag-index'
+            ? l('开始索引', 'Start indexing')
+            : confirmDialog?.kind === 'exclude-rag-papers' || confirmDialog?.kind === 'exclude-rag-paper'
+              ? l('移出', 'Exclude')
+              : confirmDialog?.kind === 'remove-translated-pdf'
+                ? l('移除', 'Remove')
+                : l('删除', 'Delete')
         }
         cancelLabel={l('取消', 'Cancel')}
         busy={dialogBusy}
-        danger
+        danger={confirmDialog?.kind !== 'batch-rag-index'}
         onClose={() => {
           if (!dialogBusy) {
             setConfirmDialog(null);
@@ -1158,6 +1284,16 @@ export default function LiteratureLibraryView({
 
           if (confirmDialog.kind === 'exclude-rag-paper') {
             void batch.applyRagMembership([confirmDialog.paper.id], false);
+            return;
+          }
+
+          if (confirmDialog.kind === 'batch-rag-index') {
+            const request = {
+              mode: confirmDialog.mode,
+              paperIds: confirmDialog.selection.candidateIds,
+            };
+            setConfirmDialog(null);
+            onBatchRagIndex?.(request);
             return;
           }
 

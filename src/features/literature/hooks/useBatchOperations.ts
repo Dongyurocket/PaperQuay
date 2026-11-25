@@ -20,6 +20,7 @@ import type {
 } from '../../../types/library';
 import { ATTACHMENT_KIND_TRANSLATED_PDF } from '../../../utils/libraryPaper';
 import type { LiteraturePaperRagStatus } from '../components/LiteraturePaperList';
+import type { RagBatchMode, RagBatchSelection } from '../../../services/ragIndexStatus';
 import type { TranslatedPdfLanguageBatchEntry } from '../components/TranslatedPdfLanguageBatchDialog';
 import { reorderPaperList } from '../literatureLibraryUtils';
 import { emitNativePaperUpdated } from '../libraryEvents';
@@ -34,6 +35,12 @@ export type LibraryConfirmDialogState =
   | { kind: 'delete-papers'; paperIds: string[]; deleteFiles: boolean }
   | { kind: 'exclude-rag-paper'; paper: LiteraturePaper }
   | { kind: 'exclude-rag-papers'; paperIds: string[]; indexedCount: number }
+  | {
+    kind: 'batch-rag-index';
+    paperIds: string[];
+    mode: RagBatchMode;
+    selection: RagBatchSelection;
+  }
   | { kind: 'remove-translated-pdf'; paper: LiteraturePaper; attachmentId: string; fileName: string };
 
 interface TranslatedPdfLanguageBatchState {

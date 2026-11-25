@@ -730,6 +730,7 @@ function Reader({ workspaceActive = true }: ReaderProps) {
     ragIndexRunning,
     ragIndexingDocumentKey,
     handleBatchRagIndex,
+    previewBatchRagIndex,
     handleCancelRagIndex,
     handleIndexPaperRag,
     handleToggleRagIndexPause,
@@ -1214,6 +1215,13 @@ function Reader({ workspaceActive = true }: ReaderProps) {
                   ragStatusEntriesByDocumentKey={ragStatusByDocumentKey}
                   ragIndexingDocumentKey={ragIndexingDocumentKey}
                   onIndexPaperRag={(paperId) => void handleIndexPaperRag(paperId)}
+                  onBatchRagIndex={(options) => void handleBatchRagIndex(options)}
+                  onPreviewBatchRagIndex={(options) => previewBatchRagIndex(options)}
+                  ragIndexRunning={ragIndexRunning}
+                  ragIndexPaused={ragIndexPaused}
+                  ragIndexProgress={ragIndexProgress}
+                  onToggleRagIndexPause={handleToggleRagIndexPause}
+                  onCancelRagIndex={handleCancelRagIndex}
                   onPaperStatusesChange={setLibraryPaperStatuses}
                 />
               </div>
