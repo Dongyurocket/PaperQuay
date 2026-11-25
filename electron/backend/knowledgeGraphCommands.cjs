@@ -1062,8 +1062,10 @@ async function createKnowledgeGraphSnapshot(context, request = {}) {
         description: `similarity ${similarity.similarity.toFixed(3)}`,
       });
     }
+  }
 
-    // 语义覆盖按「有 ready 索引的文献数」统计，而不是只看当前渲染出的边。
+  // 语义覆盖按「有 ready 索引的文献数」统计，不依赖当前是否显示语义边。
+  if (ragStore?.available !== false && typeof ragStore?.listIndexStatuses === 'function') {
     try {
       const statuses = await Promise.resolve(ragStore.listIndexStatuses());
       const indexedDocumentKeys = new Set(
