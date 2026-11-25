@@ -5,8 +5,14 @@ import {
   DEFAULT_MAX_SIMILARITY_CANDIDATES,
   MAX_SIMILARITY_CANDIDATES,
   MAX_SIMILARITY_EDGE_LIMIT,
-  listDocumentSimilarities,
+  buildDocumentGeometry,
+  listDocumentSimilarities as listDocumentSimilaritiesWithStrategy,
 } from '../electron/backend/rag/retrieval.cjs';
+
+// 这组测试锁定旧的 global-top 算法与预算；互近邻语义单独在下方测试。
+function listDocumentSimilarities(db, options = {}) {
+  return listDocumentSimilaritiesWithStrategy(db, { ...options, strategy: 'global-top' });
+}
 
 function seededRandom(seed) {
   let state = seed >>> 0;
@@ -319,4 +325,91 @@ test('2500-document similarity stays bounded and fast', () => {
   }
   assert.ok(elapsedMs < 5000, `similarity candidates took ${elapsedMs.toFixed(0)}ms`);
   console.log(`[graph benchmark] similarity candidates=2000 of 2500, dims=8, edges=${edges.length}: ${elapsedMs.toFixed(0)}ms`);
+});
+
+test('mutual-knn caps non-bridge degree and bridges all components', () => {
+  const rows = makeRows(40, 8, { seed: 23 });
+  const edges = listDocumentSimilaritiesWithStrategy(createMockDb(rows), {
+    strategy: 'mutual-knn',
+    k: 5,
+  });
+
+  const degree = new Map(rows.map((row) => [row.documentKey, 0]));
+  const parent = new Map(rows.map((row) => [row.documentKey, row.documentKey]));
+  const find = (key) => {
+    let current = key;
+    while (parent.get(current) !== current) current = parent.get(current);
+    return current;
+  };
+  const union = (left, right) => {
+    const leftRoot = find(left);
+    const rightRoot = find(right);
+    if (leftRoot !== rightRoot) parent.set(rightRoot, leftRoot);
+  };
+
+  for (const edge of edges) {
+    assert.ok(Number.isFinite(edge.similarity), 'similarity must be finite');
+    degree.set(edge.sourceDocumentKey, degree.get(edge.sourceDocumentKey) + 1);
+    degree.set(edge.targetDocumentKey, degree.get(edge.targetDocumentKey) + 1);
+    if (edge.rankWeight > 0) {
+      assert.ok(degree.get(edge.sourceDocumentKey) <= 5);
+      assert.ok(degree.get(edge.targetDocumentKey) <= 5);
+    }
+    union(edge.sourceDocumentKey, edge.targetDocumentKey);
+  }
+
+  const roots = new Set(rows.map((row) => find(row.documentKey)));
+  assert.equal(roots.size, 1, 'bridge edges must connect every component');
+  assert.ok(edges.length <= 40 * 5 + 39);
+});
+
+test('all-but-the-top removes the shared direction without breaking near duplicates', () => {
+  const dimension = 24;
+  const random = seededRandom(31);
+  const rows = [];
+  for (let index = 0; index < 24; index += 1) {
+    const vector = new Float32Array(dimension);
+    for (let axis = 0; axis < dimension; axis += 1) vector[axis] = 1;
+    // 每篇带自己的噪声；0/1 两篇共享同一份噪声，作为近重复对。
+    if (index === 1) {
+      vector.set(rows[0].embedding);
+      vector[0] += 1.1;
+      rows.push({
+        documentKey: `doc-${String(index).padStart(5, '0')}`,
+        dimension,
+        embedding: vector,
+        sourceTypesJson: '[]',
+      });
+      continue;
+    }
+    for (let axis = 0; axis < dimension; axis += 1) vector[axis] += random() * 0.4 - 0.2;
+    rows.push({
+      documentKey: `doc-${String(index).padStart(5, '0')}`,
+      dimension,
+      embedding: vector,
+      sourceTypesJson: '[]',
+    });
+  }
+
+  const geometry = buildDocumentGeometry(createMockDb(rows), { components: 2 });
+  const cosine = (left, right) => {
+    let dot = 0;
+    for (let axis = 0; axis < left.length; axis += 1) dot += left[axis] * right[axis];
+    return dot;
+  };
+
+  let total = 0;
+  let count = 0;
+  for (let left = 0; left < geometry.documents.length; left += 1) {
+    for (let right = left + 1; right < geometry.documents.length; right += 1) {
+      total += cosine(geometry.documents[left].vector, geometry.documents[right].vector);
+      count += 1;
+    }
+  }
+
+  const nearDuplicate = cosine(geometry.documents[0].vector, geometry.documents[1].vector);
+  const unrelated = cosine(geometry.documents[2].vector, geometry.documents[3].vector);
+  assert.ok(geometry.documents.every((document) => document.vector.every(Number.isFinite)));
+  assert.ok(total / count < 0.25, 'shared direction should be mostly removed');
+  assert.ok(nearDuplicate > unrelated + 0.2, 'near duplicate should stay closer than unrelated papers');
 });

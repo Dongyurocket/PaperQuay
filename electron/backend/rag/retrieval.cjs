@@ -29,6 +29,15 @@ const MAX_CONTEXT_NEIGHBORS = 8;
 const DEFAULT_MAX_SIMILARITY_CANDIDATES = 2000;
 const MAX_SIMILARITY_CANDIDATES = 5000;
 const MAX_SIMILARITY_EDGE_LIMIT = 1000;
+const DEFAULT_MUTUAL_NEIGHBORS = 10;
+const MAX_MUTUAL_NEIGHBORS = 20;
+const MAX_MUTUAL_EDGE_LIMIT = 20000;
+const DEFAULT_GEOMETRY_COMPONENTS = 2;
+const MAX_GEOMETRY_COMPONENTS = 3;
+const MAX_GEOMETRY_DOCUMENTS = 1200;
+const DOCUMENT_GEOMETRY_VERSION = 'abtt-d2-mutual-knn-v1';
+const documentGeometryCache = new Map();
+const MAX_DOCUMENT_GEOMETRY_CACHE = 6;
 
 function vectorNorm(vector) {
   let sum = 0;
@@ -37,6 +46,453 @@ function vectorNorm(vector) {
     sum += value * value;
   }
   return Math.sqrt(sum);
+}
+
+function normalizeVector(vector) {
+  const norm = vectorNorm(vector);
+  if (norm <= 0) return null;
+  const normalized = new Float64Array(vector.length);
+  for (let index = 0; index < vector.length; index += 1) {
+    normalized[index] = vector[index] / norm;
+  }
+  return normalized;
+}
+
+function dotProduct(left, right) {
+  let dot = 0;
+  for (let index = 0; index < left.length; index += 1) {
+    dot += left[index] * right[index];
+  }
+  return dot;
+}
+
+/**
+ * 读取同一 embedding 模型、同一维度的文档向量。
+ *
+ * 旧缓存可能同时存在多个模型；选“文档数最多”的一组，避免把不同模型的
+ * 平均向量混在一起做几何。没有模型键的旧数据按 unknown 处理。
+ */
+function readDocumentVectors(db, request = {}) {
+  const allowedDocumentKeys = Array.isArray(request.documentKeys)
+    ? new Set(request.documentKeys.map((key) => cleanString(key)).filter(Boolean))
+    : null;
+  const requestedModelKey = cleanString(request.embeddingModelKey);
+  const where = [
+    `NOT EXISTS (
+      SELECT 1 FROM json_each(rag_document_vectors.source_types_json) WHERE value = 'note'
+    )`,
+  ];
+  const params = [];
+
+  if (allowedDocumentKeys) {
+    where.push('document_key IN (SELECT value FROM json_each(?))');
+    params.push(JSON.stringify(Array.from(allowedDocumentKeys).sort()));
+  }
+  if (requestedModelKey) {
+    where.push('embedding_model_key = ?');
+    params.push(requestedModelKey);
+  }
+
+  const rows = db.prepare(`
+    SELECT
+      document_key AS documentKey,
+      dimension,
+      embedding_model_key AS embeddingModelKey,
+      embedding,
+      source_types_json AS sourceTypesJson,
+      updated_at AS updatedAt
+    FROM rag_document_vectors
+    WHERE ${where.join(' AND ')}
+    ORDER BY document_key, dimension
+  `).all(...params);
+
+  const groups = new Map();
+  for (const row of rows) {
+    const documentKey = cleanString(row.documentKey);
+    const dimension = Number(row.dimension);
+    const modelKey = cleanString(row.embeddingModelKey) || 'unknown';
+
+    if (!documentKey || !Number.isFinite(dimension) || dimension <= 0) continue;
+    if (allowedDocumentKeys && !allowedDocumentKeys.has(documentKey)) continue;
+
+    const vector = decodeEmbeddingValue(row.embedding, dimension);
+    if (!vector) continue;
+
+    const groupKey = `${modelKey}\u0000${dimension}`;
+    let group = groups.get(groupKey);
+    if (!group) {
+      group = { modelKey, dimension, documents: [], maxUpdatedAt: 0 };
+      groups.set(groupKey, group);
+    }
+    group.documents.push({
+      documentKey,
+      vector,
+      sourceTypes: parseSourceTypesJson(row.sourceTypesJson),
+    });
+    group.maxUpdatedAt = Math.max(group.maxUpdatedAt, Number(row.updatedAt) || 0);
+  }
+
+  let selected = null;
+  for (const group of groups.values()) {
+    if (!selected
+      || group.documents.length > selected.documents.length
+      || (group.documents.length === selected.documents.length && group.maxUpdatedAt > selected.maxUpdatedAt)
+      || (group.documents.length === selected.documents.length
+        && group.maxUpdatedAt === selected.maxUpdatedAt
+        && `${group.modelKey}\u0000${group.dimension}` < `${selected.modelKey}\u0000${selected.dimension}`)) {
+      selected = group;
+    }
+  }
+
+  if (!selected) {
+    return { documents: [], modelKey: requestedModelKey || null, dimension: 0, maxUpdatedAt: 0 };
+  }
+
+  selected.documents.sort((left, right) => left.documentKey.localeCompare(right.documentKey));
+  return selected;
+}
+
+/**
+ * 用 Gram 矩阵上的幂迭代求前 D 个主成分。
+ * n≈200 << d=4096 时，构造 n×n 矩阵比 d×d 协方差便宜得多。
+ */
+function topPrincipalComponents(gram, count) {
+  const size = Math.sqrt(gram.length) | 0;
+  const matrix = Float64Array.from(gram);
+  const components = [];
+
+  for (let componentIndex = 0; componentIndex < count; componentIndex += 1) {
+    let vector = new Float64Array(size);
+    for (let index = 0; index < size; index += 1) {
+      vector[index] = Math.sin((index + 1) * (componentIndex + 1) * 1.6180339887498949);
+    }
+    if (size > componentIndex) vector[componentIndex] += 1;
+
+    const orthogonalize = (candidate) => {
+      for (const previous of components) {
+        const projection = dotProduct(candidate, previous);
+        for (let index = 0; index < size; index += 1) {
+          candidate[index] -= projection * previous[index];
+        }
+      }
+    };
+
+    orthogonalize(vector);
+    let norm = vectorNorm(vector);
+    if (norm <= 1e-12) break;
+    for (let index = 0; index < size; index += 1) vector[index] /= norm;
+
+    for (let iteration = 0; iteration < 96; iteration += 1) {
+      const next = new Float64Array(size);
+      for (let row = 0; row < size; row += 1) {
+        let sum = 0;
+        const offset = row * size;
+        for (let column = 0; column < size; column += 1) {
+          sum += matrix[offset + column] * vector[column];
+        }
+        next[row] = sum;
+      }
+
+      orthogonalize(next);
+      norm = vectorNorm(next);
+      if (norm <= 1e-12) {
+        vector = null;
+        break;
+      }
+      for (let index = 0; index < size; index += 1) next[index] /= norm;
+      vector = next;
+    }
+
+    if (!vector) break;
+
+    let eigenvalue = 0;
+    for (let row = 0; row < size; row += 1) {
+      eigenvalue += vector[row] * dotProduct(matrix.subarray(row * size, (row + 1) * size), vector);
+    }
+    if (!(eigenvalue > 1e-9)) break;
+
+    components.push(vector);
+    // 对称矩阵的降幂：A <- A - λ v vᵀ
+    for (let row = 0; row < size; row += 1) {
+      for (let column = 0; column < size; column += 1) {
+        matrix[row * size + column] -= eigenvalue * vector[row] * vector[column];
+      }
+    }
+  }
+
+  return components;
+}
+
+/**
+ * 文档几何：单位化 → 去均值 → 去前 D 个主成分 → 再单位化。
+ * 这是 all-but-the-top 的轻量实现，专门解决平均池化向量的公共方向。
+ */
+function buildDocumentGeometry(db, request = {}) {
+  const source = readDocumentVectors(db, request);
+  if (source.documents.length === 0) {
+    return {
+      ...source,
+      geometryVersion: DOCUMENT_GEOMETRY_VERSION,
+      documents: [],
+    };
+  }
+
+  // 几何是 O(n²·d)；这里只约束互近邻路径，global-top 仍按旧候选上限处理。
+  if (source.documents.length > MAX_GEOMETRY_DOCUMENTS) {
+    source.documents = source.documents.slice(0, MAX_GEOMETRY_DOCUMENTS);
+  }
+
+  const components = Math.min(
+    MAX_GEOMETRY_COMPONENTS,
+    Math.max(0, normalizeNonNegativeInteger(request.components, DEFAULT_GEOMETRY_COMPONENTS)),
+  );
+  const cacheKey = [
+    source.modelKey,
+    source.dimension,
+    source.documents.length,
+    source.maxUpdatedAt,
+    components,
+  ].join('\u0000');
+
+  const cached = documentGeometryCache.get(cacheKey);
+  if (cached) return cached;
+
+  const normalized = source.documents.map((document) => normalizeVector(document.vector));
+  const mean = new Float64Array(source.dimension);
+  let meanCount = 0;
+  for (const vector of normalized) {
+    if (!vector) continue;
+    for (let index = 0; index < source.dimension; index += 1) mean[index] += vector[index];
+    meanCount += 1;
+  }
+  if (meanCount > 0) {
+    for (let index = 0; index < source.dimension; index += 1) mean[index] /= meanCount;
+  }
+
+  const centered = normalized.map((vector) => {
+    if (!vector) return null;
+    const next = new Float64Array(source.dimension);
+    for (let index = 0; index < source.dimension; index += 1) {
+      next[index] = vector[index] - mean[index];
+    }
+    return next;
+  });
+
+  let principalComponents = [];
+  if (components > 0) {
+    const size = centered.length;
+    const gram = new Float64Array(size * size);
+    for (let row = 0; row < size; row += 1) {
+      if (!centered[row]) continue;
+      for (let column = row; column < size; column += 1) {
+        if (!centered[column]) continue;
+        const value = dotProduct(centered[row], centered[column]);
+        gram[row * size + column] = value;
+        gram[column * size + row] = value;
+      }
+    }
+    // Gram 的特征向量是「文档权重」；真正的特征空间方向是中心化文档的线性组合。
+    principalComponents = topPrincipalComponents(gram, components)
+      .map((weights) => {
+        const direction = new Float64Array(source.dimension);
+        for (let row = 0; row < weights.length; row += 1) {
+          const weight = weights[row];
+          if (!weight || !centered[row]) continue;
+          for (let axis = 0; axis < source.dimension; axis += 1) {
+            direction[axis] += weight * centered[row][axis];
+          }
+        }
+        return normalizeVector(direction);
+      })
+      .filter(Boolean);
+  }
+
+  const documents = source.documents.map((document, index) => {
+    let vector = centered[index];
+    if (!vector) {
+      return { ...document, vector: new Float64Array(source.dimension) };
+    }
+
+    const projected = new Float64Array(vector);
+    for (const component of principalComponents) {
+      const projection = dotProduct(projected, component);
+      for (let axis = 0; axis < source.dimension; axis += 1) {
+        projected[axis] -= projection * component[axis];
+      }
+    }
+
+    vector = normalizeVector(projected) ?? projected;
+    return { ...document, vector };
+  });
+
+  const result = {
+    ...source,
+    documents,
+    geometryVersion: DOCUMENT_GEOMETRY_VERSION,
+  };
+  documentGeometryCache.set(cacheKey, result);
+  if (documentGeometryCache.size > MAX_DOCUMENT_GEOMETRY_CACHE) {
+    documentGeometryCache.delete(documentGeometryCache.keys().next().value);
+  }
+  return result;
+}
+
+function unionFind(size) {
+  const parent = Array.from({ length: size }, (_, index) => index);
+  const find = (value) => {
+    let current = value;
+    while (parent[current] !== current) {
+      parent[current] = parent[parent[current]];
+      current = parent[current];
+    }
+    return current;
+  };
+  const union = (left, right) => {
+    const leftRoot = find(left);
+    const rightRoot = find(right);
+    if (leftRoot !== rightRoot) parent[rightRoot] = leftRoot;
+  };
+  return { find, union };
+}
+
+/**
+ * 互近邻语义边：每篇最多 k 个双向邻居；断开的连通分量用跨分量最高相似度桥接。
+ * 边权重用排名（1 表示最近邻），原始中心化余弦只作为证据。
+ */
+function listMutualKnnEdges(geometry, request = {}) {
+  const documents = geometry.documents;
+  const size = documents.length;
+  if (size < 2) return [];
+
+  const k = Math.min(
+    MAX_MUTUAL_NEIGHBORS,
+    Math.max(1, normalizeNonNegativeInteger(request.k, DEFAULT_MUTUAL_NEIGHBORS)),
+  );
+  const neighbors = Array.from({ length: size }, (_, index) => {
+    const scored = [];
+    for (let other = 0; other < size; other += 1) {
+      if (other === index) continue;
+      scored.push({
+        index: other,
+        similarity: dotProduct(documents[index].vector, documents[other].vector),
+      });
+    }
+    scored.sort((left, right) => right.similarity - left.similarity || left.index - right.index);
+    return scored.slice(0, k);
+  });
+
+  const neighborSets = neighbors.map((entries) => new Set(entries.map((entry) => entry.index)));
+  const edges = new Map();
+  const union = unionFind(size);
+
+  const addEdge = (leftIndex, rightIndex, similarity, rankWeight) => {
+    const left = Math.min(leftIndex, rightIndex);
+    const right = Math.max(leftIndex, rightIndex);
+    const key = `${left}:${right}`;
+    const existing = edges.get(key);
+    if (existing) {
+      existing.rankWeight = Math.max(existing.rankWeight, rankWeight);
+      existing.similarity = Math.max(existing.similarity, similarity);
+      return existing;
+    }
+    const edge = {
+      sourceDocumentKey: documents[left].documentKey,
+      targetDocumentKey: documents[right].documentKey,
+      similarity,
+      rankWeight,
+      sourceTypes: Array.from(new Set([
+        ...documents[left].sourceTypes,
+        ...documents[right].sourceTypes,
+      ])).sort(),
+    };
+    edges.set(key, edge);
+    union.union(left, right);
+    return edge;
+  };
+
+  for (let index = 0; index < size; index += 1) {
+    for (let rank = 0; rank < neighbors[index].length; rank += 1) {
+      const neighbor = neighbors[index][rank];
+      if (!neighborSets[neighbor.index].has(index)) continue;
+      addEdge(index, neighbor.index, neighbor.similarity, 1 - rank / k);
+    }
+  }
+
+  // 互近邻可能产生多个分量；把每个分量接到文档 0 所在分量上，避免 O(c·n²) 的反复全扫。
+  let anchorRoot = union.find(0);
+  for (let index = 0; index < size; index += 1) {
+    if (union.find(index) === anchorRoot) continue;
+
+    let best = null;
+    for (let other = 0; other < size; other += 1) {
+      if (union.find(other) !== anchorRoot) continue;
+      const similarity = dotProduct(documents[index].vector, documents[other].vector);
+      if (!best || similarity > best.similarity) {
+        best = { index: other, similarity };
+      }
+    }
+
+    if (best) {
+      addEdge(index, best.index, best.similarity, 0);
+      anchorRoot = union.find(anchorRoot);
+    }
+  }
+
+  const values = Array.from(edges.values())
+    .sort((left, right) => right.similarity - left.similarity
+      || left.sourceDocumentKey.localeCompare(right.sourceDocumentKey)
+      || left.targetDocumentKey.localeCompare(right.targetDocumentKey));
+  const explicitLimit = Number.isFinite(Number(request.limit))
+    ? Math.max(0, Math.min(MAX_MUTUAL_EDGE_LIMIT, Math.trunc(Number(request.limit))))
+    : MAX_MUTUAL_EDGE_LIMIT;
+  return values.slice(0, explicitLimit);
+}
+
+function listGlobalTopEdges(geometry, request = {}) {
+  const limit = Math.min(
+    MAX_SIMILARITY_EDGE_LIMIT,
+    Math.max(0, normalizeNonNegativeInteger(request.limit, 80)),
+  );
+  const minSimilarity = Number.isFinite(Number(request.minSimilarity))
+    ? Math.max(-1, Math.min(1, Number(request.minSimilarity)))
+    : 0.82;
+  const candidateLimit = Math.min(
+    MAX_SIMILARITY_CANDIDATES,
+    Math.max(2, normalizeNonNegativeInteger(request.maxCandidates, DEFAULT_MAX_SIMILARITY_CANDIDATES)),
+  );
+
+  if (limit === 0) return [];
+
+  const candidates = (geometry.documents.length > candidateLimit
+    ? geometry.documents.slice(0, candidateLimit)
+    : geometry.documents)
+    .map((document) => ({ ...document, norm: vectorNorm(document.vector) }));
+  const collector = createTopEdgeCollector(limit);
+
+  for (let leftIndex = 0; leftIndex < candidates.length; leftIndex += 1) {
+    const left = candidates[leftIndex];
+    const leftNorm = left.norm;
+    if (leftNorm === 0 && minSimilarity > 0) continue;
+
+    for (let rightIndex = leftIndex + 1; rightIndex < candidates.length; rightIndex += 1) {
+      const right = candidates[rightIndex];
+      const rightNorm = right.norm;
+      let similarity = 0;
+      if (leftNorm !== 0 && rightNorm !== 0) {
+        similarity = dotProduct(left.vector, right.vector) / (leftNorm * rightNorm);
+      }
+      if (similarity < minSimilarity) continue;
+
+      collector.push({
+        sourceDocumentKey: left.documentKey,
+        targetDocumentKey: right.documentKey,
+        similarity,
+        sourceTypes: Array.from(new Set([...left.sourceTypes, ...right.sourceTypes])).sort(),
+      });
+    }
+  }
+
+  return collector.values();
 }
 
 // 保留“最差边在堆顶”的小顶堆，内存只与 limit 有关。
@@ -399,125 +855,20 @@ function getChunkContext(db, request) {
  *   若未来需要近似索引，必须另行设计误差边界并同步更新文档与基准。
  */
 function listDocumentSimilarities(db, request = {}) {
-  const limit = Math.min(
-    MAX_SIMILARITY_EDGE_LIMIT,
-    Math.max(0, normalizeNonNegativeInteger(request.limit, 80)),
-  );
-  const minSimilarity = Number.isFinite(Number(request.minSimilarity))
-    ? Math.max(-1, Math.min(1, Number(request.minSimilarity)))
-    : 0.82;
-  const candidateLimit = Math.min(
-    MAX_SIMILARITY_CANDIDATES,
-    Math.max(2, normalizeNonNegativeInteger(request.maxCandidates, DEFAULT_MAX_SIMILARITY_CANDIDATES)),
-  );
-  const allowedDocumentKeys = Array.isArray(request.documentKeys)
-    ? new Set(request.documentKeys.map((key) => cleanString(key)).filter(Boolean))
-    : null;
+  const strategy = request.strategy === 'global-top' ? 'global-top' : 'mutual-knn';
 
-  if (limit === 0) {
+  // global-top 保留原始空间与旧的预算语义，便于回退和旧测试对照。
+  if (strategy === 'global-top') {
+    const source = readDocumentVectors(db, request);
+    return source.documents.length < 2 ? [] : listGlobalTopEdges(source, request);
+  }
+
+  const geometry = buildDocumentGeometry(db, request);
+  if (geometry.documents.length < 2) {
     return [];
   }
 
-  // 只读文档级平均向量缓存（由 indexDocument/reportFailure 维护、旧库一次性回填），
-  // 避免每次全量解码 chunk 向量阻塞主进程。允许列表在 SQL 中先过滤，避免
-  // 大库把全部向量解码后才丢弃。
-  const selectSql = `
-    SELECT
-      document_key AS documentKey,
-      dimension,
-      embedding,
-      source_types_json AS sourceTypesJson
-    FROM rag_document_vectors
-    WHERE NOT EXISTS (
-      SELECT 1 FROM json_each(rag_document_vectors.source_types_json) WHERE value = 'note'
-    )`;
-  const rows = allowedDocumentKeys
-    ? db.prepare(`${selectSql}
-        AND document_key IN (SELECT value FROM json_each(?))
-        ORDER BY document_key, dimension
-      `).all(JSON.stringify(Array.from(allowedDocumentKeys).sort()))
-    : db.prepare(`${selectSql}
-        ORDER BY document_key, dimension
-      `).all();
-
-  const documents = rows
-    .map((row) => {
-      const documentKey = cleanString(row.documentKey);
-      const dimension = Number(row.dimension);
-
-      if (!documentKey || (allowedDocumentKeys && !allowedDocumentKeys.has(documentKey))) {
-        return null;
-      }
-
-      const vector = decodeEmbeddingValue(row.embedding, dimension);
-      if (!vector) {
-        return null;
-      }
-
-      return {
-        documentKey,
-        dimension,
-        vector,
-        norm: vectorNorm(vector),
-        sourceTypes: parseSourceTypesJson(row.sourceTypesJson),
-      };
-    })
-    .filter(Boolean);
-
-  // 候选向量数超过上限时按 document_key 升序截断（SQL 已排序），再进入
-  // 成对循环；因此成对比较的规模始终受 candidateLimit 约束，不会退化为
-  // 无界 O(n^2)。
-  const candidates = documents.length > candidateLimit
-    ? documents.slice(0, candidateLimit)
-    : documents;
-
-  const collector = createTopEdgeCollector(limit);
-
-  for (let leftIndex = 0; leftIndex < candidates.length; leftIndex += 1) {
-    const left = candidates[leftIndex];
-    const leftDimension = left.dimension;
-    const leftNorm = left.norm;
-    const leftVector = left.vector;
-    // 零向量与任何向量的相似度恒为 0：阈值 > 0 时整行都不可能入选，直接跳过。
-    const leftIsZero = leftNorm === 0;
-    if (leftIsZero && minSimilarity > 0) {
-      continue;
-    }
-
-    for (let rightIndex = leftIndex + 1; rightIndex < candidates.length; rightIndex += 1) {
-      const right = candidates[rightIndex];
-
-      if (leftDimension !== right.dimension) {
-        continue;
-      }
-
-      let similarity = 0;
-      if (!leftIsZero && right.norm !== 0) {
-        // 内联点积：candidate 向量统一为 Float32Array（decodeEmbeddingValue），
-        // 直接下标相乘避免逐元素函数调用与属性查找。累加顺序与旧 vectorDot 一致，
-        // 因此相似度数值逐位相同（小规模对照见 tests/graphSimilarityScale.test.mjs）。
-        const rightVector = right.vector;
-        let dot = 0;
-        for (let axis = 0; axis < leftDimension; axis += 1) {
-          dot += leftVector[axis] * rightVector[axis];
-        }
-        similarity = dot / (leftNorm * right.norm);
-      }
-
-      if (similarity < minSimilarity) {
-        continue;
-      }
-
-      collector.push({
-        sourceDocumentKey: left.documentKey,
-        targetDocumentKey: right.documentKey,
-        similarity,
-        sourceTypes: Array.from(new Set([...left.sourceTypes, ...right.sourceTypes])).sort(),
-      });
-    }
-  }
-
-  return collector.values();
+  return listMutualKnnEdges(geometry, request);
 }
 
 function retrieveNoteVectors(db, request) {
@@ -526,8 +877,11 @@ function retrieveNoteVectors(db, request) {
 
 module.exports = {
   DEFAULT_MAX_SIMILARITY_CANDIDATES,
+  DEFAULT_MUTUAL_NEIGHBORS,
+  DOCUMENT_GEOMETRY_VERSION,
   MAX_SIMILARITY_CANDIDATES,
   MAX_SIMILARITY_EDGE_LIMIT,
+  buildDocumentGeometry,
   getChunkContext,
   listDocumentSimilarities,
   retrieveDocumentChunks,

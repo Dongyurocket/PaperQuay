@@ -194,8 +194,8 @@ function rowToStatus(row) {
   };
 }
 
-// 重算单个文档在所有维度下的平均向量缓存；没有可用向量时删除缓存行。
-// 语义与原 listDocumentSimilarities 的按 documentKey 聚合一致：跨 source_type 合并、仅统计 ready 且维度匹配的索引。
+// 重算单个文档在所有维度/模型下的平均向量缓存；没有可用向量时删除缓存行。
+// 同一文档的 MinerU / PDF 文本来源合并；不同 embedding 模型必须分组平均。
 function rebuildDocumentVectors(db, documentKey) {
   const normalizedDocumentKey = cleanString(documentKey);
   if (!normalizedDocumentKey) {
@@ -207,6 +207,7 @@ function rebuildDocumentVectors(db, documentKey) {
     const rows = db.prepare(`
       SELECT
         c.source_type AS sourceType,
+        i.embedding_model_key AS embeddingModelKey,
         v.embedding AS embedding
       FROM ${table} v
       JOIN rag_chunks c ON c.id = v.rowid
@@ -219,61 +220,65 @@ function rebuildDocumentVectors(db, documentKey) {
       ORDER BY c.source_type, c.chunk_index
     `).all(dimension, normalizedDocumentKey);
 
-    const sum = new Float64Array(dimension);
-    const sourceTypes = new Set();
-    let count = 0;
-
+    const groups = new Map();
     for (const row of rows) {
       const vector = decodeEmbeddingValue(row.embedding, dimension);
-      if (!vector) {
-        continue;
+      if (!vector) continue;
+
+      const modelKey = cleanString(row.embeddingModelKey) || 'unknown';
+      let entry = groups.get(modelKey);
+      if (!entry) {
+        entry = { sum: new Float64Array(dimension), count: 0, sourceTypes: new Set() };
+        groups.set(modelKey, entry);
       }
 
       for (let index = 0; index < dimension; index += 1) {
-        sum[index] += vector[index];
+        entry.sum[index] += vector[index];
       }
-      count += 1;
+      entry.count += 1;
 
       const sourceType = cleanString(row.sourceType);
       if (sourceType) {
-        sourceTypes.add(sourceType);
+        entry.sourceTypes.add(sourceType);
       }
     }
 
-    if (count === 0) {
-      db.prepare('DELETE FROM rag_document_vectors WHERE document_key = ? AND dimension = ?')
-        .run(normalizedDocumentKey, dimension);
-      continue;
-    }
+    // 先清掉该文档在该维度下的旧模型行，避免模型切换后残留旧向量。
+    db.prepare('DELETE FROM rag_document_vectors WHERE document_key = ? AND dimension = ?')
+      .run(normalizedDocumentKey, dimension);
 
-    const average = new Float32Array(dimension);
-    for (let index = 0; index < dimension; index += 1) {
-      average[index] = sum[index] / count;
-    }
+    for (const [modelKey, entry] of groups) {
+      const average = new Float32Array(dimension);
+      for (let index = 0; index < dimension; index += 1) {
+        average[index] = entry.sum[index] / entry.count;
+      }
 
-    db.prepare(`
-      INSERT INTO rag_document_vectors (
-        document_key,
+      db.prepare(`
+        INSERT INTO rag_document_vectors (
+          document_key,
+          dimension,
+          embedding_model_key,
+          embedding,
+          chunk_count,
+          source_types_json,
+          updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT (document_key, dimension, embedding_model_key) DO UPDATE SET
+          embedding = excluded.embedding,
+          chunk_count = excluded.chunk_count,
+          source_types_json = excluded.source_types_json,
+          updated_at = excluded.updated_at
+      `).run(
+        normalizedDocumentKey,
         dimension,
-        embedding,
-        chunk_count,
-        source_types_json,
-        updated_at
-      )
-      VALUES (?, ?, ?, ?, ?, ?)
-      ON CONFLICT (document_key, dimension) DO UPDATE SET
-        embedding = excluded.embedding,
-        chunk_count = excluded.chunk_count,
-        source_types_json = excluded.source_types_json,
-        updated_at = excluded.updated_at
-    `).run(
-      normalizedDocumentKey,
-      dimension,
-      Buffer.from(average.buffer, average.byteOffset, average.byteLength),
-      count,
-      JSON.stringify(Array.from(sourceTypes).sort()),
-      Date.now(),
-    );
+        modelKey,
+        Buffer.from(average.buffer, average.byteOffset, average.byteLength),
+        entry.count,
+        JSON.stringify(Array.from(entry.sourceTypes).sort()),
+        Date.now(),
+      );
+    }
   }
 }
 
@@ -286,21 +291,25 @@ function rebuildAllDocumentVectors(db) {
     INSERT INTO rag_document_vectors (
       document_key,
       dimension,
+      embedding_model_key,
       embedding,
       chunk_count,
       source_types_json,
       updated_at
     )
-    VALUES (?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
 
   for (const dimension of knownVectorDimensions(db)) {
-    const readyKeys = new Set(
+    const readySources = new Map(
       db.prepare(`
-        SELECT document_key || '::' || source_type AS key
+        SELECT document_key, source_type, embedding_model_key
         FROM rag_indexes
         WHERE status = 'ready' AND embedding_dimension = ?
-      `).all(dimension).map((row) => row.key),
+      `).all(dimension).map((row) => [
+        `${row.document_key}::${row.source_type}`,
+        cleanString(row.embedding_model_key) || 'unknown',
+      ]),
     );
     const table = vectorTableName(dimension);
     const rows = db.prepare(`
@@ -312,8 +321,9 @@ function rebuildAllDocumentVectors(db) {
     for (const row of rows) {
       const documentKey = cleanString(row.documentKey);
       const sourceType = cleanString(row.sourceType);
+      const modelKey = readySources.get(`${documentKey}::${sourceType}`);
 
-      if (!documentKey || !readyKeys.has(`${documentKey}::${sourceType}`)) {
+      if (!documentKey || !modelKey) {
         continue;
       }
 
@@ -322,10 +332,17 @@ function rebuildAllDocumentVectors(db) {
         continue;
       }
 
-      let entry = grouped.get(documentKey);
+      const groupKey = `${documentKey}\u0000${modelKey}`;
+      let entry = grouped.get(groupKey);
       if (!entry) {
-        entry = { sum: new Float64Array(dimension), count: 0, sourceTypes: new Set() };
-        grouped.set(documentKey, entry);
+        entry = {
+          documentKey,
+          modelKey,
+          sum: new Float64Array(dimension),
+          count: 0,
+          sourceTypes: new Set(),
+        };
+        grouped.set(groupKey, entry);
       }
 
       for (let index = 0; index < dimension; index += 1) {
@@ -337,15 +354,16 @@ function rebuildAllDocumentVectors(db) {
       }
     }
 
-    for (const [documentKey, entry] of grouped) {
+    for (const entry of grouped.values()) {
       const average = new Float32Array(dimension);
       for (let index = 0; index < dimension; index += 1) {
         average[index] = entry.sum[index] / entry.count;
       }
 
       upsert.run(
-        documentKey,
+        entry.documentKey,
         dimension,
+        entry.modelKey,
         Buffer.from(average.buffer, average.byteOffset, average.byteLength),
         entry.count,
         JSON.stringify(Array.from(entry.sourceTypes).sort()),

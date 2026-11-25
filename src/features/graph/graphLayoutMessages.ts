@@ -22,15 +22,23 @@ export interface FcoseLayoutOptions {
   packComponents: boolean;
   tile: boolean;
   nodeDimensionsIncludeLabels: boolean;
+  uniformNodeDimensions?: boolean;
 }
 
 export interface GraphLayoutNodeInput {
   id: string;
+  type?: string;
+  size?: number;
+  degree?: number;
+  x?: number;
+  y?: number;
 }
 
 export interface GraphLayoutEdgeInput {
   source: string;
   target: string;
+  type?: string;
+  weight?: number;
 }
 
 export interface GraphLayoutRequestPayload {
@@ -109,7 +117,7 @@ export function buildFcoseLayoutOptions(nodeCount: number): FcoseLayoutOptions {
     name: 'fcose',
     quality: budget.quality,
     numIter: budget.numIter,
-    randomize: true,
+    randomize: false,
     // The worker never animates; the main thread applies a preset layout.
     animate: false,
     fit: false,
@@ -120,7 +128,8 @@ export function buildFcoseLayoutOptions(nodeCount: number): FcoseLayoutOptions {
     gravity: 0.3,
     packComponents: true,
     tile: true,
-    nodeDimensionsIncludeLabels: false,
+    nodeDimensionsIncludeLabels: true,
+    uniformNodeDimensions: false,
   };
 }
 

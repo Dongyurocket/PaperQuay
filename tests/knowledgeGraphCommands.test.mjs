@@ -111,8 +111,8 @@ function createContext(overrides = {}) {
 
 test('knowledge graph snapshot includes library, note, tag, category, and embedding edges', async () => {
   const snapshot = await createKnowledgeGraphSnapshot(createContext(), {
-    embeddingMinSimilarity: 0.8,
-    embeddingEdgeLimit: 10,
+    embeddingStrategy: 'mutual-knn',
+    embeddingK: 10,
   });
   const nodeIds = new Set(snapshot.nodes.map((node) => node.id));
   const edgeTypes = new Set(snapshot.edges.map((edge) => edge.type));
@@ -135,6 +135,14 @@ test('knowledge graph snapshot includes library, note, tag, category, and embedd
   assert.equal(semanticEdge?.source, 'paper:paper-1');
   assert.equal(semanticEdge?.target, 'paper:paper-2');
   assert.equal(semanticEdge?.weight, 0.91);
+
+  const paperNode = snapshot.nodes.find((node) => node.id === 'paper:paper-1');
+  assert.equal(typeof paperNode?.degree, 'number');
+  assert.ok(paperNode.degree >= 1);
+  assert.equal(typeof paperNode?.color, 'string');
+  assert.ok(snapshot.metadata?.graphQuality);
+  assert.equal(snapshot.metadata.graphQuality.semanticCoverage.total, 2);
+  assert.equal(snapshot.metadata.graphQuality.geometryVersion, 'abtt-d2-mutual-knn-v1');
 });
 
 test('knowledge graph builds citation edges from cached paper references', async () => {

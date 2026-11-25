@@ -5,6 +5,9 @@ const {
   id,
   writeJsonSync,
 } = require('./utils.cjs');
+const { buildEmbeddingModelKey, resolveEmbeddingConfigFromDocument } = require('../../src/shared/embeddingConfig.cjs');
+const { resolveReaderConfigSecrets } = require('./secretStorage.cjs');
+const { DOCUMENT_GEOMETRY_VERSION } = require('./rag/retrieval.cjs');
 
 const NATIVE_LIBRARY_PREFIX = 'native-library:';
 const PAPER_NODE_PREFIX = 'paper:';
@@ -17,6 +20,20 @@ const DEFAULT_GRAPH_NODE_LIMIT = 10000;
 const MAX_GRAPH_NODE_LIMIT = 50000;
 const DEFAULT_GRAPH_EDGE_LIMIT_PER_NODE = 250;
 const MAX_GRAPH_EDGE_LIMIT_PER_NODE = 1000;
+const PAPER_CATEGORY_COLORS = [
+  '#2563eb', '#0891b2', '#7c3aed', '#db2777', '#ea580c',
+  '#65a30d', '#0d9488', '#4f46e5', '#b45309', '#be123c',
+];
+
+function paperCategoryColor(categoryIds) {
+  const categoryId = Array.isArray(categoryIds) ? cleanString(categoryIds[0]) : '';
+  if (!categoryId) return '#64748b';
+  let hash = 0;
+  for (let index = 0; index < categoryId.length; index += 1) {
+    hash = ((hash << 5) - hash + categoryId.charCodeAt(index)) | 0;
+  }
+  return PAPER_CATEGORY_COLORS[Math.abs(hash) % PAPER_CATEGORY_COLORS.length];
+}
 
 function normalizeBoolean(value, fallback = true) {
   if (value === undefined || value === null) {
@@ -33,6 +50,19 @@ function normalizeLimit(value, fallback, min, max) {
   }
 
   return Math.min(max, Math.max(min, Math.trunc(number)));
+}
+
+function resolveRagEmbeddingModelKey(appPaths) {
+  try {
+    const raw = JSON.parse(fs.readFileSync(appPaths.configPath, 'utf8'));
+    const config = resolveEmbeddingConfigFromDocument({
+      settings: raw.settings || {},
+      secrets: resolveReaderConfigSecrets(raw, appPaths) || {},
+    }, { requireApiKey: false });
+    return config ? buildEmbeddingModelKey(config) : null;
+  } catch {
+    return null;
+  }
 }
 
 function paperNodeId(paperId) {
@@ -653,6 +683,76 @@ function applyGraphBounds(snapshot, { nodeLimit, edgeLimitPerNode }) {
   };
 }
 
+function computeGraphQuality(snapshot, { semanticCoverage, geometryVersion }) {
+  const nodes = Array.isArray(snapshot?.nodes) ? snapshot.nodes : [];
+  const edges = Array.isArray(snapshot?.edges) ? snapshot.edges : [];
+  const degree = new Map(nodes.map((node) => [node.id, 0]));
+  const adjacency = new Map(nodes.map((node) => [node.id, []]));
+  const parent = new Map(nodes.map((node) => [node.id, node.id]));
+
+  const find = (value) => {
+    let current = value;
+    while (parent.get(current) !== current) {
+      parent.set(current, parent.get(parent.get(current)));
+      current = parent.get(current);
+    }
+    return current;
+  };
+  const union = (left, right) => {
+    const leftRoot = find(left);
+    const rightRoot = find(right);
+    if (leftRoot !== rightRoot) parent.set(rightRoot, leftRoot);
+  };
+
+  for (const edge of edges) {
+    if (!degree.has(edge.source) || !degree.has(edge.target)) continue;
+    degree.set(edge.source, degree.get(edge.source) + 1);
+    degree.set(edge.target, degree.get(edge.target) + 1);
+    adjacency.get(edge.source).push({ id: edge.target, weight: Number(edge.weight) || 0 });
+    adjacency.get(edge.target).push({ id: edge.source, weight: Number(edge.weight) || 0 });
+    union(edge.source, edge.target);
+  }
+
+  const degrees = [...degree.values()].sort((left, right) => left - right);
+  const degreeMedian = degrees.length === 0
+    ? 0
+    : degrees.length % 2 === 1
+      ? degrees[(degrees.length - 1) / 2]
+      : (degrees[degrees.length / 2 - 1] + degrees[degrees.length / 2]) / 2;
+  const componentCount = new Set(nodes.map((node) => find(node.id))).size;
+  const isolatedCount = degrees.filter((value) => value === 0).length;
+
+  // k-occurrence 偏度：每篇的 top-10 邻居被多少其他节点选中，衡量 hub 是否过度集中。
+  const occurrence = new Map(nodes.map((node) => [node.id, 0]));
+  for (const neighbors of adjacency.values()) {
+    neighbors
+      .slice()
+      .sort((left, right) => right.weight - left.weight)
+      .slice(0, 10)
+      .forEach((neighbor) => occurrence.set(neighbor.id, occurrence.get(neighbor.id) + 1));
+  }
+  const occurrenceValues = [...occurrence.values()];
+  const mean = occurrenceValues.reduce((sum, value) => sum + value, 0) / Math.max(1, occurrenceValues.length);
+  const variance = occurrenceValues.reduce((sum, value) => sum + (value - mean) ** 2, 0) / Math.max(1, occurrenceValues.length);
+  const std = Math.sqrt(variance);
+  const hubnessSkew = std === 0
+    ? 0
+    : occurrenceValues.reduce((sum, value) => sum + ((value - mean) / std) ** 3, 0) / Math.max(1, occurrenceValues.length);
+
+  return {
+    nodeCount: nodes.length,
+    edgeCount: edges.length,
+    degreeMin: degrees[0] ?? 0,
+    degreeMedian,
+    degreeMax: degrees[degrees.length - 1] ?? 0,
+    componentCount,
+    isolatedCount,
+    hubnessSkew,
+    semanticCoverage,
+    geometryVersion,
+  };
+}
+
 async function createKnowledgeGraphSnapshot(context, request = {}) {
   const { appPaths, noteStore, ragStore, store } = context;
   const includePapers = normalizeBoolean(request.includePapers, true);
@@ -663,10 +763,14 @@ async function createKnowledgeGraphSnapshot(context, request = {}) {
   const includeCoAuthors = normalizeBoolean(request.includeCoAuthors, false);
   const includeCustomRelations = normalizeBoolean(request.includeCustomRelations, true);
   const includeEmbeddingEdges = normalizeBoolean(request.includeEmbeddingEdges, true);
+  const embeddingStrategy = request.embeddingStrategy === 'global-top' ? 'global-top' : 'mutual-knn';
+  const embeddingK = normalizeLimit(request.embeddingK, 10, 3, 20);
+  const embeddingComponents = normalizeLimit(request.embeddingComponents, 2, 0, 3);
   const embeddingEdgeLimit = normalizeLimit(request.embeddingEdgeLimit, 80, 0, 300);
   const embeddingMinSimilarity = Number.isFinite(Number(request.embeddingMinSimilarity))
     ? Math.max(-1, Math.min(1, Number(request.embeddingMinSimilarity)))
     : 0.82;
+  const embeddingModelKey = resolveRagEmbeddingModelKey(appPaths);
   const search = cleanString(request.search).toLowerCase();
   const localNodeId = cleanString(request.localNodeId);
   const localDepth = normalizeLimit(request.localDepth, 1, 0, 4);
@@ -721,7 +825,10 @@ async function createKnowledgeGraphSnapshot(context, request = {}) {
         label: paper.title,
         subtitle: [authorsText(paper), paper.year, paper.publication].filter(Boolean).join(' · '),
         paperId: paper.id,
-        size: 34 + Math.min(18, Math.max(0, Number(paper.readingProgress) || 0) * 18),
+        year: paper.year ?? null,
+        categoryIds: Array.isArray(paper.categoryIds) ? paper.categoryIds : [],
+        color: paperCategoryColor(paper.categoryIds),
+        size: 26,
       });
     }
   }
@@ -915,6 +1022,7 @@ async function createKnowledgeGraphSnapshot(context, request = {}) {
     addCoAuthorEdges({ papers: library.papers, nodes, edges });
   }
 
+  let semanticIndexed = 0;
   if (includeEmbeddingEdges && ragStore?.available !== false && typeof ragStore?.listDocumentSimilarities === 'function') {
     const documentKeys = library.papers.flatMap((paper) => [
       paper.id,
@@ -922,8 +1030,14 @@ async function createKnowledgeGraphSnapshot(context, request = {}) {
     ]);
     const similarities = await Promise.resolve(ragStore.listDocumentSimilarities({
       documentKeys,
-      limit: embeddingEdgeLimit,
-      minSimilarity: embeddingMinSimilarity,
+      strategy: embeddingStrategy,
+      k: embeddingK,
+      components: embeddingComponents,
+      embeddingModelKey: embeddingModelKey || undefined,
+      // 互近邻不需要全局 top-N；旧的 120 条上限会把语义网络又变回排行榜。
+      ...(embeddingStrategy === 'global-top'
+        ? { limit: embeddingEdgeLimit, minSimilarity: embeddingMinSimilarity }
+        : {}),
     }));
     for (const similarity of similarities) {
       const sourcePaperId = resolvePaperReference(similarity.sourceDocumentKey);
@@ -944,8 +1058,26 @@ async function createKnowledgeGraphSnapshot(context, request = {}) {
         target,
         type: 'related_by_embedding',
         label: 'similar',
-        weight: similarity.similarity,
+        weight: similarity.rankWeight ?? similarity.similarity,
+        description: `similarity ${similarity.similarity.toFixed(3)}`,
       });
+    }
+
+    // 语义覆盖按「有 ready 索引的文献数」统计，而不是只看当前渲染出的边。
+    try {
+      const statuses = await Promise.resolve(ragStore.listIndexStatuses());
+      const indexedDocumentKeys = new Set(
+        (Array.isArray(statuses) ? statuses : [])
+          .filter((status) => status?.status === 'ready')
+          .map((status) => cleanString(status.documentKey))
+          .filter(Boolean),
+      );
+      semanticIndexed = library.papers.filter((paper) => (
+        indexedDocumentKeys.has(paper.id)
+        || indexedDocumentKeys.has(`${NATIVE_LIBRARY_PREFIX}${paper.id}`)
+      )).length;
+    } catch {
+      semanticIndexed = 0;
     }
   }
 
@@ -973,6 +1105,25 @@ async function createKnowledgeGraphSnapshot(context, request = {}) {
     generatedAt: Date.now(),
   };
 
+  // 节点大小由图内实际度数决定；阅读进度改由前端外环表达。
+  const degreeByNode = new Map();
+  for (const edge of snapshot.edges) {
+    degreeByNode.set(edge.source, (degreeByNode.get(edge.source) ?? 0) + 1);
+    degreeByNode.set(edge.target, (degreeByNode.get(edge.target) ?? 0) + 1);
+  }
+  snapshot = {
+    ...snapshot,
+    nodes: snapshot.nodes.map((node) => {
+      const degree = degreeByNode.get(node.id) ?? 0;
+      if (node.type !== 'paper') return { ...node, degree };
+      return {
+        ...node,
+        degree,
+        size: Math.min(56, Math.max(18, 18 + 6 * Math.sqrt(degree))),
+      };
+    }),
+  };
+
   if (search) {
     const matchedNodes = new Set(snapshot.nodes.filter((node) => matchesSearch(node, search)).map((node) => node.id));
     const neighborNodes = new Set(matchedNodes);
@@ -988,10 +1139,23 @@ async function createKnowledgeGraphSnapshot(context, request = {}) {
     };
   }
 
-  return applyGraphBounds(filterLocalGraph(snapshot, localNodeId, localDepth), {
+  const bounded = applyGraphBounds(filterLocalGraph(snapshot, localNodeId, localDepth), {
     nodeLimit: graphNodeLimit,
     edgeLimitPerNode: graphEdgeLimitPerNode,
   });
+  return {
+    ...bounded,
+    metadata: {
+      ...(bounded.metadata ?? {}),
+      graphQuality: computeGraphQuality(bounded, {
+        semanticCoverage: {
+          indexed: semanticIndexed,
+          total: library.papers.length,
+        },
+        geometryVersion: DOCUMENT_GEOMETRY_VERSION,
+      }),
+    },
+  };
 }
 
 function createKnowledgeGraphCommands(context) {

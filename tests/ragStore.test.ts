@@ -1335,3 +1335,49 @@ test('RAG store retrieves equation and reference chunks for mixed Chinese-Englis
     rmSync(dataDir, { recursive: true, force: true });
   }
 });
+
+test('legacy document vector cache is rebuilt with an embedding model key', () => {
+  const dataDir = mkdtempSync(path.join(tmpdir(), 'paperquay-rag-migrate-'));
+  const databasePath = path.join(dataDir, 'paperquay-rag.sqlite');
+  const legacy = new DatabaseSync(databasePath);
+
+  try {
+    legacy.exec(`
+      CREATE TABLE rag_document_vectors (
+        document_key TEXT NOT NULL,
+        dimension INTEGER NOT NULL,
+        embedding BLOB NOT NULL,
+        chunk_count INTEGER NOT NULL,
+        source_types_json TEXT NOT NULL,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (document_key, dimension)
+      );
+    `);
+    const vector = Buffer.from(new Float32Array([0.1, 0.2, 0.3, 0.4]).buffer);
+    legacy.prepare(`
+      INSERT INTO rag_document_vectors
+        (document_key, dimension, embedding, chunk_count, source_types_json, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run('doc-legacy', 4, vector, 1, '["pdf-text"]', 1);
+  } finally {
+    legacy.close();
+  }
+
+  const store = createRagStore({ ragDatabasePath: databasePath });
+  store.close();
+
+  const verify = new DatabaseSync(databasePath);
+  try {
+    const columns = verify.prepare('PRAGMA table_info(rag_document_vectors)').all()
+      .map((row: { name: string }) => row.name);
+    assert.ok(columns.includes('embedding_model_key'));
+    assert.equal(
+      verify.prepare('SELECT COUNT(*) AS count FROM rag_document_vectors').get().count,
+      0,
+      'legacy rows without a model key must be dropped and backfilled from chunks',
+    );
+  } finally {
+    verify.close();
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});

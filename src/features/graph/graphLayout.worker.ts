@@ -30,8 +30,24 @@ scope.onmessage = (event) => {
   const { id, request } = message;
 
   try {
+    const nodeCount = request.nodes.length;
     const elements = [
-      ...request.nodes.map((node) => ({ data: { id: node.id } })),
+      ...request.nodes.map((node, index) => {
+        const size = Number.isFinite(Number(node.size)) ? Math.max(8, Number(node.size)) : 28;
+        // 没有历史坐标时按黄金角螺旋给出确定性初始位置；fcose 不再 randomize。
+        const hasPosition = Number.isFinite(Number(node.x))
+          && Number.isFinite(Number(node.y))
+          && (Number(node.x) !== 0 || Number(node.y) !== 0);
+        const angle = index * 2.399963229728653;
+        const radius = 36 * Math.sqrt(index + 1);
+        return {
+          data: { id: node.id },
+          position: hasPosition
+            ? { x: Number(node.x), y: Number(node.y) }
+            : { x: Math.cos(angle) * radius, y: Math.sin(angle) * radius },
+          style: { width: size, height: size },
+        };
+      }),
       ...request.edges.map((edge, index) => ({
         data: {
           id: `layout-edge-${index}`,
@@ -40,7 +56,8 @@ scope.onmessage = (event) => {
         },
       })),
     ];
-    const cy = cytoscape({ headless: true, elements, styleEnabled: false });
+    // 需要 styleEnabled 才能让 fcose 读到每个节点的 width/height 与标签尺寸。
+    const cy = cytoscape({ headless: true, elements, styleEnabled: true });
 
     try {
       const layout = cy.layout(request.options as unknown as cytoscape.LayoutOptions);

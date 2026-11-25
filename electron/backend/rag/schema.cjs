@@ -128,14 +128,16 @@ function createSchema(db) {
 
     -- 文档级平均向量缓存：listDocumentSimilarities 只读本表，
     -- 避免每次全量解码 rag_chunks 的全部 chunk 向量。
+    -- embedding_model_key 参与主键：更换模型后不能把同维度的不同模型向量混在一起。
     CREATE TABLE IF NOT EXISTS rag_document_vectors (
       document_key TEXT NOT NULL,
       dimension INTEGER NOT NULL,
+      embedding_model_key TEXT NOT NULL,
       embedding BLOB NOT NULL,
       chunk_count INTEGER NOT NULL,
       source_types_json TEXT NOT NULL,
       updated_at INTEGER NOT NULL,
-      PRIMARY KEY (document_key, dimension)
+      PRIMARY KEY (document_key, dimension, embedding_model_key)
     );
 
     CREATE TABLE IF NOT EXISTS agent_runs (
@@ -168,6 +170,36 @@ function createSchema(db) {
   `);
   ensureChunkMappingColumns(db);
   ensureIndexMetadataColumns(db);
+  ensureDocumentVectorModelKey(db);
+}
+
+/**
+ * 旧库的 rag_document_vectors 主键只有 (document_key, dimension)，无法同时保存
+ * 不同 embedding 模型的平均向量。整表重建并从 chunk 重新回填，避免几何计算
+ * 把不同模型的向量混在一起。
+ */
+function ensureDocumentVectorModelKey(db) {
+  const columns = db.prepare('PRAGMA table_info(rag_document_vectors)').all();
+  if (columns.length === 0 || columns.some((row) => row.name === 'embedding_model_key')) {
+    return;
+  }
+
+  db.exec(`
+    ALTER TABLE rag_document_vectors RENAME TO rag_document_vectors_legacy;
+    CREATE TABLE rag_document_vectors (
+      document_key TEXT NOT NULL,
+      dimension INTEGER NOT NULL,
+      embedding_model_key TEXT NOT NULL,
+      embedding BLOB NOT NULL,
+      chunk_count INTEGER NOT NULL,
+      source_types_json TEXT NOT NULL,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (document_key, dimension, embedding_model_key)
+    );
+    DROP TABLE rag_document_vectors_legacy;
+    DELETE FROM rag_store_meta
+      WHERE key IN ('rag_document_vectors_v1', 'rag_document_vectors_v1_cursor');
+  `);
 }
 
 // 索引元数据：抽取器版本决定「待更新」判定；rebuild_error 记录一次失败的暂存重建，

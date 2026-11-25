@@ -204,7 +204,7 @@ const graphStyles = [
       'transition-duration': 120,
     },
   },
-  { selector: 'node[type = "paper"]', style: { 'background-color': NODE_COLORS.paper } },
+  { selector: 'node[type = "paper"]', style: { 'background-color': 'data(color)' } },
   { selector: 'node[type = "note"]', style: { 'background-color': NODE_COLORS.note } },
   { selector: 'node[type = "tag"]', style: { 'background-color': NODE_COLORS.tag } },
   { selector: 'node[type = "category"]', style: { 'background-color': NODE_COLORS.category } },
@@ -249,7 +249,9 @@ const graphStyles = [
     selector: 'edge[type = "related_by_embedding"]',
     style: {
       'line-color': EDGE_COLORS.related_by_embedding,
-      opacity: 0.58,
+      'line-style': 'dashed',
+      width: 'mapData(weight, 0, 1, 0.6, 2.4)',
+      opacity: 0.5,
     },
   },
   { selector: 'edge[type = "note_paper"]', style: { 'line-color': EDGE_COLORS.note_paper } },
@@ -291,7 +293,7 @@ function perspectiveNodeTypes(perspective: GraphPerspective): Record<KnowledgeGr
   };
 
   if (perspective === 'paper') {
-    return { ...all, note: false, reference: false };
+    return { ...all, note: false, reference: false, tag: false, category: false };
   }
 
   if (perspective === 'note') {
@@ -334,6 +336,8 @@ function perspectiveEdgeTypes(perspective: GraphPerspective): Record<KnowledgeGr
       note_link: false,
       note_tag: false,
       paper_reference: false,
+      paper_tag: false,
+      paper_category: false,
       co_author: false,
       custom_relation: true,
     };
@@ -426,6 +430,7 @@ function toElements(
           label,
           rawLabel: node.label,
           size,
+          color: node.color ?? NODE_COLORS[node.type] ?? NODE_COLORS.paper,
           // displayLabel 为画布实际绘制的文本；data(label) 保留给选中态与放大态使用。
           displayLabel: labelAll || size >= hubCutoff ? label : '',
         },
@@ -502,10 +507,22 @@ function runGraphLayout(cy: Core, mode: LayoutMode) {
 
   const requestId = graphLayoutRequestSeq + 1;
   graphLayoutRequestSeq = requestId;
-  const nodes = cy.nodes().map((node) => ({ id: node.id() }));
+  const nodes = cy.nodes().map((node) => {
+    const position = node.position();
+    return {
+      id: node.id(),
+      type: String(node.data('type') ?? ''),
+      size: Number(node.data('size')) || 28,
+      degree: Number(node.data('degree')) || 0,
+      x: position.x,
+      y: position.y,
+    };
+  });
   const edges = cy.edges().map((edge) => ({
     source: edge.source().id(),
     target: edge.target().id(),
+    type: String(edge.data('type') ?? ''),
+    weight: Number(edge.data('weight')) || 0,
   }));
 
   void getGraphLayoutClient()
@@ -610,19 +627,19 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
   const [contextMenu, setContextMenu] = useState<GraphContextMenuState>(null);
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
-  const [perspective, setPerspective] = useState<GraphPerspective>('mixed');
+  const [perspective, setPerspective] = useState<GraphPerspective>('paper');
   const [layoutMode, setLayoutMode] = useState<LayoutMode>('global');
   const [localNodeId, setLocalNodeId] = useState('');
   const [localDepth, setLocalDepth] = useState(1);
   const [enabledNodeTypes, setEnabledNodeTypes] = useState<Record<KnowledgeGraphNodeType, boolean>>(
-    perspectiveNodeTypes('mixed'),
+    perspectiveNodeTypes('paper'),
   );
   const [enabledEdgeTypes, setEnabledEdgeTypes] = useState<Record<KnowledgeGraphEdgeType, boolean>>(
-    perspectiveEdgeTypes('mixed'),
+    perspectiveEdgeTypes('paper'),
   );
-  const [embeddingMinSimilarity, setEmbeddingMinSimilarity] = useState(0.82);
-  // S5：相似度滑杆连续拖动时每次都请求后端会打满主进程；防抖后再触发图谱重建。
-  const [debouncedEmbeddingMinSimilarity, setDebouncedEmbeddingMinSimilarity] = useState(0.82);
+  const [embeddingNeighbors, setEmbeddingNeighbors] = useState(10);
+  // 邻里数连续拖动时每次都请求后端会打满主进程；防抖后再触发图谱重建。
+  const [debouncedEmbeddingNeighbors, setDebouncedEmbeddingNeighbors] = useState(10);
   const [relationLabel, setRelationLabel] = useState('related');
   const [relationDescription, setRelationDescription] = useState('');
   const [relationWorking, setRelationWorking] = useState(false);
@@ -753,9 +770,9 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
   }, [search]);
 
   useEffect(() => {
-    const handle = window.setTimeout(() => setDebouncedEmbeddingMinSimilarity(embeddingMinSimilarity), 260);
+    const handle = window.setTimeout(() => setDebouncedEmbeddingNeighbors(embeddingNeighbors), 260);
     return () => window.clearTimeout(handle);
-  }, [embeddingMinSimilarity]);
+  }, [embeddingNeighbors]);
 
   useEffect(() => {
     let cancelled = false;
@@ -799,8 +816,8 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
           includeReferences: enabledEdgeTypes.paper_cites_paper,
           includeCoAuthors: enabledEdgeTypes.co_author,
           includeCustomRelations: enabledEdgeTypes.custom_relation,
-          embeddingMinSimilarity: debouncedEmbeddingMinSimilarity,
-          embeddingEdgeLimit: 120,
+          embeddingStrategy: 'mutual-knn',
+          embeddingK: debouncedEmbeddingNeighbors,
         });
 
         if (cancelled) return;
@@ -831,7 +848,7 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
   }, [
     workspaceActive,
     debouncedSearch,
-    debouncedEmbeddingMinSimilarity,
+    debouncedEmbeddingNeighbors,
     enabledEdgeTypes.custom_relation,
     enabledEdgeTypes.co_author,
     enabledEdgeTypes.paper_cites_paper,
@@ -852,11 +869,60 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
     const layoutModeChanged = renderedLayoutModeRef.current !== layoutMode;
 
     if (nodesChanged || layoutModeChanged) {
+      const previousPositions = new Map(
+        cy.nodes().map((node) => [node.id(), { ...node.position() }]),
+      );
       cy.elements().remove();
       cy.add(toElements(filteredSnapshot, displayNodeLabel));
       renderedNodeIdsRef.current = nextNodeIds;
       renderedEdgeIdsRef.current = nextEdgeIds;
       renderedLayoutModeRef.current = layoutMode;
+
+      // 旧节点保留坐标；新增节点放在已定位邻居的质心附近，避免整张图重新洗牌。
+      for (const node of cy.nodes()) {
+        const previous = previousPositions.get(node.id());
+        if (previous) node.position(previous);
+      }
+      if (previousPositions.size > 0 && !layoutModeChanged) {
+        const neighbors = new Map<string, Array<{ x: number; y: number }>>();
+        for (const edge of filteredSnapshot.edges) {
+          const source = cy.$id(edge.source);
+          const target = cy.$id(edge.target);
+          const sourcePosition = previousPositions.get(edge.source);
+          const targetPosition = previousPositions.get(edge.target);
+          if (sourcePosition && target.isNode()) {
+            const list = neighbors.get(edge.target) ?? [];
+            list.push(sourcePosition);
+            neighbors.set(edge.target, list);
+          }
+          if (targetPosition && source.isNode()) {
+            const list = neighbors.get(edge.source) ?? [];
+            list.push(targetPosition);
+            neighbors.set(edge.source, list);
+          }
+        }
+        for (const node of cy.nodes()) {
+          if (previousPositions.has(node.id())) continue;
+          const list = neighbors.get(node.id());
+          if (list?.length) {
+            node.position({
+              x: list.reduce((sum, item) => sum + item.x, 0) / list.length,
+              y: list.reduce((sum, item) => sum + item.y, 0) / list.length,
+            });
+          }
+        }
+        // 没有已定位邻居的新节点（例如新导入且暂无语义边）放到外围，避免叠在原点。
+        let orphanIndex = 0;
+        for (const node of cy.nodes()) {
+          if (previousPositions.has(node.id()) || neighbors.get(node.id())?.length) continue;
+          const angle = orphanIndex * 2.399963229728653;
+          const radius = 120 + 24 * Math.sqrt(orphanIndex + 1);
+          node.position({ x: Math.cos(angle) * radius, y: Math.sin(angle) * radius });
+          orphanIndex += 1;
+        }
+        return;
+      }
+
       // 工作区以 hidden 常驻挂载（App.tsx），容器为 0x0 时布局会把所有节点压成一团，
       // 这里推迟到工作区激活（workspaceActive）后再补跑。
       userAdjustedViewRef.current = false;
@@ -1285,9 +1351,28 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
       });
     });
 
+    cy.on('mouseover', 'node', (event) => {
+      containerRef.current?.style.setProperty('cursor', 'pointer');
+      if (cy.$(':selected').length > 0) return;
+      cy.elements().addClass('faded');
+      event.target.removeClass('faded').addClass('focused');
+      event.target.neighborhood().removeClass('faded').addClass('focused');
+    });
+
+    cy.on('mouseout', 'node', () => {
+      containerRef.current?.style.setProperty('cursor', 'default');
+      if (cy.$(':selected').length > 0) return;
+      cy.elements().removeClass('faded focused');
+    });
+
     cy.on('tapdragover', 'node', (event) => {
       containerRef.current?.style.setProperty('cursor', 'grab');
       event.target.addClass('focused');
+    });
+
+    cy.on('tapdragout', 'node', (event) => {
+      containerRef.current?.style.setProperty('cursor', 'default');
+      if (cy.$(':selected').length === 0) event.target.removeClass('focused');
     });
 
     return () => {
@@ -1505,24 +1590,27 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
           </CollapsiblePanel>
 
           <CollapsiblePanel
-            title={l('语义相似阈值', 'Embedding Similarity')}
-            summary={embeddingMinSimilarity.toFixed(2)}
+            title={l('语义邻居数', 'Semantic Neighbors')}
+            summary={String(embeddingNeighbors)}
             collapsed={collapsedPanels.embedding}
             onToggle={() => togglePanel('embedding')}
           >
             <div className="mb-2 flex items-center justify-between text-xs font-semibold text-[var(--pq-text)]">
-              <span>{l('语义相似阈值', 'Embedding Similarity')}</span>
-              <span className="text-[var(--pq-text-muted)]">{embeddingMinSimilarity.toFixed(2)}</span>
+              <span>{l('每篇保留的语义邻居数', 'Neighbors per paper')}</span>
+              <span className="text-[var(--pq-text-muted)]">{embeddingNeighbors}</span>
             </div>
             <input
               type="range"
-              min={0.6}
-              max={0.98}
-              step={0.01}
-              value={embeddingMinSimilarity}
-              onChange={(event) => setEmbeddingMinSimilarity(Number(event.target.value))}
+              min={3}
+              max={20}
+              step={1}
+              value={embeddingNeighbors}
+              onChange={(event) => setEmbeddingNeighbors(Number(event.target.value))}
               className="w-full accent-[var(--pq-accent)]"
             />
+            <p className="mt-1 text-[11px] leading-4 text-[var(--pq-text-muted)]">
+              {l('互近邻会限制每篇的度数；断开的主题会被自动桥接。', 'Mutual neighbors cap each paper’s degree; disconnected topics are bridged automatically.')}
+            </p>
           </CollapsiblePanel>
 
           <CollapsiblePanel
@@ -1627,6 +1715,26 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
               <span>{l('图谱统计', 'Graph Stats')}</span>
               <span className="text-[var(--pq-text-muted)]">{nodeCount}/{edgeCount}</span>
             </div>
+            {snapshot?.metadata?.graphQuality ? (
+              <div className="mb-2 space-y-1 rounded-[var(--pq-radius-sm)] bg-[var(--pq-surface-2)] p-2 text-[11px] leading-5 text-[var(--pq-text-muted)]">
+                <div>
+                  {l(
+                    `语义覆盖 ${snapshot.metadata.graphQuality.semanticCoverage.indexed}/${snapshot.metadata.graphQuality.semanticCoverage.total} · 分量 ${snapshot.metadata.graphQuality.componentCount} · 最大度数 ${snapshot.metadata.graphQuality.degreeMax}`,
+                    `Semantic coverage ${snapshot.metadata.graphQuality.semanticCoverage.indexed}/${snapshot.metadata.graphQuality.semanticCoverage.total} · components ${snapshot.metadata.graphQuality.componentCount} · max degree ${snapshot.metadata.graphQuality.degreeMax}`,
+                  )}
+                </div>
+                {snapshot.metadata.graphQuality.isolatedCount > 0 ? (
+                  <div className="text-[var(--pq-warning)]">
+                    {l(`有 ${snapshot.metadata.graphQuality.isolatedCount} 个孤立节点`, `${snapshot.metadata.graphQuality.isolatedCount} isolated nodes`)}
+                  </div>
+                ) : null}
+                {snapshot.metadata.graphQuality.hubnessSkew > 1.4 ? (
+                  <div className="text-[var(--pq-warning)]">
+                    {l('语义边仍集中在少数 hub，可降低邻居数或检查索引质量。', 'Semantic edges still concentrate on a few hubs; lower K or check index quality.')}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
             <div className="space-y-1">
               {graphStats.topNodes.length > 0 ? graphStats.topNodes.map((item, index) => (
                 <button

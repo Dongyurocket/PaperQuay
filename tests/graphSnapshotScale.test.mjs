@@ -264,7 +264,10 @@ test('small libraries keep the historic snapshot shape without sampling metadata
     const context = createContext(createPapers(3));
     context.appPaths.dataDir = dir;
     const snapshot = await createKnowledgeGraphSnapshot(context, {});
-    assert.equal(snapshot.metadata, undefined);
+    assert.equal(snapshot.metadata?.sampled, undefined);
+    assert.equal(snapshot.metadata?.truncated, undefined);
+    assert.ok(snapshot.metadata?.graphQuality);
+    assert.equal(snapshot.metadata.graphQuality.nodeCount, snapshot.nodes.length);
     assert.equal(snapshot.nodes.length, 3 + 3 + 10);
     assert.ok(snapshot.edges.length > 0);
   } finally {

@@ -72,7 +72,7 @@ test('fcose options are headless-safe and keep the historical layout parameters'
   assert.equal(small.name, 'fcose');
   assert.equal(small.quality, 'proof');
   assert.equal(small.numIter, 2500);
-  assert.equal(small.randomize, true);
+  assert.equal(small.randomize, false);
   assert.equal(small.animate, false);
   assert.equal(small.fit, false);
   assert.equal(small.padding, 36);
@@ -82,7 +82,8 @@ test('fcose options are headless-safe and keep the historical layout parameters'
   assert.equal(small.gravity, 0.3);
   assert.equal(small.packComponents, true);
   assert.equal(small.tile, true);
-  assert.equal(small.nodeDimensionsIncludeLabels, false);
+  assert.equal(small.nodeDimensionsIncludeLabels, true);
+  assert.equal(small.uniformNodeDimensions, false);
 
   const large = buildFcoseLayoutOptions(10000);
   assert.equal(large.quality, 'draft');
