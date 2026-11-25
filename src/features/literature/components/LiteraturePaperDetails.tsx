@@ -18,6 +18,9 @@ import { normalizeOrcid } from '../metadataValidation';
 import { paperPdfPath, paperTranslatedPdfAttachment } from '../literatureUi';
 import { resolvePaperTitleDisplay, type PaperTitleDisplayMode } from '../titleDisplay';
 import type { LiteraturePaperListStatus, LiteraturePaperRagStatus } from './LiteraturePaperList';
+import type { RagDocumentIndexStatus } from '../../../types/reader';
+import PaperRagPanel from '../details/PaperRagPanel';
+import type { RagPaperAction } from '../ragActions';
 import { loadPaperDetailsSections, persistPaperDetailsSections, type PaperDetailsSectionKey, type PaperDetailsSectionState } from '../details/paperDetailsSections';
 import { parsePaperOverviewForDisplay } from '../details/paperOverviewPresentation';
 import { buildPaperDraftUpdateRequest, createPaperDetailsDraft, hasDuplicateCitationKey, paperDraftChanged, validatePaperDraft, normalizeDoi, type PaperDetailsDraft, type PaperDraftErrors } from '../details/paperDetailsDraft';
@@ -56,7 +59,11 @@ interface LiteraturePaperDetailsProps {
   onUpdateTranslatedPdfLanguage?: (paper: LiteraturePaper, attachmentId: string, language: string | null) => Promise<void>;
   onGenerateSummary?: (paper: LiteraturePaper) => void;
   ragStatus?: LiteraturePaperRagStatus;
+  ragStatusEntries?: RagDocumentIndexStatus[];
+  ragIndexAvailable?: boolean;
+  ragIndexing?: boolean;
   ragMembershipBusy?: boolean;
+  onRagAction?: (paper: LiteraturePaper, action: RagPaperAction) => void;
   onSetRagMembership?: (paper: LiteraturePaper, enabled: boolean) => void;
   onIndexPaperRag?: (paper: LiteraturePaper) => void;
   onDeletePaper?: (paper: LiteraturePaper) => void;
@@ -196,7 +203,11 @@ export default function LiteraturePaperDetails({
   onUpdateTranslatedPdfLanguage,
   onGenerateSummary,
   ragStatus = 'none',
+  ragStatusEntries = [],
+  ragIndexAvailable = false,
+  ragIndexing = false,
   ragMembershipBusy = false,
+  onRagAction,
   onSetRagMembership,
   onIndexPaperRag,
   onDeletePaper,
@@ -549,6 +560,17 @@ export default function LiteraturePaperDetails({
             onAttachTranslatedPdf={onAttachTranslatedPdf}
             onRemoveTranslatedPdf={onRemoveTranslatedPdf}
             onSetTranslatedPdfLanguage={() => setLanguageDialogOpen(true)}
+          />
+
+          <PaperRagPanel
+            paper={paper}
+            status={ragStatus}
+            entries={ragStatusEntries}
+            ragIndexAvailable={ragIndexAvailable}
+            indexing={ragIndexing}
+            busy={ragMembershipBusy || actionState?.status === 'running'}
+            mineruParsed={Boolean(paperStatus?.mineruParsed)}
+            onAction={(action) => onRagAction?.(paper, action)}
           />
 
           <RetainPdfTranslationPanel

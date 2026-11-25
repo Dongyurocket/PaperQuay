@@ -723,6 +723,7 @@ function Reader({ workspaceActive = true }: ReaderProps) {
   const {
     ragIndexAvailable,
     ragBadgeByDocumentKey,
+    ragStatusByDocumentKey,
     ragIndexOverview,
     ragIndexPaused,
     ragIndexProgress,
@@ -1210,6 +1211,7 @@ function Reader({ workspaceActive = true }: ReaderProps) {
                   metadataLlmPreset={summaryModelPreset ?? translationModelPreset}
                   ragIndexAvailable={ragIndexAvailable}
                   ragBadgeByDocumentKey={ragBadgeByDocumentKey}
+                  ragStatusEntriesByDocumentKey={ragStatusByDocumentKey}
                   ragIndexingDocumentKey={ragIndexingDocumentKey}
                   onIndexPaperRag={(paperId) => void handleIndexPaperRag(paperId)}
                   onPaperStatusesChange={setLibraryPaperStatuses}

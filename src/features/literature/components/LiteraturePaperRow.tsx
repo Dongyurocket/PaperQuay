@@ -1,11 +1,13 @@
 import clsx from 'clsx';
-import { memo, useCallback, useEffect, useLayoutEffect, useRef, type DragEvent, type KeyboardEvent, type MouseEvent, type PointerEvent } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type DragEvent, type KeyboardEvent, type MouseEvent, type PointerEvent } from 'react';
 import { Check, GripVertical, Star } from 'lucide-react';
 import { useAppLocale, useLocaleText } from '../../../i18n/uiLanguage';
+import { Menu, type MenuEntry } from '../../../ui/menu';
 import type { LiteraturePaper } from '../../../types/library';
 import type { PdfReadingHeatmap } from '../../../types/reader';
 import { truncateMiddle } from '../../../utils/text';
 import { paperAuthors, paperPdfPath } from '../literatureUi';
+import { buildRagActionItems, type RagPaperAction } from '../ragActions';
 import { resolvePaperTitleDisplay, type PaperTitleDisplayMode } from '../titleDisplay';
 import LiteratureReadingHeatmapPreview from './LiteratureReadingHeatmapPreview';
 import type { LiteraturePaperListStatus, LiteraturePaperRagStatus } from './LiteraturePaperList';
@@ -35,6 +37,7 @@ export interface LiteraturePaperRowProps {
   onSelectPaper: (paperId: string, modifiers?: { ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean }) => void;
   onOpenPaper: (paper: LiteraturePaper) => void;
   onContextMenu: (event: MouseEvent<HTMLDivElement>, paper: LiteraturePaper) => void;
+  onRagAction: (paper: LiteraturePaper, action: RagPaperAction) => void;
   onDragStart: (event: DragEvent<HTMLDivElement>, paper: LiteraturePaper) => void;
   onDragOver: (event: DragEvent<HTMLDivElement>, paper: LiteraturePaper) => void;
   onDragLeave: () => void;
@@ -96,6 +99,7 @@ function LiteraturePaperRowImpl({
   onSelectPaper,
   onOpenPaper,
   onContextMenu,
+  onRagAction,
   onDragStart,
   onDragOver,
   onDragLeave,
@@ -113,6 +117,12 @@ function LiteraturePaperRowImpl({
 }: LiteraturePaperRowProps) {
   const l = useLocaleText();
   const locale = useAppLocale();
+  const [ragMenu, setRagMenu] = useState<{
+    x: number;
+    y: number;
+    anchor: HTMLButtonElement;
+    entries: MenuEntry[];
+  } | null>(null);
   const rowRef = useRef<HTMLDivElement | null>(null);
 
   const reportMeasure = useCallback(() => {
@@ -267,20 +277,48 @@ function LiteraturePaperRowImpl({
                   : l('MinerU 未解析', 'MinerU Not Parsed')}
             </span>
             {ragIndexAvailable || ragStatus === 'excluded' ? (
-              <span
+              <button
+                type="button"
+                aria-haspopup="menu"
                 title={
                   ragIndexing
                     ? l('正在建立 RAG 索引', 'Building RAG index')
                     : ragStatus === 'failed'
-                      ? l('RAG 索引失败，可在设置中重建', 'RAG indexing failed; rebuild it in settings')
+                      ? l('RAG 索引失败，点击重试或查看原因', 'RAG indexing failed; click to retry or view the reason')
                       : ragStatus === 'stale'
-                        ? l('索引已过期，会在打开或提问时自动重建', 'Index is outdated; it rebuilds when the paper is opened or queried')
+                        ? l('索引已过期，点击更新', 'Index is outdated; click to update')
                         : ragStatus === 'excluded'
                         ? l('该文献已移出本地知识库', 'This paper is excluded from the local knowledge base')
-                        : undefined
+                        : l('管理 RAG 索引', 'Manage RAG index')
                 }
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  setRagMenu({
+                    x: rect.left,
+                    y: rect.bottom + 4,
+                    anchor: event.currentTarget,
+                    entries: buildRagActionItems({
+                      status: ragStatus,
+                      ragIndexAvailable,
+                      mineruParsed,
+                      indexing: ragIndexing,
+                    }, l).map((item) => ({
+                      id: `rag-${item.id}`,
+                      label: item.label,
+                      disabled: item.disabled,
+                      tone: item.action === 'exclude' ? 'danger' as const : undefined,
+                      onSelect: () => {
+                        setRagMenu(null);
+                        onRagAction(paper, item.action);
+                      },
+                    })),
+                  });
+                }}
                 className={clsx(
-                  'rounded-full border px-2 py-0.5 text-[11px] font-semibold',
+                  'cursor-pointer rounded-full border px-2 py-0.5 text-[11px] font-semibold transition hover:brightness-105 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--pq-accent)]',
                   ragIndexing && ragStatus !== 'excluded'
                     ? 'border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-[var(--pq-accent-bg)] text-[var(--pq-accent)] '
                     : ragStatus === 'ready'
@@ -305,7 +343,7 @@ function LiteraturePaperRowImpl({
                           : ragStatus === 'pending'
                             ? l('RAG 待索引', 'RAG Pending')
                             : l('RAG 未索引', 'RAG Not Indexed')}
-              </span>
+              </button>
             ) : null}
             <span
               className={clsx(
@@ -355,6 +393,19 @@ function LiteraturePaperRowImpl({
       </div>
       {dropPlacement === 'after' ? (
         <div className="pointer-events-none absolute -bottom-1 left-3 right-3 z-10 h-0.5 rounded-full bg-[var(--pq-accent)]" />
+      ) : null}
+      {ragMenu ? (
+        <Menu
+          x={ragMenu.x}
+          y={ragMenu.y}
+          entries={ragMenu.entries}
+          onClose={() => {
+            setRagMenu(null);
+            ragMenu.anchor.focus();
+          }}
+          keyboardAnchor={ragMenu.anchor}
+          width={220}
+        />
       ) : null}
     </div>
   );

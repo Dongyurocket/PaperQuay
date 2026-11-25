@@ -14,6 +14,7 @@ import { useLocaleText } from '../../../i18n/uiLanguage';
 import { useWheelScrollDelegate } from '../../../hooks/useWheelScrollDelegate';
 import type { ListPapersRequest, LiteraturePaper } from '../../../types/library';
 import type { PdfReadingHeatmap } from '../../../types/reader';
+import type { RagPaperAction } from '../ragActions';
 import {
   loadPaperHistoryMap,
   PAPER_READING_HEATMAP_UPDATED_EVENT,
@@ -128,6 +129,8 @@ interface LiteraturePaperListProps {
     event: MouseEvent<HTMLDivElement>,
     paper: LiteraturePaper,
   ) => void;
+  /** 行内 RAG 角标菜单：由文献库统一处理索引/成员动作。 */
+  onRagAction?: (paper: LiteraturePaper, action: RagPaperAction) => void;
   /** 本地 RAG 索引角标：paper id（即 rag_indexes.document_key）→ 聚合状态。 */
   ragBadgeByDocumentKey?: Record<string, LiteraturePaperRagStatus>;
   /** 正在建立索引的文献 id（批量或单篇索引运行时）。 */
@@ -175,6 +178,7 @@ export default function LiteraturePaperList({
   onPaperDropOnCategory,
   onPaperPointerDragOverCategory,
   onPaperContextMenu,
+  onRagAction,
   ragBadgeByDocumentKey,
   ragIndexingDocumentKey = '',
   ragIndexAvailable = false,
@@ -184,6 +188,7 @@ export default function LiteraturePaperList({
   const stableSelectPaper = useStableCallback(onSelectPaper);
   const stableOpenPaper = useStableCallback(onOpenPaper);
   const stablePaperContextMenu = useStableCallback(onPaperContextMenu);
+  const stableRagAction = useStableCallback(onRagAction ?? (() => {}));
   const stablePaperReorder = useStableCallback(onPaperReorder);
   const stablePaperDragStart = useStableCallback(onPaperDragStart);
   const stablePaperDropOnCategory = useStableCallback(onPaperDropOnCategory);
@@ -694,6 +699,7 @@ export default function LiteraturePaperList({
         onSelectPaper={stableSelectPaper}
         onOpenPaper={stableOpenPaper}
         onContextMenu={stablePaperContextMenu}
+        onRagAction={stableRagAction}
         onDragStart={handlePaperDragStart}
         onDragOver={handlePaperDragOver}
         onDragLeave={handlePaperDragLeave}
@@ -742,6 +748,7 @@ export default function LiteraturePaperList({
     sortDraggingPaperId,
     stableOpenPaper,
     stablePaperContextMenu,
+    stableRagAction,
     stableSelectPaper,
     storageDir,
     suppressClickPaperId,

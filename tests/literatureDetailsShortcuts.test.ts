@@ -74,8 +74,8 @@ const fixtures: Record<string, string> = {
   toast: `export const toast = (input) => {
       globalThis.__detailsToasts = [...(globalThis.__detailsToasts ?? []), input];
     };`,
-  'lucide-react': ['BookOpenText', 'Check', 'ChevronDown', 'Copy', 'ExternalLink', 'FileText', 'Languages',
-    'MoreHorizontal', 'Pencil', 'Save', 'Star', 'Trash2', 'X']
+  'lucide-react': ['AlertTriangle', 'BookOpenText', 'Check', 'ChevronDown', 'Copy', 'Database', 'ExternalLink', 'FileText', 'Languages',
+    'Loader2', 'MoreHorizontal', 'Pencil', 'Save', 'Star', 'Trash2', 'X']
     .map((name) => `export const ${name} = () => null;`).join('\n'),
 };
 

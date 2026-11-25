@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -9,7 +10,7 @@ import { Database, Sparkles, Star, Tag, Trash2 } from 'lucide-react';
 import { useLocaleText } from '../../i18n/uiLanguage';
 import { listLibraryCitationKeys } from '../../services/library';
 import type { LiteraturePaper, LiteraturePaperTaskState } from '../../types/library';
-import type { QaModelPreset } from '../../types/reader';
+import type { QaModelPreset, RagDocumentIndexStatus } from '../../types/reader';
 import { getFileNameFromPath } from '../../utils/text';
 import ImportConfirmationDialog from './components/ImportConfirmationDialog';
 import LibraryConfirmDialog from './components/LibraryConfirmDialog';
@@ -38,6 +39,7 @@ import {
   type PaperTitleDisplayMode,
 } from './titleDisplay';
 import { usePaperFileLocationMenu } from './usePaperFileLocationMenu';
+import type { RagPaperAction } from './ragActions';
 import { Menu, type MenuEntry } from '../../ui/menu';
 import { toast } from '../../ui/toast';
 import { useLibraryCatalog } from './hooks/useLibraryCatalog';
@@ -72,6 +74,8 @@ interface LiteratureLibraryViewProps {
   ragIndexAvailable?: boolean;
   /** paper id（rag_indexes.document_key）→ 聚合索引状态。 */
   ragBadgeByDocumentKey?: Record<string, LiteraturePaperRagStatus>;
+  /** paper id → 逐来源索引状态，详情页面板使用。 */
+  ragStatusEntriesByDocumentKey?: Record<string, RagDocumentIndexStatus[]>;
   /** 正在建立索引的文献 id。 */
   ragIndexingDocumentKey?: string;
   /** 右键菜单：为单篇文献建立/重建 RAG 索引。 */
@@ -103,6 +107,7 @@ export default function LiteratureLibraryView({
   metadataLlmPreset = null,
   ragIndexAvailable = false,
   ragBadgeByDocumentKey,
+  ragStatusEntriesByDocumentKey,
   ragIndexingDocumentKey = '',
   onIndexPaperRag,
   onPaperStatusesChange,
@@ -434,6 +439,29 @@ export default function LiteratureLibraryView({
     }
   };
 
+  /** 行内角标与详情面板的共用动作入口。 */
+  const handlePaperRagAction = useCallback((paper: LiteraturePaper, action: RagPaperAction) => {
+    if (demoMode) {
+      showDemoLockedMessage();
+      return;
+    }
+
+    switch (action) {
+      case 'include':
+      case 'exclude':
+        void batch.applyRagMembership([paper.id], action === 'include');
+        return;
+      case 'open-details':
+        setSelectedPaperId(paper.id);
+        return;
+      case 'parse-mineru':
+        onRunMineruParse?.(paper);
+        return;
+      default:
+        onIndexPaperRag?.(paper.id);
+    }
+  }, [batch, demoMode, onIndexPaperRag, onRunMineruParse, setSelectedPaperId, showDemoLockedMessage]);
+
   const handleToggleFavoriteFromContextMenu = () => {
     if (demoMode) {
       showDemoLockedMessage();
@@ -530,11 +558,18 @@ export default function LiteratureLibraryView({
     ];
 
     if (ragIndexAvailable && onIndexPaperRag) {
+      const ragStatus = ragBadgeByDocumentKey?.[paper.id] ?? 'none';
       entries.push({
         id: 'rag-index',
         label: ragIndexingDocumentKey === paper.id
           ? l('RAG 索引中…', 'Indexing…')
-          : l('建立/重建 RAG 索引', 'Build/Rebuild RAG Index'),
+          : ragStatus === 'failed'
+            ? l('重试 RAG 索引', 'Retry RAG indexing')
+            : ragStatus === 'stale'
+              ? l('更新 RAG 索引', 'Update RAG index')
+              : ragStatus === 'none'
+                ? l('建立 RAG 索引', 'Build RAG index')
+                : l('重建 RAG 索引', 'Rebuild RAG index'),
         disabled: ragIndexingDocumentKey === paper.id || paper.ragEnabled === false,
         icon: <Database className="h-4 w-4 text-[var(--pq-accent)]" strokeWidth={1.9} />,
         onSelect: handleIndexPaperRagFromContextMenu,
@@ -767,6 +802,7 @@ export default function LiteratureLibraryView({
           onPaperDropOnCategory={categoryActions.handlePaperDropOnCategory}
           onPaperPointerDragOverCategory={categoryActions.setPaperDragOverCategoryId}
           onPaperContextMenu={handlePaperContextMenu}
+          onRagAction={handlePaperRagAction}
           ragBadgeByDocumentKey={ragBadgeByDocumentKey}
           ragIndexingDocumentKey={ragIndexingDocumentKey}
           ragIndexAvailable={ragIndexAvailable}
@@ -861,7 +897,11 @@ export default function LiteratureLibraryView({
                   ? ragBadgeByDocumentKey?.[selectedPaper.id] ?? 'none'
                   : 'none'
             }
+            ragStatusEntries={selectedPaper ? ragStatusEntriesByDocumentKey?.[selectedPaper.id] ?? [] : []}
+            ragIndexAvailable={ragIndexAvailable}
+            ragIndexing={Boolean(selectedPaper && ragIndexingDocumentKey === selectedPaper.id)}
             ragMembershipBusy={batchWorking}
+            onRagAction={handlePaperRagAction}
             onSetRagMembership={(paper, enabled) => {
               void batch.applyRagMembership([paper.id], enabled);
             }}
