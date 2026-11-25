@@ -6,9 +6,11 @@ import {
   aggregateRagIndexStatus,
   groupRagIndexStatuses,
   RAG_INDEX_STATUS_UPDATED_EVENT,
-  selectRagIndexCandidates,
+  selectRagBatchTargets,
   summarizeRagIndexOverview,
   type RagAggregateStatus,
+  type RagBatchMode,
+  type RagBatchSelection,
   type RagIndexOverview,
 } from '../../services/ragIndexStatus';
 import type { RagDocumentIndexStatus, ReaderSettings, WorkspaceItem } from '../../types/reader';
@@ -41,6 +43,15 @@ interface UseReaderRagIndexActionsOptions {
   settings: ReaderSettings;
 }
 
+export interface RagBatchOptions {
+  mode?: RagBatchMode;
+  /** 只处理这些文献（文献库选中批量）；缺省时按设置页全库候选。 */
+  paperIds?: string[];
+  reason?: 'manual' | 'auto';
+  /** 手动动作绕过失败冷却；自动重试保留冷却。 */
+  force?: boolean;
+}
+
 export interface UseReaderRagIndexActionsResult {
   ragIndexAvailable: boolean;
   /** documentKey（native-library 即 paper id）→ 聚合角标状态 */
@@ -51,7 +62,8 @@ export interface UseReaderRagIndexActionsResult {
   ragIndexRunning: boolean;
   ragIndexingDocumentKey: string;
   ragStatusByDocumentKey: Record<string, RagDocumentIndexStatus[]>;
-  handleBatchRagIndex: (options?: { onlyFailed?: boolean; onlyStale?: boolean }) => Promise<void>;
+  previewBatchRagIndex: (options?: RagBatchOptions) => Promise<RagBatchSelection | null>;
+  handleBatchRagIndex: (options?: RagBatchOptions) => Promise<void>;
   handleCancelRagIndex: () => void;
   handleIndexPaperRag: (documentKey: string) => Promise<void>;
   handleToggleRagIndexPause: () => void;
@@ -204,7 +216,7 @@ export function useReaderRagIndexActions({
   );
 
   const indexOneItem = useCallback(
-    async (entry: (typeof indexableItems)[number]) => {
+    async (entry: (typeof indexableItems)[number], { force = true }: { force?: boolean } = {}) => {
       const existingParse = await findExistingMineruJson(entry.item);
 
       if (!existingParse) {
@@ -219,15 +231,80 @@ export function useReaderRagIndexActions({
         embeddingApiKey,
         blocks,
         mineruPath: existingParse.path,
-        force: true,
+        force,
         l,
       });
     },
     [embeddingApiKey, findExistingMineruJson, l, settings],
   );
 
+  const resolveBatchEntries = useCallback(async (paperIds?: string[]) => {
+    if (!paperIds) {
+      return indexableItems;
+    }
+
+    const byDocumentKey = new Map(indexableItems.map((entry) => [entry.documentKey, entry]));
+    const entries: typeof indexableItems = [];
+    const seen = new Set<string>();
+
+    for (const paperId of [...new Set(paperIds)]) {
+      let entry = byDocumentKey.get(paperId);
+
+      if (!entry && resolveIndexableItem) {
+        try {
+          const item = await resolveIndexableItem(paperId);
+          if (item) {
+            entry = {
+              documentKey: item.itemKey,
+              workspaceId: item.workspaceId,
+              title: item.title,
+              ragEnabled: item.ragEnabled,
+              item,
+            };
+          }
+        } catch {
+          // 解析失败按未找到处理，批量结果里体现为跳过。
+        }
+      }
+
+      if (entry && !seen.has(entry.documentKey)) {
+        seen.add(entry.documentKey);
+        entries.push(entry);
+      }
+    }
+
+    return entries;
+  }, [indexableItems, resolveIndexableItem]);
+
+  const buildBatchSelection = useCallback((entries: typeof indexableItems, mode: RagBatchMode) => {
+    const selection = selectRagBatchTargets(entries.map((entry) => ({
+      paperId: entry.documentKey,
+      ragEnabled: entry.ragEnabled,
+      mineruParsed: mergedParseStatusMap[entry.workspaceId] === true,
+      status: aggregateRagIndexStatus(ragStatusByDocumentKey[entry.documentKey], aggregateOptions),
+    })), mode);
+    const byDocumentKey = new Map(entries.map((entry) => [entry.documentKey, entry]));
+
+    return {
+      selection,
+      entries: selection.candidateIds.flatMap((paperId) => {
+        const entry = byDocumentKey.get(paperId);
+        return entry ? [entry] : [];
+      }),
+    };
+  }, [aggregateOptions, mergedParseStatusMap, ragStatusByDocumentKey]);
+
+  const previewBatchRagIndex = useCallback(async (options: RagBatchOptions = {}) => {
+    if (!ragIndexAvailable) {
+      return null;
+    }
+
+    const entries = await resolveBatchEntries(options.paperIds);
+    return buildBatchSelection(entries, options.mode ?? 'all-legacy').selection;
+  }, [buildBatchSelection, ragIndexAvailable, resolveBatchEntries]);
+
   const handleBatchRagIndex = useCallback(
-    async ({ onlyFailed = false, onlyStale = false }: { onlyFailed?: boolean; onlyStale?: boolean } = {}) => {
+    async (options: RagBatchOptions = {}) => {
       if (runningRef.current) {
         return;
       }
@@ -242,23 +319,31 @@ export function useReaderRagIndexActions({
         return;
       }
 
-      const candidates = selectRagIndexCandidates({
-        items: indexableItems,
-        mineruParsedByWorkspaceId: mergedParseStatusMap,
-        statusByDocumentKey: ragStatusByDocumentKey,
-        aggregateOptions,
-        onlyFailed,
-        onlyStale,
-      });
+      const mode = options.mode ?? 'all-legacy';
+      const force = options.force ?? true;
+      const batchEntries = await resolveBatchEntries(options.paperIds);
+      const { selection, entries: candidates } = buildBatchSelection(batchEntries, mode);
 
       if (candidates.length === 0) {
-        setStatusMessage(
-          onlyFailed
-            ? l('当前没有索引失败的文献。', 'No papers with failed indexes right now.')
-            : onlyStale
-              ? l('当前没有需要更新的索引。', 'No indexes need updating right now.')
-              : l('当前没有需要建立索引的文献。', 'No papers need indexing right now.'),
+        const skipped = selection.skipped;
+        const detail = l(
+          `未解析 ${skipped.unparsed}，已排除 ${skipped.excluded}，已就绪 ${skipped.ready}，待索引 ${skipped.pending}，其他 ${skipped.other}。`,
+          `${skipped.unparsed} unparsed, ${skipped.excluded} excluded, ${skipped.ready} ready, ${skipped.pending} pending, ${skipped.other} other.`,
         );
+        setStatusMessage(
+          mode === 'failed'
+            ? l(`选中范围内没有索引失败的文献。${detail}`, `No failed indexes in the selected scope. ${detail}`)
+            : mode === 'stale'
+              ? l(`选中范围内没有需要更新的索引。${detail}`, `No stale indexes in the selected scope. ${detail}`)
+              : mode === 'rebuild'
+                ? l(`选中范围内没有可重建的文献。${detail}`, `No papers can be rebuilt in the selected scope. ${detail}`)
+                : l(`选中范围内没有需要建立索引的文献。${detail}`, `No papers need indexing in the selected scope. ${detail}`),
+        );
+        return;
+      }
+
+      if (runningRef.current) {
+        // 预览/解析条目是异步的；两个入口同时触发时只允许一个批次真正开跑。
         return;
       }
 
@@ -317,7 +402,7 @@ export function useReaderRagIndexActions({
           setRagIndexingDocumentKey(entry.documentKey);
 
           try {
-            const result = await indexOneItem(entry);
+            const result = await indexOneItem(entry, { force });
 
             if (result.outcome === 'failed') {
               progress.failed += 1;
@@ -378,14 +463,12 @@ export function useReaderRagIndexActions({
       );
     },
     [
-      aggregateOptions,
+      buildBatchSelection,
       indexOneItem,
-      indexableItems,
       l,
-      mergedParseStatusMap,
       ragIndexAvailable,
-      ragStatusByDocumentKey,
       refreshRagIndexStatuses,
+      resolveBatchEntries,
       setStatusMessage,
     ],
   );
@@ -511,6 +594,7 @@ export function useReaderRagIndexActions({
     ragIndexRunning,
     ragIndexingDocumentKey,
     ragStatusByDocumentKey,
+    previewBatchRagIndex,
     handleBatchRagIndex,
     handleCancelRagIndex,
     handleIndexPaperRag,

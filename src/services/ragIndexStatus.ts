@@ -108,6 +108,82 @@ export interface RagIndexOverview {
   excluded: number;
 }
 
+export type RagBatchMode = 'missing' | 'failed' | 'stale' | 'rebuild' | 'all-legacy';
+
+/** 文献库批量栏发起的 RAG 索引请求。 */
+export interface RagBatchRequest {
+  mode: RagBatchMode;
+  paperIds: string[];
+}
+
+export interface RagBatchTarget {
+  paperId: string;
+  ragEnabled?: boolean;
+  mineruParsed: boolean;
+  status: RagAggregateStatus;
+}
+
+export interface RagBatchSkipped {
+  unparsed: number;
+  excluded: number;
+  ready: number;
+  pending: number;
+  other: number;
+}
+
+export interface RagBatchSelection {
+  candidateIds: string[];
+  skipped: RagBatchSkipped;
+}
+
+/**
+ * 选中批量索引的目标选择。
+ *
+ * `missing` 不处理 pending，避免和正在进行的懒索引打架；卡住的 pending 归入
+ * `rebuild`。`all-legacy` 保留设置页原有“未索引/未就绪”口径。
+ */
+export function selectRagBatchTargets(
+  targets: readonly RagBatchTarget[],
+  mode: RagBatchMode,
+): RagBatchSelection {
+  const candidateIds: string[] = [];
+  const skipped: RagBatchSkipped = { unparsed: 0, excluded: 0, ready: 0, pending: 0, other: 0 };
+
+  for (const target of targets) {
+    if (target.ragEnabled === false) {
+      skipped.excluded += 1;
+      continue;
+    }
+
+    if (!target.mineruParsed) {
+      skipped.unparsed += 1;
+      continue;
+    }
+
+    const matches = mode === 'rebuild'
+      ? true
+      : mode === 'missing'
+        ? target.status === 'none'
+        : mode === 'failed'
+          ? target.status === 'failed'
+          : mode === 'stale'
+            ? target.status === 'stale'
+            : target.status !== 'ready';
+
+    if (matches) {
+      candidateIds.push(target.paperId);
+    } else if (target.status === 'ready') {
+      skipped.ready += 1;
+    } else if (target.status === 'pending') {
+      skipped.pending += 1;
+    } else {
+      skipped.other += 1;
+    }
+  }
+
+  return { candidateIds, skipped };
+}
+
 /** 管理面板统计：在 MinerU 已解析的文献集合上按聚合状态计数。 */
 export function summarizeRagIndexOverview(input: {
   items: readonly RagIndexCandidateItem[];

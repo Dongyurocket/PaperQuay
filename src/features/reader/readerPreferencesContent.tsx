@@ -1760,7 +1760,7 @@ export function ReaderPreferencesContent({
                   <div className="flex flex-wrap gap-2">
                     <button
                       type="button"
-                      onClick={() => onBatchRagIndex?.()}
+                      onClick={() => onBatchRagIndex?.({ mode: 'missing' })}
                       disabled={!ragIndexAvailable || ragIndexRunning}
                       className="rounded-xl border border-[var(--pq-border)] bg-[var(--pq-surface-2)] px-4 py-2 text-sm text-[var(--pq-text-muted)] transition hover:bg-[var(--pq-surface-2)] disabled:opacity-60"
                     >
@@ -1771,7 +1771,7 @@ export function ReaderPreferencesContent({
                     {ragIndexOverview && ragIndexOverview.stale > 0 && !ragIndexRunning ? (
                       <button
                         type="button"
-                        onClick={() => onBatchRagIndex?.({ onlyStale: true })}
+                        onClick={() => onBatchRagIndex?.({ mode: 'stale' })}
                         disabled={!ragIndexAvailable}
                         className="rounded-xl border border-[color-mix(in_srgb,var(--pq-warning)_28%,transparent)] bg-[var(--pq-warning-bg)] px-4 py-2 text-sm text-[var(--pq-warning)] transition hover:bg-[var(--pq-warning-bg)] disabled:opacity-60"
                       >
@@ -1781,7 +1781,7 @@ export function ReaderPreferencesContent({
                     {ragIndexOverview && ragIndexOverview.failed > 0 && !ragIndexRunning ? (
                       <button
                         type="button"
-                        onClick={() => onBatchRagIndex?.({ onlyFailed: true })}
+                        onClick={() => onBatchRagIndex?.({ mode: 'failed' })}
                         disabled={!ragIndexAvailable}
                         className="rounded-xl border border-[color-mix(in_srgb,var(--pq-warning)_28%,transparent)] bg-[var(--pq-warning-bg)] px-4 py-2 text-sm text-[var(--pq-warning)] transition hover:bg-[var(--pq-warning-bg)] disabled:opacity-60"
                       >

@@ -8,6 +8,7 @@ import type {
   ReaderSettings,
 } from '../../types/reader';
 import type { LibrarySettings } from '../../types/library';
+import type { RagBatchOptions } from './useReaderRagIndexActions';
 import type { RagIndexOverview } from '../../services/ragIndexStatus';
 import type { BatchProgressState, PreferencesSectionKey } from './readerShared';
 import type { SettingsLocalizer } from '../../app/settings/settingsTypes';
@@ -89,7 +90,7 @@ export interface ReaderPreferencesWindowProps {
   ragIndexRunning?: boolean;
   ragStorageStats?: RagStorageStats | null;
   ragCompacting?: boolean;
-  onBatchRagIndex?: (options?: { onlyFailed?: boolean; onlyStale?: boolean }) => void;
+  onBatchRagIndex?: (options?: RagBatchOptions) => void;
   onToggleRagIndexPause?: () => void;
   onCancelRagIndex?: () => void;
   onCompactRagStorage?: () => void;

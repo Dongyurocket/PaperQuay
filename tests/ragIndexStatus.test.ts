@@ -9,6 +9,7 @@ import {
   aggregateRagIndexStatus,
   groupRagIndexStatuses,
   isRagIndexStale,
+  selectRagBatchTargets,
   selectRagIndexCandidates,
   summarizeRagIndexOverview,
 } from '../src/services/ragIndexStatus.ts';
@@ -275,4 +276,40 @@ test('excluded papers skip indexing candidates and are counted separately', () =
   });
   assert.equal(overview.excluded, 1);
   assert.equal(overview.unindexed, 1);
+});
+
+test('batch targets honor each mode and report why papers were skipped', () => {
+  const targets = [
+    { paperId: 'ready', mineruParsed: true, status: 'ready' as const },
+    { paperId: 'stale', mineruParsed: true, status: 'stale' as const },
+    { paperId: 'failed', mineruParsed: true, status: 'failed' as const },
+    { paperId: 'pending', mineruParsed: true, status: 'pending' as const },
+    { paperId: 'missing', mineruParsed: true, status: 'none' as const },
+    { paperId: 'unparsed', mineruParsed: false, status: 'none' as const },
+    { paperId: 'excluded', ragEnabled: false, mineruParsed: true, status: 'failed' as const },
+  ];
+
+  assert.deepEqual(selectRagBatchTargets(targets, 'missing'), {
+    candidateIds: ['missing'],
+    skipped: { unparsed: 1, excluded: 1, ready: 1, pending: 1, other: 2 },
+  });
+  assert.deepEqual(selectRagBatchTargets(targets, 'failed').candidateIds, ['failed']);
+  assert.deepEqual(selectRagBatchTargets(targets, 'stale').candidateIds, ['stale']);
+  assert.deepEqual(selectRagBatchTargets(targets, 'rebuild').candidateIds, [
+    'ready', 'stale', 'failed', 'pending', 'missing',
+  ]);
+  assert.deepEqual(selectRagBatchTargets(targets, 'all-legacy').candidateIds, [
+    'stale', 'failed', 'pending', 'missing',
+  ]);
+  assert.deepEqual(selectRagBatchTargets(targets, 'missing').skipped, {
+    unparsed: 1,
+    excluded: 1,
+    ready: 1,
+    pending: 1,
+    other: 2,
+  });
+  assert.deepEqual(selectRagBatchTargets([], 'missing'), {
+    candidateIds: [],
+    skipped: { unparsed: 0, excluded: 0, ready: 0, pending: 0, other: 0 },
+  });
 });
