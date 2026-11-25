@@ -7,6 +7,7 @@ import {
   GRAPH_LAYOUT_WORKER_PROTOCOL,
   buildFcoseLayoutOptions,
   normalizeLayoutPositions,
+  packDisconnectedComponents,
   parseLayoutWorkerResponse,
   positionsToMap,
   resolveLayoutBudget,
@@ -384,4 +385,37 @@ test('fcose stays behind a dynamic import in the main-thread fallback', () => {
   assert.match(source, /import\(\s*['"]cytoscape['"]\s*\)/);
   assert.doesNotMatch(source, /from\s+['"](?:cytoscape-fcose|cose-base|layout-base)['"]/);
   assert.doesNotMatch(source, /^\s*import\s+[\w$]+\s+from\s+['"]cytoscape['"]/m);
+});
+
+test('disconnected layout components are shelf-packed without overlap', () => {
+  const nodes = ['a', 'b', 'c', 'd'].map((id) => ({ id }));
+  const edges = [{ source: 'a', target: 'b' }, { source: 'c', target: 'd' }];
+  const positions = [
+    { id: 'a', x: 0, y: 0 },
+    { id: 'b', x: 100, y: 0 },
+    { id: 'c', x: 0, y: 0 },
+    { id: 'd', x: 100, y: 0 },
+  ];
+
+  const packed = packDisconnectedComponents(nodes, edges, positions, { gap: 60 });
+  assert.equal(packed.length, 4);
+  const byId = new Map(packed.map((position) => [position.id, position]));
+  const left = [byId.get('a')!, byId.get('b')!];
+  const right = [byId.get('c')!, byId.get('d')!];
+  const leftBox = {
+    minX: Math.min(...left.map((item) => item.x)),
+    maxX: Math.max(...left.map((item) => item.x)),
+  };
+  const rightBox = {
+    minX: Math.min(...right.map((item) => item.x)),
+    maxX: Math.max(...right.map((item) => item.x)),
+  };
+
+  assert.ok(
+    leftBox.maxX + 60 <= rightBox.minX || rightBox.maxX + 60 <= leftBox.minX,
+    'packed components must keep at least the configured gap',
+  );
+
+  const single = packDisconnectedComponents([{ id: 'a' }], [], [{ id: 'a', x: 4, y: 5 }]);
+  assert.deepEqual(single, [{ id: 'a', x: 4, y: 5 }]);
 });

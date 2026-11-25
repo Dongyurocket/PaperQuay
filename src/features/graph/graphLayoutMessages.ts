@@ -174,6 +174,108 @@ export function positionsToMap(
   return map;
 }
 
+interface ComponentBounds {
+  ids: string[];
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+}
+
+/**
+ * fcose 的 packComponents 只有在注册 layout-utilities 时才生效；这里自己按
+ * 连通分量做 shelf packing，避免 8 个分量散落在画布各处。
+ */
+export function packDisconnectedComponents(
+  nodes: readonly GraphLayoutNodeInput[],
+  edges: readonly GraphLayoutEdgeInput[],
+  positions: readonly GraphLayoutPosition[],
+  options: { gap?: number; maxRowWidth?: number } = {},
+): GraphLayoutPosition[] {
+  if (positions.length < 2) return [...positions];
+
+  const parent = new Map<string, string>();
+  for (const node of nodes) parent.set(node.id, node.id);
+  const find = (value: string): string => {
+    let current = value;
+    while (parent.get(current) !== current) {
+      parent.set(current, parent.get(parent.get(current) as string) as string);
+      current = parent.get(current) as string;
+    }
+    return current;
+  };
+  const union = (left: string, right: string) => {
+    if (!parent.has(left) || !parent.has(right)) return;
+    const leftRoot = find(left);
+    const rightRoot = find(right);
+    if (leftRoot !== rightRoot) parent.set(rightRoot, leftRoot);
+  };
+  for (const edge of edges) union(edge.source, edge.target);
+
+  const groups = new Map<string, GraphLayoutPosition[]>();
+  for (const position of positions) {
+    if (!parent.has(position.id)) parent.set(position.id, position.id);
+    const root = find(position.id);
+    const group = groups.get(root) ?? [];
+    group.push(position);
+    groups.set(root, group);
+  }
+
+  const bounds: ComponentBounds[] = [...groups.values()].map((group) => ({
+    ids: group.map((position) => position.id),
+    minX: Math.min(...group.map((position) => position.x)),
+    minY: Math.min(...group.map((position) => position.y)),
+    maxX: Math.max(...group.map((position) => position.x)),
+    maxY: Math.max(...group.map((position) => position.y)),
+  }));
+  if (bounds.length <= 1) return [...positions];
+
+  const gap = Math.max(0, Number(options.gap) || 60);
+  const totalArea = bounds.reduce(
+    (sum, item) => sum + (item.maxX - item.minX + gap) * (item.maxY - item.minY + gap),
+    0,
+  );
+  const maxRowWidth = Math.max(
+    Number(options.maxRowWidth) || 0,
+    1600,
+    Math.sqrt(Math.max(1, totalArea)) * 1.5,
+  );
+  const ordered = bounds
+    .slice()
+    .sort((left, right) => (
+      (right.maxX - right.minX) * (right.maxY - right.minY)
+      - (left.maxX - left.minX) * (left.maxY - left.minY)
+      || left.ids[0].localeCompare(right.ids[0])
+    ));
+
+  const byId = new Map(positions.map((position) => [position.id, position]));
+  let cursorX = 0;
+  let cursorY = 0;
+  let rowHeight = 0;
+  const packed: GraphLayoutPosition[] = [];
+
+  for (const item of ordered) {
+    const width = item.maxX - item.minX;
+    const height = item.maxY - item.minY;
+    if (cursorX > 0 && cursorX + width > maxRowWidth) {
+      cursorX = 0;
+      cursorY += rowHeight + gap;
+      rowHeight = 0;
+    }
+    const offsetX = cursorX - item.minX;
+    const offsetY = cursorY - item.minY;
+    for (const id of item.ids) {
+      const position = byId.get(id);
+      if (!position) continue;
+      packed.push({ id, x: position.x + offsetX, y: position.y + offsetY });
+    }
+    cursorX += width + gap;
+    rowHeight = Math.max(rowHeight, height);
+  }
+
+  return packed;
+}
+
 export type ParsedLayoutWorkerResponse =
   | { id: number; ok: true; positions: GraphLayoutPosition[] }
   | { id: number; ok: false; error: string };

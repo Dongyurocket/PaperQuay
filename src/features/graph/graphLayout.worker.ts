@@ -7,6 +7,7 @@ import fcose from 'cytoscape-fcose';
 
 import {
   GRAPH_LAYOUT_WORKER_PROTOCOL,
+  packDisconnectedComponents,
   type GraphLayoutWorkerMessage,
   type GraphLayoutWorkerResponse,
 } from './graphLayoutMessages.ts';
@@ -73,7 +74,7 @@ scope.onmessage = (event) => {
         id,
         protocol: GRAPH_LAYOUT_WORKER_PROTOCOL,
         ok: true,
-        positions,
+        positions: packDisconnectedComponents(request.nodes, request.edges, positions),
         durationMs: Date.now() - startedAt,
       });
     } finally {

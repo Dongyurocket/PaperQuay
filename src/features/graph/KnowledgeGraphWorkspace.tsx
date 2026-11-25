@@ -20,6 +20,7 @@ import {
   Search,
   Trash2,
   StickyNote,
+  X,
 } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { emitOpenLibraryPaper } from '../../app/appEvents';
@@ -112,6 +113,11 @@ const edgeTypes: Array<{
 const visibleNodeTypes = nodeTypes.filter((item) => item.type !== 'reference');
 const visibleEdgeTypes = edgeTypes.filter((item) => item.type !== 'paper_reference');
 
+function edgeTypeLabel(type: KnowledgeGraphEdgeType, isEnglish: boolean): string {
+  const item = edgeTypes.find((entry) => entry.type === type);
+  return item ? (isEnglish ? item.en : item.zh) : type;
+}
+
 const graphPerspectives: Array<{
   id: GraphPerspective;
   zh: string;
@@ -196,12 +202,11 @@ const graphStyles = [
       'text-margin-y': 6,
       'text-wrap': 'wrap',
       'text-max-width': 110,
+      'text-events': 'no',
       'background-color': '#64748b',
       'border-color': '#ffffff',
       'border-width': 1.2,
       'overlay-opacity': 0,
-      'transition-property': 'background-color, border-color, opacity, width, height',
-      'transition-duration': 120,
     },
   },
   { selector: 'node[type = "paper"]', style: { 'background-color': 'data(color)' } },
@@ -496,6 +501,39 @@ function applyPresetLayout(cy: Core, positions: ReturnType<typeof positionsToMap
   } as cytoscape.LayoutOptions));
 
   layout.run();
+  persistGraphPositions(cy);
+}
+
+const GRAPH_POSITIONS_STORAGE_KEY = 'paperquay-graph-positions-v1';
+
+function readStoredGraphPositions(): Map<string, { x: number; y: number }> {
+  const result = new Map<string, { x: number; y: number }>();
+  try {
+    const raw = JSON.parse(localStorage.getItem(GRAPH_POSITIONS_STORAGE_KEY) || '{}') as Record<string, unknown>;
+    for (const [id, value] of Object.entries(raw)) {
+      const position = value as { x?: unknown; y?: unknown };
+      const x = Number(position?.x);
+      const y = Number(position?.y);
+      if (id && Number.isFinite(x) && Number.isFinite(y)) result.set(id, { x, y });
+    }
+  } catch {
+    // Positions are a convenience; a broken/blocked storage must not break the graph.
+  }
+  return result;
+}
+
+function persistGraphPositions(cy: Core) {
+  if (cy.destroyed() || cy.nodes().length > 2000) return;
+  try {
+    const positions: Record<string, { x: number; y: number }> = {};
+    cy.nodes().forEach((node) => {
+      const position = node.position();
+      positions[node.id()] = { x: position.x, y: position.y };
+    });
+    localStorage.setItem(GRAPH_POSITIONS_STORAGE_KEY, JSON.stringify(positions));
+  } catch {
+    // Storage can be unavailable in private/locked-down environments.
+  }
 }
 
 function runGraphLayout(cy: Core, mode: LayoutMode) {
@@ -883,6 +921,21 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
         const previous = previousPositions.get(node.id());
         if (previous) node.position(previous);
       }
+      if (previousPositions.size === 0) {
+        const stored = readStoredGraphPositions();
+        let restored = 0;
+        for (const node of cy.nodes()) {
+          const position = stored.get(node.id());
+          if (position) {
+            node.position(position);
+            restored += 1;
+          }
+        }
+        if (restored >= Math.max(3, Math.ceil(nextNodeIds.size * 0.6))) {
+          if (graphContainerHasSize(containerRef.current)) cy.fit(undefined, 36);
+          return;
+        }
+      }
       if (previousPositions.size > 0 && !layoutModeChanged) {
         const neighbors = new Map<string, Array<{ x: number; y: number }>>();
         for (const edge of filteredSnapshot.edges) {
@@ -1259,6 +1312,8 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
       style: resolvedGraphStyles(),
       minZoom: 0.08,
       maxZoom: 2.8,
+      hideEdgesOnViewport: true,
+      pixelRatio: Math.min(window.devicePixelRatio || 1, 2),
     });
     cyRef.current = cy;
     const themeObserver = new MutationObserver(() => cy.style(resolvedGraphStyles()));
@@ -1307,6 +1362,10 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
     cy.on('zoom', markUserAdjustedView);
     cy.on('zoom', syncLabelDensity);
     cy.on('dragpan', markUserAdjustedView);
+    cy.on('dragfree', 'node', () => {
+      userAdjustedViewRef.current = true;
+      persistGraphPositions(cy);
+    });
 
     cy.on('tap', 'node', (event) => {
       const data = event.target.data() as KnowledgeGraphNode;
@@ -1389,6 +1448,26 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
     };
     // selectGraphNode/selectGraphEdge 依赖均为空、引用稳定；createRelation 走 createRelationRef。
   }, [selectGraphEdge, selectGraphNode]);
+
+  const nodeTypeCounts = useMemo(() => {
+    const counts: Record<KnowledgeGraphNodeType, number> = {
+      paper: 0, note: 0, tag: 0, category: 0, reference: 0,
+    };
+    for (const node of snapshot?.nodes ?? []) counts[node.type] += 1;
+    return counts;
+  }, [snapshot]);
+
+  const selectedNodeConnections = useMemo(() => {
+    if (!selectedNode || !filteredSnapshot) return [];
+    return filteredSnapshot.edges
+      .filter((edge) => edge.source === selectedNode.id || edge.target === selectedNode.id)
+      .map((edge) => ({
+        edge,
+        other: nodeById.get(edge.source === selectedNode.id ? edge.target : edge.source) ?? null,
+      }))
+      .sort((left, right) => (Number(right.edge.weight) || 0) - (Number(left.edge.weight) || 0))
+      .slice(0, 24);
+  }, [filteredSnapshot, nodeById, selectedNode]);
 
   const nodeCount = filteredSnapshot?.nodes.length ?? 0;
   const edgeCount = filteredSnapshot?.edges.length ?? 0;
@@ -1836,20 +1915,26 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
               <Maximize2 className="h-4 w-4" strokeWidth={1.9} />
             </button>
           </div>
-          <div className="pointer-events-auto flex max-w-[220px] flex-wrap justify-end gap-x-3 gap-y-1 rounded-[var(--pq-radius-sm)] border border-[var(--pq-border)] bg-[var(--pq-surface)] px-2.5 py-1.5 text-[11px] text-[var(--pq-text-muted)] shadow-[var(--pq-shadow-soft)]">
-            {[
-              { type: 'paper', label: l('文献', 'Papers') },
-              { type: 'note', label: l('笔记', 'Notes') },
-              { type: 'tag', label: l('标签', 'Tags') },
-              { type: 'category', label: l('分类', 'Categories') },
-            ].map((item) => (
-              <span key={item.type} className="inline-flex items-center gap-1 whitespace-nowrap">
+          <div className="pointer-events-auto flex max-w-[260px] flex-wrap justify-end gap-x-3 gap-y-1 rounded-[var(--pq-radius-sm)] border border-[var(--pq-border)] bg-[var(--pq-surface)] px-2.5 py-1.5 text-[11px] text-[var(--pq-text-muted)] shadow-[var(--pq-shadow-soft)]">
+            {visibleNodeTypes.map((item) => (
+              <button
+                key={item.type}
+                type="button"
+                disabled={nodeTypeCounts[item.type] === 0}
+                onClick={() => toggleNodeType(item.type)}
+                title={l(`切换${item.zh}节点`, `Toggle ${item.en} nodes`)}
+                className={[
+                  'inline-flex items-center gap-1 whitespace-nowrap rounded px-0.5 transition disabled:opacity-40',
+                  enabledNodeTypes[item.type] ? 'text-[var(--pq-text)]' : 'text-[var(--pq-text-faint)] line-through',
+                ].join(' ')}
+              >
                 <span
                   className="h-2 w-2 rounded-full"
                   style={{ backgroundColor: NODE_COLORS[item.type] }}
                 />
-                {item.label}
-              </span>
+                {isEnglish ? item.en : item.zh}
+                <span className="tabular-nums text-[var(--pq-text-faint)]">{nodeTypeCounts[item.type]}</span>
+              </button>
             ))}
           </div>
         </div>
@@ -1951,7 +2036,7 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
         ) : null}
 
         {selectedNode ? (
-          <div className="absolute bottom-4 right-4 w-[320px] rounded-[var(--pq-radius-sm)] border border-[var(--pq-border)] bg-[var(--pq-surface)] p-3 shadow-[var(--pq-shadow-float)]">
+          <div className="absolute bottom-4 right-4 top-16 w-[344px] max-w-[calc(100%-2rem)] overflow-y-auto rounded-[var(--pq-radius-sm)] border border-[var(--pq-border)] bg-[var(--pq-surface)] p-3 shadow-[var(--pq-shadow-float)]">
             <div className="flex items-center gap-2">
               <span className="rounded-md bg-[var(--pq-accent-bg)] px-1.5 py-0.5 text-[11px] font-semibold text-[var(--pq-accent)]">
                 {selectedNode.type}
@@ -1959,6 +2044,18 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
               <span className="min-w-0 flex-1 truncate text-sm font-semibold text-[var(--pq-text)]">
                 {displayNodeLabel(selectedNode)}
               </span>
+              <button
+                type="button"
+                className="pq-icon-button h-6 w-6 shrink-0"
+                title={l('关闭详情', 'Close details')}
+                aria-label={l('关闭详情', 'Close details')}
+                onClick={() => {
+                  setSelectedNode(null);
+                  cyRef.current?.elements().unselect();
+                }}
+              >
+                <X className="h-3.5 w-3.5" strokeWidth={1.8} />
+              </button>
             </div>
             {selectedNode.subtitle ? (
               <p className="mt-2 line-clamp-3 text-xs leading-5 text-[var(--pq-text-muted)]">
@@ -1977,6 +2074,30 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
             {selectedNode.doi ? (
               <div className="mt-2 truncate rounded-[var(--pq-radius-sm)] bg-[var(--pq-bg-secondary)] px-2 py-1 text-[11px] text-[var(--pq-text-muted)]">
                 DOI: {selectedNode.doi}
+              </div>
+            ) : null}
+            {selectedNodeConnections.length > 0 ? (
+              <div className="mt-3 border-t border-[var(--pq-border)] pt-2">
+                <div className="mb-1.5 flex items-center justify-between text-[11px] font-semibold text-[var(--pq-text)]">
+                  <span>{l('为什么相连', 'Why connected')}</span>
+                  <span className="font-normal text-[var(--pq-text-faint)]">{selectedNodeConnections.length}</span>
+                </div>
+                <div className="max-h-56 space-y-1 overflow-auto pr-1">
+                  {selectedNodeConnections.map(({ edge, other }) => (
+                    <button
+                      key={edge.id}
+                      type="button"
+                      onClick={() => selectGraphEdge(edge, cyRef.current?.$id(edge.id) as cytoscape.EdgeSingular | undefined)}
+                      className="flex w-full items-center gap-2 rounded-[var(--pq-radius-sm)] bg-[var(--pq-bg-secondary)] px-2 py-1.5 text-left text-[11px] text-[var(--pq-text-muted)] hover:text-[var(--pq-text)]"
+                    >
+                      <span className="h-1.5 w-4 shrink-0 rounded-full" style={{ backgroundColor: EDGE_COLORS[edge.type] }} />
+                      <span className="min-w-0 flex-1 truncate text-[var(--pq-text)]">
+                        {other ? displayNodeLabel(other) : (edge.source === selectedNode.id ? edge.target : edge.source)}
+                      </span>
+                      <span className="shrink-0 text-[10px] text-[var(--pq-text-faint)]">{edgeTypeLabel(edge.type, isEnglish)}</span>
+                    </button>
+                  ))}
+                </div>
               </div>
             ) : null}
             <div className="mt-3 flex items-center gap-2">
