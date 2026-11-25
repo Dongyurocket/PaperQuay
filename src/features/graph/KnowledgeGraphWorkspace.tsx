@@ -931,7 +931,7 @@ export default function KnowledgeGraphWorkspace({ workspaceActive = true }: { wo
             restored += 1;
           }
         }
-        if (restored >= Math.max(3, Math.ceil(nextNodeIds.size * 0.6))) {
+        if (restored === nextNodeIds.size) {
           if (graphContainerHasSize(containerRef.current)) cy.fit(undefined, 36);
           return;
         }
