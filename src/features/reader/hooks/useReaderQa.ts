@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import {
   captureSystemScreenshot,
+  readLocalBinaryFile,
   selectChatAttachmentPaths,
 } from '../../../services/desktop';
 import {
@@ -11,7 +12,10 @@ import { createPdfTextCache } from '../pdfTextCache';
 import { askDocumentOpenAICompatibleStream } from '../../../services/qa';
 import {
   resolveLocalRag,
+  resolveScopedLocalRag,
+  type ScopedRagDocument,
 } from '../../../services/localRag';
+import { buildMineruMarkdownDocument, extractPdfTextByPdfJs } from '../../../services/summarySource';
 import type {
   UpdateNoteRequest,
 } from '../../../types/notes';
@@ -42,8 +46,14 @@ import {
   resolveQaSessionSelection,
 } from '../documentReaderQaSessions';
 import {
+  createNativeLibraryWorkspaceItem,
   getModelRuntimeConfig,
 } from '../readerShared';
+import {
+  buildScopedRagLibraryItems,
+  describeScopedRagFailure,
+  loadScopedRagDocuments,
+} from '../readerQaScope';
 import type { LocalRagResolution } from '../readerQaContext';
 import { buildQaContext, formatQaContextStatus } from '../readerQaContext';
 import { awaitQaRequest } from '../readerQaAbort';
@@ -70,7 +80,7 @@ import type { ReaderNotesApi } from './useReaderNotes';
 import type { ReaderAnnotationsApi } from './useReaderAnnotations';
 
 export function useReaderQa(state: ReaderTabState, documentApi: ReaderDocumentApi, summaryApi: ReaderSummaryApi, notesApi: ReaderNotesApi, annotationsApi: ReaderAnnotationsApi) {
-  const { activeNoteId, activeQaPreset, activeQaSession, aiConfigured, assistantActivePanel, capturingScreenshot, currentDocument, document, embeddingApiKey, flatBlocks, lRef, lastDocumentSignatureRef, localeRef, notePaperCandidates, notes, notesError, notesLoading, notesSaving, onBridgeStateChange, onNotePaperClick, onOpenPreferences, onQaActivePresetChange, pdfSource, pdfTextCacheRef, pendingNoteAnchorInsert, qaAbortControllersRef, qaAbortWorkspaceRef, qaAnswerRenderMode, qaAttachments, qaConfigured, qaError, qaHistoryExpectedRef, qaHistoryGenerationRef, qaHistoryReadyWorkspaceRef, qaInput, qaMessages, qaModelPresets, qaRagEnabled, qaReasoningEffort, qaRunningSessionIds, qaScopeDocumentsRef, qaScopeMode, qaScopePaperIds, qaScopeSessionIdRef, qaSessions, qaSessionsRef, readerLocaleText, readerNoteEditorSourceId, readerNoteExternalUpdate, screenshotBusy, selectedExcerpt, selectedQaPresetId, selectedQaPresetIdRef, selectedQaSessionId, selectedQaSessionIdRef, setAssistantActivePanel, setAssistantDetached, setCapturingScreenshot, setQaAnswerRenderMode, setQaAttachments, setQaError, setQaInput, setQaRagEnabled, setQaReasoningEffort, setQaRunningSessionIds, setQaScopeMode, setQaScopePaperIds, setQaSessions, setQaWorkspaceId, setSelectedQaPresetId, setSelectedQaSessionId, setStatusMessage, setWorkspaceStage, settings, statusMessage, tabId } = state;
+  const { activeNoteId, activeQaPreset, activeQaSession, aiConfigured, assistantActivePanel, capturingScreenshot, currentDocument, document, embeddingApiKey, flatBlocks, lRef, lastDocumentSignatureRef, libraryStorageDir, loadLibraryPreviewBlocks, localeRef, notePaperCandidates, notes, notesError, notesLoading, notesSaving, onBridgeStateChange, onNotePaperClick, onOpenPreferences, onQaActivePresetChange, pdfSource, pdfTextCacheRef, pendingNoteAnchorInsert, qaAbortControllersRef, qaAbortWorkspaceRef, qaAnswerRenderMode, qaAttachments, qaConfigured, qaError, qaHistoryExpectedRef, qaHistoryGenerationRef, qaHistoryReadyWorkspaceRef, qaInput, qaMessages, qaModelPresets, qaRagEnabled, qaReasoningEffort, qaRunningSessionIds, qaScopeDocumentsRef, qaScopeMode, qaScopePaperIds, qaScopeSessionIdRef, qaSessions, qaSessionsRef, readerLocaleText, readerNoteEditorSourceId, readerNoteExternalUpdate, screenshotBusy, selectedExcerpt, selectedQaPresetId, selectedQaPresetIdRef, selectedQaSessionId, selectedQaSessionIdRef, setAssistantActivePanel, setAssistantDetached, setCapturingScreenshot, setQaAnswerRenderMode, setQaAttachments, setQaError, setQaInput, setQaRagEnabled, setQaReasoningEffort, setQaRunningSessionIds, setQaScopeMode, setQaScopePaperIds, setQaSessions, setQaWorkspaceId, setSelectedQaPresetId, setSelectedQaSessionId, setStatusMessage, setWorkspaceStage, settings, statusMessage, tabId } = state;
   const { activateBlock, currentJsonName, currentPdfName, documentSource, handleCancelDocumentTranslation, handleClearTranslations, handleCloudParse, handleTranslateDocument, handleTranslateSelectedExcerpt, loadCachedPdfDocumentText, openDocumentItem, selectedExcerptError, selectedExcerptTranslating, selectedExcerptTranslation, summaryBlockInputs, translatedCount, translating } = documentApi;
   const { handleGeneratePaperSummary, loadMineruMarkdownForSummary } = summaryApi;
   const { handleAddSelectionToNote, handleCreateStandaloneNote, handleDeleteNote, handleJumpToNoteAnchor, handlePendingNoteAnchorInsertHandled, handleReaderNoteExternalUpdateApply, handleSaveAssistantMessageAsNote, handleSelectNote, handleUpdateNote } = notesApi;
@@ -108,13 +118,14 @@ export function useReaderQa(state: ReaderTabState, documentApi: ReaderDocumentAp
   qaSessionsRef.current = qaSessions;
   selectedQaSessionIdRef.current = selectedQaSessionId;
   selectedQaPresetIdRef.current = selectedQaPresetId;
-  const resolveQaRequest = useCallback(async (question: string, options?: { tokenBudget?: number }) => {
+  const resolveQaRequest = useCallback(async (question: string, options?: { tokenBudget?: number; signal?: AbortSignal }) => {
+      const scopedQa = qaScopeMode !== 'current';
       let pdfDocumentText = '';
       let mineruDocumentText = '';
 
       if (settings.ragSourceMode === 'pdf-text' || settings.ragSourceMode === 'hybrid' || settings.qaSourceMode === 'pdf-text') {
         if (!pdfSource) {
-          if (settings.qaSourceMode === 'pdf-text') {
+          if (!scopedQa && settings.qaSourceMode === 'pdf-text') {
             throw new Error(
               lRef.current(
                 '请先加载 PDF，或切换到 MinerU 内容问答。',
@@ -123,9 +134,9 @@ export function useReaderQa(state: ReaderTabState, documentApi: ReaderDocumentAp
             );
           }
         } else {
-          pdfDocumentText = await loadCachedPdfDocumentText();
+          pdfDocumentText = await loadCachedPdfDocumentText().catch(() => '');
 
-          if (settings.qaSourceMode === 'pdf-text' && !pdfDocumentText.trim()) {
+          if (!scopedQa && settings.qaSourceMode === 'pdf-text' && !pdfDocumentText.trim()) {
             throw new Error(
               lRef.current(
                 '当前 PDF 未提取到可用文本，请改用 MinerU 内容问答，或确认 PDF 可被本地文本层读取。',
@@ -137,10 +148,15 @@ export function useReaderQa(state: ReaderTabState, documentApi: ReaderDocumentAp
       }
 
       if (settings.ragSourceMode === 'mineru-markdown' || settings.ragSourceMode === 'hybrid' || settings.qaSourceMode === 'mineru-markdown') {
-        mineruDocumentText = await loadMineruMarkdownForSummary();
+        mineruDocumentText = await loadMineruMarkdownForSummary().catch(() => '');
       }
 
-      if (settings.qaSourceMode === 'mineru-markdown' && !mineruDocumentText.trim() && summaryBlockInputs.length === 0) {
+      if (!mineruDocumentText.trim() && flatBlocks.length > 0) {
+        // Markdown 缓存缺失时用结构块重建，避免已有 MinerU JSON 却无法参与 RAG。
+        mineruDocumentText = buildMineruMarkdownDocument(flatBlocks);
+      }
+
+      if (!scopedQa && settings.qaSourceMode === 'mineru-markdown' && !mineruDocumentText.trim() && summaryBlockInputs.length === 0) {
         throw new Error(
           lRef.current(
             '请先加载 MinerU JSON，再进行基于 MinerU 内容的文档问答。',
@@ -151,6 +167,105 @@ export function useReaderQa(state: ReaderTabState, documentApi: ReaderDocumentAp
 
       const ragEnabledForQa =
         qaRagEnabled && settings.localRagEnabled && settings.ragSourceMode !== 'off';
+      const embeddingConfigured = Boolean(
+        embeddingApiKey.trim() &&
+        settings.embeddingBaseUrl.trim() &&
+        settings.embeddingModel.trim(),
+      );
+      const embedding = {
+        baseUrl: settings.embeddingBaseUrl,
+        apiKey: embeddingApiKey.trim(),
+        model: settings.embeddingModel,
+        dimensions: settings.embeddingDimensions,
+        timeoutSeconds: settings.embeddingRequestTimeoutSeconds,
+      };
+
+      if (qaScopeMode !== 'current') {
+        if (qaScopeMode === 'selected' && qaScopePaperIds.length === 0) {
+          throw new Error(lRef.current(
+            '请至少选择一篇文献，或切回当前文献范围。',
+            'Select at least one paper, or switch back to the current paper scope.',
+          ));
+        }
+
+        if (!ragEnabledForQa) {
+          throw new Error(lRef.current(
+            '选定文献 / 全库问答需要开启本地 RAG；请开启本地 RAG 后重试，或切回当前文献。',
+            'Selected-paper and whole-library QA require local RAG. Turn it on and retry, or switch back to the current paper.',
+          ));
+        }
+
+        if (!embeddingConfigured) {
+          throw new Error(lRef.current(
+            '选定文献 / 全库问答需要配置 Embedding 模型；请先在设置中完成配置，或切回当前文献。',
+            'Selected-paper and whole-library QA require an embedding configuration. Configure it in Settings, or switch back to the current paper.',
+          ));
+        }
+
+        const currentScopedDocument: ScopedRagDocument | undefined = currentDocument
+          ? {
+              item: currentDocument,
+              mineruBlocks: flatBlocks,
+              mineruDocumentText,
+              pdfDocumentText,
+            }
+          : undefined;
+        const { documents, missing } = qaScopeMode === 'selected'
+          ? await loadScopedRagDocuments({
+              papers: notePaperCandidates,
+              paperIds: qaScopePaperIds,
+              currentDocument: currentScopedDocument,
+              storageDir: libraryStorageDir,
+              ragSourceMode: settings.ragSourceMode,
+              cache: qaScopeDocumentsRef.current,
+              signal: options?.signal,
+              deps: {
+                createItem: (paper) => createNativeLibraryWorkspaceItem(paper, libraryStorageDir),
+                loadLibraryPreviewBlocks,
+                readLocalBinaryFile,
+                extractPdfTextByPdfJs,
+                buildMineruMarkdownDocument,
+              },
+            })
+          : { documents: [], missing: [] };
+        const libraryItems = qaScopeMode === 'library'
+          ? buildScopedRagLibraryItems(
+              notePaperCandidates,
+              (paper) => createNativeLibraryWorkspaceItem(paper, libraryStorageDir),
+            )
+          : [];
+        const scoped = await resolveScopedLocalRag({
+          scope: { mode: qaScopeMode, paperIds: qaScopePaperIds },
+          documents,
+          libraryItems,
+          settings,
+          embedding,
+          question,
+          excerptText: selectedExcerpt?.text,
+          tokenBudget: options?.tokenBudget,
+          signal: options?.signal,
+        });
+        const skippedDocuments = [...missing, ...scoped.skippedDocuments];
+
+        if (scoped.resolution.kind === 'retrieved') {
+          return {
+            blocks: summaryBlockInputs,
+            documentText: scoped.resolution.documentText,
+            qaContext: buildQaContext({
+              origin: 'local-rag',
+              rag: scoped.resolution,
+              skippedPaperTitles: skippedDocuments.map((entry) => entry.title),
+            }),
+            citations: scoped.resolution.citations,
+          };
+        }
+
+        // 多文献范围没有“当前文献全文”可退；明确失败原因，避免拿当前文献冒充范围答案。
+        throw new Error(describeScopedRagFailure(
+          { ...scoped, skippedDocuments },
+          lRef.current,
+        ));
+      }
 
       const skippedPaperTitles: string[] = [];
       let ragResolution: LocalRagResolution =
@@ -164,29 +279,18 @@ export function useReaderQa(state: ReaderTabState, documentApi: ReaderDocumentAp
 
       if (currentDocument?.ragEnabled === false) {
         ragResolution = { kind: 'excluded' };
-      } else if (
-        ragEnabledForQa &&
-        currentDocument &&
-        embeddingApiKey.trim() &&
-        settings.embeddingBaseUrl.trim() &&
-        settings.embeddingModel.trim()
-      ) {
+      } else if (ragEnabledForQa && currentDocument && embeddingConfigured) {
         ragResolution = await resolveLocalRag({
           item: currentDocument,
           settings,
-          embedding: {
-            baseUrl: settings.embeddingBaseUrl,
-            apiKey: embeddingApiKey.trim(),
-            model: settings.embeddingModel,
-            dimensions: settings.embeddingDimensions,
-            timeoutSeconds: settings.embeddingRequestTimeoutSeconds,
-          },
+          embedding,
           question,
           excerptText: selectedExcerpt?.text,
           mineruBlocks: flatBlocks,
           mineruDocumentText,
           pdfDocumentText,
           tokenBudget: options?.tokenBudget,
+          signal: options?.signal,
         });
 
         if (ragResolution.kind === 'retrieved') {
@@ -200,21 +304,6 @@ export function useReaderQa(state: ReaderTabState, documentApi: ReaderDocumentAp
             }),
             citations: ragResolution.citations,
           };
-        }
-
-        // 显式选择多文献/全库范围时，没有可用证据就停止调用模型，避免拿当前文献冒充范围答案。
-        if (qaScopeMode !== 'current') {
-          const reason = ragResolution.kind === 'indexing'
-            ? lRef.current(
-                '所选范围内的文献索引尚未就绪；请先在文献库中完成索引，或缩小检索范围。',
-                'The selected scope has no ready index yet. Index the papers first, or narrow the scope.',
-              )
-            : ragResolution.kind === 'failed'
-              ? lRef.current('所选范围的本地索引不可用，请检查嵌入模型配置后重试。', 'Local retrieval failed for the selected scope. Check the embedding configuration and retry.')
-              : ragResolution.kind === 'excluded'
-                ? lRef.current('所选文献都已移出本地知识库。', 'Every selected paper is excluded from the local knowledge base.')
-                : lRef.current('所选范围没有检索到可用的正文证据。', 'No usable evidence was found in the selected scope.');
-          throw new Error(reason);
         }
       }
 
@@ -259,8 +348,13 @@ export function useReaderQa(state: ReaderTabState, documentApi: ReaderDocumentAp
       currentDocument,
       embeddingApiKey,
       flatBlocks,
+      libraryStorageDir,
+      loadLibraryPreviewBlocks,
+      notePaperCandidates,
       pdfSource,
       qaRagEnabled,
+      qaScopeMode,
+      qaScopePaperIds,
       selectedExcerpt?.text,
       settings,
       settings.qaSourceMode,
@@ -630,7 +724,7 @@ export function useReaderQa(state: ReaderTabState, documentApi: ReaderDocumentAp
           }
         }
         const qaRequest = await awaitQaRequest(
-          resolveQaRequest(question, { tokenBudget }),
+          resolveQaRequest(question, { tokenBudget, signal: controller.signal }),
           controller.signal,
         );
         if (!isRequestCurrent()) {

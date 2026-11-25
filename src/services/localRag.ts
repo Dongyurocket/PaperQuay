@@ -1,6 +1,7 @@
 import type {
   DocumentChatCitation,
   PositionedMineruBlock,
+  RagRetrievalDiagnostics,
   RagRetrievalResult,
   ReaderQaScopeMode,
   ReaderSettings,
@@ -668,7 +669,7 @@ export async function resolveLocalRag(input: {
     };
   }
 
-  let retrievals;
+  let retrievals: RagRetrievalDiagnostics[];
 
   try {
     retrievals = await Promise.all(
@@ -877,6 +878,8 @@ function mergeRetrievedResolutions(
   let indexedChunkCount = 0;
   let totalChunkCount = 0;
   let ftsHitCount = 0;
+  let budgetSkippedCount = 0;
+  let usingPreviousIndex = false;
   const ftsStatuses = new Set<string>();
   const embeddedPapers: Array<{ resolution: LocalRagResolutionSuccess }> = [];
 
@@ -891,6 +894,8 @@ function mergeRetrievedResolutions(
     indexedChunkCount += Number(entry.resolution.indexedChunkCount) || 0;
     totalChunkCount += Number(entry.resolution.totalChunkCount) || 0;
     ftsHitCount += Number(entry.resolution.ftsHitCount) || 0;
+    budgetSkippedCount += Number(entry.resolution.budgetSkippedCount) || 0;
+    if (entry.resolution.usingPreviousIndex) usingPreviousIndex = true;
     for (const status of entry.resolution.ftsStatuses ?? []) ftsStatuses.add(status);
     embeddedPapers.push({ resolution: entry.resolution });
   }
@@ -902,6 +907,8 @@ function mergeRetrievedResolutions(
       retrievedChunkCount: embeddedPapers.reduce((sum, entry) => sum + entry.resolution.retrievedChunkCount, 0),
       citations,
       retrievals,
+      ...(budgetSkippedCount > 0 ? { budgetSkippedCount } : {}),
+      ...(usingPreviousIndex ? { usingPreviousIndex: true } : {}),
       indexedChunkCount,
       totalChunkCount,
       ftsStatuses: [...ftsStatuses] as LocalRagResolutionSuccess['ftsStatuses'],
@@ -1049,6 +1056,10 @@ export async function resolveScopedLocalRag(input: {
     }
 
     const merged = mergeRetrievedResolutions(retrieved);
+    if (skippedDocuments.length > 0) {
+      // 外层跳过（索引未就绪 / 被排除 / 无正文）也要让 UI 知道本轮只覆盖了部分所选文献。
+      merged.resolution.partialSources = true;
+    }
     return {
       resolution: merged.resolution,
       skippedDocuments: [...skippedDocuments, ...merged.skippedDocuments],
@@ -1057,19 +1068,33 @@ export async function resolveScopedLocalRag(input: {
   }
 
   // library：只读已就绪索引，不触发整库建索引。
+  if (input.libraryItems.length === 0) {
+    return {
+      resolution: { kind: 'no-sources' },
+      skippedDocuments: [],
+      consideredPaperIds,
+    };
+  }
+
   const excluded = new Set<string>();
+  const libraryKeys = new Set<string>();
   for (const item of input.libraryItems) {
+    libraryKeys.add(item.itemKey);
+    libraryKeys.add(item.workspaceId);
+    libraryKeys.add(`native-library:${item.itemKey}`);
     if (item.ragEnabled === false) {
       excluded.add(normalizeRagKey(item.itemKey));
       excluded.add(item.itemKey);
     }
   }
+  const allExcluded = input.libraryItems.every((item) => item.ragEnabled === false);
   const embeddingModelKey = buildRagEmbeddingModelKey(input.embedding);
   const statuses = await ragListIndexStatuses();
   const readyKeys = [...new Set(statuses
     .filter((status) => status.status === 'ready'
       && (status.sourceType === 'mineru-markdown' || status.sourceType === 'pdf-text')
       && status.embeddingModelKey === embeddingModelKey
+      && libraryKeys.has(status.documentKey)
       && !excluded.has(status.documentKey)
       && !excluded.has(normalizeRagKey(status.documentKey)))
     .map((status) => status.documentKey)
@@ -1077,7 +1102,7 @@ export async function resolveScopedLocalRag(input: {
 
   if (readyKeys.length === 0) {
     return {
-      resolution: { kind: 'indexing' },
+      resolution: allExcluded ? { kind: 'excluded' } : { kind: 'indexing' },
       skippedDocuments: [],
       consideredPaperIds,
     };

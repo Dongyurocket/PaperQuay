@@ -194,6 +194,9 @@ test('selected scope lazy-indexes missing papers and reports failures as skipped
     });
     assert.equal(scoped.resolution.kind, 'retrieved');
     assert.equal(scoped.skippedDocuments.some((entry) => entry.paperId === 'b'), true);
+    if (scoped.resolution.kind === 'retrieved') {
+      assert.equal(scoped.resolution.partialSources, true);
+    }
     assert.equal(bridge.calls.some((call) => call.command === 'rag_index_document' && call.args.request.documentKey === 'b'), true);
     if (scoped.resolution.kind === 'retrieved') {
       assert.equal(scoped.resolution.citations[0]?.paperId, 'a');
@@ -229,6 +232,44 @@ test('selected scope stops with a clear state when every paper is excluded or in
     });
     assert.notEqual(scoped.resolution.kind, 'retrieved');
     assert.equal(scoped.skippedDocuments.length, 2);
+  } finally {
+    bridge.restore();
+  }
+});
+
+
+test('library scope returns excluded when every library paper is excluded', async () => {
+  const items = [makeItem('a', false), makeItem('b', false)];
+  const bridge = installBridge({
+    rag_list_index_statuses: () => [],
+  });
+  try {
+    const scoped = await resolveScopedLocalRag({
+      scope: { mode: 'library' },
+      documents: [],
+      libraryItems: items,
+      settings: { localRagEnabled: true, localRagTopK: 6, ragSourceMode: 'mineru-markdown', embeddingBatchSize: 4 },
+      embedding,
+      question: 'question',
+    });
+    assert.equal(scoped.resolution.kind, 'excluded');
+  } finally {
+    bridge.restore();
+  }
+});
+
+test('library scope returns no-sources for an empty library', async () => {
+  const bridge = installBridge({});
+  try {
+    const scoped = await resolveScopedLocalRag({
+      scope: { mode: 'library' },
+      documents: [],
+      libraryItems: [],
+      settings: { localRagEnabled: true, localRagTopK: 6, ragSourceMode: 'mineru-markdown', embeddingBatchSize: 4 },
+      embedding,
+      question: 'question',
+    });
+    assert.equal(scoped.resolution.kind, 'no-sources');
   } finally {
     bridge.restore();
   }

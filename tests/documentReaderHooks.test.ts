@@ -74,6 +74,36 @@ test('explicit effect wrappers keep the original execution order', () => {
   assert.equal((tab.match(/useEffect\(/g) ?? []).length, 29);
 });
 
+test('reader QA routes selected and library scopes through resolveScopedLocalRag', () => {
+  const qa = read('src/features/reader/hooks/useReaderQa.ts');
+
+  assert.match(qa, /resolveScopedLocalRag/);
+  assert.match(qa, /loadScopedRagDocuments/);
+  assert.match(qa, /buildScopedRagLibraryItems/);
+  assert.match(qa, /describeScopedRagFailure/);
+
+  const start = qa.indexOf('const resolveQaRequest');
+  const end = qa.indexOf('const handleOpenFloatingAssistant', start);
+  assert.notEqual(start, -1, 'resolveQaRequest must exist');
+  assert.notEqual(end, -1, 'resolveQaRequest must stay before the floating assistant handler');
+
+  const resolver = qa.slice(start, end);
+  assert.match(resolver, /resolveScopedLocalRag\(/);
+  assert.match(resolver, /qaScopePaperIds/);
+
+  const depsStart = resolver.lastIndexOf('}, [');
+  const depsEnd = resolver.indexOf(']);', depsStart);
+  assert.notEqual(depsStart, -1, 'resolveQaRequest must declare a dependency array');
+  assert.notEqual(depsEnd, -1, 'resolveQaRequest dependency array must close');
+
+  const deps = resolver.slice(depsStart, depsEnd);
+  assert.match(deps, /qaScopeMode/, 'qaScopeMode must invalidate the resolver when the scope changes');
+  assert.match(deps, /qaScopePaperIds/, 'qaScopePaperIds must invalidate the resolver when the selection changes');
+  assert.match(deps, /libraryStorageDir/);
+  assert.match(deps, /loadLibraryPreviewBlocks/);
+  assert.match(deps, /notePaperCandidates/);
+});
+
 test('reader hooks are acyclic: later domains may consume earlier APIs only', () => {
   const document = read('src/features/reader/hooks/useReaderDocument.ts');
   const summary = read('src/features/reader/hooks/useReaderSummary.ts');
