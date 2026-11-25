@@ -665,6 +665,12 @@ export interface ReaderSettings {
   localRagEnabled: boolean;
   localRagTopK: number;
   ragSourceMode: RagSourceMode;
+  /** MinerU 解析完成后自动把该文献纳入本地索引；默认开。 */
+  ragAutoIndexAfterParse: boolean;
+  /** 失败索引自动重试；默认关，避免隐式产生 embedding 费用。 */
+  ragAutoRetryFailed: boolean;
+  ragAutoRetryMaxAttempts: number;
+  ragAutoRetryIntervalMinutes: number;
   libraryBatchConcurrency: number;
   showLibraryReadingHeatmap: boolean;
   enablePdfReadingHeatmap: boolean;

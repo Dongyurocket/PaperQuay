@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { flattenMineruPages, parseMineruPages } from '../../services/mineru';
 import { buildRagEmbeddingModelKey, ragListIndexStatuses } from '../../services/rag';
+import { isRagAuthOrBillingError } from '../../services/ragIndexError';
 import {
   aggregateRagIndexStatus,
   groupRagIndexStatuses,
@@ -18,11 +19,6 @@ import { indexLibraryPaperMineruSource } from './libraryRagIndexing';
 import { EMPTY_BATCH_PROGRESS, sleep, type BatchProgressState } from './readerShared';
 
 type LocaleTextPicker = <T>(zh: T, en: T) => T;
-
-/** embedding 认证/余额错误：批量任务应立即停止，而不是逐篇失败。 */
-function isRagAuthOrBillingError(message: string | undefined | null): boolean {
-  return /HTTP\s+(401|402|403)\b/i.test(String(message ?? ''));
-}
 
 interface UseReaderRagIndexActionsOptions {
   allKnownItems: WorkspaceItem[];
@@ -93,6 +89,14 @@ export function useReaderRagIndexActions({
   const runningRef = useRef(false);
   const pausedRef = useRef(false);
   const cancelRequestedRef = useRef(false);
+  // 自动重试的本会话计数与上次自动批次时间；不写入数据库，重启后重新计数。
+  const autoRetryAttemptsRef = useRef(new Map<string, number>());
+  const lastAutoRetryAtRef = useRef(0);
+  const autoRetryStateRef = useRef({
+    handleBatchRagIndex: null as null | ((options?: RagBatchOptions) => Promise<void>),
+    ragStatusByDocumentKey: {} as Record<string, RagDocumentIndexStatus[]>,
+    aggregateOptions: {} as { embeddingModelKey?: string },
+  });
 
   const ragIndexAvailable = Boolean(
     settings.localRagEnabled &&
@@ -321,6 +325,11 @@ export function useReaderRagIndexActions({
 
       const mode = options.mode ?? 'all-legacy';
       const force = options.force ?? true;
+      if (options.reason !== 'auto') {
+        // 用户主动重试/建立索引后，给自动重试一次全新的计数。
+        autoRetryAttemptsRef.current.clear();
+        lastAutoRetryAtRef.current = 0;
+      }
       const batchEntries = await resolveBatchEntries(options.paperIds);
       const { selection, entries: candidates } = buildBatchSelection(batchEntries, mode);
 
@@ -514,6 +523,7 @@ export function useReaderRagIndexActions({
 
       setRagIndexingDocumentKey(documentKey);
       setStatusMessage(l(`正在为《${entry.title}》建立 RAG 索引…`, `Indexing "${entry.title}"…`));
+      autoRetryAttemptsRef.current.delete(documentKey);
 
       try {
         const result = await indexOneItem(entry);
@@ -584,6 +594,85 @@ export function useReaderRagIndexActions({
     pausedRef.current = false;
     setRagIndexProgress((current) => ({ ...current, cancelRequested: true, paused: false }));
   }, []);
+
+  // 自动重试只读最新状态，不把状态变化写进 effect 依赖，否则每次刷新都会重置计数。
+  autoRetryStateRef.current = {
+    handleBatchRagIndex,
+    ragStatusByDocumentKey,
+    aggregateOptions,
+  };
+
+  useEffect(() => {
+    autoRetryAttemptsRef.current.clear();
+    lastAutoRetryAtRef.current = 0;
+
+    if (!settings.ragAutoRetryFailed || !ragIndexAvailable || settings.ragAutoRetryMaxAttempts <= 0) {
+      return undefined;
+    }
+
+    const tick = () => {
+      if (runningRef.current) {
+        return;
+      }
+
+      const now = Date.now();
+      const intervalMs = settings.ragAutoRetryIntervalMinutes * 60_000;
+      if (lastAutoRetryAtRef.current > 0 && now - lastAutoRetryAtRef.current < intervalMs) {
+        return;
+      }
+
+      const state = autoRetryStateRef.current;
+      const attempts = autoRetryAttemptsRef.current;
+      const targets: string[] = [];
+
+      for (const [documentKey, entries] of Object.entries(state.ragStatusByDocumentKey)) {
+        if (aggregateRagIndexStatus(entries, state.aggregateOptions) !== 'failed') {
+          attempts.delete(documentKey);
+          continue;
+        }
+
+        if ((attempts.get(documentKey) ?? 0) >= settings.ragAutoRetryMaxAttempts) {
+          continue;
+        }
+
+        const failedEntries = entries.filter((entry) => entry.status === 'failed');
+        if (failedEntries.some((entry) => isRagAuthOrBillingError(entry.lastError))) {
+          continue;
+        }
+        if (failedEntries.some((entry) => typeof entry.cooldownUntil === 'number' && entry.cooldownUntil > now)) {
+          continue;
+        }
+
+        targets.push(documentKey);
+      }
+
+      if (targets.length === 0) {
+        return;
+      }
+
+      lastAutoRetryAtRef.current = now;
+      for (const documentKey of targets) {
+        attempts.set(documentKey, (attempts.get(documentKey) ?? 0) + 1);
+      }
+      void state.handleBatchRagIndex?.({
+        mode: 'failed',
+        paperIds: targets,
+        reason: 'auto',
+        force: false,
+      });
+    };
+
+    const timer = setInterval(tick, 60_000);
+    return () => clearInterval(timer);
+  }, [
+    ragIndexAvailable,
+    settings.embeddingBaseUrl,
+    settings.embeddingDimensions,
+    settings.embeddingModel,
+    settings.ragAutoRetryFailed,
+    settings.ragAutoRetryIntervalMinutes,
+    settings.ragAutoRetryMaxAttempts,
+  ]);
 
   return {
     ragIndexAvailable,

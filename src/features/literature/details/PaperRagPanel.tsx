@@ -3,6 +3,11 @@ import { useLocaleText } from '../../../i18n/uiLanguage';
 import type { LiteraturePaper } from '../../../types/library';
 import type { RagDocumentIndexStatus } from '../../../types/reader';
 import {
+  classifyRagIndexError,
+  ragIndexErrorHint,
+  ragIndexErrorLabel,
+} from '../../../services/ragIndexError';
+import {
   buildRagActionItems,
   ragStatusDescription,
   ragStatusLabel,
@@ -167,21 +172,27 @@ export default function PaperRagPanel({
 
         {errors.length > 0 ? (
           <div className="space-y-1 rounded-[var(--pq-radius-sm)] border border-[color-mix(in_srgb,var(--pq-danger)_24%,transparent)] bg-[var(--pq-error-bg)] p-2 text-xs text-[var(--pq-danger)]">
-            {errors.map(({ entry, message, coolingDown }) => (
-              <div key={`${entry.documentKey}:${entry.sourceType}:error`} className="space-y-0.5">
-                <div className="flex items-center gap-1 font-medium">
-                  <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-                  <span>{sourceLabel(entry.sourceType, l)}</span>
-                </div>
-                {message ? <div className="break-words opacity-90">{message}</div> : null}
-                {coolingDown ? (
-                  <div className="opacity-80">
-                    {l('冷却到 ', 'Cooling down until ')}
-                    {formatTimestamp(entry.cooldownUntil)}
+            {errors.map(({ entry, message, coolingDown }) => {
+              const info = classifyRagIndexError(message);
+              const hint = ragIndexErrorHint(info.kind, l);
+              return (
+                <div key={`${entry.documentKey}:${entry.sourceType}:error`} className="space-y-0.5">
+                  <div className="flex items-center gap-1 font-medium">
+                    <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                    <span>{sourceLabel(entry.sourceType, l)}</span>
+                    <span className="opacity-80">· {ragIndexErrorLabel(info.kind, l)}</span>
                   </div>
-                ) : null}
-              </div>
-            ))}
+                  {message ? <div className="break-words opacity-90">{message}</div> : null}
+                  {hint ? <div className="opacity-80">{hint}</div> : null}
+                  {coolingDown ? (
+                    <div className="opacity-80">
+                      {l('冷却到 ', 'Cooling down until ')}
+                      {formatTimestamp(entry.cooldownUntil)}
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
           </div>
         ) : null}
 

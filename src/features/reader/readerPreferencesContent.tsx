@@ -1757,6 +1757,50 @@ export function ReaderPreferencesContent({
                       </div>
                     ) : null}
                   </div>
+                  <ToggleRow
+                    title={l('MinerU 解析后自动建立索引', 'Index after MinerU parsing')}
+                    description={l(
+                      '解析完成后在后台把该文献纳入本地知识库；不会在启动时扫描全库。',
+                      'Add the paper to the local knowledge base after parsing. Startup does not scan the whole library.',
+                    )}
+                    checked={settings.ragAutoIndexAfterParse}
+                    onChange={(checked) => onSettingChange('ragAutoIndexAfterParse', checked)}
+                  />
+                  <ToggleRow
+                    title={l('失败索引自动重试', 'Retry failed indexes automatically')}
+                    description={l(
+                      '默认关闭。开启后只在冷却结束、且不是认证/余额错误时重试；可能产生 Embedding 费用。',
+                      'Off by default. Retries only after cooldown and never after auth/billing errors; embedding calls may cost money.',
+                    )}
+                    checked={settings.ragAutoRetryFailed}
+                    onChange={(checked) => onSettingChange('ragAutoRetryFailed', checked)}
+                  />
+                  {settings.ragAutoRetryFailed ? (
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <label className="text-xs font-medium text-[var(--pq-text-muted)]">
+                        {l('最多重试次数', 'Max attempts')}
+                        <select
+                          className="pq-input mt-1 h-9 w-full px-2 text-sm"
+                          value={String(settings.ragAutoRetryMaxAttempts)}
+                          onChange={(event) => onSettingChange('ragAutoRetryMaxAttempts', Number(event.target.value))}
+                        >
+                          {[1, 2, 3, 4, 5].map((value) => <option key={value} value={value}>{value}</option>)}
+                        </select>
+                      </label>
+                      <label className="text-xs font-medium text-[var(--pq-text-muted)]">
+                        {l('重试间隔', 'Retry interval')}
+                        <select
+                          className="pq-input mt-1 h-9 w-full px-2 text-sm"
+                          value={String(settings.ragAutoRetryIntervalMinutes)}
+                          onChange={(event) => onSettingChange('ragAutoRetryIntervalMinutes', Number(event.target.value))}
+                        >
+                          {[5, 15, 30, 60, 120, 240].map((value) => (
+                            <option key={value} value={value}>{l(`${value} 分钟`, `${value} min`)}</option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
+                  ) : null}
                   <div className="flex flex-wrap gap-2">
                     <button
                       type="button"

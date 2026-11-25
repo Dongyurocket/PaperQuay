@@ -251,6 +251,10 @@ export function useReaderLibraryActions({
       mineruPath: string,
       markdownText?: string | null,
     ) => {
+      if (settings.ragAutoIndexAfterParse === false) {
+        return;
+      }
+
       void indexLibraryPaperMineruSource({
         item,
         settings,

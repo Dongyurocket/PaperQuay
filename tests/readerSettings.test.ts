@@ -47,6 +47,22 @@ test("normalizeReaderSettings constrains note settings", async () => {
   assert.equal(normalizeReaderSettings({ notesVaultAutoSyncIntervalMinutes: 90 }).notesVaultAutoSyncIntervalMinutes, 60);
 });
 
+test("RAG automation defaults stay conservative and clamp their ranges", async () => {
+  const { normalizeReaderSettings } = await loadReaderShared();
+
+  const defaults = normalizeReaderSettings();
+  assert.equal(defaults.ragAutoIndexAfterParse, true);
+  assert.equal(defaults.ragAutoRetryFailed, false);
+  assert.equal(defaults.ragAutoRetryMaxAttempts, 2);
+  assert.equal(defaults.ragAutoRetryIntervalMinutes, 30);
+
+  assert.equal(normalizeReaderSettings({ ragAutoIndexAfterParse: false }).ragAutoIndexAfterParse, false);
+  assert.equal(normalizeReaderSettings({ ragAutoRetryMaxAttempts: -1 }).ragAutoRetryMaxAttempts, 0);
+  assert.equal(normalizeReaderSettings({ ragAutoRetryMaxAttempts: 99 }).ragAutoRetryMaxAttempts, 5);
+  assert.equal(normalizeReaderSettings({ ragAutoRetryIntervalMinutes: 1 }).ragAutoRetryIntervalMinutes, 5);
+  assert.equal(normalizeReaderSettings({ ragAutoRetryIntervalMinutes: 999 }).ragAutoRetryIntervalMinutes, 240);
+});
+
 test("normalizeReaderSettings migrates review writing model preset from overview preset", async () => {
   const { normalizeReaderSettings } = await loadReaderShared();
   const settings = normalizeReaderSettings({

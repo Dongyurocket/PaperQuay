@@ -182,6 +182,10 @@ export const DEFAULT_SETTINGS: ReaderSettings = {
   localRagEnabled: true,
   localRagTopK: 6,
   ragSourceMode: 'hybrid',
+  ragAutoIndexAfterParse: true,
+  ragAutoRetryFailed: false,
+  ragAutoRetryMaxAttempts: 2,
+  ragAutoRetryIntervalMinutes: 30,
   libraryBatchConcurrency: 1,
   showLibraryReadingHeatmap: true,
   enablePdfReadingHeatmap: true,
@@ -736,6 +740,22 @@ function clampLocalRagTopK(value: number): number {
   return Math.min(12, Math.max(1, Math.trunc(value)));
 }
 
+function clampRagAutoRetryMaxAttempts(value: number): number {
+  if (!Number.isFinite(value)) {
+    return DEFAULT_SETTINGS.ragAutoRetryMaxAttempts;
+  }
+
+  return Math.min(5, Math.max(0, Math.trunc(value)));
+}
+
+function clampRagAutoRetryIntervalMinutes(value: number): number {
+  if (!Number.isFinite(value)) {
+    return DEFAULT_SETTINGS.ragAutoRetryIntervalMinutes;
+  }
+
+  return Math.min(240, Math.max(5, Math.trunc(value)));
+}
+
 function clampEmbeddingDimensions(value: number | null | undefined): number | null {
   if (value === null || value === undefined || value === 0) {
     return null;
@@ -815,6 +835,10 @@ export function normalizeReaderSettings(value?: Partial<ReaderSettings> | null):
     localRagEnabled: merged.localRagEnabled !== false,
     localRagTopK: clampLocalRagTopK(merged.localRagTopK),
     ragSourceMode: normalizeRagSourceMode(merged.ragSourceMode),
+    ragAutoIndexAfterParse: merged.ragAutoIndexAfterParse !== false,
+    ragAutoRetryFailed: merged.ragAutoRetryFailed === true,
+    ragAutoRetryMaxAttempts: clampRagAutoRetryMaxAttempts(merged.ragAutoRetryMaxAttempts),
+    ragAutoRetryIntervalMinutes: clampRagAutoRetryIntervalMinutes(merged.ragAutoRetryIntervalMinutes),
     libraryBatchConcurrency: clampBatchConcurrency(merged.libraryBatchConcurrency),
     showLibraryReadingHeatmap: merged.showLibraryReadingHeatmap !== false,
     enablePdfReadingHeatmap: merged.enablePdfReadingHeatmap !== false,
