@@ -412,14 +412,15 @@ test('exceeding the default node budget samples by degree then id without dangli
 
   const bounded = applyGraphBounds(
     { nodes, edges, generatedAt: 12 },
-    { nodeLimit: DEFAULT_GRAPH_NODE_LIMIT, edgeLimitPerNode: DEFAULT_GRAPH_EDGE_LIMIT_PER_NODE },
+    // 本用例只看节点预算；hub 度数 100，需放宽边预算避免先被 per-node 裁剪。
+    { nodeLimit: DEFAULT_GRAPH_NODE_LIMIT, edgeLimitPerNode: 1000 },
   );
 
   assert.deepEqual(bounded.metadata, {
     sampled: true,
     truncated: true,
     nodeLimit: DEFAULT_GRAPH_NODE_LIMIT,
-    edgeLimitPerNode: DEFAULT_GRAPH_EDGE_LIMIT_PER_NODE,
+    edgeLimitPerNode: 1000,
     totalNodes: nodeCount,
     returnedNodes: DEFAULT_GRAPH_NODE_LIMIT,
     totalEdges: edges.length,
@@ -469,12 +470,13 @@ test('exceeding the default per-node edge budget keeps top-weight edges with ful
     returnedEdges: DEFAULT_GRAPH_EDGE_LIMIT_PER_NODE,
   });
 
-  // 权重 0.9..0.2 各 30 条全部保留（240 条），再从权重 0.1 的 30 条中按 id 升序补 10 条。
+  // 按权重降序（同权重按 id 升序）保留前 N 条。
   const keptIds = bounded.edges.map((edge) => edge.id).sort();
   const expectedIds = edges
-    .filter((edge) => edge.weight > 0.1)
+    .slice()
+    .sort((left, right) => right.weight - left.weight || left.id.localeCompare(right.id))
+    .slice(0, DEFAULT_GRAPH_EDGE_LIMIT_PER_NODE)
     .map((edge) => edge.id)
-    .concat(edges.filter((edge) => edge.weight === 0.1).slice(0, 10).map((edge) => edge.id))
     .sort();
   assert.deepEqual(keptIds, expectedIds);
 
@@ -487,7 +489,7 @@ test('exceeding the default per-node edge budget keeps top-weight edges with ful
     degree.set(edge.target, (degree.get(edge.target) ?? 0) + 1);
   }
   assert.equal(degree.get('hub'), DEFAULT_GRAPH_EDGE_LIMIT_PER_NODE);
-  // 保留下来的 250 条边各自连到不同 leaf，因此出现的 leaf 度数恒为 1。
+  // 保留下来的边各自连到不同 leaf，因此出现的 leaf 度数恒为 1。
   assert.equal(degree.size, DEFAULT_GRAPH_EDGE_LIMIT_PER_NODE + 1);
   for (const [nodeId, nodeDegree] of degree) {
     if (nodeId === 'hub') continue;
@@ -520,7 +522,8 @@ for (const tier of GRAPH_BENCHMARK_TIERS) {
       const heapBefore = process.memoryUsage().heapUsed;
       const startedAt = performance.now();
       const bounded = applyGraphBounds(snapshot, {
-        nodeLimit: DEFAULT_GRAPH_NODE_LIMIT,
+        // 该基准锁定边预算；节点预算单独在 node-limit 用例覆盖。
+        nodeLimit: 10_000,
         edgeLimitPerNode: DEFAULT_GRAPH_EDGE_LIMIT_PER_NODE,
       });
       const elapsedMs = performance.now() - startedAt;
@@ -528,7 +531,7 @@ for (const tier of GRAPH_BENCHMARK_TIERS) {
 
       assert.equal(bounded.metadata.sampled, false);
       assert.equal(bounded.metadata.truncated, true);
-      assert.equal(bounded.metadata.nodeLimit, DEFAULT_GRAPH_NODE_LIMIT);
+      assert.equal(bounded.metadata.nodeLimit, 10_000);
       assert.equal(bounded.metadata.edgeLimitPerNode, DEFAULT_GRAPH_EDGE_LIMIT_PER_NODE);
       assert.equal(bounded.metadata.totalNodes, GRAPH_BENCHMARK_NODE_COUNT);
       assert.equal(bounded.metadata.returnedNodes, GRAPH_BENCHMARK_NODE_COUNT);

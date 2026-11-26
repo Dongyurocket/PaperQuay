@@ -58,3 +58,17 @@ test('describes and individually removes active filters', () => {
   assert.equal(removeLibraryFilter(value, 'year').yearFrom, null);
   assert.equal(removeLibraryFilter(value, 'favorite').favorite, false);
 });
+
+test('every RAG status value serializes, chips and clears', () => {
+  const values = ['ready', 'stale', 'pending', 'failed', 'none'] as const;
+  for (const ragStatus of values) {
+    const value = { ...filters(), ragStatus };
+    assert.equal(parseLibraryFilters(serializeLibraryFilters(value)).ragStatus, ragStatus);
+    assert.equal(buildPaperQuery(value, {}, null, '').ragStatus, ragStatus);
+    const chips = describeActiveFilters(value, l);
+    assert.equal(chips.length, 1);
+    assert.equal(chips[0].id, 'ragStatus');
+    assert.equal(removeLibraryFilter(value, 'ragStatus').ragStatus, 'all');
+  }
+  assert.equal(buildPaperQuery({ ...filters(), ragStatus: 'all' }, {}, null, '').ragStatus, null);
+});

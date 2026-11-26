@@ -86,13 +86,16 @@ export default function PaperRagPanel({
     mineruParsed,
     indexing,
     busy,
-  }, l).filter((item) => ['build', 'retry', 'update', 'rebuild'].includes(item.action));
+  }, l).filter((item) => ['build', 'retry', 'update', 'rebuild', 'parse-mineru'].includes(item.action));
   const now = Date.now();
   const errors = entries.flatMap((entry) => {
-    const message = entry.lastError || entry.rebuildError;
     const coolingDown = typeof entry.cooldownUntil === 'number' && entry.cooldownUntil > now;
-    return message || coolingDown
-      ? [{ entry, message, coolingDown }]
+    const messages = [
+      entry.lastError ? { kind: 'last' as const, message: entry.lastError } : null,
+      entry.rebuildError ? { kind: 'rebuild' as const, message: entry.rebuildError } : null,
+    ].filter(Boolean) as Array<{ kind: 'last' | 'rebuild'; message: string }>;
+    return messages.length > 0 || coolingDown
+      ? [{ entry, messages, coolingDown }]
       : [];
   });
 
@@ -139,13 +142,14 @@ export default function PaperRagPanel({
 
         {entries.length > 0 ? (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[420px] border-collapse text-left text-xs">
+            <table className="w-full min-w-[520px] border-collapse text-left text-xs">
               <thead className="text-[var(--pq-text-muted)]">
                 <tr className="border-b border-[var(--pq-border-subtle)]">
                   <th className="py-1 pr-2 font-medium">{l('来源', 'Source')}</th>
                   <th className="py-1 pr-2 font-medium">{l('状态', 'Status')}</th>
                   <th className="py-1 pr-2 font-medium">{l('分块', 'Chunks')}</th>
                   <th className="py-1 pr-2 font-medium">{l('模型', 'Model')}</th>
+                  <th className="py-1 pr-2 font-medium">{l('抽取器', 'Extractor')}</th>
                   <th className="py-1 pr-2 font-medium">{l('索引时间', 'Indexed at')}</th>
                 </tr>
               </thead>
@@ -158,6 +162,9 @@ export default function PaperRagPanel({
                     </td>
                     <td className="py-1.5 pr-2 tabular-nums">{entry.indexedChunkCount}/{entry.totalChunkCount}</td>
                     <td className="py-1.5 pr-2" title={entry.embeddingModelKey || undefined}>{shortenModelKey(entry.embeddingModelKey)}</td>
+                    <td className="py-1.5 pr-2" title={entry.extractorVersion || undefined}>
+                      {entry.extractorVersion ? entry.extractorVersion.slice(0, 18) : '—'}
+                    </td>
                     <td className="py-1.5 pr-2">{formatTimestamp(entry.indexedAt)}</td>
                   </tr>
                 ))}
@@ -172,8 +179,8 @@ export default function PaperRagPanel({
 
         {errors.length > 0 ? (
           <div className="space-y-1 rounded-[var(--pq-radius-sm)] border border-[color-mix(in_srgb,var(--pq-danger)_24%,transparent)] bg-[var(--pq-error-bg)] p-2 text-xs text-[var(--pq-danger)]">
-            {errors.map(({ entry, message, coolingDown }) => {
-              const info = classifyRagIndexError(message);
+            {errors.map(({ entry, messages, coolingDown }) => {
+              const info = classifyRagIndexError(messages[0]?.message);
               const hint = ragIndexErrorHint(info.kind, l);
               return (
                 <div key={`${entry.documentKey}:${entry.sourceType}:error`} className="space-y-0.5">
@@ -182,7 +189,12 @@ export default function PaperRagPanel({
                     <span>{sourceLabel(entry.sourceType, l)}</span>
                     <span className="opacity-80">· {ragIndexErrorLabel(info.kind, l)}</span>
                   </div>
-                  {message ? <div className="break-words opacity-90">{message}</div> : null}
+                  {messages.map(({ kind, message }) => (
+                    <div key={kind} className="break-words opacity-90">
+                      {kind === 'rebuild' ? l('重建失败：', 'Rebuild failed: ') : null}
+                      {message}
+                    </div>
+                  ))}
                   {hint ? <div className="opacity-80">{hint}</div> : null}
                   {coolingDown ? (
                     <div className="opacity-80">

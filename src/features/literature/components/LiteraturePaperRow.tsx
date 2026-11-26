@@ -27,6 +27,8 @@ export interface LiteraturePaperRowProps {
   heatmap: PdfReadingHeatmap | null;
   ragStatus: LiteraturePaperRagStatus;
   ragIndexing: boolean;
+  /** 批量索引进行中：禁用单篇写操作，避免两条路径同时写索引。 */
+  ragIndexRunning?: boolean;
   ragIndexAvailable: boolean;
   dropPlacement: 'before' | 'after' | null;
   sortDragging: boolean;
@@ -89,6 +91,7 @@ function LiteraturePaperRowImpl({
   heatmap,
   ragStatus,
   ragIndexing,
+  ragIndexRunning = false,
   ragIndexAvailable,
   dropPlacement,
   sortDragging,
@@ -305,10 +308,12 @@ function LiteraturePaperRowImpl({
                       ragIndexAvailable,
                       mineruParsed,
                       indexing: ragIndexing,
+                      busy: ragIndexRunning,
                     }, l).map((item) => ({
                       id: `rag-${item.id}`,
                       label: item.label,
                       disabled: item.disabled,
+                      hint: item.hint ?? (ragIndexRunning ? l('批量索引进行中', 'Batch indexing is running') : undefined),
                       tone: item.action === 'exclude' ? 'danger' as const : undefined,
                       onSelect: () => {
                         setRagMenu(null);

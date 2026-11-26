@@ -6,8 +6,9 @@ import {
   type MouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from 'react';
-import { Database, Sparkles, Star, Tag, Trash2 } from 'lucide-react';
+import { Database, GitBranch, Sparkles, Star, Tag, Trash2 } from 'lucide-react';
 import { useLocaleText } from '../../i18n/uiLanguage';
+import { emitOpenGraphFocus } from '../../app/appEvents';
 import { listLibraryCitationKeys } from '../../services/library';
 import type { LiteraturePaper, LiteraturePaperTaskState } from '../../types/library';
 import type { QaModelPreset, RagDocumentIndexStatus } from '../../types/reader';
@@ -608,6 +609,15 @@ export default function LiteratureLibraryView({
         },
       },
       {
+        id: 'open-in-graph',
+        label: l('在知识图谱中查看', 'View in Knowledge Graph'),
+        icon: <GitBranch className="h-4 w-4 text-[var(--pq-text-muted)]" strokeWidth={1.9} />,
+        onSelect: () => {
+          setPaperContextMenu(null);
+          emitOpenGraphFocus({ paperId: paper.id });
+        },
+      },
+      {
         id: 'rag-membership',
         label: paper.ragEnabled === false
           ? l('加入本地知识库', 'Include in Local Knowledge Base')
@@ -1018,6 +1028,7 @@ export default function LiteratureLibraryView({
             ragIndexAvailable={ragIndexAvailable}
             ragIndexing={Boolean(selectedPaper && ragIndexingDocumentKey === selectedPaper.id)}
             ragMembershipBusy={batchWorking}
+            ragIndexRunning={ragIndexRunning}
             onRagAction={handlePaperRagAction}
             onSetRagMembership={(paper, enabled) => {
               void batch.applyRagMembership([paper.id], enabled);

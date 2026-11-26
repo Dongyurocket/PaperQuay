@@ -23,6 +23,61 @@ export interface FcoseLayoutOptions {
   tile: boolean;
   nodeDimensionsIncludeLabels: boolean;
   uniformNodeDimensions?: boolean;
+  /** 力参数（B6.5）；worker 会按节点/边类型换算成 fcose 函数。 */
+  forces?: GraphForceSettings;
+}
+
+export interface GraphForceSettings {
+  /** 聚集力 0–1。 */
+  gravity: number;
+  /** 斥力 0–20；10 对应论文节点 40k。 */
+  repulsion: number;
+  /** 连线长度 30–500；默认 180。 */
+  edgeLength: number;
+}
+
+export const DEFAULT_GRAPH_FORCES: GraphForceSettings = {
+  gravity: 0.3,
+  repulsion: 10,
+  edgeLength: 180,
+};
+
+export function normalizeGraphForces(input?: Partial<GraphForceSettings> | null): GraphForceSettings {
+  const number = (value: unknown, fallback: number) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  };
+  return {
+    gravity: Math.max(0, Math.min(1, number(input?.gravity, DEFAULT_GRAPH_FORCES.gravity))),
+    repulsion: Math.max(0, Math.min(20, number(input?.repulsion, DEFAULT_GRAPH_FORCES.repulsion))),
+    edgeLength: Math.max(30, Math.min(500, number(input?.edgeLength, DEFAULT_GRAPH_FORCES.edgeLength))),
+  };
+}
+
+/** 论文节点斥力基准 40k（repulsion=10）；标签/分类锚点 3×，笔记 0.75×。 */
+export function resolveNodeRepulsion(forces: GraphForceSettings, type?: string): number {
+  const base = Math.max(1000, 400 * forces.repulsion * forces.repulsion);
+  if (type === 'tag' || type === 'category') return base * 3;
+  if (type === 'note') return base * 0.75;
+  return base;
+}
+
+/** 语义 110 / 引用 140 / 标签分类 220 的基准比值，随 UI 连线长度缩放。 */
+export function resolveIdealEdgeLength(forces: GraphForceSettings, type?: string): number {
+  const factor = type === 'related_by_embedding'
+    ? 110 / 180
+    : type === 'paper_cites_paper' || type === 'paper_reference'
+      ? 140 / 180
+      : type === 'paper_tag' || type === 'note_tag' || type === 'paper_category'
+        ? 220 / 180
+        : 1;
+  return forces.edgeLength * factor;
+}
+
+export function resolveEdgeElasticity(type?: string): number {
+  if (type === 'paper_tag' || type === 'note_tag' || type === 'paper_category') return 0.08;
+  if (type === 'related_by_embedding') return 0.16;
+  return 0.2;
 }
 
 export interface GraphLayoutNodeInput {
@@ -91,9 +146,10 @@ export interface LayoutBudget {
 export const LAYOUT_BUDGET_TIERS: ReadonlyArray<LayoutBudget & { maxNodes: number }> = [
   { maxNodes: 500, quality: 'proof', numIter: 2500 },
   { maxNodes: 1500, quality: 'default', numIter: 1200 },
-  { maxNodes: 3000, quality: 'draft', numIter: 600 },
-  { maxNodes: 7000, quality: 'draft', numIter: 300 },
-  { maxNodes: Number.POSITIVE_INFINITY, quality: 'draft', numIter: 120 },
+  // 不用 fcose 的 draft：draft + randomize:false 会读取未生成的 spectralResult 并崩溃。
+  { maxNodes: 3000, quality: 'default', numIter: 600 },
+  { maxNodes: 7000, quality: 'default', numIter: 300 },
+  { maxNodes: Number.POSITIVE_INFINITY, quality: 'default', numIter: 120 },
 ];
 
 export function resolveLayoutBudget(nodeCount: number): LayoutBudget {
@@ -107,29 +163,37 @@ export function resolveLayoutBudget(nodeCount: number): LayoutBudget {
 
   // LAYOUT_BUDGET_TIERS ends with Infinity, so this is unreachable; keep a
   // deterministic fallback so a future edit cannot return undefined.
-  return { quality: 'draft', numIter: 120 };
+  return { quality: 'default', numIter: 120 };
 }
 
-export function buildFcoseLayoutOptions(nodeCount: number): FcoseLayoutOptions {
+export function buildFcoseLayoutOptions(
+  nodeCount: number,
+  forcesInput?: Partial<GraphForceSettings> | null,
+  extra: { packComponents?: boolean; incremental?: boolean } = {},
+): FcoseLayoutOptions {
   const budget = resolveLayoutBudget(nodeCount);
+  // 增量刷新只做一次 bounded 的随机化关闭布局，避免每次新增节点都全量重排。
+  const numIter = extra.incremental ? Math.min(budget.numIter, 600) : budget.numIter;
+  const forces = normalizeGraphForces(forcesInput);
 
   return {
     name: 'fcose',
     quality: budget.quality,
-    numIter: budget.numIter,
+    numIter,
     randomize: false,
     // The worker never animates; the main thread applies a preset layout.
     animate: false,
     fit: false,
     padding: 36,
-    nodeRepulsion: 40000,
-    idealEdgeLength: 180,
+    nodeRepulsion: resolveNodeRepulsion(forces, 'paper'),
+    idealEdgeLength: forces.edgeLength,
     edgeElasticity: 0.2,
-    gravity: 0.3,
-    packComponents: true,
-    tile: true,
+    gravity: forces.gravity,
+    packComponents: extra.packComponents !== false,
+    tile: extra.packComponents !== false,
     nodeDimensionsIncludeLabels: true,
     uniformNodeDimensions: false,
+    forces,
   };
 }
 

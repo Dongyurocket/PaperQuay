@@ -32,8 +32,19 @@ export async function getKnowledgeGraph(
   }
 }
 
-export async function listKnowledgeGraphRelations(): Promise<KnowledgeGraphRelation[]> {
+/**
+ * 文献/笔记/RAG 变更后让主进程丢弃图谱快照缓存。
+ * 失败不应阻断 UI 刷新：下一次 knowledge_graph_get 仍会因修订号/TTL 失效。
+ */
+export async function invalidateKnowledgeGraphCache(): Promise<void> {
   try {
+    await invoke('knowledge_graph_invalidate_cache');
+  } catch {
+    // Cache invalidation is best-effort; the revision key still protects correctness.
+  }
+}
+
+export async function listKnowledgeGraphRelations(): Promise<KnowledgeGraphRelation[]> {  try {
     return await invoke<KnowledgeGraphRelation[]>('knowledge_graph_list_relations');
   } catch (error) {
     throw new Error(toErrorMessage(error, '读取知识图谱关系失败'));

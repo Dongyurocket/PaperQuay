@@ -447,6 +447,8 @@ test('library queries apply the RAG status filter to pages, ids and totals', asy
       makeRagFilterPaper('p-ready'),
       makeRagFilterPaper('p-missing'),
       makeRagFilterPaper('p-excluded'),
+      makeRagFilterPaper('p-stale'),
+      makeRagFilterPaper('p-pending'),
     );
     store.save(library);
     store.setPapersRagEnabled(['p-excluded'], false);
@@ -465,6 +467,18 @@ test('library queries apply the RAG status filter to pages, ids and totals', asy
         status: 'ready',
         embeddingModelKey: 'embedding-a',
         extractorVersion: 'mineru-chunks-v3',
+      }, {
+        documentKey: 'p-stale',
+        sourceType: 'mineru-markdown',
+        status: 'ready',
+        embeddingModelKey: 'embedding-a',
+        extractorVersion: 'mineru-chunks-v2',
+      }, {
+        documentKey: 'p-pending',
+        sourceType: 'mineru-markdown',
+        status: 'pending',
+        embeddingModelKey: 'embedding-a',
+        extractorVersion: 'mineru-chunks-v3',
       }],
     };
     const commands = createLibraryCommands({ appPaths, store, ragStore });
@@ -472,6 +486,18 @@ test('library queries apply the RAG status filter to pages, ids and totals', asy
     const ready = await commands.library_query_papers({ request: { ragStatus: 'ready', limit: 10 } });
     assert.deepEqual(ready.papers.map((paper) => paper.id), ['p-ready']);
     assert.equal(ready.total, 1);
+    assert.equal(ready.ragStatusAvailable, true);
+
+    const stale = await commands.library_query_papers({ request: { ragStatus: 'stale', limit: 10 } });
+    assert.deepEqual(stale.papers.map((paper) => paper.id), ['p-stale']);
+    const pending = await commands.library_query_papers({ request: { ragStatus: 'pending', limit: 10 } });
+    assert.deepEqual(pending.papers.map((paper) => paper.id), ['p-pending']);
+
+    const firstPage = await commands.library_query_papers({ request: { ragStatus: 'none', limit: 1, offset: 0 } });
+    const secondPage = await commands.library_query_papers({ request: { ragStatus: 'none', limit: 1, offset: 1 } });
+    assert.equal(firstPage.total, 1);
+    assert.equal(secondPage.total, 1);
+    assert.equal(secondPage.papers.length, 0);
 
     const none = await commands.library_query_papers({ request: { ragStatus: 'none', limit: 10 } });
     assert.deepEqual(none.papers.map((paper) => paper.id), ['p-missing']);
@@ -493,7 +519,10 @@ test('library queries apply the RAG status filter to pages, ids and totals', asy
 
     const noRag = createLibraryCommands({ appPaths, store });
     const withoutRag = await noRag.library_query_papers({ request: { ragStatus: 'none', limit: 10 } });
-    assert.deepEqual(withoutRag.papers.map((paper) => paper.id).sort(), ['p-missing', 'p-ready']);
+    assert.deepEqual(withoutRag.papers.map((paper) => paper.id).sort(), [
+      'p-missing', 'p-pending', 'p-ready', 'p-stale',
+    ]);
+    assert.equal(withoutRag.ragStatusAvailable, false);
     assert.deepEqual(
       await noRag.library_list_paper_ids({ request: { ragStatus: 'ready' } }),
       [],

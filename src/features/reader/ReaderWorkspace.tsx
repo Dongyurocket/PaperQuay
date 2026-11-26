@@ -731,6 +731,7 @@ function ReaderWorkspace(props: ReaderWorkspaceProps) {
     <div className="flex h-full min-h-0 flex-col bg-[var(--pq-bg)]">
       {immersiveVisibility.showHeader ? (
         <ReaderWorkspaceHeader
+          paperId={currentDocument.source === 'native-library' ? currentDocument.itemKey : undefined}
           sourceLabel={sourceLabel}
           documentTitle={currentDocument.title}
           documentCreators={currentDocument.creators}

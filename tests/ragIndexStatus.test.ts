@@ -313,3 +313,24 @@ test('batch targets honor each mode and report why papers were skipped', () => {
     skipped: { unparsed: 0, excluded: 0, ready: 0, pending: 0, other: 0 },
   });
 });
+
+test('aggregate priority is failed > pending > stale > ready regardless of entry order', () => {
+  const failed = makeStatus({ status: 'failed', sourceType: 'mineru-markdown' });
+  const pending = makeStatus({ status: 'pending', sourceType: 'pdf-text' });
+  const staleReady = makeStatus({ status: 'ready', extractorVersion: 'mineru-chunks-v2' });
+  const currentReady = makeStatus({ status: 'ready' });
+
+  for (const [entries, expected] of [
+    [[pending, failed], 'failed'],
+    [[staleReady, failed], 'failed'],
+    [[currentReady, failed], 'failed'],
+    [[staleReady, pending], 'pending'],
+    [[currentReady, staleReady], 'stale'],
+  ] as const) {
+    assert.equal(aggregateRagIndexStatus([...entries]), expected);
+  }
+
+  assert.equal(aggregateRagIndexStatus([currentReady, staleReady]), 'stale');
+  assert.equal(aggregateRagIndexStatus([currentReady, currentReady]), 'ready');
+  assert.equal(aggregateRagIndexStatus([]), 'none');
+});

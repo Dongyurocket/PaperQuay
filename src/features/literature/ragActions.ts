@@ -134,6 +134,11 @@ export function buildRagActionItems(
         hint: context.mineruParsed
           ? undefined
           : l('该文献还没有 MinerU 解析结果。', 'This paper has no parsed MinerU text yet.'),
-      }, exclude];
+      }, ...(context.mineruParsed ? [] : [{
+        id: 'parse-mineru' as const,
+        action: 'parse-mineru' as const,
+        label: l('先运行 MinerU 解析', 'Run MinerU first'),
+        disabled: Boolean(context.busy),
+      }]), exclude];
   }
 }

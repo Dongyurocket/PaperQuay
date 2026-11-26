@@ -128,6 +128,8 @@ export interface LibraryCatalog {
   papersRef: MutableRefObject<LiteraturePaper[]>;
   papersTotal: number;
   setPapersTotal: Dispatch<SetStateAction<number>>;
+  /** null=未按 RAG 状态筛选；false=RAG 库不可用。 */
+  ragStatusAvailable: boolean | null;
   papersLoadingMore: boolean;
   /** 后台刷新（分类/筛选/状态联动），与首次加载的 loading 区分。 */
   papersRefreshing: boolean;
@@ -189,6 +191,7 @@ export function useLibraryCatalog({
   const [papers, setPapers] = useState<LiteraturePaper[]>([]);
   // SQL 分页（P2-1）：papers 是「当前筛选结果」的已加载前缀；papersTotal 是完整匹配数。
   const [papersTotal, setPapersTotal] = useState(0);
+  const [ragStatusAvailable, setRagStatusAvailable] = useState<boolean | null>(null);
   const [papersLoadingMore, setPapersLoadingMore] = useState(false);
   // 首次加载走 loading；后台刷新单独标记，避免把整页骨架屏重新打开。
   const [papersRefreshing, setPapersRefreshing] = useState(false);
@@ -483,6 +486,7 @@ export function useLibraryCatalog({
 
         setPapers(nextPapers);
         setPapersTotal(result.total);
+        setRagStatusAvailable(result.ragStatusAvailable ?? null);
         setSelectedPaperId((current) => resolveRefreshedSelection(
           current,
           nextPapers,
@@ -553,6 +557,7 @@ export function useLibraryCatalog({
 
       if (result.papers.length === 0) {
         setPapersTotal(result.total);
+        setRagStatusAvailable(result.ragStatusAvailable ?? null);
         return;
       }
 
@@ -561,6 +566,7 @@ export function useLibraryCatalog({
         return [...current, ...result.papers.filter((paper) => !seen.has(paper.id))];
       });
       setPapersTotal(result.total);
+      setRagStatusAvailable(result.ragStatusAvailable ?? null);
       // 分页追加的文献同样需要 MinerU 状态；checkedMineruPaperIdsRef 保证不重复检查。
       void refreshMineruStatusesForPapers(result.papers);
     } finally {
@@ -693,6 +699,7 @@ export function useLibraryCatalog({
         setSelectedCategoryId(initialCategoryId);
         setPapers(initialPage.papers);
         setPapersTotal(initialPage.total);
+        setRagStatusAvailable(initialPage.ragStatusAvailable ?? null);
         setSelectedPaperId(resolveSelectedPaperId(null, initialPage.papers));
         setStatusMessage(l('文献库已就绪', 'Library is ready'));
         allPapersSnapshotRef.current = [];
@@ -958,6 +965,7 @@ export function useLibraryCatalog({
     papersRef,
     papersTotal,
     setPapersTotal,
+    ragStatusAvailable,
     papersLoadingMore,
     papersRefreshing,
     paperStatuses,

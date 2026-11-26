@@ -289,6 +289,8 @@ export interface QueryPapersResult {
   total: number;
   offset: number;
   limit: number;
+  /** null=未按 RAG 状态筛选；false=RAG 库不可用，筛选结果按空/全部降级。 */
+  ragStatusAvailable?: boolean | null;
 }
 
 export interface CreateCategoryRequest {

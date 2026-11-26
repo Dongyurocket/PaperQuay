@@ -1,7 +1,7 @@
 # 文献级 RAG 索引管理与知识图谱显示优化计划
 
 - 日期：2026-11-25
-- 状态：**已确认并实施第一批（A0–A3、B1–B4）**；D1–D6 按建议执行，实施记录见 [2026-11-26 change record](../changes/2026-11-26-library-rag-status-and-graph-semantic-edges.md)
+- 状态：**已完整实施 A0–A6 与 B4–B8（2026-11-26）**；D1–D6 按建议执行（D6：高级引用模式另立计划）。实施记录见 [第一批](../changes/2026-11-26-library-rag-status-and-graph-semantic-edges.md) 与 [第二批](../changes/2026-11-26-graph-view-modes-scale-and-rag-closeout.md)。Electron 实机验收项仍需在应用内逐项执行。
 - 代码基线：`main` `c197e32`（0.4.40）
 - 关联：
   - [2026-10-26 文献级 RAG 索引开关](2026-10-26-paper-rag-index-opt-out.md)（成员开关、门禁、清理）
@@ -630,6 +630,8 @@ interface GraphQuality {
 - PASS：pan/zoom p95 帧时间 ≤33ms（≥30fps），首帧 <2s，完整布局 <3s；
 - TUNE：33–66ms，继续调布局/边预算；
 - MIGRATE：仍 >66ms，且产品需要 combo 折叠/lasso/minimap 等 G6 能力，再评估 G6 v5；Sigma v4 作为 WebGL 备选。迁移前不并行动手。
+
+**实施结果（2026-11-26）**：5,000 节点/25,000 边 headless fcose fixture 实测约 389s（本机 Node 24），判定 MIGRATE；因此未迁移渲染栈，而是在 UI 层增加保护：超过 1,200 节点且未聚合时使用确定性网格布局并提示开启聚合，避免力导向阻塞工作区。Electron 实机的 pan/zoom p95 仍待测量。
 
 ## B9. G6：可选高级模式（另立计划）
 

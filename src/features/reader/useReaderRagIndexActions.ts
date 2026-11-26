@@ -4,6 +4,7 @@ import { flattenMineruPages, parseMineruPages } from '../../services/mineru';
 import { buildRagEmbeddingModelKey, ragListIndexStatuses } from '../../services/rag';
 import { isRagAuthOrBillingError } from '../../services/ragIndexError';
 import {
+  resolveRagBatchForce,
   aggregateRagIndexStatus,
   groupRagIndexStatuses,
   RAG_INDEX_STATUS_UPDATED_EVENT,
@@ -87,6 +88,8 @@ export function useReaderRagIndexActions({
     useState<BatchProgressState>(EMPTY_BATCH_PROGRESS);
 
   const runningRef = useRef(false);
+  // 单篇索引锁：批量与单篇、两次单篇点击都不允许同时写同一篇索引。
+  const paperIndexRunningRef = useRef(false);
   const pausedRef = useRef(false);
   const cancelRequestedRef = useRef(false);
   // 自动重试的本会话计数与上次自动批次时间；不写入数据库，重启后重新计数。
@@ -312,6 +315,12 @@ export function useReaderRagIndexActions({
       if (runningRef.current) {
         return;
       }
+      if (paperIndexRunningRef.current) {
+        setStatusMessage(
+          l('单篇索引正在进行，请等待完成后再启动批量任务。', 'A single-paper index is running; wait before starting a batch.'),
+        );
+        return;
+      }
 
       if (!ragIndexAvailable) {
         setStatusMessage(
@@ -324,7 +333,7 @@ export function useReaderRagIndexActions({
       }
 
       const mode = options.mode ?? 'all-legacy';
-      const force = options.force ?? true;
+      const force = resolveRagBatchForce(options.reason, options.force);
       if (options.reason !== 'auto') {
         // 用户主动重试/建立索引后，给自动重试一次全新的计数。
         autoRetryAttemptsRef.current.clear();
@@ -484,6 +493,13 @@ export function useReaderRagIndexActions({
 
   const handleIndexPaperRag = useCallback(
     async (documentKey: string) => {
+      if (runningRef.current || paperIndexRunningRef.current) {
+        setStatusMessage(
+          l('已有索引任务进行中，请等待完成。', 'Another indexing task is running; wait for it to finish.'),
+        );
+        return;
+      }
+
       if (!ragIndexAvailable) {
         setStatusMessage(
           l(
@@ -521,6 +537,7 @@ export function useReaderRagIndexActions({
         return;
       }
 
+      paperIndexRunningRef.current = true;
       setRagIndexingDocumentKey(documentKey);
       setStatusMessage(l(`正在为《${entry.title}》建立 RAG 索引…`, `Indexing "${entry.title}"…`));
       autoRetryAttemptsRef.current.delete(documentKey);
@@ -560,6 +577,7 @@ export function useReaderRagIndexActions({
           ),
         );
       } finally {
+        paperIndexRunningRef.current = false;
         setRagIndexingDocumentKey('');
         await refreshRagIndexStatuses();
       }
@@ -666,6 +684,7 @@ export function useReaderRagIndexActions({
     return () => clearInterval(timer);
   }, [
     ragIndexAvailable,
+    embeddingApiKey,
     settings.embeddingBaseUrl,
     settings.embeddingDimensions,
     settings.embeddingModel,

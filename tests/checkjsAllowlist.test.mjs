@@ -28,6 +28,7 @@ const REQUIRED_CHECKJS = [
   'electron/backend/desktopRunMarker.cjs',
   'electron/backend/externalWriteMarker.cjs',
   'electron/backend/externalWriteWatch.cjs',
+  'electron/backend/graphSnapshotCache.cjs',
   'electron/backend/legacyBackupCleanup.cjs',
   'electron/backend/libraryAttachmentAvailability.cjs',
   'electron/backend/libraryRagStatusFilter.cjs',

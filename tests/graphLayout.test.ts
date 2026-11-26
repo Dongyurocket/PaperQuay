@@ -51,12 +51,12 @@ test('layout budget keeps proof/2500 for small graphs and scales down iterations
   assert.deepEqual(resolveLayoutBudget(500), { quality: 'proof', numIter: 2500 });
   assert.deepEqual(resolveLayoutBudget(501), { quality: 'default', numIter: 1200 });
   assert.deepEqual(resolveLayoutBudget(1500), { quality: 'default', numIter: 1200 });
-  assert.deepEqual(resolveLayoutBudget(1501), { quality: 'draft', numIter: 600 });
-  assert.deepEqual(resolveLayoutBudget(3000), { quality: 'draft', numIter: 600 });
-  assert.deepEqual(resolveLayoutBudget(3001), { quality: 'draft', numIter: 300 });
-  assert.deepEqual(resolveLayoutBudget(7000), { quality: 'draft', numIter: 300 });
-  assert.deepEqual(resolveLayoutBudget(7001), { quality: 'draft', numIter: 120 });
-  assert.deepEqual(resolveLayoutBudget(10000), { quality: 'draft', numIter: 120 });
+  assert.deepEqual(resolveLayoutBudget(1501), { quality: 'default', numIter: 600 });
+  assert.deepEqual(resolveLayoutBudget(3000), { quality: 'default', numIter: 600 });
+  assert.deepEqual(resolveLayoutBudget(3001), { quality: 'default', numIter: 300 });
+  assert.deepEqual(resolveLayoutBudget(7000), { quality: 'default', numIter: 300 });
+  assert.deepEqual(resolveLayoutBudget(7001), { quality: 'default', numIter: 120 });
+  assert.deepEqual(resolveLayoutBudget(10000), { quality: 'default', numIter: 120 });
 
   // Deterministic and monotonically cheaper as the graph grows.
   let previous = Number.POSITIVE_INFINITY;
@@ -87,7 +87,7 @@ test('fcose options are headless-safe and keep the historical layout parameters'
   assert.equal(small.uniformNodeDimensions, false);
 
   const large = buildFcoseLayoutOptions(10000);
-  assert.equal(large.quality, 'draft');
+  assert.equal(large.quality, 'default');
   assert.equal(large.numIter, 120);
 });
 
@@ -418,4 +418,69 @@ test('disconnected layout components are shelf-packed without overlap', () => {
 
   const single = packDisconnectedComponents([{ id: 'a' }], [], [{ id: 'a', x: 4, y: 5 }]);
   assert.deepEqual(single, [{ id: 'a', x: 4, y: 5 }]);
+});
+
+test('force settings clamp and map to per-type fcose inputs', async () => {
+  const {
+    DEFAULT_GRAPH_FORCES,
+    normalizeGraphForces,
+    resolveIdealEdgeLength,
+    resolveNodeRepulsion,
+    resolveEdgeElasticity,
+  } = await import('../src/features/graph/graphLayoutMessages.ts');
+
+  assert.deepEqual(normalizeGraphForces({ gravity: 9, repulsion: -1, edgeLength: 1000 }), {
+    gravity: 1,
+    repulsion: 0,
+    edgeLength: 500,
+  });
+  assert.deepEqual(normalizeGraphForces(null), DEFAULT_GRAPH_FORCES);
+
+  assert.equal(resolveNodeRepulsion(DEFAULT_GRAPH_FORCES, 'paper'), 40000);
+  assert.equal(resolveNodeRepulsion(DEFAULT_GRAPH_FORCES, 'tag'), 120000);
+  assert.equal(resolveNodeRepulsion(DEFAULT_GRAPH_FORCES, 'category'), 120000);
+  assert.equal(resolveNodeRepulsion(DEFAULT_GRAPH_FORCES, 'note'), 30000);
+  assert.ok(Math.abs(resolveIdealEdgeLength(DEFAULT_GRAPH_FORCES, 'related_by_embedding') - 110) < 1e-9);
+  assert.ok(Math.abs(resolveIdealEdgeLength(DEFAULT_GRAPH_FORCES, 'paper_cites_paper') - 140) < 1e-9);
+  assert.ok(Math.abs(resolveIdealEdgeLength(DEFAULT_GRAPH_FORCES, 'paper_category') - 220) < 1e-9);
+  assert.ok(Math.abs(resolveIdealEdgeLength(DEFAULT_GRAPH_FORCES, 'note_paper') - 180) < 1e-9);
+  assert.equal(resolveEdgeElasticity('paper_category'), 0.08);
+  assert.equal(resolveEdgeElasticity('related_by_embedding'), 0.16);
+});
+
+test('incremental layouts cap iterations and can skip component packing', () => {
+  const incremental = buildFcoseLayoutOptions(10000, null, { incremental: true, packComponents: false });
+  assert.equal(incremental.numIter, 120);
+  assert.equal(incremental.packComponents, false);
+  assert.equal(incremental.tile, false);
+
+  const normal = buildFcoseLayoutOptions(10000);
+  assert.equal(normal.numIter, 120);
+  const medium = buildFcoseLayoutOptions(2000, null, { incremental: true });
+  assert.equal(medium.numIter, 600);
+});
+
+test('layout requests preserve node type/size/degree and edge type/weight', async () => {
+  const worker = createFakeWorker();
+  const client = createGraphLayoutClient({
+    createWorker: () => worker as unknown as LayoutWorkerLike,
+    runFallback: () => [],
+  });
+
+  void client.requestLayout(
+    [{ id: 'paper:a', type: 'paper', size: 42, degree: 7, x: 1, y: 2 }],
+    [{ source: 'paper:a', target: 'paper:b', type: 'related_by_embedding', weight: 0.8 }],
+    { forces: { gravity: 0.4, repulsion: 12, edgeLength: 200 }, packComponents: false, incremental: true },
+  );
+
+  const [message] = worker.messages as Array<{ request: GraphLayoutRequestPayload }>;
+  assert.deepEqual(message.request.nodes[0], {
+    id: 'paper:a', type: 'paper', size: 42, degree: 7, x: 1, y: 2,
+  });
+  assert.deepEqual(message.request.edges[0], {
+    source: 'paper:a', target: 'paper:b', type: 'related_by_embedding', weight: 0.8,
+  });
+  assert.equal(message.request.options.forces?.repulsion, 12);
+  assert.equal(message.request.options.packComponents, false);
+  assert.equal(message.request.options.numIter, 600);
 });

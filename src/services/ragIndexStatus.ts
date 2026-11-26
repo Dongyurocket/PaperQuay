@@ -226,3 +226,15 @@ export function summarizeRagIndexOverview(input: {
 
   return overview;
 }
+
+/**
+ * 批量索引是否绕过失败冷却：手动路径默认 true；自动重试默认 false，
+ * 保留数据库 cooldown 与内存失败缓存。
+ */
+export function resolveRagBatchForce(
+  reason: 'manual' | 'auto' | undefined,
+  explicit: boolean | undefined,
+): boolean {
+  if (typeof explicit === 'boolean') return explicit;
+  return reason !== 'auto';
+}

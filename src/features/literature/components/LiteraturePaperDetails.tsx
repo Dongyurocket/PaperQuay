@@ -63,6 +63,8 @@ interface LiteraturePaperDetailsProps {
   ragIndexAvailable?: boolean;
   ragIndexing?: boolean;
   ragMembershipBusy?: boolean;
+  /** 批量 RAG 索引运行中。 */
+  ragIndexRunning?: boolean;
   onRagAction?: (paper: LiteraturePaper, action: RagPaperAction) => void;
   onSetRagMembership?: (paper: LiteraturePaper, enabled: boolean) => void;
   onIndexPaperRag?: (paper: LiteraturePaper) => void;
@@ -207,6 +209,7 @@ export default function LiteraturePaperDetails({
   ragIndexAvailable = false,
   ragIndexing = false,
   ragMembershipBusy = false,
+  ragIndexRunning = false,
   onRagAction,
   onSetRagMembership,
   onIndexPaperRag,
@@ -549,6 +552,7 @@ export default function LiteraturePaperDetails({
             actionState={actionState}
             paperStatus={paperStatus}
             ragStatus={ragStatus}
+            ragIndexRunning={ragIndexRunning}
             storageDir={storageDir}
             onOpenPaper={onOpenPaper}
             onRunMineruParse={onRunMineruParse}
@@ -568,7 +572,7 @@ export default function LiteraturePaperDetails({
             entries={ragStatusEntries}
             ragIndexAvailable={ragIndexAvailable}
             indexing={ragIndexing}
-            busy={ragMembershipBusy || actionState?.status === 'running'}
+            busy={ragMembershipBusy || ragIndexRunning || actionState?.status === 'running'}
             mineruParsed={Boolean(paperStatus?.mineruParsed)}
             onAction={(action) => onRagAction?.(paper, action)}
           />

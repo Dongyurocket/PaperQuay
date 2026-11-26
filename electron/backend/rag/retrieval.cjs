@@ -419,22 +419,25 @@ function listMutualKnnEdges(geometry, request = {}) {
   }
 
   // 互近邻可能产生多个分量；把每个分量接到文档 0 所在分量上，避免 O(c·n²) 的反复全扫。
-  let anchorRoot = union.find(0);
-  for (let index = 0; index < size; index += 1) {
-    if (union.find(index) === anchorRoot) continue;
+  // embeddingBridge=false 时保留分量（用于观察真实主题隔离），但默认开启。
+  if (request.bridge !== false) {
+    let anchorRoot = union.find(0);
+    for (let index = 0; index < size; index += 1) {
+      if (union.find(index) === anchorRoot) continue;
 
-    let best = null;
-    for (let other = 0; other < size; other += 1) {
-      if (union.find(other) !== anchorRoot) continue;
-      const similarity = dotProduct(documents[index].vector, documents[other].vector);
-      if (!best || similarity > best.similarity) {
-        best = { index: other, similarity };
+      let best = null;
+      for (let other = 0; other < size; other += 1) {
+        if (union.find(other) !== anchorRoot) continue;
+        const similarity = dotProduct(documents[index].vector, documents[other].vector);
+        if (!best || similarity > best.similarity) {
+          best = { index: other, similarity };
+        }
       }
-    }
 
-    if (best) {
-      addEdge(index, best.index, best.similarity, 0);
-      anchorRoot = union.find(anchorRoot);
+      if (best) {
+        addEdge(index, best.index, best.similarity, 0);
+        anchorRoot = union.find(anchorRoot);
+      }
     }
   }
 

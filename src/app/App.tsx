@@ -19,6 +19,7 @@ import {
   emitOpenPreferences,
   emitOpenStandalonePdf,
   JUMP_TO_NOTE_ANCHOR_EVENT,
+  OPEN_GRAPH_FOCUS_EVENT,
   OPEN_LIBRARY_PAPER_EVENT,
   UI_LANGUAGE_CHANGED_EVENT,
 } from './appEvents';
@@ -209,6 +210,13 @@ function App() {
   }, []);
 
   useEffect(() => startExternalWriteBridge(), []);
+
+  // “在图中查看”：切换图谱工作区；图谱自身监听同一事件并设置局部中心。
+  useEffect(() => {
+    const handle = () => openGraphTab();
+    window.addEventListener(OPEN_GRAPH_FOCUS_EVENT, handle);
+    return () => window.removeEventListener(OPEN_GRAPH_FOCUS_EVENT, handle);
+  }, [openGraphTab]);
 
   useEffect(() => {
     applyDocumentLanguage(uiLanguage);

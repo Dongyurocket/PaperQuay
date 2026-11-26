@@ -53,6 +53,8 @@ const RENDERER_ALLOWED_COMMANDS = new Set([
   'knowledge_graph_create_relation',
   'knowledge_graph_delete_relation',
   'knowledge_graph_get',
+  'knowledge_graph_invalidate_cache',
+  'knowledge_graph_cache_stats',
   'knowledge_graph_list_relations',
   'knowledge_graph_update_relation',
   'library_add_attachment',

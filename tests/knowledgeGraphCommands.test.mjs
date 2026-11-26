@@ -441,3 +441,57 @@ test('concurrent relation writes stay atomic and readable', async () => {
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test('snapshot cache returns the same revision until explicitly invalidated', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'paperquay-graph-cache-'));
+  try {
+    const context = createContext();
+    context.appPaths.dataDir = dir;
+    const commands = createKnowledgeGraphCommands(context);
+
+    const first = await commands.knowledge_graph_get({ request: { includeTags: false } });
+    const second = await commands.knowledge_graph_get({ request: { includeTags: false } });
+    assert.equal(second, first, 'identical request and revision must hit the cache');
+
+    const stats = commands.knowledge_graph_cache_stats();
+    assert.equal(stats.hits, 1);
+    assert.equal(stats.misses, 1);
+
+    commands.knowledge_graph_invalidate_cache();
+    const third = await commands.knowledge_graph_get({ request: { includeTags: false } });
+    assert.notEqual(third, first, 'invalidation must force a rebuild');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('paper nodes carry tags, category names, reading progress and RAG status', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'paperquay-graph-fields-'));
+  try {
+    const context = createContext();
+    context.appPaths.dataDir = dir;
+    context.ragStore.listIndexStatuses = () => [{
+      documentKey: 'paper-1',
+      sourceType: 'mineru-markdown',
+      status: 'ready',
+      embeddingModelKey: 'embedding-a',
+      extractorVersion: 'mineru-chunks-v3',
+    }];
+    const snapshot = await createKnowledgeGraphSnapshot(context, {});
+    const paper = snapshot.nodes.find((node) => node.id === 'paper:paper-1');
+    assert.ok(paper);
+    assert.deepEqual(paper.tags, ['RAG']);
+    assert.deepEqual(paper.categoryNames, ['Reading Systems']);
+    assert.equal(paper.primaryCategoryId, 'cat-1');
+    assert.equal(paper.readingProgress, 0.5);
+    assert.equal(paper.ragStatus, 'ready');
+    assert.ok(Number.isFinite(paper.degree));
+    assert.ok(snapshot.metadata.graphQuality.annotationEdgesExcluded);
+    assert.ok(snapshot.metadata.graphQuality.contentNodeCount <= snapshot.nodes.length);
+    const semantic = snapshot.edges.find((edge) => edge.type === 'related_by_embedding');
+    assert.ok(semantic);
+    assert.ok(Number.isFinite(semantic.similarity));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

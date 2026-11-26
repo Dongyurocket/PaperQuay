@@ -219,7 +219,7 @@ test('the note-component kicker keeps >=4.5:1 against its composited accent back
 
 
 test('graph node labels use opaque 6-digit hex with >=4.5:1 in both themes', () => {
-  const source = readFileSync(path.resolve('src/features/graph/KnowledgeGraphWorkspace.tsx'), 'utf8');
+  const source = readFileSync(path.resolve('src/features/graph/graphStyles.ts'), 'utf8');
   const match = source.match(/GRAPH_TEXT_COLORS\s*=\s*\{\s*light:\s*'(#[0-9a-f]{6})',\s*dark:\s*'(#[0-9a-f]{6})',\s*\}/i);
   assert.ok(match, 'graph label colors must be a light/dark 6-digit hex pair');
   const [, light, dark] = match;

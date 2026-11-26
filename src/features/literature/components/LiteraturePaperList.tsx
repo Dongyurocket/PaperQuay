@@ -99,6 +99,10 @@ interface LiteraturePaperListProps {
   filters: LibraryFilterState;
   onFiltersChange: (filters: LibraryFilterState) => void;
   ragStatusDisabled?: boolean;
+  /** RAG 索引库不可用：保留筛选控件但提示结果降级。 */
+  ragStatusUnavailable?: boolean;
+  /** 批量 RAG 索引运行中。 */
+  ragIndexRunning?: boolean;
   tags: LibraryTagCount[];
   libraryTotal: number;
   sortBy: LiteraturePaperListSortBy;
@@ -158,6 +162,8 @@ export default function LiteraturePaperList({
   filters,
   onFiltersChange,
   ragStatusDisabled = false,
+  ragStatusUnavailable = false,
+  ragIndexRunning = false,
   tags,
   libraryTotal,
   sortBy,
@@ -689,6 +695,7 @@ export default function LiteraturePaperList({
         heatmap={heatmapsByPaperId[paper.id] ?? null}
         ragStatus={ragStatus}
         ragIndexing={indexingRag}
+        ragIndexRunning={ragIndexRunning}
         ragIndexAvailable={ragIndexAvailable}
         dropPlacement={dropIndicator?.paperId === paper.id ? dropIndicator.placement : null}
         sortDragging={sortDraggingPaperId === paper.id}
@@ -740,6 +747,7 @@ export default function LiteraturePaperList({
     paperStatuses,
     ragBadgeByDocumentKey,
     ragIndexAvailable,
+    ragIndexRunning,
     ragIndexingDocumentKey,
     resetCategoryDrag,
     resetSortDrag,
@@ -770,7 +778,7 @@ export default function LiteraturePaperList({
         working={working} refreshing={refreshing} total={resolvedTotal} libraryTotal={libraryTotal}
         selectAllState={selectAllState} onToggleSelectAll={onToggleSelectAll}
         search={searchQuery} onSearch={onSearchQueryChange}
-        filters={filters} onFilters={onFiltersChange} tags={tags} ragStatusDisabled={ragStatusDisabled}
+        filters={filters} onFilters={onFiltersChange} tags={tags} ragStatusDisabled={ragStatusDisabled} ragStatusUnavailable={ragStatusUnavailable}
         sortBy={sortBy} sortDirection={sortDirection} onSort={onSortChange}
         titleMode={titleDisplayMode} onTitleMode={onTitleDisplayModeChange}
         showHeatmap={showReadingHeatmap} onHeatmap={setShowReadingHeatmap}

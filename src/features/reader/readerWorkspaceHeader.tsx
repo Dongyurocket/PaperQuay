@@ -7,6 +7,7 @@ import {
   Columns2,
   FileJson,
   FileText,
+  GitBranch,
   Info,
   Languages,
   Loader2,
@@ -19,6 +20,7 @@ import {
 import { useLocaleText } from '../../i18n/uiLanguage';
 import { formatShortcut } from '../../ui/commands';
 import { Menu, type MenuEntry } from '../../ui/menu';
+import { emitOpenGraphFocus } from '../../app/appEvents';
 import type { ReaderViewMode, WorkspaceStage } from '../../types/reader';
 import { cn } from '../../utils/cn';
 import { READER_IMMERSIVE_SHORTCUT } from './readerImmersive';
@@ -29,6 +31,8 @@ interface PdfOption {
   title?: string;
 }
 export interface ReaderWorkspaceHeaderProps {
+  /** 当前文献在本地文库中的 id；独立 PDF 为空。 */
+  paperId?: string;
   sourceLabel: string;
   documentTitle: string;
   documentCreators: string;
@@ -181,6 +185,7 @@ function HeaderPdfVersionControl({
 }
 
 function HeaderToolsMenu({
+  paperId,
   loading,
   translating,
   translationCancelling,
@@ -192,6 +197,7 @@ function HeaderToolsMenu({
   onOpenPreferences,
 }: Pick<
   ReaderWorkspaceHeaderProps,
+  | 'paperId'
   | 'loading'
   | 'translating'
   | 'translationCancelling'
@@ -205,6 +211,15 @@ function HeaderToolsMenu({
   const l = useLocaleText();
   const [menu, setMenu] = useState<{ x: number; y: number; anchor: HTMLButtonElement } | null>(null);
   const entries: MenuEntry[] = [
+    {
+      id: 'open-in-graph',
+      label: l('在知识图谱中查看', 'View in Knowledge Graph'),
+      icon: <GitBranch className="h-4 w-4" strokeWidth={1.8} />,
+      disabled: !paperId,
+      onSelect: () => {
+        if (paperId) emitOpenGraphFocus({ paperId });
+      },
+    },
     {
       id: 'open-json',
       label: l('打开 JSON', 'Open JSON'),
@@ -275,6 +290,7 @@ function HeaderToolsMenu({
 }
 
 export function ReaderWorkspaceHeader({
+  paperId,
   sourceLabel,
   documentTitle,
   documentCreators,
@@ -373,6 +389,7 @@ export function ReaderWorkspaceHeader({
             </button>
           ) : null}
           <HeaderToolsMenu
+        paperId={paperId}
             loading={loading}
             translating={translating}
             translationCancelling={translationCancelling}

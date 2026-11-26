@@ -15,6 +15,8 @@ interface PaperDetailsStatusBarProps {
   actionState: LiteraturePaperTaskState | null;
   paperStatus?: LiteraturePaperListStatus;
   ragStatus: LiteraturePaperRagStatus;
+  /** 批量 RAG 索引运行中。 */
+  ragIndexRunning?: boolean;
   storageDir?: string | null;
   onOpenPaper: (paper: LiteraturePaper) => void;
   onRunMineruParse?: (paper: LiteraturePaper) => void;
@@ -80,6 +82,7 @@ export default function PaperDetailsStatusBar({
   actionState,
   paperStatus,
   ragStatus,
+  ragIndexRunning = false,
   storageDir,
   onOpenPaper,
   onRunMineruParse,
@@ -100,6 +103,7 @@ export default function PaperDetailsStatusBar({
   const translationTask = task('translation');
   const overviewTask = task('overview');
   const anyTaskRunning = actionState?.status === 'running';
+  const ragBusy = anyTaskRunning || ragIndexRunning;
 
   const showMenu = (anchor: HTMLButtonElement, entries: MenuEntry[]) => {
     const rect = anchor.getBoundingClientRect();
@@ -135,7 +139,7 @@ export default function PaperDetailsStatusBar({
       id: 'toggle-rag',
       label: paper.ragEnabled === false ? l('加入知识库', 'Include in Knowledge Base') : l('移出知识库', 'Exclude from Knowledge Base'),
       icon: <Database className="h-4 w-4" />,
-      disabled: !onSetRagMembership || anyTaskRunning,
+      disabled: !onSetRagMembership || ragBusy,
       onSelect: () => onSetRagMembership?.(paper, paper.ragEnabled === false),
     },
     ...(paper.ragEnabled === false || !onIndexPaperRag ? [] : [{
@@ -148,7 +152,7 @@ export default function PaperDetailsStatusBar({
             ? l('建立索引', 'Build Index')
             : l('重建索引', 'Rebuild Index'),
       icon: <RefreshCw className="h-4 w-4" />,
-      disabled: anyTaskRunning,
+      disabled: ragBusy,
       onSelect: () => onIndexPaperRag(paper),
     }]),
     { id: 'rag-view', label: l('查看文献', 'Open Paper'), icon: <BookOpenText className="h-4 w-4" />, onSelect: () => onOpenPaper(paper) },
@@ -184,7 +188,7 @@ export default function PaperDetailsStatusBar({
   return (
     <div className="rounded-[var(--pq-radius-sm)] border border-[var(--pq-border)] bg-[var(--pq-surface-1)] p-2.5">
       <div className="flex flex-wrap items-center gap-1.5">
-        <StatusChip label={ragStatusLabel(ragStatus, l)} done={ragDone} error={ragStatus === 'failed'} disabled={anyTaskRunning && !ragDone} icon={<Database className="h-3.5 w-3.5" />} onClick={(button) => showMenu(button, ragEntries)} />
+        <StatusChip label={ragStatusLabel(ragStatus, l)} done={ragDone} error={ragStatus === 'failed'} disabled={ragBusy && !ragDone} icon={<Database className="h-3.5 w-3.5" />} onClick={(button) => showMenu(button, ragEntries)} />
         <StatusChip label="MinerU" done={mineruDone} running={mineruTask?.status === 'running'} error={mineruTask?.status === 'error'} disabled={!mineruDone && (anyTaskRunning || !onRunMineruParse)} icon={<Sparkles className="h-3.5 w-3.5" />} onClick={(button) => runOrMenu(button, mineruDone, mineruTask?.status === 'running', onRunMineruParse ? () => onRunMineruParse(paper) : undefined, 'MinerU')} />
         <StatusChip label={l('全文翻译', 'Translation')} done={translationDone} running={translationTask?.status === 'running'} error={translationTask?.status === 'error'} disabled={!translationDone && (anyTaskRunning || !onTranslatePaper)} icon={<Languages className="h-3.5 w-3.5" />} onClick={(button) => runOrMenu(button, translationDone, translationTask?.status === 'running', onTranslatePaper ? () => onTranslatePaper(paper) : undefined, l('全文翻译', 'translation'))} />
         <StatusChip label={l('AI 概览', 'AI Overview')} done={overviewDone} running={overviewTask?.status === 'running'} error={overviewTask?.status === 'error'} disabled={!overviewDone && (anyTaskRunning || !onGenerateSummary)} icon={<FileText className="h-3.5 w-3.5" />} onClick={(button) => runOrMenu(button, overviewDone, overviewTask?.status === 'running', onGenerateSummary ? () => onGenerateSummary(paper) : undefined, l('概览', 'Overview'))} />

@@ -3,6 +3,7 @@
 // pays for them when the worker path is unavailable.
 
 import {
+  packDisconnectedComponents,
   type GraphLayoutPosition,
   type GraphLayoutRequestPayload,
 } from './graphLayoutMessages.ts';
@@ -18,26 +19,39 @@ export async function runMainThreadGraphLayout(
   cytoscape.use(fcose);
 
   const elements = [
-    ...request.nodes.map((node) => ({ data: { id: node.id } })),
+    ...request.nodes.map((node) => ({
+      data: {
+        id: node.id,
+        type: node.type ?? '',
+        size: Number(node.size) || 28,
+        degree: Number(node.degree) || 0,
+      },
+      style: { width: Number(node.size) || 28, height: Number(node.size) || 28 },
+    })),
     ...request.edges.map((edge, index) => ({
       data: {
         id: `layout-edge-${index}`,
         source: edge.source,
         target: edge.target,
+        type: edge.type ?? '',
+        weight: Number(edge.weight) || 0,
       },
     })),
   ];
-  const cy = cytoscape({ headless: true, elements, styleEnabled: false });
+  const cy = cytoscape({ headless: true, elements, styleEnabled: true });
 
   try {
     const layout = cy.layout(request.options as unknown as cytoscape.LayoutOptions);
     layout.run();
 
-    return cy.nodes().map((node) => ({
+    const positions = cy.nodes().map((node) => ({
       id: node.id(),
       x: node.position('x'),
       y: node.position('y'),
     }));
+    return request.options.packComponents === false
+      ? positions
+      : packDisconnectedComponents(request.nodes, request.edges, positions);
   } finally {
     cy.destroy();
   }

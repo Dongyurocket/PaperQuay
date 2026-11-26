@@ -93,7 +93,7 @@
 
 1. 应用首次启动会触发一次 `rag_document_vectors` 迁移与有界回填；回填完成前图谱的语义覆盖会暂时偏低，需在真实应用内确认空闲回填速度。
 2. 图谱 UI（inspector、图例、hover、位置恢复）尚未在 Electron 实机逐项验收；本轮只完成构建、自动化测试与数据层副本测量。
-3. B5 的边预算/LOD/快照缓存/WebGL 开关、B6 的 Prior/Derivative/Timeline/Connect 高级模式未实施。
+3. B5 的边预算/LOD/快照缓存/WebGL 开关已在同日第二批补齐（见 [图谱视图模式与规模性能](./2026-11-26-graph-view-modes-scale-and-rag-closeout.md)）；B6 的 Prior/Derivative/Timeline/Connect 高级模式按 D6 另立计划。
 4. 文献库筛选与设置页统计口径不同（前者全部已加入文献，后者 MinerU 已解析集合），需要在用户手册写清。
 
 ## 回退

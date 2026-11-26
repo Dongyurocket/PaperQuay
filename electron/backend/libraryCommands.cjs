@@ -230,17 +230,22 @@ function createLibraryCommands(context) {
 
   /** 只在实际带了 ragStatus 时读 RAG 库；普通列表查询不受影响。 */
   const withRagStatusFilter = async (request) => {
-    if (!request || request.ragStatus == null) return request;
+    if (!request || request.ragStatus == null) {
+      return { request, ragStatusAvailable: null };
+    }
     const snapshot = typeof store.listRagStatusSnapshot === 'function'
       ? store.listRagStatusSnapshot()
       : [];
     const statuses = await readRagStatuses();
-    return applyRagStatusFilter(request, {
-      papers: snapshot,
-      statuses,
-      ragAvailable: statuses !== null,
-      embeddingModelKey: resolveRagEmbeddingModelKey(),
-    });
+    return {
+      request: applyRagStatusFilter(request, {
+        papers: snapshot,
+        statuses,
+        ragAvailable: statuses !== null,
+        embeddingModelKey: resolveRagEmbeddingModelKey(),
+      }),
+      ragStatusAvailable: statuses !== null,
+    };
   };
 
   /**
@@ -393,7 +398,8 @@ function createLibraryCommands(context) {
 
     async library_list_papers({ request = {} }) {
       const library = store.load();
-      const resolved = await resolvePaperRequest(await withRagStatusFilter(request), library);
+      const filtered = await withRagStatusFilter(request);
+      const resolved = await resolvePaperRequest(filtered.request, library);
       const limit = Math.max(1, Math.min(5000, resolved.request.limit ?? 300));
       return resolved.applyToPapers(sortPapers(library.papers.filter((paper) => paperMatches(paper, resolved.request, library)), resolved.request).slice(0, limit));
     },
@@ -403,9 +409,15 @@ function createLibraryCommands(context) {
      * { papers, total, offset, limit }；total 为当前筛选的完整匹配数，不受分页限制。
      */
     async library_query_papers({ request = {} }) {
-      const resolved = await resolvePaperRequest(await withRagStatusFilter(request));
+      const filtered = await withRagStatusFilter(request);
+      const resolved = await resolvePaperRequest(filtered.request);
       const result = store.queryPapers(resolved.request);
-      return { ...result, papers: resolved.applyToPapers(result.papers) };
+      return {
+        ...result,
+        papers: resolved.applyToPapers(result.papers),
+        // null 表示本次未按 RAG 状态筛选；false 表示 RAG 库不可用，前端给出提示。
+        ragStatusAvailable: filtered.ragStatusAvailable,
+      };
     },
 
     /** 单条文献查询：跨文献跳转不受 library_list_papers 的 1000 条截断影响。 */
@@ -521,13 +533,15 @@ function createLibraryCommands(context) {
 
     /** 与 library_query_papers 同筛选同排序，仅分批枚举 id（供全选/批量目标管理，P2-2）。 */
     async library_list_paper_ids({ request = {} }) {
-      const resolved = await resolvePaperRequest(await withRagStatusFilter(request));
+      const filtered = await withRagStatusFilter(request);
+      const resolved = await resolvePaperRequest(filtered.request);
       return store.listPaperIds(resolved.request);
     },
 
     /** 当前筛选的完整匹配计数（供全选三态与批量目标校验，P2-2）。 */
     async library_count_papers({ request = {} }) {
-      const resolved = await resolvePaperRequest(await withRagStatusFilter(request));
+      const filtered = await withRagStatusFilter(request);
+      const resolved = await resolvePaperRequest(filtered.request);
       return store.countPapers(resolved.request);
     },
 

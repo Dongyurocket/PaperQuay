@@ -3,6 +3,7 @@ import {
   Copy,
   FilePlus2,
   FileText,
+  GitBranch,
   ListTree,
   MapPin,
   PanelRightClose,
@@ -17,6 +18,7 @@ import type { LiteraturePaper } from '../../types/library';
 import type { SelectedExcerpt } from '../../types/reader';
 import { cn } from '../../utils/cn';
 import { useLocaleText } from '../../i18n/uiLanguage';
+import { emitOpenGraphFocus } from '../../app/appEvents';
 import { NoteEditor } from './NoteEditor';
 import {
   copyTextToClipboard,
@@ -267,6 +269,12 @@ export function NotesSidebar({
             onSelectNote(note);
             setDrawerOpen(false);
           },
+        },
+        {
+          id: 'open-in-graph',
+          label: l('在知识图谱中查看', 'View in Knowledge Graph'),
+          icon: <GitBranch className="h-4 w-4" strokeWidth={1.8} />,
+          onSelect: () => emitOpenGraphFocus({ noteId: note.id }),
         },
         {
           id: 'copy-title',

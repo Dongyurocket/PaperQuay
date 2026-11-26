@@ -10,6 +10,7 @@ import {
   buildFcoseLayoutOptions,
   normalizeLayoutPositions,
   parseLayoutWorkerResponse,
+  type GraphForceSettings,
   type GraphLayoutEdgeInput,
   type GraphLayoutNodeInput,
   type GraphLayoutPosition,
@@ -34,10 +35,17 @@ export interface GraphLayoutClientOptions {
   timeoutMs?: number;
 }
 
+export interface GraphLayoutRequestOptions {
+  forces?: GraphForceSettings;
+  packComponents?: boolean;
+  incremental?: boolean;
+}
+
 export interface GraphLayoutClient {
   requestLayout(
     nodes: GraphLayoutNodeInput[],
     edges: GraphLayoutEdgeInput[],
+    options?: GraphLayoutRequestOptions,
   ): Promise<GraphLayoutPosition[]>;
   dispose(): void;
 }
@@ -155,7 +163,7 @@ export function createGraphLayoutClient(options: GraphLayoutClientOptions): Grap
   };
 
   return {
-    requestLayout(nodes, edges) {
+    requestLayout(nodes, edges, requestOptions = {}) {
       if (disposed) {
         return Promise.reject(new Error('Graph layout client has been disposed'));
       }
@@ -163,7 +171,10 @@ export function createGraphLayoutClient(options: GraphLayoutClientOptions): Grap
       const request: GraphLayoutRequestPayload = {
         nodes: Array.isArray(nodes) ? nodes : [],
         edges: Array.isArray(edges) ? edges : [],
-        options: buildFcoseLayoutOptions(nodes?.length ?? 0),
+        options: buildFcoseLayoutOptions(nodes?.length ?? 0, requestOptions.forces, {
+          packComponents: requestOptions.packComponents,
+          incremental: requestOptions.incremental,
+        }),
       };
 
       const current = ensureWorker();

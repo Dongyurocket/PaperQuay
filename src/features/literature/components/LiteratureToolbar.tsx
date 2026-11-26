@@ -23,6 +23,8 @@ interface Props {
   onFilters: (value: LibraryFilterState) => void;
   /** 演示库没有真实 RAG 索引，禁用「RAG 索引状态」筛选。 */
   ragStatusDisabled?: boolean;
+  /** RAG 索引库不可用：保留控件并提示降级。 */
+  ragStatusUnavailable?: boolean;
   tags: LibraryTagCount[];
   sortBy: NonNullable<ListPapersRequest['sortBy']>;
   sortDirection: NonNullable<ListPapersRequest['sortDirection']>;
@@ -128,7 +130,7 @@ export default function LiteratureToolbar(props: Props) {
       <button type="button" className="text-[var(--pq-accent)] hover:underline" onClick={() => props.onFilters({ ...DEFAULT_LIBRARY_FILTERS, tagIds: [], itemTypes: [] })}>{l('清除全部', 'Clear all')}</button>
       <span className="ml-auto text-[var(--pq-text-muted)]">{l(`显示 ${props.total} / ${props.libraryTotal}`, `Showing ${props.total} / ${props.libraryTotal}`)}</span>
     </div>}
-    {filterOpen && filterRef.current && <LiteratureFilterPopover id={filterId} anchor={filterRef.current} filters={props.filters} tags={props.tags} ragStatusDisabled={props.ragStatusDisabled} onChange={props.onFilters} onClose={() => setFilterOpen(false)} />}
+    {filterOpen && filterRef.current && <LiteratureFilterPopover id={filterId} anchor={filterRef.current} filters={props.filters} tags={props.tags} ragStatusDisabled={props.ragStatusDisabled} ragStatusUnavailable={props.ragStatusUnavailable} onChange={props.onFilters} onClose={() => setFilterOpen(false)} />}
     {menu && <Menu x={menu.x} y={menu.y} entries={menu.entries} keyboardAnchor={menu.anchor} onClose={() => setMenu(null)} />}
   </header>;
 }

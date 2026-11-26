@@ -7,7 +7,11 @@ import fcose from 'cytoscape-fcose';
 
 import {
   GRAPH_LAYOUT_WORKER_PROTOCOL,
+  normalizeGraphForces,
   packDisconnectedComponents,
+  resolveEdgeElasticity,
+  resolveIdealEdgeLength,
+  resolveNodeRepulsion,
   type GraphLayoutWorkerMessage,
   type GraphLayoutWorkerResponse,
 } from './graphLayoutMessages.ts';
@@ -31,7 +35,6 @@ scope.onmessage = (event) => {
   const { id, request } = message;
 
   try {
-    const nodeCount = request.nodes.length;
     const elements = [
       ...request.nodes.map((node, index) => {
         const size = Number.isFinite(Number(node.size)) ? Math.max(8, Number(node.size)) : 28;
@@ -42,7 +45,12 @@ scope.onmessage = (event) => {
         const angle = index * 2.399963229728653;
         const radius = 36 * Math.sqrt(index + 1);
         return {
-          data: { id: node.id },
+          data: {
+            id: node.id,
+            type: node.type ?? '',
+            size,
+            degree: Number(node.degree) || 0,
+          },
           position: hasPosition
             ? { x: Number(node.x), y: Number(node.y) }
             : { x: Math.cos(angle) * radius, y: Math.sin(angle) * radius },
@@ -54,6 +62,8 @@ scope.onmessage = (event) => {
           id: `layout-edge-${index}`,
           source: edge.source,
           target: edge.target,
+          type: edge.type ?? '',
+          weight: Number(edge.weight) || 0,
         },
       })),
     ];
@@ -61,7 +71,18 @@ scope.onmessage = (event) => {
     const cy = cytoscape({ headless: true, elements, styleEnabled: true });
 
     try {
-      const layout = cy.layout(request.options as unknown as cytoscape.LayoutOptions);
+      const forces = normalizeGraphForces(request.options.forces);
+      const layoutOptions = {
+        ...request.options,
+        // 函数不能通过 postMessage 传递；在这里按节点/边类型注入。
+        nodeRepulsion: (node: cytoscape.NodeSingular) =>
+          resolveNodeRepulsion(forces, String(node.data('type') ?? '')),
+        idealEdgeLength: (edge: cytoscape.EdgeSingular) =>
+          resolveIdealEdgeLength(forces, String(edge.data('type') ?? '')),
+        edgeElasticity: (edge: cytoscape.EdgeSingular) =>
+          resolveEdgeElasticity(String(edge.data('type') ?? '')),
+      };
+      const layout = cy.layout(layoutOptions as unknown as cytoscape.LayoutOptions);
       layout.run();
 
       const positions = cy.nodes().map((node) => ({
@@ -74,7 +95,9 @@ scope.onmessage = (event) => {
         id,
         protocol: GRAPH_LAYOUT_WORKER_PROTOCOL,
         ok: true,
-        positions: packDisconnectedComponents(request.nodes, request.edges, positions),
+        positions: request.options.packComponents === false
+          ? positions
+          : packDisconnectedComponents(request.nodes, request.edges, positions),
         durationMs: Date.now() - startedAt,
       });
     } finally {

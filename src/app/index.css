@@ -85,6 +85,12 @@
   --pq-table-row-hover-bg: #f6f9fc;
   --pq-scrollbar-thumb: rgba(148, 163, 184, 0.34);
   --pq-scrollbar-thumb-hover: rgba(100, 116, 139, 0.42);
+  /* 知识图谱画布：Cytoscape 只接受具体颜色，这些令牌必须是 6 位 hex。 */
+  --pq-graph-surface: #ffffff;
+  --pq-graph-text: #1f2937;
+  --pq-graph-text-muted: #64748b;
+  --pq-graph-node-border: #ffffff;
+  --pq-graph-selection: #0f172a;
   font-family:
     ui-sans-serif,
     system-ui,
@@ -173,7 +179,26 @@
   --pq-table-row-hover-bg: #1a2744;
   --pq-scrollbar-thumb: rgba(255, 255, 255, 0.12);
   --pq-scrollbar-thumb-hover: rgba(255, 255, 255, 0.2);
+  --pq-graph-surface: #1a1a1a;
+  --pq-graph-text: #e5e7eb;
+  --pq-graph-text-muted: #94a3b8;
+  --pq-graph-node-border: #111827;
+  --pq-graph-selection: #f8fafc;
   background: var(--pq-bg-primary);
+}
+
+
+/* 知识图谱画布：Cytoscape 通过 getComputedStyle 读取 --pq-graph-*；
+   这里同时提供 DOM 侧引用，保证令牌表不会出现“声明但未使用”。 */
+.pq-graph-canvas {
+  background-color: var(--pq-graph-surface);
+  color: var(--pq-graph-text);
+  border-color: var(--pq-graph-node-border);
+  outline-color: var(--pq-graph-selection);
+}
+
+.pq-graph-canvas .pq-graph-muted {
+  color: var(--pq-graph-text-muted);
 }
 
 html,

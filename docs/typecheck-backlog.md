@@ -105,6 +105,8 @@ electron/localPdfProtocol.cjs
 | `tests/retainPdfRecovery.test.mjs` | 1 |
 | `tests/translationBatch.test.mjs` | 1 |
 | `tests/vaultAutosyncReactivity.test.mjs` | 2 |
+| `tests/graphGeometry.test.mjs` | 3 |
+| `tests/graphSnapshotCache.test.mjs` | 2 |
 
 以下测试文件自身 0 诊断，但依赖链中包含未清零文件，暂缓纳入：
 

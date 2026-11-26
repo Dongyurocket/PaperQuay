@@ -34,6 +34,7 @@
     "electron/preload.cjs",
     "electron/shared/zoteroDomain.cjs",
     "src/shared/mineruCachePaths.cjs",
-    "src/shared/zoteroItemMetadata.cjs"
+    "src/shared/zoteroItemMetadata.cjs",
+    "electron/backend/graphSnapshotCache.cjs"
   ]
 }
