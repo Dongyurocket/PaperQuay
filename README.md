@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.4.39-2563eb?style=flat-square" alt="Version v0.4.39">
+  <img src="https://img.shields.io/badge/version-v0.4.43-2563eb?style=flat-square" alt="Version v0.4.43">
   <img src="https://img.shields.io/badge/platform-Windows%20x64-4b5563?style=flat-square" alt="Windows x64">
   <img src="https://img.shields.io/badge/built%20with-Electron-47848f?style=flat-square" alt="Electron">
   <img src="https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-0f766e?style=flat-square" alt="React TypeScript">
@@ -57,13 +57,12 @@ PaperQuay 面向研究生、科研人员和需要持续阅读论文的用户。�
 
 ## 近期更新
 
-- **v0.4.39**：完成 2026-11-22 启动的代码、架构与 UI 专项审计（第 1–12R 批）。目录授权不再扩散到父目录，Vault 参考文献不再重复，图谱深色标签可读，axe 覆盖扩展到笔记与设置子页；启动与 Library 首屏加快，Notes/Graph 改为首次打开时加载。详见 [CHANGELOG.md](./CHANGELOG.md)。
+- **v0.4.43**：修复知识图谱布局退化。0.4.42 让画布重新画出节点与边，但所有节点坐标共线（`x === y`），整张图挤成一条 45° 斜线；全量布局改为由 fcose 做谱初始化（`randomize: true`），增量刷新仍保持 `randomize: false`，新增节点不会让已有节点整体重排。
+- **v0.4.42**：修复 0.4.41 桌面验收发现的 2 个 P1 与 2 个 P2：图谱空白与 `Cannot read properties of null (reading 'value')` 崩溃、设置「AI 模型」不可达、笔记「任务列表」点击无响应、筛选无结果沿用空库文案；同时统一 RAG 状态术语并加固笔记「未保存」判定。
+- **v0.4.41**：完成「文献级 RAG 索引管理与知识图谱显示优化」。RAG 状态可从文献库角标直接建立/重试/更新/移出并按状态筛选，支持选中批量索引与失败自动重试；图谱改为以论文为中心的语义网络，新增互近邻 kNN 语义边、视图模式、着色、节点详情、搜索聚光、LOD 与位置持久化。
+- **v0.4.39**：完成 2026-11-22 启动的代码、架构与 UI 专项审计（第 1–12R 批）。目录授权不再扩散到父目录，Vault 参考文献不再重复，图谱深色标签可读，axe 覆盖扩展到笔记与设置子页；启动与 Library 首屏加快，Notes/Graph 改为首次打开时加载。
 - **v0.4.36**：新增“用 RetainPDF 生成译版”。应用调用本机 RetainPDF 完成整本翻译，并自动下载、附加译版 PDF；任务进度进入全局任务条，重启后可续跑。
-- **v0.4.35**：全文翻译缓存写入更稳。应用数据目录直接放行，`EPERM` / `EBUSY` 等瞬时错误自动重试；译文已完整落盘时不再误判失败。
 - **v0.4.32**：只保留外部 Agent 接入，移除应用内独立 Agent、Agent 记忆和笔记 AI 润色；MinerU OCR 重试成为唯一解析降级入口；阅读器问答支持当前文献、选定文献和全库三档范围。
-- **v0.4.31**：移除综述写作工作区和图谱 AI 关系候选。跨文献归纳改由外部 Agent 检索证据，并写入 `synthesis` 笔记。
-- **v0.4.30**：阅读器顶栏改为单行，PDF 工具行支持页码跳转和溢出菜单；新增沉浸阅读（`Ctrl+Shift+F`）。
-- **v0.4.29**：论文概览页重做。解析、翻译和概览生成收进“处理”菜单，概览按节显示，文件卡列出原始 PDF、译版 PDF 和 MinerU 结果。
 
 完整记录见 [CHANGELOG.md](./CHANGELOG.md)，安装包见 [Releases](https://github.com/Dongyurocket/PaperQuay/releases)。
 
@@ -82,8 +81,8 @@ PaperQuay 面向研究生、科研人员和需要持续阅读论文的用户。�
 | 论文概览 | 按背景、问题、方法、实验、发现、结论和局限分节保存，打开即读缓存 |
 | 阅读器问答 | 基于本地 RAG 证据回答，可限定当前文献、选定文献或全库；引用带页码和证据类型，可停止生成并存为笔记 |
 | 笔记 | Tiptap 富文本；8 种页面类型和 11 个模板；双链、标签、文献引用、摘录卡、引用样式、笔记图谱与 Obsidian 兼容 vault |
-| 本地 RAG | 向量 KNN + FTS5 + RRF 混合检索；支持批量建立、暂停、继续、取消和单篇移出知识库 |
-| 知识图谱 | 文献、笔记、标签、分类和引用节点；支持语义相似、参考文献、共同作者和自定义关系 |
+| 本地 RAG | 向量 KNN + FTS5 + RRF 混合检索；文献级索引状态角标与筛选、选中批量建立/更新/重试、失败自动重试；支持暂停、继续、取消和单篇移出知识库 |
+| 知识图谱 | 文献、笔记、标签、分类和引用节点；以论文为中心的语义网络（互近邻 kNN 语义边、语义邻居数 K）；视图模式、着色、节点详情、搜索聚光、LOD 与位置持久化；支持语义相似、参考文献、共同作者和自定义关系 |
 | Zotero | 读取 `zotero.sqlite` 临时副本，不改原库；支持全量导入或按分类、条件检索后选择性同步 |
 | 备份 | 密码保护的 `.pqbackup` 单文件导出与导入；导入后重启替换，并保留回滚点 |
 | 其他 | 浅色 / 深色主题、命令面板（`Ctrl+K`）、应用内更新检查 |

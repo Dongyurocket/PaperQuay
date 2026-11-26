@@ -1,6 +1,6 @@
 # PaperQuay 知识库 MCP 接入指南
 
-> 适用版本：v0.4.39。更新日期：2026-11-25。
+> 适用版本：v0.4.43。更新日期：2026-11-26。
 
 PaperQuay 提供基于 **Model Context Protocol (MCP)** 的 stdio 服务（`paperquay-knowledge-mcp`）。Proma、Pi、Codex、Claude 等外部 Agent 可以检索文献库、知识库正文和笔记。写入操作受独立护栏约束。
 
