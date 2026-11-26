@@ -78,7 +78,7 @@ function CountingPaperRow(props) {
 const MemoRow = React.memo(CountingPaperRow);
 MemoRow.displayName = 'CountingPaperRowStub';
 export default MemoRow;`,
-  'lucide-react': ['BookOpenText', 'Check', 'GripVertical', 'Star']
+  'lucide-react': ['BookOpenText', 'Check', 'GripVertical', 'SearchX', 'Star']
     .map((name) => `export const ${name} = () => null;`)
     .join('\n'),
 };

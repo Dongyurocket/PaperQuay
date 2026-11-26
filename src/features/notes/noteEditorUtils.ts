@@ -3,6 +3,7 @@ import type { EditorView } from '@tiptap/pm/view';
 import type { Note, NoteAnchor, NotePageKind } from '../../types/notes';
 import type { UiLanguage } from '../../types/reader';
 import { collectText, noteContentToTiptap } from './notesTiptap.ts';
+import { normalizeTagInput } from './noteUtils.ts';
 
 export interface NoteTemplate {
   id: string;
@@ -973,7 +974,12 @@ export function fastContentSignature(
 ): FastContentSignature {
   return {
     contentHash: contentHash(contentJson),
-    textHash: (hashStringInto(SIGNATURE_HASH_OFFSET, contentText) >>> 0).toString(16).padStart(8, '0'),
+    // 0.4.42：数据层用 cleanString（trim）落库 contentText，这里必须用同一种归一化。
+    // 否则“开头是引用摘录块”的笔记（getText 会产生前导分隔符）保存后，本地签名与
+    // 回读签名永远不相等，工具栏的「未保存」徽标不会消失。
+    textHash: (hashStringInto(SIGNATURE_HASH_OFFSET, String(contentText ?? '').trim()) >>> 0)
+      .toString(16)
+      .padStart(8, '0'),
   };
 }
 
@@ -989,7 +995,9 @@ export function fastSignatureFromContent(
   return JSON.stringify([
     'v3',
     meta.title.trim(),
-    meta.tagText.trim(),
+    // 0.4.42：后端把标签存成数组再 join('， ')；这里用同一套 normalizeTagInput 归一化，
+    // 避免「a,b」与「a, b」这类等价输入在保存后被判成未保存。
+    normalizeTagInput(meta.tagText).join('\u0000'),
     meta.color,
     content.contentHash,
     content.textHash,

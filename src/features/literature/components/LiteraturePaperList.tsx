@@ -9,7 +9,7 @@ import {
   type MouseEvent,
   type PointerEvent,
 } from 'react';
-import { BookOpenText } from 'lucide-react';
+import { BookOpenText, SearchX } from 'lucide-react';
 import { useLocaleText } from '../../../i18n/uiLanguage';
 import { useWheelScrollDelegate } from '../../../hooks/useWheelScrollDelegate';
 import type { ListPapersRequest, LiteraturePaper } from '../../../types/library';
@@ -27,7 +27,7 @@ import {
 import { resolvePaperListNavigation } from '../paperListKeyboard';
 import type { PaperTitleDisplayMode } from '../titleDisplay';
 import type { SelectionCheckState } from '../paperSelection';
-import type { LibraryFilterState } from '../libraryFilters';
+import { DEFAULT_LIBRARY_FILTERS, type LibraryFilterState } from '../libraryFilters';
 import type { LibraryTagCount } from '../../../types/library';
 import LiteratureToolbar from './LiteratureToolbar';
 import LiteraturePaperRow from './LiteraturePaperRow';
@@ -190,6 +190,29 @@ export default function LiteraturePaperList({
   ragIndexAvailable = false,
 }: LiteraturePaperListProps) {
   const l = useLocaleText();
+  // 0.4.42：筛选后为空 ≠ 空库。只有真正没有任何筛选/搜索时才展示导入引导。
+  // 逐字段判断而不是复用 describeActiveFilters：后者假定状态完整，
+  // 缺字段（旧持久化数据/测试夹具）会把 undefined 当成激活条件。
+  const hasActiveFilters = useMemo(() => {
+    if (searchQuery.trim().length > 0) return true;
+    return Boolean(
+      filters.favorite
+      || filters.recentlyRead
+      || (filters.tagIds?.length ?? 0) > 0
+      || filters.yearFrom !== null
+      || filters.yearTo !== null
+      || (filters.itemTypes?.length ?? 0) > 0
+      || filters.readStatus
+      || filters.hasPdf
+      || filters.hasTranslatedPdf
+      || filters.missingFile
+      || filters.hasSummary
+      || filters.mineruParsed
+      || filters.source
+      || (filters.ragMembership && filters.ragMembership !== 'all')
+      || (filters.ragStatus && filters.ragStatus !== 'all'),
+    );
+  }, [filters, searchQuery]);
   // 传给行的外部回调全部经 ref 转发：父组件的闭包引用每次都变，但行 props 保持稳定。
   const stableSelectPaper = useStableCallback(onSelectPaper);
   const stableOpenPaper = useStableCallback(onOpenPaper);
@@ -815,18 +838,52 @@ export default function LiteraturePaperList({
             {l('正在加载文献库...', 'Loading library...')}
           </div>
         ) : papers.length === 0 ? (
-          <div role="status" className="rounded-2xl border border-dashed border-[var(--pq-border)] bg-white/60 p-8 text-center dark:bg-white/5">
-            <BookOpenText className="mx-auto h-9 w-9 text-[var(--pq-text-faint)] dark:text-[var(--pq-text-muted)]" strokeWidth={1.7} />
-            <div className="mt-4 text-lg font-semibold">
-              {l('还没有文献', 'No papers yet')}
+          hasActiveFilters ? (
+            <div role="status" className="rounded-2xl border border-dashed border-[var(--pq-border)] bg-white/60 p-8 text-center dark:bg-white/5">
+              <SearchX className="mx-auto h-9 w-9 text-[var(--pq-text-faint)] dark:text-[var(--pq-text-muted)]" strokeWidth={1.7} />
+              <div className="mt-4 text-lg font-semibold">
+                {l('没有符合条件的文献', 'No matching papers')}
+              </div>
+              <div className="mx-auto mt-2 max-w-md text-sm leading-6 text-[var(--pq-text-muted)] dark:text-[var(--pq-text-muted)]">
+                {l(
+                  `当前筛选或搜索没有匹配项。清除后会显示全部 ${libraryTotal} 篇文献。`,
+                  `Nothing matches the current filters or search. Clear them to see all ${libraryTotal} papers.`,
+                )}
+              </div>
+              <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
+                <button
+                  type="button"
+                  className="pq-button-primary h-8 px-3 text-xs"
+                  onClick={() => {
+                    onFiltersChange(DEFAULT_LIBRARY_FILTERS);
+                    onSearchQueryChange('');
+                  }}
+                >
+                  {l('清除筛选', 'Clear filters')}
+                </button>
+                <button
+                  type="button"
+                  className="pq-button h-8 px-3 text-xs"
+                  onClick={onImportPdfs}
+                >
+                  {l('导入 PDF', 'Import PDF')}
+                </button>
+              </div>
             </div>
-            <div className="mx-auto mt-2 max-w-md text-sm leading-6 text-[var(--pq-text-muted)] dark:text-[var(--pq-text-muted)]">
-              {l(
-                '点击“导入 PDF”选择一个或多个文件。应用会把路径、附件和基础元数据保存到本地文库。',
-                'Click "Import PDF" to select one or more files. The app will save paths, attachments, and basic metadata into the local library.',
-              )}
+          ) : (
+            <div role="status" className="rounded-2xl border border-dashed border-[var(--pq-border)] bg-white/60 p-8 text-center dark:bg-white/5">
+              <BookOpenText className="mx-auto h-9 w-9 text-[var(--pq-text-faint)] dark:text-[var(--pq-text-muted)]" strokeWidth={1.7} />
+              <div className="mt-4 text-lg font-semibold">
+                {l('还没有文献', 'No papers yet')}
+              </div>
+              <div className="mx-auto mt-2 max-w-md text-sm leading-6 text-[var(--pq-text-muted)] dark:text-[var(--pq-text-muted)]">
+                {l(
+                  '点击“导入 PDF”选择一个或多个文件。应用会把路径、附件和基础元数据保存到本地文库。',
+                  'Click "Import PDF" to select one or more files. The app will save paths, attachments, and basic metadata into the local library.',
+                )}
+              </div>
             </div>
-          </div>
+          )
         ) : (
           <>
             <div

@@ -57,7 +57,7 @@ export const paperPdfPath = () => '';`,
   LiteratureReadingHeatmapPreview: `export default function LiteratureReadingHeatmapPreview() { return null; }`,
   LiteratureToolbar: `import React from 'react';
 export default function LiteratureToolbar() { return React.createElement('div', { 'data-toolbar': '' }); }`,
-  'lucide-react': ['BookOpenText', 'Check', 'GripVertical', 'Star']
+  'lucide-react': ['BookOpenText', 'Check', 'GripVertical', 'SearchX', 'Star']
     .map((name) => `export const ${name} = () => null;`)
     .join('\n'),
 };
@@ -389,6 +389,27 @@ test('loading, empty and load-more states announce status', async (t) => {
   const emptyStatus = scroller(empty.container).querySelector('[role="status"]');
   assert.ok(emptyStatus, '空态应有明确语义');
   assert.match(emptyStatus!.textContent ?? '', /还没有文献/);
+
+  // 0.4.42：筛选后为空必须与「空库」区分，并给出清除筛选入口。
+  let clearedFilters = 0;
+  let clearedSearch = 0;
+  const filteredEmpty = await mountList({
+    ...baseProps([]),
+    filters: { ...filters, ragStatus: 'stale' },
+    libraryTotal: 196,
+    onFiltersChange: () => { clearedFilters += 1; },
+    onSearchQueryChange: () => { clearedSearch += 1; },
+  });
+  t.after(() => filteredEmpty.unmount());
+  const filteredStatus = scroller(filteredEmpty.container).querySelector('[role="status"]');
+  assert.match(filteredStatus?.textContent ?? '', /没有符合条件的文献/);
+  assert.doesNotMatch(filteredStatus?.textContent ?? '', /还没有文献/);
+  const clearButton = [...filteredStatus!.querySelectorAll('button')]
+    .find((button) => /清除筛选/.test(button.textContent ?? ''));
+  assert.ok(clearButton, '筛选空态应提供清除筛选按钮');
+  await act(async () => { clearButton!.click(); });
+  assert.equal(clearedFilters, 1);
+  assert.equal(clearedSearch, 1);
 
   const more = await mountList({
     ...baseProps(papers(3)),

@@ -223,6 +223,10 @@ export function buildGraphElements(
       const size = node.size ?? 28;
       const degree = degreeByNode.get(node.id) ?? node.degree ?? 0;
       const progress = node.type === 'paper' ? Number(node.readingProgress) || 0 : 0;
+      // 0.4.42：hasProgress 必须跟着「真的画得出外环」走。进度 < 2.5% 时外环落在
+      // 0 桶、图片为空串；若此时仍把节点标记为 hasProgress=1，样式 `data(progressImage)`
+      // 会把空串送进 cytoscape 的 multiple 解析，抛出 null.value 并让整张图画不出来。
+      const progressImage = buildProgressRingImage(progress);
 
       return {
         data: {
@@ -236,8 +240,8 @@ export function buildGraphElements(
           color: resolveNodeColor(node, colorMode),
           // displayLabel 为画布实际绘制的文本；data(label) 保留给选中态与放大态使用。
           displayLabel: labelAll || size >= hubCutoff ? label : '',
-          progressImage: buildProgressRingImage(progress),
-          hasProgress: progress > 0 ? 1 : 0,
+          progressImage,
+          hasProgress: progressImage ? 1 : 0,
         },
       };
     }),

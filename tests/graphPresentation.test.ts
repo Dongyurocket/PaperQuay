@@ -69,6 +69,9 @@ test('color modes: category, type, year and cluster', () => {
 test('progress rings are bucketed, cached and empty at zero', () => {
   assert.equal(buildProgressRingImage(0), '');
   assert.equal(buildProgressRingImage(null), '');
+  // 0.4.42 回归：不足半桶的进度没有外环，必须返回空串（调用方据此关闭 hasProgress）。
+  assert.equal(buildProgressRingImage(0.005), '');
+  assert.equal(buildProgressRingImage(0.024), '');
   const half = buildProgressRingImage(0.5);
   assert.ok(half.startsWith('data:image/svg+xml,'));
   // 同一 5% 桶命中缓存，返回同一字符串。
@@ -118,6 +121,32 @@ test('elements carry shape, color, degree, display labels and progress', () => {
   assert.equal(paper.data.displayLabel, 'First');
   assert.equal(note?.data.shape, 'round-rectangle');
   assert.equal(note?.data.hasProgress, 0);
+});
+
+test('sub-threshold reading progress never enables the empty progress ring', () => {
+  // 0.4.41 实机缺陷：0.523% 的进度让 hasProgress=1 但 progressImage=''，
+  // cytoscape 解析空 background-image 时抛 null.value，整张图谱空白。
+  const snapshot: KnowledgeGraphSnapshot = {
+    generatedAt: 0,
+    nodes: [
+      node({ id: 'paper:low', label: 'Low', readingProgress: 0.005230672664504656 }),
+      node({ id: 'paper:zero', label: 'Zero', readingProgress: 0 }),
+      node({ id: 'paper:mid', label: 'Mid', readingProgress: 0.4 }),
+    ],
+    edges: [],
+  };
+  const elements = buildGraphElements(snapshot, { localizeNodeLabel: (item) => item.label });
+  const byId = new Map(elements.map((item) => [String(item.data.id), item.data]));
+  assert.equal(byId.get('paper:low')?.hasProgress, 0);
+  assert.equal(byId.get('paper:low')?.progressImage, '');
+  assert.equal(byId.get('paper:zero')?.hasProgress, 0);
+  assert.equal(byId.get('paper:mid')?.hasProgress, 1);
+  assert.ok(String(byId.get('paper:mid')?.progressImage).startsWith('data:image/svg+xml,'));
+
+  // 任意节点只要声明了 hasProgress=1，就必须有可解析的图片。
+  for (const data of byId.values()) {
+    if (data.hasProgress === 1) assert.notEqual(data.progressImage, '');
+  }
 });
 
 test('LOD keeps top-weight edges and every directional edge', () => {

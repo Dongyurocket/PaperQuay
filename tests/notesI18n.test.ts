@@ -86,6 +86,8 @@ const LUCIDE_ICONS = [
   'Bold', 'BookMarked', 'Code2', 'Heading1', 'Heading2', 'Highlighter', 'ImageIcon',
   'Italic', 'Link2', 'List', 'ListChecks', 'ListOrdered', 'Pilcrow', 'Quote', 'Redo2',
   'Sigma', 'Strikethrough', 'Table2', 'Undo2',
+  // ui/toast（NoteEditorToolbar 的「任务列表」不可用提示）
+  'AlertTriangle', 'CheckCircle2', 'Loader2',
   // editor/toolbar context menu
   'ClipboardPaste', 'Heading3', 'RemoveFormatting', 'Save', 'Scissors', 'Tag',
   // editor/tableCell

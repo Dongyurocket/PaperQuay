@@ -4,6 +4,26 @@
 
 Windows 安装包见 [GitHub Releases](https://github.com/Dongyurocket/PaperQuay/releases)。自 0.4.24 起仅发布、维护和测试 Windows x64；其他平台由用户自行打包，作者不承担维护和测试。
 
+## [0.4.42] - 2026-11-26
+
+本版本修复 0.4.41 桌面验收发现的 2 个 P1 与 2 个 P2 缺陷，并统一 RAG 状态术语、加固笔记保存的脏标记判定。知识图谱的空白画布与 `null.value` 崩溃是同一个根因：进度不足 2.5% 的论文节点被标记为「有阅读外环」但外环图片为空串。
+
+### 修复
+
+- **知识图谱空白 + 崩溃（P1-01）**：`buildGraphElements` 改为按「外环图片是否真的存在」决定 `hasProgress`。此前进度小于 2.5% 的论文节点会带着空 `progressImage` 命中 `node[hasProgress = 1]`，cytoscape 解析空 `background-image` 时抛 `Cannot read properties of null (reading 'value')`，第一个元素绘制即中断，整张图画不出任何节点与边（Canvas 与 WebGL 同样空白）；同一异常在 `cy.fit()` 中上抛时被错误边界接住，显示 `Graph workspace failed to load`。本机 196 篇副本中恰好有 1 篇进度 0.523% 的论文触发了该问题。
+- **设置弹窗「AI 模型」不可达（P1-02）**：`useWheelScrollDelegate` 新增 `enabled`，弹窗打开后重新挂载滚轮委托（此前首次挂载时 `rootRef` 为空，之后再打开也不会重挂）；设置侧栏列表改用固定滚动条沟槽与更明显的滑块，并补足底部留白，窗口较矮时仍可滚动到最后一个分页。
+- **笔记「任务列表」点击无反应（P2-01）**：新增 `toggleTaskListAtSelection`。光标在引用摘录块等不可转换位置时，`toggleTaskList` 会静默返回 false；现在改为插入一个新的任务项，工具栏与块菜单共用同一入口，失败时给出提示。
+- **筛选无结果沿用空库文案（P2-02）**：文献库空态按「是否有筛选/搜索」分流，筛选后为空显示「没有符合条件的文献」并提供「清除筛选」，不再误报「还没有文献」。
+- **笔记保存后仍显示「未保存」（OBS-02）**：正文签名与数据层统一归一化（`contentText` 先 trim、标签按 `normalizeTagInput` 归一），避免回读签名与本地签名永远不相等导致脏标记不消失。
+- **术语统一（OBS-03）**：行内徽标由「RAG 未索引」改为「RAG 未建立」，与详情面板、筛选与批量索引入口保持一致。
+
+### 验证
+
+- `npm run typecheck` 六个项目 0 诊断；`npm run lint` 0 error / 205 warning；`npm run build` 通过。
+- `npm test` 1,572 项：1,562 通过、10 跳过、0 失败。新增图谱进度环空值回归（含 headless cytoscape 逐节点解析 `background-image`，该用例在 0.4.41 的取值下会抛 `null.value`）与筛选空态用例。
+- 0.4.41 实机诊断证据（隔离 profile 副本 + DevTools 协议）：196 节点/845 边在 cy 内正常，三个 canvas 非透明像素为 0；仅挂载 `node[hasProgress = 1]` 规则即复现同一异常；`hasProgress=1 && progressImage===''` 的节点恰好 1 个。
+- 安装包实机验收本轮未执行（按用户要求暂缓），未覆盖项见发布说明。
+
 ## [0.4.41] - 2026-11-26
 
 本版本完成 2026-11-25 的「文献级 RAG 索引管理与知识图谱显示优化」计划：RAG 状态可从文献库直接管理与筛选，图谱改为以论文为中心的语义网络，并补上规模/性能与无障碍收口。
