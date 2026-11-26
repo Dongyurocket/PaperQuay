@@ -1,44 +1,42 @@
 # PaperQuay v{{VERSION}}
 
-This release fixes the knowledge-graph layout that v0.4.42 rendered as a single diagonal line, and records the v0.4.42 defects as verified on the installed build.
+本版本修复 v0.4.42 在安装版上暴露的知识图谱布局退化，并把 v0.4.42 的修复项逐条写进「已在安装版复验」清单。
 
-v0.4.42 removed the graph crash: nodes and edges were drawn again. But every node ended up with `x === y` — 196 nodes, 180 in the main component with a secondary-axis standard deviation of literally 0 — so the whole graph collapsed onto a 45° line with overlapping labels. The cause was a layout option, not the renderer: `buildFcoseLayoutOptions` always passed `randomize: false`, and fcose treats that as pure-incremental mode, relaxing existing springs without any spectral placement. When the starting configuration is collinear (all zeros, or the worker's golden-angle spiral degenerating), the result stays one-dimensional.
+v0.4.42 解决了图谱画不出东西的问题，节点与边重新出现；但所有节点坐标都满足 `x === y`——196 个节点中主连通分量的 180 个节点次轴标准差为 0——整张图被压成一条 45° 斜线，标签互相重叠。根因在布局参数而不是渲染：`buildFcoseLayoutOptions` 始终传 `randomize: false`，fcose 把该取值当作 pure-incremental 模式，只沿既有弹簧松弛、不做谱初始化；当起始位置共线（全零，或 worker 的黄金角螺旋退化）时，结果保持一维。
 
-## Fixes
+## 修复
 
-- **Collapsed graph layout (P1)**: full layouts now use `randomize: true`, so fcose performs its own spectral placement. Incremental refreshes keep `randomize: false`, so adding nodes does not reshuffle the existing graph. The local subgraph view and the main-thread fallback share the same option builder and recover two-dimensional spread with it.
-- **Initial-position semantics**: the worker's golden-angle spiral is now documented as the relaxation start for incremental layouts only; full layouts are placed by the spectral pass.
+- **布局退化成一条斜线（P1）**：全量布局改为 `randomize: true`，由 fcose 自己完成谱初始化；增量刷新保持 `randomize: false`，新增节点不会让已有节点整体重排。局部图谱与主线程回退共用同一套参数构造，一并恢复二维铺开。
+- **初始位置语义**：worker 的黄金角螺旋位置现在只作为增量布局的松弛起点，全量布局由谱初始化接管。
 
-## Verification
+## 验证
 
-- `npm run typecheck`: six tsc projects, 0 diagnostics.
-- `npm run lint`: 0 errors / 205 warnings.
-- `npm run build`: passed.
-- `npm test`: 1,573 tests, 1,563 passed, 10 skipped, 0 failed.
-- New `tests/graphLayoutDegenerate.test.ts` runs a real fcose layout and asserts two-dimensional spread (secondary/major axis > 0.05). With the v0.4.42 options the same fixture measures 0.000; with the fix it measures 0.927.
-- `tests/graphLayout.test.ts` now pins `randomize: true` for full layouts and `randomize: false` for incremental refreshes.
+- `npm run typecheck`：六个 tsc 项目 0 诊断。
+- `npm run lint`：0 error / 205 warning。
+- `npm run build`：通过。
+- `npm test`：1,573 项，1,563 通过、10 跳过、0 失败。
+- 新增 `tests/graphLayoutDegenerate.test.ts`，用真实 fcose 跑一次全量布局并断言二维铺开（次轴/主轴 > 0.05）。同一 fixture 在 v0.4.42 的取值下实测 0.000，修复后为 0.927。
+- `tests/graphLayout.test.ts` 现在固定断言：全量布局 `randomize: true`，增量刷新 `randomize: false`。
 
-## Verified on the installed build (v0.4.42 code, isolated profile copy)
+## 已在安装版复验（v0.4.42 代码 + 隔离 profile 副本）
 
-Running against the installed app with an isolated profile copy (`%TEMP%\pq-accept-042`), through the DevTools protocol and native window input:
+在安装版上通过 DevTools 协议与原生窗口操作逐项复验，数据跑在一次性 profile 副本上，不触碰真实文库：
 
-- **Graph renders**: 196 nodes / 845 edges drawn, three canvases with 2,056 non-transparent pixels, first frame 124 ms, no error boundary.
-- **Settings**: the section list scrolls to the end (scrollTop 349 of 349), the last page stays fully visible above the footer, the scrollbar is 10 px wide, and the "AI models" page opens.
-- **Notes task list**: a normal paragraph converts to a task list, and pressing the button with the caret inside an excerpt atom inserts a new task item (task lists 1 → 2).
-- **Filtered empty library**: both a zero-result search and a "RAG not built" filter show "No matching papers" with a "Clear filters" action.
-- **Unsaved indicator**: appears on edit, clears after save, and also clears when the edit is undone back to the saved state.
-- **RAG wording**: row badge, filter option and inspector agree on "RAG not built" / "not built (includes unparsed)".
-- **Graph interactions**: colouring by year, semantic K 10 → 6 (845 → 569 edges), search highlight (11 matches / 185 dimmed), node inspector, hover card, LOD (0 hidden edges at zoom 1.2, 223 at 0.4), position persistence across reload, dark theme, local subgraph (15 nodes / 41 edges). Performance: snapshot 1134 ms · elements 124 ms · layout 1015 ms · first frame 124 ms · interaction frames p50 6.3 ms / p95 6.5 ms.
+- **图谱渲染**：196 节点 / 845 边全部绘制，三块 canvas 非透明像素 2,056，首帧 124 ms，无错误边界。
+- **设置**：侧栏可滚到末尾（scrollTop 349 / 349），最后一页完整露出、不被底部信息条压住，滚动条宽 10 px，「AI 模型」页可打开。
+- **笔记任务列表**：普通段落可转成任务列表；光标落在引用摘录块内时插入新任务项（任务列表 1 → 2），不再无反应。
+- **筛选空态**：搜索 0 结果与「RAG 未建立」筛选 0 结果都显示「没有符合条件的文献」，并提供「清除筛选」。
+- **未保存标记**：编辑后出现，保存后消失，撤销回已保存状态时也会消失。
+- **RAG 术语**：行内角标、筛选选项与节点详情口径一致（「RAG 未建立」/「未建立（含未解析）」）。
+- **图谱交互**：按年份着色、语义邻居数 10 → 6（边 845 → 569）、搜索高亮（11 匹配 / 185 淡化）、节点详情、悬停卡片、LOD（zoom 1.2 隐藏 0 条、0.4 隐藏 223 条）、位置持久化（重开逐点一致）、深色主题、局部图谱（15 节点 / 41 边）。性能：快照 1134 ms · 元素 124 ms · 布局 1015 ms · 首帧 124 ms · 交互帧 p50 6.3 ms / p95 6.5 ms。
 
-## Not verified in this release
+## 本轮未验证
 
-These cases were not exercised this round:
+- v0.4.43 安装包本身未做实机验收：布局修复由 headless fcose 回归测试与参数断言覆盖，安装后请确认节点是否散成二维分布。
+- 真实 Embedding 建索引（B5/B6）。
+- 原生文件选择器导入（A3）与索引库不可用状态（B9）。
 
-- The v0.4.43 installer itself: the layout fix is covered by the headless fcose regression test and the option assertions, not by a fresh desktop acceptance run. Confirm two-dimensional spread after installing.
-- Real Embedding index builds (B5/B6).
-- Native file-picker import (A3) and the "index store unavailable" state (B9).
+## 已知限制
 
-## Known limitations
-
-- Only Windows x64 installers are published and maintained.
-- Advanced citation modes (prior/derivative works, timeline, connect, external citation expansion) are still not included.
+- 只发布和维护 Windows x64 安装包。
+- 高级引用模式（在先/衍生工作、时间线、连接、外部引文扩展）仍未包含。
