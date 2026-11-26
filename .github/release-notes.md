@@ -1,33 +1,42 @@
 # PaperQuay v{{VERSION}}
 
-This release fixes the two P1 and two P2 defects found by the v0.4.41 desktop acceptance run, unifies the RAG status wording, and hardens the note "unsaved" indicator.
+This release fixes the knowledge-graph layout that v0.4.42 rendered as a single diagonal line, and records the v0.4.42 defects as verified on the installed build.
+
+v0.4.42 removed the graph crash: nodes and edges were drawn again. But every node ended up with `x === y` — 196 nodes, 180 in the main component with a secondary-axis standard deviation of literally 0 — so the whole graph collapsed onto a 45° line with overlapping labels. The cause was a layout option, not the renderer: `buildFcoseLayoutOptions` always passed `randomize: false`, and fcose treats that as pure-incremental mode, relaxing existing springs without any spectral placement. When the starting configuration is collinear (all zeros, or the worker's golden-angle spiral degenerating), the result stays one-dimensional.
 
 ## Fixes
 
-- **Knowledge graph rendered nothing (P1)**: a paper whose reading progress is below 2.5% was marked as having a progress ring while its ring image was an empty string. Cytoscape parses that empty `background-image` mapping and throws `Cannot read properties of null (reading 'value')` while drawing the first element, so the canvas stayed blank with both the Canvas and WebGL renderers. The same error surfaced as `Graph workspace failed to load` when `cy.fit()` ran inside the React effect. `hasProgress` now follows whether the ring image actually exists.
-- **"AI models" settings page unreachable (P1)**: the wheel-scroll delegate was mounted only once, before the preferences dialog rendered, so it never attached. It now takes an `enabled` flag and re-attaches when the dialog opens. The section list also gets a stable scrollbar gutter, a darker thumb and extra bottom padding, so the last page stays reachable in short windows.
-- **Notes "Task list" button did nothing (P2)**: the button is a ProseMirror formatter, and `toggleTaskList()` silently returns false when the caret sits in an excerpt atom. It now falls back to inserting a new task item, and both the toolbar and the block menu share that entry point.
-- **Filtered empty library showed the empty-library copy (P2)**: the list now distinguishes "no papers at all" from "nothing matches", shows "No matching papers" and offers "Clear filters".
-- **Note stayed "unsaved" after a successful save**: the content signature now trims `contentText` and normalizes tags exactly the way the data layer stores them, so the reloaded signature can no longer differ from the local one by normalization alone.
-- **RAG wording**: the row badge now says "RAG not built" instead of "RAG not indexed", matching the details panel, filter and batch-index entry points.
+- **Collapsed graph layout (P1)**: full layouts now use `randomize: true`, so fcose performs its own spectral placement. Incremental refreshes keep `randomize: false`, so adding nodes does not reshuffle the existing graph. The local subgraph view and the main-thread fallback share the same option builder and recover two-dimensional spread with it.
+- **Initial-position semantics**: the worker's golden-angle spiral is now documented as the relaxation start for incremental layouts only; full layouts are placed by the spectral pass.
 
 ## Verification
 
 - `npm run typecheck`: six tsc projects, 0 diagnostics.
 - `npm run lint`: 0 errors / 205 warnings.
 - `npm run build`: passed.
-- `npm test`: 1,572 tests, 1,562 passed, 10 skipped, 0 failed.
-- New regression tests cover the empty progress ring (including a headless Cytoscape pass that parses `background-image` on every node — the fixture reproduces the v0.4.41 `null.value` throw before the fix) and the filtered-empty library state.
-- The v0.4.41 root cause was measured on an isolated profile copy through the DevTools protocol: 196 nodes / 845 edges inside Cytoscape, three canvases with zero non-transparent pixels, and exactly one node with `hasProgress = 1` and an empty ring image at 0.523% progress.
+- `npm test`: 1,573 tests, 1,563 passed, 10 skipped, 0 failed.
+- New `tests/graphLayoutDegenerate.test.ts` runs a real fcose layout and asserts two-dimensional spread (secondary/major axis > 0.05). With the v0.4.42 options the same fixture measures 0.000; with the fix it measures 0.927.
+- `tests/graphLayout.test.ts` now pins `randomize: true` for full layouts and `randomize: false` for incremental refreshes.
+
+## Verified on the installed build (v0.4.42 code, isolated profile copy)
+
+Running against the installed app with an isolated profile copy (`%TEMP%\pq-accept-042`), through the DevTools protocol and native window input:
+
+- **Graph renders**: 196 nodes / 845 edges drawn, three canvases with 2,056 non-transparent pixels, first frame 124 ms, no error boundary.
+- **Settings**: the section list scrolls to the end (scrollTop 349 of 349), the last page stays fully visible above the footer, the scrollbar is 10 px wide, and the "AI models" page opens.
+- **Notes task list**: a normal paragraph converts to a task list, and pressing the button with the caret inside an excerpt atom inserts a new task item (task lists 1 → 2).
+- **Filtered empty library**: both a zero-result search and a "RAG not built" filter show "No matching papers" with a "Clear filters" action.
+- **Unsaved indicator**: appears on edit, clears after save, and also clears when the edit is undone back to the saved state.
+- **RAG wording**: row badge, filter option and inspector agree on "RAG not built" / "not built (includes unparsed)".
+- **Graph interactions**: colouring by year, semantic K 10 → 6 (845 → 569 edges), search highlight (11 matches / 185 dimmed), node inspector, hover card, LOD (0 hidden edges at zoom 1.2, 223 at 0.4), position persistence across reload, dark theme, local subgraph (15 nodes / 41 edges). Performance: snapshot 1134 ms · elements 124 ms · layout 1015 ms · first frame 124 ms · interaction frames p50 6.3 ms / p95 6.5 ms.
 
 ## Not verified in this release
 
-Desktop acceptance on the installed build was not run this round. The following cases therefore remain unverified for v0.4.42:
+These cases were not exercised this round:
 
-- Graph canvas on the installed build: node/edge visibility, colour modes, node shapes, semantic K, hover, inspector, search highlight, position persistence, LOD, theme and tab switching, snapshot/layout/first-frame timings.
-- Settings dialog: reaching the "AI models" page and the "failed index auto-retry" switch in the installed build.
-- Notes task list, filtered-empty library copy, and the unsaved indicator in the installed build.
-- Native file-picker import (A3), real Embedding index builds (B5/B6) and the "index store unavailable" state (B9).
+- The v0.4.43 installer itself: the layout fix is covered by the headless fcose regression test and the option assertions, not by a fresh desktop acceptance run. Confirm two-dimensional spread after installing.
+- Real Embedding index builds (B5/B6).
+- Native file-picker import (A3) and the "index store unavailable" state (B9).
 
 ## Known limitations
 

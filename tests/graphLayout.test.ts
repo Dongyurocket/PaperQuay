@@ -73,7 +73,8 @@ test('fcose options are headless-safe and keep the historical layout parameters'
   assert.equal(small.name, 'fcose');
   assert.equal(small.quality, 'proof');
   assert.equal(small.numIter, 2500);
-  assert.equal(small.randomize, false);
+  // 0.4.43：全量布局必须让 fcose 做谱初始化，否则 pure-incremental 会退化成一条直线。
+  assert.equal(small.randomize, true);
   assert.equal(small.animate, false);
   assert.equal(small.fit, false);
   assert.equal(small.padding, 36);
@@ -451,6 +452,8 @@ test('force settings clamp and map to per-type fcose inputs', async () => {
 test('incremental layouts cap iterations and can skip component packing', () => {
   const incremental = buildFcoseLayoutOptions(10000, null, { incremental: true, packComponents: false });
   assert.equal(incremental.numIter, 120);
+  // 增量刷新保留 randomize:false，已有节点不被整体重排。
+  assert.equal(incremental.randomize, false);
   assert.equal(incremental.packComponents, false);
   assert.equal(incremental.tile, false);
 

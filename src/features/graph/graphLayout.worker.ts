@@ -38,7 +38,8 @@ scope.onmessage = (event) => {
     const elements = [
       ...request.nodes.map((node, index) => {
         const size = Number.isFinite(Number(node.size)) ? Math.max(8, Number(node.size)) : 28;
-        // 没有历史坐标时按黄金角螺旋给出确定性初始位置；fcose 不再 randomize。
+        // 没有历史坐标时按黄金角螺旋给出确定性初始位置：全量布局由 fcose 的谱
+        // 初始化覆盖，增量布局（randomize:false）则拿它当松弛起点，避免共线退化。
         const hasPosition = Number.isFinite(Number(node.x))
           && Number.isFinite(Number(node.y))
           && (Number(node.x) !== 0 || Number(node.y) !== 0);
