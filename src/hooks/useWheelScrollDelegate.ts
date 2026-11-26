@@ -53,6 +53,12 @@ interface UseWheelScrollDelegateOptions {
   rootRef: RefObject<HTMLElement | null>;
   targetSelector?: string;
   ignoreSelector?: string;
+  /**
+   * 弹窗类调用方在 `open=false` 时不渲染 DOM，`rootRef.current` 为 null；
+   * 首次挂载的 effect 会在这种状态下只跑一次，之后再打开弹窗也不会重挂。
+   * 传入 `enabled`（例如 `open`）让监听随可见性重新建立。
+   */
+  enabled?: boolean;
 }
 
 function handleWheelDelegation(
@@ -110,6 +116,7 @@ export function useWheelScrollDelegate({
   rootRef,
   targetSelector = DEFAULT_TARGET_SELECTOR,
   ignoreSelector = DEFAULT_IGNORE_SELECTOR,
+  enabled = true,
 }: UseWheelScrollDelegateOptions): WheelEventHandler<HTMLElement> {
   const wheelHandler = useCallback<WheelEventHandler<HTMLElement>>(() => {
     // React attaches wheel listeners as passive in this runtime, so preventDefault()
@@ -117,6 +124,10 @@ export function useWheelScrollDelegate({
   }, []);
 
   useEffect(() => {
+    if (!enabled) {
+      return undefined;
+    }
+
     const root = rootRef.current;
 
     if (!root) {
@@ -135,7 +146,7 @@ export function useWheelScrollDelegate({
     return () => {
       root.removeEventListener('wheel', nativeHandler, true);
     };
-  }, [ignoreSelector, rootRef, targetSelector]);
+  }, [enabled, ignoreSelector, rootRef, targetSelector]);
 
   return wheelHandler;
 }

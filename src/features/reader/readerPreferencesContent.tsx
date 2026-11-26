@@ -1810,7 +1810,7 @@ export function ReaderPreferencesContent({
                     >
                       {ragIndexRunning
                         ? l('索引中...', 'Indexing...')
-                        : l('为未索引文献建立索引', 'Index Unindexed Papers')}
+                        : l('为未建立索引的文献建索引', 'Index Papers Without an Index')}
                     </button>
                     {ragIndexOverview && ragIndexOverview.stale > 0 && !ragIndexRunning ? (
                       <button

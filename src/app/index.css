@@ -201,6 +201,25 @@
   color: var(--pq-graph-text-muted);
 }
 
+/* 0.4.42：设置弹窗的分页列表。底部「翻译缓存」信息条固定占位，窗口较矮时
+   最后一项会被列表边界裁切；默认 10px 半透明滚动条几乎看不见，用户找不到
+   入口。这里固定沟槽并加深滑块，保证「AI 模型」始终可被滚动/拖动到。 */
+.pq-preferences-section-list {
+  scrollbar-width: thin;
+  scrollbar-gutter: stable;
+  scrollbar-color: var(--pq-scrollbar-thumb-hover) transparent;
+}
+
+.pq-preferences-section-list::-webkit-scrollbar {
+  width: 8px;
+}
+
+.pq-preferences-section-list::-webkit-scrollbar-thumb {
+  border: 1px solid transparent;
+  background-clip: padding-box;
+  background-color: var(--pq-scrollbar-thumb-hover);
+}
+
 html,
 body,
 #root {

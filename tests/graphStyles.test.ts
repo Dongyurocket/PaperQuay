@@ -86,3 +86,44 @@ test('cytoscape accepts the stylesheet with generated elements', () => {
     cy.destroy();
   }
 });
+
+test('every rendered node resolves a valid background-image (0.4.42 blank-graph regression)', () => {
+  // 0.4.41 实机：1 篇进度 0.523% 的论文让 hasProgress=1 而 progressImage=''，
+  // cytoscape 在 multiple 类型属性上解析空串后抛 null.value，整张图谱一个像素都画不出来。
+  const lowProgressSnapshot: KnowledgeGraphSnapshot = {
+    generatedAt: 0,
+    nodes: [
+      { id: 'paper:low', type: 'paper', label: 'Low', color: '#2563eb', size: 28, readingProgress: 0.005230672664504656 },
+      { id: 'paper:mid', type: 'paper', label: 'Mid', color: '#2563eb', size: 28, readingProgress: 0.42 },
+      { id: 'paper:none', type: 'paper', label: 'None', color: '#2563eb', size: 28 },
+      { id: 'note:1', type: 'note', label: 'Note' },
+    ],
+    edges: [{ id: 'e1', source: 'paper:mid', target: 'note:1', type: 'note_paper', label: 'note', weight: 0.5 }],
+  };
+  const elements = buildGraphElements(lowProgressSnapshot, {
+    localizeNodeLabel: (item) => item.label,
+    colorMode: 'category',
+  });
+  const cy = cytoscape({
+    headless: true,
+    styleEnabled: true,
+    elements,
+    style: buildGraphStyles(resolveGraphTheme(() => '', false)),
+  });
+  try {
+    assert.equal(cy.$id('paper:low').data('hasProgress'), 0);
+    // parsedStyle 是 cytoscape 的运行时 API，类型声明里没有（0.4.41 抛错就发生在它内部）。
+    const parsedStyleOf = (element: unknown) => (element as { parsedStyle(name: string): unknown }).parsedStyle.bind(element);
+    for (const node of cy.nodes()) {
+      // 这里就是 0.4.41 抛错的那条路径：空 background-image 会让解析返回 null。
+      const parsedStyle = parsedStyleOf(node);
+      assert.doesNotThrow(() => parsedStyle('background-image'));
+    }
+    for (const edge of cy.edges()) {
+      const parsedStyle = parsedStyleOf(edge);
+      assert.doesNotThrow(() => parsedStyle('line-color'));
+    }
+  } finally {
+    cy.destroy();
+  }
+});

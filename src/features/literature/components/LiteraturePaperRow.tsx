@@ -347,7 +347,7 @@ function LiteraturePaperRowImpl({
                           ? l('RAG 索引失败', 'RAG Index Failed')
                           : ragStatus === 'pending'
                             ? l('RAG 待索引', 'RAG Pending')
-                            : l('RAG 未索引', 'RAG Not Indexed')}
+                            : l('RAG 未建立', 'RAG Not Built')}
               </button>
             ) : null}
             <span

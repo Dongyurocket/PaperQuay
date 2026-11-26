@@ -23,6 +23,7 @@ import {
 import { cn } from '../../utils/cn';
 import { useLocaleText } from '../../i18n/uiLanguage';
 import { copyTextToClipboard } from './NotesContextMenu';
+import { toggleTaskListAtSelection } from './noteTaskList.ts';
 import {
   deleteNoteBlock,
   duplicateNoteBlock,
@@ -306,7 +307,7 @@ export function NoteBlockControls({
               <ListOrdered className="h-4 w-4" strokeWidth={1.8} />
               {l('有序列表', 'Ordered list')}
             </button>
-            <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => convertBlock(() => editor.chain().focus().toggleTaskList().run())}>
+            <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => convertBlock(() => { toggleTaskListAtSelection(editor); })}>
               <ListChecks className="h-4 w-4" strokeWidth={1.8} />
               {l('任务列表', 'Task list')}
             </button>

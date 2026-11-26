@@ -27,6 +27,8 @@ import {
 } from 'lucide-react';
 import { cn } from '../../utils/cn';
 import { focusTextPosition } from './noteEditorBlockUtils.ts';
+import { toggleTaskListAtSelection } from './noteTaskList.ts';
+import { toast } from '../../ui/toast';
 import {
   componentBlockNode,
   insertImageFilesIntoView,
@@ -359,7 +361,17 @@ export function NoteEditorToolbar({
       <ToolbarButton title={l('有序列表', 'Ordered list')} active={editorState.isOrderedList} onClick={() => chain().toggleOrderedList().run()}>
         <ListOrdered className="h-3.5 w-3.5" strokeWidth={1.8} />
       </ToolbarButton>
-      <ToolbarButton title={l('任务列表', 'Task list')} active={editorState.isTaskList} onClick={() => chain().toggleTaskList().run()}>
+      <ToolbarButton
+        title={l('任务列表', 'Task list')}
+        active={editorState.isTaskList}
+        onClick={() => {
+          // 0.4.42：光标在引用摘录块等不可转换位置时，命令会静默失败；改为插入新任务项并提示。
+          const outcome = toggleTaskListAtSelection(editor);
+          if (outcome === 'unavailable') {
+            toast({ tone: 'info', message: l('当前位置无法创建任务列表', 'Cannot create a task list here') });
+          }
+        }}
+      >
         <ListChecks className="h-3.5 w-3.5" strokeWidth={1.8} />
       </ToolbarButton>
       <ToolbarButton title={l('引用', 'Quote')} active={editorState.isBlockquote} onClick={() => chain().toggleBlockquote().run()}>

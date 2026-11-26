@@ -30,8 +30,8 @@ export default function ReaderPreferencesWindow({
   const [activeSection, setActiveSection] = useState<PreferencesSectionKey>('general');
   const sidebarRef = useRef<HTMLElement | null>(null);
   const contentRef = useRef<HTMLElement | null>(null);
-  const handleSidebarWheelCapture = useWheelScrollDelegate({ rootRef: sidebarRef });
-  const handleContentWheelCapture = useWheelScrollDelegate({ rootRef: contentRef });
+  const handleSidebarWheelCapture = useWheelScrollDelegate({ rootRef: sidebarRef, enabled: open });
+  const handleContentWheelCapture = useWheelScrollDelegate({ rootRef: contentRef, enabled: open });
 
   useEffect(() => {
     if (!open) {
@@ -63,7 +63,7 @@ export default function ReaderPreferencesWindow({
       labelledBy="pq-preferences-title"
       className="!max-w-[min(1080px,calc(100vw-32px))]"
     >
-      <div className="flex h-[min(760px,calc(100vh-32px))] overflow-hidden">
+      <div className="flex h-[min(760px,calc(100vh-32px))] min-h-0 overflow-hidden">
         <aside
           ref={sidebarRef}
           onWheelCapture={handleSidebarWheelCapture}
@@ -83,7 +83,7 @@ export default function ReaderPreferencesWindow({
 
           <div
             data-wheel-scroll-target
-            className="min-h-0 flex-1 space-y-1 overflow-y-auto overscroll-y-contain pr-1"
+            className="pq-preferences-section-list min-h-0 flex-1 space-y-1 overflow-y-auto overscroll-y-contain pb-3 pr-1"
           >
             {sections.map((section) => (
               <button
@@ -124,7 +124,7 @@ export default function ReaderPreferencesWindow({
             ))}
           </div>
 
-          <div className="mt-4 shrink-0 rounded-[var(--pq-radius-md)] border border-[var(--pq-border)] bg-[var(--pq-surface-1)] p-3 text-xs leading-5 text-[var(--pq-text-muted)]">
+          <div className="mt-3 shrink-0 rounded-[var(--pq-radius-md)] border border-[var(--pq-border)] bg-[var(--pq-surface-1)] p-3 text-xs leading-5 text-[var(--pq-text-muted)]">
             {l(
               `当前翻译缓存：${translatedCount} 个结构块`,
               `Translation cache: ${translatedCount} blocks`,
