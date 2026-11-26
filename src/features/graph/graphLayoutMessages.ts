@@ -176,11 +176,17 @@ export function buildFcoseLayoutOptions(
   const numIter = extra.incremental ? Math.min(budget.numIter, 600) : budget.numIter;
   const forces = normalizeGraphForces(forcesInput);
 
+  // 0.4.43：`randomize:false` 会让 fcose 走 pure-incremental 分支，它只沿既有
+  // 弹簧松弛、不做谱初始化；起始点共线（全 0 或黄金角螺旋退化）时会保持一维，
+  // 196 节点全部落在 y=x 上变成一条斜线。全量布局必须让 fcose 自己做谱初始化；
+  // 增量刷新仍保持 randomize:false，才能让已有节点不被整体重排。
+  const randomize = extra.incremental !== true;
+
   return {
     name: 'fcose',
     quality: budget.quality,
     numIter,
-    randomize: false,
+    randomize,
     // The worker never animates; the main thread applies a preset layout.
     animate: false,
     fit: false,
