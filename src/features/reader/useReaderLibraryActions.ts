@@ -69,6 +69,10 @@ import {
   translateBlocksBestEffort,
 } from './readerTranslation';
 import {
+  buildTranslationSourceHashes,
+  withCurrentSourceHashes,
+} from './translationSource';
+import {
   createTranslationCacheIdentity,
   readTranslationCache,
 } from './readerTranslationCache';
@@ -209,13 +213,18 @@ export function useReaderLibraryActions({
   );
 
   const saveLibraryTranslationCache = useCallback(
-    async (item: WorkspaceItem, translations: TranslationMap) =>
+    async (
+      item: WorkspaceItem,
+      translations: TranslationMap,
+      sourceHashes: Record<string, string>,
+    ) =>
       writeLibraryTranslationCache({
         item,
         mineruCacheDir: settings.mineruCacheDir,
         sourceLanguage: settings.translationSourceLanguage,
         targetLanguage: settings.translationTargetLanguage,
         translations,
+        sourceHashes,
         identity: libraryTranslationCacheIdentity,
       }),
     [
@@ -581,6 +590,7 @@ export function useReaderLibraryActions({
             text: extractTranslatableMarkdownFromMineruBlock(block),
           }))
           .filter((block) => block.text.trim().length > 0);
+        const blocksToTranslateHashes = buildTranslationSourceHashes(blocksToTranslate);
 
         if (blocksToTranslate.length === 0) {
           throw new Error(
@@ -693,6 +703,10 @@ export function useReaderLibraryActions({
             [item.workspaceId]: {
               targetLanguage: settings.translationTargetLanguage,
               translations: resumedTranslations,
+              sourceHashes: withCurrentSourceHashes(
+                resumedTranslations,
+                blocksToTranslateHashes,
+              ),
               updatedAt: Date.now(),
             },
           }));
@@ -713,13 +727,21 @@ export function useReaderLibraryActions({
               [item.workspaceId]: {
                 targetLanguage: settings.translationTargetLanguage,
                 translations: progress.translations,
+                sourceHashes: withCurrentSourceHashes(
+                  progress.translations,
+                  blocksToTranslateHashes,
+                ),
                 updatedAt: Date.now(),
               },
             }));
 
             if (Object.keys(progress.translations).length > 0) {
               try {
-                await saveLibraryTranslationCache(item, progress.translations);
+                await saveLibraryTranslationCache(
+                  item,
+                  progress.translations,
+                  withCurrentSourceHashes(progress.translations, blocksToTranslateHashes),
+                );
               } catch (cacheError) {
                 console.warn('Failed to save library translation cache', cacheError);
               }
@@ -761,6 +783,7 @@ export function useReaderLibraryActions({
           [item.workspaceId]: {
             targetLanguage: settings.translationTargetLanguage,
             translations,
+            sourceHashes: withCurrentSourceHashes(translations, blocksToTranslateHashes),
             updatedAt: Date.now(),
           },
         }));
@@ -768,7 +791,11 @@ export function useReaderLibraryActions({
         let cacheStatusSuffix = '';
 
         try {
-          const savedCachePath = await saveLibraryTranslationCache(item, translations);
+          const savedCachePath = await saveLibraryTranslationCache(
+            item,
+            translations,
+            withCurrentSourceHashes(translations, blocksToTranslateHashes),
+          );
 
           if (!savedCachePath) {
             cacheStatusSuffix = l('，仅保存在当前会话', ', kept in the current session only');

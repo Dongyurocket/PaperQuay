@@ -7,17 +7,16 @@ import {
   type MutableRefObject,
 } from "react";
 
-import { extractTranslatableMarkdownFromMineruBlock } from "../../services/mineru";
 import {
   translateBlocksOpenAICompatible,
   translateTextOpenAICompatible,
 } from "../../services/translation";
+import type { BlockReparseOverrideApi } from "../../services/blockReparseOverrides";
 import type {
   PositionedMineruBlock,
   QaModelPreset,
   ReaderSettings,
   SelectedExcerpt,
-  TranslationBlockInput,
   TranslationMap,
   WorkspaceItem,
 } from "../../types/reader";
@@ -31,6 +30,16 @@ import {
   sanitizeTranslationErrorMessage,
   translateBlocksBestEffort,
 } from "./readerTranslation";
+import {
+  buildBlockTranslationInput,
+  buildBlockTranslationInputs,
+  hashTranslationSourceText,
+  mergeSourceHashes,
+  reconcileTranslations,
+  resolveBlockTranslationText,
+  sameTranslationMap,
+  withCurrentSourceHashes,
+} from "./translationSource";
 import {
   beginTranslationCacheRestore,
   createTranslationCacheIdentity,
@@ -54,22 +63,6 @@ import {
 
 type LocaleTextFn = (zh: string, en: string) => string;
 
-function buildTranslatableBlockInput(block: PositionedMineruBlock): TranslationBlockInput | null {
-  if (block.contentSourceBlockId) {
-    return null;
-  }
-
-  const text = extractTranslatableMarkdownFromMineruBlock(block).trim();
-
-  return text ? { blockId: block.blockId, text } : null;
-}
-
-function buildTranslatableBlockInputs(blocks: PositionedMineruBlock[]): TranslationBlockInput[] {
-  return blocks
-    .map((block) => buildTranslatableBlockInput(block))
-    .filter((block): block is TranslationBlockInput => Boolean(block));
-}
-
 function translationCacheFailureMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -77,6 +70,8 @@ function translationCacheFailureMessage(error: unknown): string {
 interface UseDocumentTranslationOptions {
   currentDocument: WorkspaceItem;
   flatBlocks: PositionedMineruBlock[];
+  /** AI 重解析覆盖：翻译输入与失效判断都以修复后的文本为准。 */
+  blockReparse: BlockReparseOverrideApi;
   libraryOperationRunning: boolean;
   onOpenPreferences: () => void;
   selectedExcerpt: SelectedExcerpt | null;
@@ -121,6 +116,7 @@ interface UseDocumentTranslationResult {
 export function useDocumentTranslation({
   currentDocument,
   flatBlocks,
+  blockReparse,
   libraryOperationRunning,
   onOpenPreferences,
   selectedExcerpt,
@@ -141,6 +137,8 @@ export function useDocumentTranslation({
   const translationProgressTotalRef = useRef(0);
   const translationPublishGateRef = useRef<ProgressPublishGate | null>(null);
   const translationTaskIdRef = useRef("");
+  /** 当前内存译文对应的源文本指纹；与 blockTranslationsRef 同步更新。 */
+  const translationSourceHashesRef = useRef<Record<string, string>>({});
 
   const [blockTranslations, setBlockTranslations] = useState<TranslationMap>(
     {},
@@ -163,6 +161,78 @@ export function useDocumentTranslation({
     [blockTranslations],
   );
 
+  const { overrides: blockOverrides, getOverrideMarkdown } = blockReparse;
+  const customSourceBlockIds = useMemo(
+    () => new Set(Object.keys(blockOverrides)),
+    [blockOverrides],
+  );
+  const knownBlockIds = useMemo(
+    () =>
+      new Set(
+        flatBlocks
+          .filter((block) => !block.contentSourceBlockId)
+          .map((block) => block.blockId),
+      ),
+    [flatBlocks],
+  );
+  const blockById = useMemo(
+    () => new Map(flatBlocks.map((block) => [block.blockId, block])),
+    [flatBlocks],
+  );
+
+  /**
+   * 只计算候选块的当前源文本指纹。整篇逐块重算 markdown 代价高，而校验与
+   * 失效只涉及已有译文的块；全文翻译的指纹在构造输入时直接产出。
+   */
+  const buildCurrentHashesFor = useCallback(
+    (blockIds: Iterable<string>): Record<string, string> => {
+      const hashes: Record<string, string> = {};
+
+      for (const blockId of blockIds) {
+        const block = blockById.get(blockId);
+
+        if (!block || block.contentSourceBlockId) {
+          continue;
+        }
+
+        hashes[blockId] = hashTranslationSourceText(
+          resolveBlockTranslationText(block, getOverrideMarkdown),
+        );
+      }
+
+      return hashes;
+    },
+    [blockById, getOverrideMarkdown],
+  );
+
+  /**
+   * 同时更新内存译文与它们对应的源文本指纹。所有写入译文的位置都必须走这里，
+   * 否则下一次校验会把刚生成的译文当成过期。
+   */
+  const applyTranslationState = useCallback(
+    (translations: TranslationMap, sourceHashes: Record<string, string>) => {
+      blockTranslationsRef.current = translations;
+      translationSourceHashesRef.current = sourceHashes;
+      setBlockTranslations(translations);
+    },
+    [],
+  );
+
+  const reconcileWithCurrentSources = useCallback(
+    (
+      translations: TranslationMap | null | undefined,
+      sourceHashes: Record<string, string> | null | undefined,
+    ) =>
+      reconcileTranslations({
+        translations,
+        storedHashes: sourceHashes,
+        currentHashes: buildCurrentHashesFor(Object.keys(translations ?? {})),
+        customSourceBlockIds,
+        knownBlockIds,
+      }),
+    [buildCurrentHashesFor, customSourceBlockIds, knownBlockIds],
+  );
+
   // 译文缓存按目标语言 + 模型身份 + 源语言隔离；切换模型后不会读到另一套
   // 译文，旧版 <targetLanguage>.json 仍会作为读取候选。
   const documentTranslationCacheIdentity = useMemo(
@@ -178,6 +248,47 @@ export function useDocumentTranslation({
   useEffect(() => {
     blockTranslationsRef.current = blockTranslations;
   }, [blockTranslations]);
+
+  // 源文本或 AI 覆盖变化后立即剪掉不再对应的译文，避免界面继续显示旧译文。
+  // 这里只改内存状态；磁盘缓存在下一次翻译写入时按新指纹覆盖，读取时仍会
+  // 经过同一套校验，不会把已失效的译文又贴回来。
+  useEffect(() => {
+    if (!flatBlocks.length || translating) {
+      return;
+    }
+
+    const currentTranslations = blockTranslationsRef.current;
+
+    if (Object.keys(currentTranslations).length === 0) {
+      return;
+    }
+
+    const reconciled = reconcileWithCurrentSources(
+      currentTranslations,
+      translationSourceHashesRef.current,
+    );
+
+    if (sameTranslationMap(reconciled.translations, currentTranslations)) {
+      translationSourceHashesRef.current = reconciled.sourceHashes;
+      return;
+    }
+
+    const staleCount =
+      Object.keys(currentTranslations).length -
+      Object.keys(reconciled.translations).length;
+
+    applyTranslationState(reconciled.translations, reconciled.sourceHashes);
+    setTranslationProgressCompleted(Object.keys(reconciled.translations).length);
+
+    if (staleCount > 0) {
+      setStatusMessage(
+        lRef.current(
+          `${staleCount} 段译文对应的原文已更新，已标记为待重新翻译`,
+          `${staleCount} translation(s) no longer match the current source text and will be retranslated`,
+        ),
+      );
+    }
+  }, [applyTranslationState, flatBlocks.length, reconcileWithCurrentSources, setStatusMessage, translating, lRef]);
 
   useEffect(() => {
     translationProgressTotalRef.current = translationProgressTotal;
@@ -255,13 +366,18 @@ export function useDocumentTranslation({
   );
 
   const saveTranslationCache = useCallback(
-    async (item: WorkspaceItem, translations: TranslationMap) => {
+    async (
+      item: WorkspaceItem,
+      translations: TranslationMap,
+      sourceHashes: Record<string, string>,
+    ) => {
       await writeTranslationCache({
         item,
         mineruCacheDir: settings.mineruCacheDir,
         sourceLanguage: settings.translationSourceLanguage,
         targetLanguage: settings.translationTargetLanguage,
         translations,
+        sourceHashes,
         identity: documentTranslationCacheIdentity,
       });
     },
@@ -278,10 +394,10 @@ export function useDocumentTranslation({
       blockTranslationTargetLanguage &&
       blockTranslationTargetLanguage !== settings.translationTargetLanguage
     ) {
-      setBlockTranslations({});
+      applyTranslationState({}, {});
       setBlockTranslationTargetLanguage("");
     }
-  }, [blockTranslationTargetLanguage, settings.translationTargetLanguage]);
+  }, [applyTranslationState, blockTranslationTargetLanguage, settings.translationTargetLanguage]);
 
   useEffect(() => {
     if (
@@ -302,9 +418,11 @@ export function useDocumentTranslation({
       return;
     }
 
-    const incomingCount = countTranslatedBlocks(
+    const incoming = reconcileWithCurrentSources(
       translationSnapshot.translations,
+      translationSnapshot.sourceHashes,
     );
+    const incomingCount = countTranslatedBlocks(incoming.translations);
 
     if (incomingCount === 0) {
       return;
@@ -317,7 +435,7 @@ export function useDocumentTranslation({
       return;
     }
 
-    setBlockTranslations(translationSnapshot.translations);
+    applyTranslationState(incoming.translations, incoming.sourceHashes);
     setBlockTranslationTargetLanguage(translationSnapshot.targetLanguage);
     setStatusMessage(
       lRef.current(
@@ -326,8 +444,10 @@ export function useDocumentTranslation({
       ),
     );
   }, [
+    applyTranslationState,
     blockTranslationTargetLanguage,
     currentDocument,
+    reconcileWithCurrentSources,
     settings.translationTargetLanguage,
     setStatusMessage,
     translatedCount,
@@ -372,22 +492,52 @@ export function useDocumentTranslation({
         return;
       }
 
-      setBlockTranslations(cachedTranslationResult.translations);
-      setBlockTranslationTargetLanguage(settings.translationTargetLanguage);
-      const restoredCount = countTranslatedBlocks(cachedTranslationResult.translations);
-      setStatusMessage(
-        lRef.current(
-          `已恢复历史翻译 ${restoredCount} 条（${settings.translationTargetLanguage}）`,
-          `Restored ${restoredCount} saved translations (${settings.translationTargetLanguage})`,
-        ),
+      const restored = reconcileWithCurrentSources(
+        cachedTranslationResult.translations,
+        cachedTranslationResult.sourceHashes,
       );
+      const restoredCount = countTranslatedBlocks(restored.translations);
+      const staleCount =
+        countTranslatedBlocks(cachedTranslationResult.translations) - restoredCount;
+
+      if (restoredCount === 0) {
+        // 缓存全部过期（例如每段都修复过）：不要把空结果说成“已恢复 0 条”，
+        // 而是明确提示需要重新翻译。
+        if (staleCount > 0) {
+          const staleMessage = lRef.current(
+            `${staleCount} 段历史译文的原文已更新，需要重新翻译`,
+            `${staleCount} saved translation(s) no longer match the current source text and need to be retranslated`,
+          );
+          setStatusMessage(staleMessage);
+          updateLibraryOperation(
+            "translation",
+            "success",
+            staleMessage,
+            null,
+            flatBlocks.length || null,
+          );
+        }
+
+        return;
+      }
+
+      const restoredMessage = staleCount > 0
+        ? lRef.current(
+            `已恢复历史翻译 ${restoredCount} 条（${settings.translationTargetLanguage}）；${staleCount} 段因原文更新待重新翻译`,
+            `Restored ${restoredCount} saved translations (${settings.translationTargetLanguage}); ${staleCount} need retranslation because the source text changed`,
+          )
+        : lRef.current(
+            `已恢复历史翻译 ${restoredCount} 条（${settings.translationTargetLanguage}）`,
+            `Restored ${restoredCount} saved translations (${settings.translationTargetLanguage})`,
+          );
+
+      applyTranslationState(restored.translations, restored.sourceHashes);
+      setBlockTranslationTargetLanguage(settings.translationTargetLanguage);
+      setStatusMessage(restoredMessage);
       updateLibraryOperation(
         "translation",
         "success",
-        lRef.current(
-          `已恢复历史翻译 ${restoredCount} 条（${settings.translationTargetLanguage}）`,
-          `Restored ${restoredCount} saved translations (${settings.translationTargetLanguage})`,
-        ),
+        restoredMessage,
         restoredCount,
         flatBlocks.length || null,
       );
@@ -411,9 +561,11 @@ export function useDocumentTranslation({
       cancelled = true;
     };
   }, [
+    applyTranslationState,
     blockTranslationTargetLanguage,
     currentDocument,
     flatBlocks.length,
+    reconcileWithCurrentSources,
     settings.mineruCacheDir,
     settings.translationTargetLanguage,
     setError,
@@ -429,7 +581,14 @@ export function useDocumentTranslation({
       return;
     }
 
-    const blocksToTranslate = buildTranslatableBlockInputs(flatBlocks);
+    const blocksToTranslate = buildBlockTranslationInputs(flatBlocks, getOverrideMarkdown);
+    const blocksToTranslateHashes: Record<string, string> = {};
+
+    for (const block of blocksToTranslate) {
+      if (block.sourceHash) {
+        blocksToTranslateHashes[block.blockId] = block.sourceHash;
+      }
+    }
 
     if (blocksToTranslate.length === 0) {
       const message = lRef.current(
@@ -491,17 +650,40 @@ export function useDocumentTranslation({
             console.warn('Failed to read translation cache before translation resume', cacheError);
             return null;
           });
+      // 旧缓存要与当前源文本逐块校验：修复过的块、或 blockId 已漂移的块
+      // 不再参与续译，避免“看起来已翻译”把旧译文带回来。
+      const cachedResumed = cachedTranslationResult
+        ? reconcileWithCurrentSources(
+            cachedTranslationResult.translations,
+            cachedTranslationResult.sourceHashes,
+          )
+        : { translations: {}, sourceHashes: {} };
+      const snapshotResumed = translationCacheCleared
+        ? { translations: {}, sourceHashes: {} }
+        : reconcileWithCurrentSources(
+            translationSnapshot?.translations,
+            translationSnapshot?.sourceHashes,
+          );
       const resumedTranslations = mergeReaderTranslations(
         mergeReaderTranslations(
           blockTranslations,
-          cachedTranslationResult?.translations,
+          cachedResumed.translations,
         ),
-        translationCacheCleared ? undefined : translationSnapshot?.translations,
+        snapshotResumed.translations,
+      );
+      const resumedSourceHashes = withCurrentSourceHashes(
+        resumedTranslations,
+        mergeSourceHashes(
+          translationSourceHashesRef.current,
+          cachedResumed.sourceHashes,
+          snapshotResumed.sourceHashes,
+          blocksToTranslateHashes,
+        ),
       );
       const resumedCount = countTranslatedBlocks(resumedTranslations);
 
       if (resumedCount > 0) {
-        setBlockTranslations(resumedTranslations);
+        applyTranslationState(resumedTranslations, resumedSourceHashes);
         setBlockTranslationTargetLanguage(settings.translationTargetLanguage);
         setTranslationProgressCompleted(resumedCount);
       } else {
@@ -527,14 +709,21 @@ export function useDocumentTranslation({
             return;
           }
 
-          setBlockTranslations(progress.translations);
+          applyTranslationState(
+            progress.translations,
+            withCurrentSourceHashes(progress.translations, blocksToTranslateHashes),
+          );
           setBlockTranslationTargetLanguage(settings.translationTargetLanguage);
           setTranslationProgressCompleted(progress.translatedCount);
           publishTranslationProgress(progress.translatedCount, progress.totalBlocks);
 
           if (progress.translatedCount > 0) {
             try {
-              await saveTranslationCache(currentDocument, progress.translations);
+              await saveTranslationCache(
+                currentDocument,
+                progress.translations,
+                withCurrentSourceHashes(progress.translations, blocksToTranslateHashes),
+              );
               cacheWriteError = null;
             } catch (cacheError) {
               cacheWriteError = cacheError;
@@ -571,13 +760,17 @@ export function useDocumentTranslation({
 
       const nextTranslations = result.translations;
       const nextTranslatedCount = countTranslatedBlocks(nextTranslations);
+      const nextSourceHashes = withCurrentSourceHashes(
+        nextTranslations,
+        blocksToTranslateHashes,
+      );
 
-      setBlockTranslations(nextTranslations);
+      applyTranslationState(nextTranslations, nextSourceHashes);
       setBlockTranslationTargetLanguage(settings.translationTargetLanguage);
       setTranslationProgressCompleted(nextTranslatedCount);
 
       try {
-        await saveTranslationCache(currentDocument, nextTranslations);
+        await saveTranslationCache(currentDocument, nextTranslations, nextSourceHashes);
         cacheWriteError = null;
       } catch (cacheError) {
         cacheWriteError = cacheError;
@@ -679,11 +872,14 @@ export function useDocumentTranslation({
       }
     }
   }, [
+    applyTranslationState,
     blockTranslations,
     currentDocument,
     flatBlocks,
+    getOverrideMarkdown,
     libraryOperationRunning,
     onOpenPreferences,
+    reconcileWithCurrentSources,
     saveTranslationCache,
     setError,
     setStatusMessage,
@@ -694,6 +890,7 @@ export function useDocumentTranslation({
     settings.translationTargetLanguage,
     translating,
     translationModelPreset,
+    translationSnapshot?.sourceHashes,
     translationSnapshot?.translations,
     publishTranslationProgress,
     settleTranslationTask,
@@ -735,7 +932,7 @@ export function useDocumentTranslation({
         return;
       }
 
-      const blockToTranslate = buildTranslatableBlockInput(block);
+      const blockToTranslate = buildBlockTranslationInput(block, getOverrideMarkdown);
 
       if (!blockToTranslate) {
         const message = lRef.current(
@@ -745,6 +942,12 @@ export function useDocumentTranslation({
         setStatusMessage(message);
         return;
       }
+
+      // 单块重译发生在“刚保存修复文本”之后：不能依赖上一次渲染的指纹表，
+      // 必须使用本次输入同步算出的指纹。
+      const blockSourceHashes: Record<string, string> = blockToTranslate.sourceHash
+        ? { [block.blockId]: blockToTranslate.sourceHash }
+        : {};
 
       if (!translationModelPreset || !translationModelPreset.apiKey.trim()) {
         onOpenPreferences();
@@ -801,15 +1004,23 @@ export function useDocumentTranslation({
               blockTranslationsRef.current,
               progress.translations,
             );
+            const mergedSourceHashes = withCurrentSourceHashes(
+              mergedTranslations,
+              mergeSourceHashes(translationSourceHashesRef.current, blockSourceHashes),
+            );
 
-            setBlockTranslations(mergedTranslations);
+            applyTranslationState(mergedTranslations, mergedSourceHashes);
             setBlockTranslationTargetLanguage(settings.translationTargetLanguage);
             setTranslationProgressCompleted(progress.translatedCount);
             publishTranslationProgress(progress.translatedCount, progress.totalBlocks);
 
             if (progress.translatedCount > 0) {
               try {
-                await saveTranslationCache(currentDocument, mergedTranslations);
+                await saveTranslationCache(
+                  currentDocument,
+                  mergedTranslations,
+                  mergedSourceHashes,
+                );
                 cacheWriteError = null;
               } catch (cacheError) {
                 cacheWriteError = cacheError;
@@ -835,12 +1046,16 @@ export function useDocumentTranslation({
           result.translations,
         );
         const translatedText = result.translations[block.blockId]?.trim() ?? "";
+        const nextSourceHashes = withCurrentSourceHashes(
+          nextTranslations,
+          mergeSourceHashes(translationSourceHashesRef.current, blockSourceHashes),
+        );
 
-        setBlockTranslations(nextTranslations);
+        applyTranslationState(nextTranslations, nextSourceHashes);
         setBlockTranslationTargetLanguage(settings.translationTargetLanguage);
         setTranslationProgressCompleted(translatedText ? 1 : 0);
         try {
-          await saveTranslationCache(currentDocument, nextTranslations);
+          await saveTranslationCache(currentDocument, nextTranslations, nextSourceHashes);
           cacheWriteError = null;
         } catch (cacheError) {
           cacheWriteError = cacheError;
@@ -940,7 +1155,9 @@ export function useDocumentTranslation({
       }
     },
     [
+      applyTranslationState,
       currentDocument,
+      getOverrideMarkdown,
       libraryOperationRunning,
       onOpenPreferences,
       saveTranslationCache,
@@ -964,7 +1181,7 @@ export function useDocumentTranslation({
     // 先同步推进清除标记与 generation：正在进行的磁盘恢复读取会在 await
     // 之后检查 token，发现已经清除就不再回填旧译文。
     markTranslationCacheCleared(currentDocument, targetLanguage);
-    setBlockTranslations({});
+    applyTranslationState({}, {});
 
     void deleteTranslationCache({
       item: currentDocument,
@@ -1006,6 +1223,7 @@ export function useDocumentTranslation({
         );
       });
   }, [
+    applyTranslationState,
     currentDocument,
     documentTranslationCacheIdentity,
     settings.mineruCacheDir,
@@ -1206,7 +1424,7 @@ export function useDocumentTranslation({
     translationPublishGateRef.current = null;
     removeBackgroundTask(translationTaskIdRef.current);
     selectionRequestKeyRef.current = "";
-    setBlockTranslations({});
+    applyTranslationState({}, {});
     setBlockTranslationTargetLanguage("");
     setTranslating(false);
     setTranslationCancelling(false);
@@ -1215,7 +1433,7 @@ export function useDocumentTranslation({
     setSelectedExcerptTranslation("");
     setSelectedExcerptTranslating(false);
     setSelectedExcerptError("");
-  }, []);
+  }, [applyTranslationState]);
 
   const resetSelectedExcerptTranslationState = useCallback(() => {
     selectionRequestKeyRef.current = "";

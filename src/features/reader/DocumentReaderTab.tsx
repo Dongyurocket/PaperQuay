@@ -71,7 +71,7 @@ function DocumentReaderTab(props: DocumentReaderTabProps) {
   const notesApi = useReaderNotes(state, documentApi);
   const annotationsApi = useReaderAnnotations(state, documentApi, notesApi);
   const qaApi = useReaderQa(state, documentApi, summaryApi, notesApi, annotationsApi);
-  const { activeBlockSummary, annotationSaveDirectory, availablePdfOptions, blockTranslations, canOpenOriginalPdf, currentJsonName, currentLocalPdfPath, currentPdfName, currentPdfVariantLabel, handleAttachTranslatedPdf, handleBlockClick, handleCancelDocumentTranslation, handleCloudParse, handleForceReparse, handleGenerateTranslatedPdf, handleOpenMineruJson, handleOpenOriginalPdf, handlePdfAnnotationSaveSuccess, handlePdfBlockHover, handlePdfBlockSelect, handlePdfReadingHeatmapChange, handlePdfScrollPositionChange, handleRetranslateBlock, handleSelectProjectPdf, handleSplitResizeStart, handleTranslateDocument, handleTranslateSelectedExcerpt, originalPdfPath, pdfReadingHeatmap, pdfScrollPosition, resetLayout, selectedExcerptError, selectedExcerptTranslating, selectedExcerptTranslation, translatedCount, translating, translationCancelling, translationProgressCompleted, translationProgressTotal } = documentApi;
+  const { activeBlockSummary, annotationSaveDirectory, availablePdfOptions, blockReparse, blockTranslations, canOpenOriginalPdf, currentJsonName, currentLocalPdfPath, currentPdfName, currentPdfVariantLabel, handleAttachTranslatedPdf, handleBlockClick, handleBlockReparseApplied, handleCancelDocumentTranslation, handleCloudParse, handleForceReparse, handleGenerateTranslatedPdf, handleOpenMineruJson, handleOpenOriginalPdf, handlePdfAnnotationSaveSuccess, handlePdfBlockHover, handlePdfBlockSelect, handlePdfReadingHeatmapChange, handlePdfScrollPositionChange, handleRetranslateBlock, handleSelectProjectPdf, handleSplitResizeStart, handleTranslateDocument, handleTranslateSelectedExcerpt, originalPdfPath, pdfReadingHeatmap, pdfScrollPosition, resetLayout, selectedExcerptError, selectedExcerptTranslating, selectedExcerptTranslation, translatedCount, translating, translationCancelling, translationProgressCompleted, translationProgressTotal } = documentApi;
   const { handleGeneratePaperSummary } = summaryApi;
   const { activeExcerptCard, canReidentifyDistillPreview, commitDistillPreview, handleAddBlockToNote, handleAddSelectionToNote, handleCancelDistillPreview, handleDistillSelectionToNote, handleGenerateDistillPreview, handleReidentifyDistillPreview, handleSaveAssistantMessageAsNote } = notesApi;
   const { handleAppendSelectedExcerptToQa, handleClearSelectedExcerpt, handleSelectAnnotation, handleTextSelect } = annotationsApi;
@@ -232,6 +232,8 @@ function DocumentReaderTab(props: DocumentReaderTabProps) {
           blocks={flatBlocks}
           mineruOutlineIndex={mineruOutlineIndex}
           translations={blockTranslations}
+          blockReparse={blockReparse}
+          onBlockReparseApplied={handleBlockReparseApplied}
           translationDisplayMode={settings.translationDisplayMode}
           translationLanguageLabel={translationTargetLanguageLabel}
           activeBlockId={activeBlockId}

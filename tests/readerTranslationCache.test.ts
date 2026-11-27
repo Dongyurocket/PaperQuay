@@ -573,3 +573,86 @@ test('the current model cache wins over a more complete legacy cache for the sam
     'page-1-block-3': '第三段译文',
   });
 });
+
+test('source hashes round-trip with v2 caches and stay separate from legacy v1 caches', async () => {
+  resetTranslationCacheSessionState();
+  const store = memoryCacheStore();
+  const path = buildMineruTranslationCachePath('C:/cache', item(), 'Chinese');
+
+  await writeTranslationCache({
+    item: item(),
+    mineruCacheDir: 'C:/cache',
+    sourceLanguage: 'English',
+    targetLanguage: 'Chinese',
+    translations,
+    sourceHashes: {
+      'page-1-block-1': 'hash-one',
+      'page-1-block-2': 'hash-two',
+    },
+    identity: null,
+    resolveFallbackRoot: async () => '',
+    readText: store.readText,
+    writeText: store.writeText,
+  });
+
+  const raw = JSON.parse(store.files.get(path) ?? '{}');
+  assert.equal(raw.version, 2);
+  assert.deepEqual(raw.sourceHashes, {
+    'page-1-block-1': 'hash-one',
+    'page-1-block-2': 'hash-two',
+  });
+
+  const read = await readTranslationCache({
+    item: item(),
+    mineruCacheDir: 'C:/cache',
+    targetLanguage: 'Chinese',
+    identity: null,
+    resolveFallbackRoot: async () => '',
+    readText: store.readText,
+  });
+
+  assert.ok(read);
+  assert.deepEqual(read.sourceHashes, {
+    'page-1-block-1': 'hash-one',
+    'page-1-block-2': 'hash-two',
+  });
+
+  // 重写某块但不带指纹时，旧指纹必须被丢掉，不能留给新译文。
+  await writeTranslationCache({
+    item: item(),
+    mineruCacheDir: 'C:/cache',
+    sourceLanguage: 'English',
+    targetLanguage: 'Chinese',
+    translations: { 'page-1-block-1': '第一段新译文' },
+    identity: null,
+    resolveFallbackRoot: async () => '',
+    readText: store.readText,
+    writeText: store.writeText,
+  });
+
+  const afterRewrite = JSON.parse(store.files.get(path) ?? '{}');
+  assert.deepEqual(afterRewrite.translations['page-1-block-1'], '第一段新译文');
+  assert.equal(afterRewrite.sourceHashes['page-1-block-1'], undefined);
+  assert.equal(afterRewrite.sourceHashes['page-1-block-2'], 'hash-two');
+
+  // v1 缓存（没有 sourceHashes）仍然可读，指纹为空表，由调用方按“旧译文”处理。
+  store.files.set(path, JSON.stringify({
+    version: 1,
+    sourceLanguage: 'English',
+    targetLanguage: 'Chinese',
+    translatedAt: '2026-11-18T00:00:00.000Z',
+    translations: { 'legacy-block': '历史译文' },
+  }));
+
+  const legacyRead = await readTranslationCache({
+    item: item(),
+    mineruCacheDir: 'C:/cache',
+    targetLanguage: 'Chinese',
+    identity: null,
+    resolveFallbackRoot: async () => '',
+    readText: store.readText,
+  });
+
+  assert.ok(legacyRead);
+  assert.deepEqual(legacyRead.sourceHashes, {});
+});

@@ -13,6 +13,7 @@ import type {
   ReaderSettings,
   SummarySourceMode,
   TranslationMap,
+  TranslationSourceHashes,
   UiLanguage,
   WorkspaceItem,
 } from '../../types/reader';
@@ -614,6 +615,8 @@ export interface TranslationCacheEnvelope {
   targetLanguage: string;
   translatedAt: string;
   translations: TranslationMap;
+  /** v2：生成译文时使用的块级源文本指纹，用于重解析后的失效判断。 */
+  sourceHashes?: TranslationSourceHashes;
 }
 
 export interface BatchProgressState {

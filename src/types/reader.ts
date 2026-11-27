@@ -107,9 +107,16 @@ export interface TranslationMap {
   [blockId: string]: string;
 }
 
+/** 生成译文的源文本指纹，用于判断译文是否仍对应当前块内容。 */
+export interface TranslationSourceHashes {
+  [blockId: string]: string;
+}
+
 export interface TranslationBlockInput {
   blockId: string;
   text: string;
+  /** 构造输入时同步计算的源文本指纹 */
+  sourceHash?: string;
 }
 
 export interface SummaryBlockInput {

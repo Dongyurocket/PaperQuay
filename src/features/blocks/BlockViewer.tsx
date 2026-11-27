@@ -23,8 +23,7 @@ import { ContextMenu, type ContextMenuEntry } from '../../components/ContextMenu
 import { useLocaleText } from '../../i18n/uiLanguage';
 import { IconButton } from '../../ui/button';
 import { buildRenderableBlocks, extractTextFromMineruBlock, extractTableHtmlFromMineruBlock } from '../../services/mineru';
-import { createBlockReparseStorageKey, loadBlockReparseOverrides, saveBlockReparseOverride } from '../../services/blockReparseOverrides';
-import { getPdfSourceSignature } from '../pdf/pdfDocumentSource';
+import type { BlockReparseOverrideApi } from '../../services/blockReparseOverrides';
 import type {
   PdfSource,
   PositionedMineruBlock,
@@ -70,6 +69,10 @@ interface BlockViewerProps {
   onBlockClick: (block: PositionedMineruBlock) => void;
   onAddBlockToNote?: (block: PositionedMineruBlock, selection: TextSelectionPayload) => void;
   onRetranslateBlock?: (block: PositionedMineruBlock) => void;
+  /** AI 重解析覆盖：与翻译流程共享同一份状态。 */
+  blockReparse: BlockReparseOverrideApi;
+  /** 修复文本保存或恢复后触发（用于按新源文本重译该块）。 */
+  onBlockReparseApplied?: (block: PositionedMineruBlock) => void;
   onTranslationDisplayModeChange?: (mode: TranslationDisplayMode) => void;
   onTextSelect?: (selection: TextSelectionPayload) => void;
 }
@@ -201,6 +204,8 @@ function BlockViewer({
   onBlockClick,
   onAddBlockToNote,
   onRetranslateBlock,
+  blockReparse,
+  onBlockReparseApplied,
   onTranslationDisplayModeChange,
   onTextSelect,
 }: BlockViewerProps) {
@@ -268,47 +273,26 @@ function BlockViewer({
   } | null>(null);
   const [flashBlockId, setFlashBlockId] = useState<string | null>(null);
   const [cropBlockIds, setCropBlockIds] = useState<Set<string>>(() => new Set());
-  const documentSource = getPdfSourceSignature(pdfSource ?? null, mineruPath);
-  const overrideScope = useMemo(() => ({ documentSource, mineruPath, blocks }), [documentSource, mineruPath, blocks]);
   const [reparseTarget, setReparseTarget] = useState<{
     block: PositionedMineruBlock;
     initialText: string;
-    scope: typeof overrideScope;
   } | null>(null);
-  const [overrideState, setOverrideState] = useState<{
-    scope: typeof overrideScope | null;
-    key: string;
-    values: Record<string, string>;
-    error: string;
-  }>({ scope: null, key: '', values: {}, error: '' });
-  const storageReady = overrideState.scope === overrideScope && Boolean(overrideState.key);
-  const blockOverrides = storageReady ? overrideState.values : {};
-
-  useEffect(() => {
-    let disposed = false;
-    void createBlockReparseStorageKey(documentSource, mineruPath, blocks).then((key) => {
-      if (disposed) return;
-      const values = loadBlockReparseOverrides(window.localStorage, key);
-      setOverrideState({ scope: overrideScope, key, values, error: '' });
-    }).catch((reason) => {
-      if (!disposed) setOverrideState({ scope: overrideScope, key: '', values: {}, error: String(reason instanceof Error ? reason.message : reason) });
-    });
-    return () => { disposed = true; };
-  }, [overrideScope, documentSource, mineruPath, blocks]);
+  const { overrides: blockOverrides, storageReady, storageError } = blockReparse;
 
   const handleOpenReparse = useCallback((block: PositionedMineruBlock, currentText: string) => {
     // Always reference original OCR, including table markup; previous repairs are not evidence.
     const originalText = [extractTextFromMineruBlock(block), block.type === 'table' ? extractTableHtmlFromMineruBlock(block) : ''].filter(Boolean).join('\n\n');
-    setReparseTarget({ block, initialText: originalText || currentText, scope: overrideScope });
-  }, [overrideScope]);
+    setReparseTarget({ block, initialText: originalText || currentText });
+  }, []);
 
   const persistReparse = useCallback((markdown: string | null) => {
-    if (!reparseTarget || reparseTarget.scope !== overrideScope || !storageReady) {
-      throw new Error(l('解析版本已变化或存储尚未就绪，请重新打开此区块。', 'The parse revision changed or storage is not ready. Reopen this block.'));
+    if (!reparseTarget) {
+      return;
     }
-    const values = saveBlockReparseOverride(window.localStorage, overrideState.key, reparseTarget.block.blockId, markdown);
-    setOverrideState((previous) => ({ ...previous, values }));
-  }, [reparseTarget, overrideScope, storageReady, overrideState.key, l]);
+
+    blockReparse.saveOverride(reparseTarget.block.blockId, markdown);
+    onBlockReparseApplied?.(reparseTarget.block);
+  }, [blockReparse, onBlockReparseApplied, reparseTarget]);
   const handleApplyReparse = useCallback((markdown: string) => persistReparse(markdown), [persistReparse]);
   const handleResetReparse = useCallback(() => persistReparse(null), [persistReparse]);
 
@@ -1012,13 +996,13 @@ function BlockViewer({
         />
       ) : null}
 
-      {reparseTarget && reparseTarget.scope === overrideScope ? (
+      {reparseTarget ? (
         <BlockReparseModal
           key={reparseTarget.block.blockId}
           block={reparseTarget.block}
           pdfSource={pdfSource}
           storageReady={storageReady}
-          storageError={overrideState.scope === overrideScope ? overrideState.error : ''}
+          storageError={storageError}
           initialText={reparseTarget.initialText}
           hasCustomOverride={Boolean(blockOverrides[reparseTarget.block.blockId])}
           onApply={handleApplyReparse}

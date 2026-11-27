@@ -335,6 +335,7 @@ export function useReaderLibraryPreview({
               item,
               count,
               translations: cachedTranslation.translations,
+              sourceHashes: cachedTranslation.sourceHashes,
             };
           }),
         )
@@ -342,6 +343,7 @@ export function useReaderLibraryPreview({
         item: WorkspaceItem;
         count: number;
         translations: ReaderDocumentTranslationSnapshot['translations'];
+        sourceHashes: NonNullable<ReaderDocumentTranslationSnapshot['sourceHashes']>;
       } => Boolean(entry));
 
       if (cancelled || restoredEntries.length === 0) {
@@ -368,6 +370,7 @@ export function useReaderLibraryPreview({
           next[entry.item.workspaceId] = {
             targetLanguage: settings.translationTargetLanguage,
             translations: entry.translations,
+            sourceHashes: entry.sourceHashes,
             updatedAt: restoredAt,
           };
           changed = true;

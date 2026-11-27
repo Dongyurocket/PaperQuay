@@ -20,6 +20,7 @@ import type {
   PositionedMineruBlock,
   ReaderSettings,
   TranslationMap,
+  TranslationSourceHashes,
   WorkspaceItem,
 } from '../../types/reader';
 import { getFileNameFromPath } from '../../utils/text';
@@ -581,6 +582,7 @@ export async function writeLibraryTranslationCache({
   sourceLanguage,
   targetLanguage,
   translations,
+  sourceHashes,
   identity,
 }: {
   item: WorkspaceItem;
@@ -588,6 +590,7 @@ export async function writeLibraryTranslationCache({
   sourceLanguage: string;
   targetLanguage: string;
   translations: TranslationMap;
+  sourceHashes?: TranslationSourceHashes | null;
   identity?: TranslationCacheIdentity | null;
 }) {
   return writeTranslationCache({
@@ -596,6 +599,7 @@ export async function writeLibraryTranslationCache({
     sourceLanguage,
     targetLanguage,
     translations,
+    sourceHashes,
     identity,
   });
 }

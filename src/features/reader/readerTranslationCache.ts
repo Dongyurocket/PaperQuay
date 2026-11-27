@@ -1,4 +1,4 @@
-import type { TranslationMap, WorkspaceItem } from '../../types/reader';
+import type { TranslationMap, TranslationSourceHashes, WorkspaceItem } from '../../types/reader';
 import {
   buildMineruCachePathCandidates,
   buildMineruTranslationCacheFileName,
@@ -235,6 +235,8 @@ export interface TranslationCacheReadResult {
   targetLanguage: string;
   translatedAt: string;
   translations: TranslationMap;
+  /** 译文写入时记录的源文本指纹；旧版缓存没有该字段 */
+  sourceHashes: TranslationSourceHashes;
 }
 
 function translationCacheCompleteness(result: TranslationCacheReadResult): number {
@@ -244,6 +246,40 @@ function translationCacheCompleteness(result: TranslationCacheReadResult): numbe
 function translationCacheTime(result: TranslationCacheReadResult): number {
   const value = Date.parse(result.translatedAt);
   return Number.isFinite(value) ? value : 0;
+}
+
+function readSourceHashes(value: unknown): TranslationSourceHashes {
+  const hashes: TranslationSourceHashes = {};
+
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return hashes;
+  }
+
+  for (const [blockId, hash] of Object.entries(value as Record<string, unknown>)) {
+    const nextBlockId = blockId.trim();
+    const nextHash = typeof hash === 'string' ? hash.trim() : '';
+
+    if (nextBlockId && nextHash) {
+      hashes[nextBlockId] = nextHash;
+    }
+  }
+
+  return hashes;
+}
+
+function pruneSourceHashes(
+  sourceHashes: TranslationSourceHashes,
+  translations: TranslationMap,
+): TranslationSourceHashes {
+  const pruned: TranslationSourceHashes = {};
+
+  for (const [blockId, hash] of Object.entries(sourceHashes)) {
+    if (blockId in translations) {
+      pruned[blockId] = hash;
+    }
+  }
+
+  return pruned;
 }
 
 export async function readTranslationCache({
@@ -295,6 +331,7 @@ export async function readTranslationCache({
           targetLanguage: parsed?.targetLanguage ?? targetLanguage,
           translatedAt: parsed?.translatedAt ?? '',
           translations,
+          sourceHashes: readSourceHashes(parsed?.sourceHashes),
         });
       } catch (error) {
         lastReadError = error;
@@ -377,6 +414,7 @@ export async function readTranslationCache({
   });
   const bestResult = sortedResults[0];
   const mergedTranslations: TranslationMap = {};
+  const mergedSourceHashes: TranslationSourceHashes = {};
 
   for (const result of sortedResults) {
     for (const [blockId, translatedText] of Object.entries(result.translations)) {
@@ -384,9 +422,19 @@ export async function readTranslationCache({
         mergedTranslations[blockId] = translatedText;
       }
     }
+
+    for (const [blockId, sourceHash] of Object.entries(result.sourceHashes)) {
+      if (!(blockId in mergedSourceHashes)) {
+        mergedSourceHashes[blockId] = sourceHash;
+      }
+    }
   }
 
-  return { ...bestResult, translations: mergedTranslations };
+  return {
+    ...bestResult,
+    translations: mergedTranslations,
+    sourceHashes: pruneSourceHashes(mergedSourceHashes, mergedTranslations),
+  };
 }
 
 export async function writeTranslationCache({
@@ -395,6 +443,7 @@ export async function writeTranslationCache({
   sourceLanguage,
   targetLanguage,
   translations,
+  sourceHashes,
   identity,
   writeText = defaultWriteText,
   readText = defaultReadText,
@@ -406,6 +455,8 @@ export async function writeTranslationCache({
   sourceLanguage: string;
   targetLanguage: string;
   translations: TranslationMap;
+  /** 本次写入的译文对应的块级源文本指纹；旧调用方可省略。 */
+  sourceHashes?: TranslationSourceHashes | null;
   identity?: TranslationCacheIdentity | null;
   writeText?: (path: string, content: string) => Promise<void>;
   readText?: (path: string) => Promise<string | null>;
@@ -420,6 +471,10 @@ export async function writeTranslationCache({
 
   const resolvedIdentity = identity === undefined ? await resolveIdentity() : identity;
   const incomingTranslations = normalizeTranslationMap(translations);
+  const incomingSourceHashes = pruneSourceHashes(
+    readSourceHashes(sourceHashes),
+    incomingTranslations,
+  );
   const primaryPath = buildMineruTranslationCachePath(
     primaryRoot,
     item,
@@ -453,12 +508,25 @@ export async function writeTranslationCache({
       ...(existingCache?.translations ?? {}),
       ...incomingTranslations,
     };
+    // 旧版缓存没有指纹，只有本次新写入的块带指纹；合并时按块覆盖，
+    // 并剪掉已经没有译文的块，避免缓存文件无限增长。本次重写的块即使
+    // 没有携带指纹，也必须丢掉旧指纹，否则新译文会被旧指纹判成过期。
+    const mergedSourceHashes: TranslationSourceHashes = {
+      ...(existingCache?.sourceHashes ?? {}),
+    };
+
+    for (const blockId of Object.keys(incomingTranslations)) {
+      delete mergedSourceHashes[blockId];
+    }
+
+    Object.assign(mergedSourceHashes, incomingSourceHashes);
     const payload: TranslationCacheEnvelope = {
-      version: 1,
+      version: 2,
       sourceLanguage,
       targetLanguage,
       translatedAt: new Date().toISOString(),
       translations: mergedTranslations,
+      sourceHashes: pruneSourceHashes(mergedSourceHashes, mergedTranslations),
     };
     const content = JSON.stringify(payload, null, 2);
     const preferredFallbackRoot = translationCacheFallbackRoots.get(primaryPath);

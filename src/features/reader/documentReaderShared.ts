@@ -7,6 +7,7 @@ import type {
   PaperSummary,
   PdfSource,
   TranslationMap,
+  TranslationSourceHashes,
   UiLanguage,
   WorkspaceItem,
 } from '../../types/reader';
@@ -47,6 +48,8 @@ export interface ReaderTabBridgeState {
 export interface ReaderDocumentTranslationSnapshot {
   targetLanguage: string;
   translations: TranslationMap;
+  /** 文库页写入的译文对应的块级源文本指纹；旧快照没有该字段。 */
+  sourceHashes?: TranslationSourceHashes;
   updatedAt: number;
 }
 

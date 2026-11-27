@@ -3,6 +3,7 @@ import type { PointerEvent as ReactPointerEvent } from 'react';
 import { Minimize2 } from 'lucide-react';
 import BlockViewer from '../blocks/BlockViewer';
 import PdfViewer from '../pdf/PdfViewer';
+import type { BlockReparseOverrideApi } from '../../services/blockReparseOverrides';
 import { useLocaleText } from '../../i18n/uiLanguage';
 import type { LiteraturePaper, LiteraturePaperTaskState } from '../../types/library';
 import { ReaderWorkspaceOverview } from './readerWorkspaceOverview';
@@ -96,6 +97,9 @@ interface ReaderWorkspaceProps {
   blocks: PositionedMineruBlock[];
   mineruOutlineIndex?: readonly MineruOutlineIndexItem[] | null;
   translations: TranslationMap;
+  /** AI 重解析覆盖与翻译共享的唯一状态。 */
+  blockReparse: BlockReparseOverrideApi;
+  onBlockReparseApplied?: (block: PositionedMineruBlock) => void;
   translationDisplayMode: TranslationDisplayMode;
   translationLanguageLabel: string;
   activeBlockId: string | null;
@@ -582,6 +586,8 @@ export function ReadingStage(props: ReaderWorkspaceProps & { immersiveReading: b
                   onBlockClick={onBlockClick}
                   onAddBlockToNote={onAddBlockToNote}
                   onRetranslateBlock={onRetranslateBlock}
+                  blockReparse={props.blockReparse}
+                  onBlockReparseApplied={props.onBlockReparseApplied}
                   onTranslationDisplayModeChange={props.onTranslationDisplayModeChange}
                   onTextSelect={handleBlockTextSelect}
                   />

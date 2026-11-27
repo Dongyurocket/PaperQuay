@@ -4,6 +4,23 @@ const STORAGE_PREFIX = 'paperquay:block-reparse:v1:';
 export type BlockReparseOverrides = Record<string, string>;
 type OverrideStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 
+/**
+ * 渲染层共享的区块修复状态。阅读器把它同时交给 BlockViewer 与翻译流程，
+ * 保证「显示的修复文本」与「送去翻译的文本」只有一个来源。
+ */
+export interface BlockReparseOverrideApi {
+  /** 当前解析版本下的有效覆盖；存储未就绪时为空表。 */
+  overrides: BlockReparseOverrides;
+  /** 覆盖表是否已按当前块内容加载完成；未就绪时不得保存。 */
+  storageReady: boolean;
+  /** 覆盖数据读写失败时的原因。 */
+  storageError: string;
+  /** 同步读取最新覆盖文本，供同一事件内的翻译调用使用（状态尚未重渲染时也可用）。 */
+  getOverrideMarkdown: (blockId: string) => string | undefined;
+  /** 保存或恢复覆盖；存储失败时抛出。 */
+  saveOverride: (blockId: string, markdown: string | null) => void;
+}
+
 /** Bind overrides to both the document and the complete, unmodified parse content.
  * A changed block order, geometry, text, or source path produces a different revision.
  */
