@@ -7,7 +7,9 @@ import {
   type SetStateAction,
 } from 'react';
 
+import { readMineruParseEdits } from '../../services/desktop';
 import { updateLibraryPaper } from '../../services/library';
+import { applyMineruBlockEdits, sanitizeMineruBlockEdits } from '../../services/parseEdits';
 import {
   summarizeDocumentOpenAICompatible,
 } from '../../services/summary';
@@ -496,15 +498,38 @@ export function useReaderLibraryPreview({
   );
 
   const loadLibraryPreviewBlocks = useCallback(
-    async (item: WorkspaceItem): Promise<LibraryPreviewLoadResult> =>
-      loadReaderLibraryPreviewBlocks({
+    async (item: WorkspaceItem): Promise<LibraryPreviewLoadResult> => {
+      const result = await loadReaderLibraryPreviewBlocks({
         item,
         settings,
         l,
         noJsonLoadedText,
         noPdfLoadedText,
         notLoadedText,
-      }),
+      });
+      const jsonPath = result.jsonPath?.trim() ?? '';
+
+      if (!jsonPath || result.blocks.length === 0) {
+        return result;
+      }
+
+      try {
+        const separatorIndex = Math.max(jsonPath.lastIndexOf('/'), jsonPath.lastIndexOf('\\'));
+        const parsePath = separatorIndex > 0 ? jsonPath.slice(0, separatorIndex) : jsonPath;
+        const file = await readMineruParseEdits(parsePath);
+        const { edits } = sanitizeMineruBlockEdits(file.blocks);
+
+        if (Object.keys(edits).length === 0) {
+          return result;
+        }
+
+        const applied = applyMineruBlockEdits(result.blocks, edits);
+
+        return applied.appliedCount > 0 ? { ...result, blocks: applied.blocks } : result;
+      } catch {
+        return result;
+      }
+    },
     [l, noJsonLoadedText, noPdfLoadedText, notLoadedText, settings],
   );
 

@@ -259,6 +259,7 @@ export async function loadReaderLibraryPreviewBlocks({
             blocks,
             currentPdfName: pdfName,
             currentJsonName: getFileNameFromPath(candidatePath),
+            jsonPath: candidatePath,
             statusMessage: l(
               `已从缓存加载 ${blocks.length} 个结构块`,
               `Loaded ${blocks.length} structured blocks from cache`,
@@ -284,6 +285,7 @@ export async function loadReaderLibraryPreviewBlocks({
           blocks,
           currentPdfName: pdfName,
           currentJsonName: getFileNameFromPath(siblingJsonPath),
+          jsonPath: siblingJsonPath,
           statusMessage: l(
             `已从同目录 JSON 加载 ${blocks.length} 个结构块`,
             `Loaded ${blocks.length} structured blocks from the sibling JSON`,
@@ -311,6 +313,7 @@ export async function loadReaderLibraryPreviewBlocks({
         blocks,
         currentPdfName: pdfName,
         currentJsonName: getFileNameFromPath(markdownPath),
+        jsonPath: markdownPath,
         statusMessage: l(
           `已从 MinerU Markdown 加载 ${blocks.length} 个结构块`,
           `Loaded ${blocks.length} structured blocks from MinerU Markdown`,

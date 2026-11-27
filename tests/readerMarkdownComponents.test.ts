@@ -124,7 +124,7 @@ function repairButton(tree: any): any {
 
 test('actual block reparse modal keeps numerical ranges in the completed repair preview', async () => {
   const { BlockReparseModal, renderTree } = await components;
-  const modal = new ModalLifecycle(BlockReparseModal, { block, initialText: markdown, storageReady: true, onApply() {}, onClose() {} });
+  const modal = new ModalLifecycle(BlockReparseModal, { block, initialText: markdown, currentText: markdown, initialTab: 'ai', storageReady: true, onApply() {}, onClose() {} });
   try {
     modal.render();
     await Promise.resolve();

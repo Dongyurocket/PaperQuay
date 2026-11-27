@@ -20,11 +20,12 @@ const MINERU_IMAGE_PATH_PATTERN = /(?:^|\s)(?:!\[[^\]]*\]\()?images\/[A-Za-z0-9.
 
 function decodeHtmlEntities(value: string) {
   return value
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&amp;/g, '&')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'");
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&amp;/gi, '&')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'");
 }
 
 function htmlFormulaToLatex(value: string) {
@@ -1031,4 +1032,62 @@ export function normalizeMarkdownMath(markdown: string) {
   flushMathFence();
 
   return output.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+function normalizeTableCell(value: string): string {
+  return decodeHtmlEntities(
+    value
+      .replace(/<br\s*\/?>/gi, ' ')
+      .replace(/<[^>]+>/g, ' '),
+  )
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\|/g, '\\|');
+}
+
+/**
+ * 把 MinerU 的表格 HTML 转成可直接编辑的 GFM Markdown 表格。
+ *
+ * 阅读视图与 AI 重析都以 Markdown 为交换格式；直接展示原始 HTML 既不可编辑，
+ * 也不会被 Markdown 渲染器识别为表格。转换只保留纯文本与行/列结构，跨行跨列
+ * 属性不展开（按原单元格顺序补齐），足以支持人工修正表格文字。
+ */
+export function htmlTableToMarkdown(html: string): string {
+  const source = String(html ?? '');
+  const tableMatch = /<table\b[\s\S]*?<\/table>/i.exec(source);
+  const tableHtml = tableMatch ? tableMatch[0] : source;
+  const rows = Array.from(tableHtml.matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi));
+
+  if (rows.length === 0) {
+    return normalizeTableCell(tableHtml);
+  }
+
+  const matrix: string[][] = [];
+
+  for (const row of rows) {
+    const cells = Array.from(row[1].matchAll(/<(t[dh])\b[^>]*>([\s\S]*?)<\/\1>/gi))
+      .map((cell) => normalizeTableCell(cell[2]));
+
+    if (cells.length > 0) {
+      matrix.push(cells);
+    }
+  }
+
+  if (matrix.length === 0) {
+    return normalizeTableCell(tableHtml);
+  }
+
+  const columnCount = Math.max(...matrix.map((cells) => cells.length));
+  const padRow = (cells: string[]) => [
+    ...cells,
+    ...Array.from({ length: columnCount - cells.length }, () => ''),
+  ];
+  const [header, ...body] = matrix.map(padRow);
+  const lines = [
+    `| ${header.join(' | ')} |`,
+    `| ${header.map(() => '---').join(' | ')} |`,
+    ...body.map((cells) => `| ${cells.join(' | ')} |`),
+  ];
+
+  return lines.join('\n');
 }

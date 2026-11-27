@@ -81,7 +81,7 @@ import type { ReaderAnnotationsApi } from './useReaderAnnotations';
 
 export function useReaderQa(state: ReaderTabState, documentApi: ReaderDocumentApi, summaryApi: ReaderSummaryApi, notesApi: ReaderNotesApi, annotationsApi: ReaderAnnotationsApi) {
   const { activeNoteId, activeQaPreset, activeQaSession, aiConfigured, assistantActivePanel, capturingScreenshot, currentDocument, document, embeddingApiKey, flatBlocks, lRef, lastDocumentSignatureRef, libraryStorageDir, loadLibraryPreviewBlocks, localeRef, notePaperCandidates, notes, notesError, notesLoading, notesSaving, onBridgeStateChange, onNotePaperClick, onOpenPreferences, onQaActivePresetChange, pdfSource, pdfTextCacheRef, pendingNoteAnchorInsert, qaAbortControllersRef, qaAbortWorkspaceRef, qaAnswerRenderMode, qaAttachments, qaConfigured, qaError, qaHistoryExpectedRef, qaHistoryGenerationRef, qaHistoryReadyWorkspaceRef, qaInput, qaMessages, qaModelPresets, qaRagEnabled, qaReasoningEffort, qaRunningSessionIds, qaScopeDocumentsRef, qaScopeMode, qaScopePaperIds, qaScopeSessionIdRef, qaSessions, qaSessionsRef, readerLocaleText, readerNoteEditorSourceId, readerNoteExternalUpdate, screenshotBusy, selectedExcerpt, selectedQaPresetId, selectedQaPresetIdRef, selectedQaSessionId, selectedQaSessionIdRef, setAssistantActivePanel, setAssistantDetached, setCapturingScreenshot, setQaAnswerRenderMode, setQaAttachments, setQaError, setQaInput, setQaRagEnabled, setQaReasoningEffort, setQaRunningSessionIds, setQaScopeMode, setQaScopePaperIds, setQaSessions, setQaWorkspaceId, setSelectedQaPresetId, setSelectedQaSessionId, setStatusMessage, setWorkspaceStage, settings, statusMessage, tabId } = state;
-  const { activateBlock, currentJsonName, currentPdfName, documentSource, handleCancelDocumentTranslation, handleClearTranslations, handleCloudParse, handleTranslateDocument, handleTranslateSelectedExcerpt, loadCachedPdfDocumentText, openDocumentItem, selectedExcerptError, selectedExcerptTranslating, selectedExcerptTranslation, summaryBlockInputs, translatedCount, translating } = documentApi;
+  const { activateBlock, blockReparse, currentJsonName, currentPdfName, documentSource, handleCancelDocumentTranslation, handleClearTranslations, handleCloudParse, handleTranslateDocument, handleTranslateSelectedExcerpt, loadCachedPdfDocumentText, openDocumentItem, selectedExcerptError, selectedExcerptTranslating, selectedExcerptTranslation, summaryBlockInputs, translatedCount, translating } = documentApi;
   const { handleGeneratePaperSummary, loadMineruMarkdownForSummary } = summaryApi;
   const { handleAddSelectionToNote, handleCreateStandaloneNote, handleDeleteNote, handleJumpToNoteAnchor, handlePendingNoteAnchorInsertHandled, handleReaderNoteExternalUpdateApply, handleSaveAssistantMessageAsNote, handleSelectNote, handleUpdateNote } = notesApi;
   const { handleAppendSelectedExcerptToQa, handleClearSelectedExcerpt } = annotationsApi;
@@ -148,12 +148,15 @@ export function useReaderQa(state: ReaderTabState, documentApi: ReaderDocumentAp
       }
 
       if (settings.ragSourceMode === 'mineru-markdown' || settings.ragSourceMode === 'hybrid' || settings.qaSourceMode === 'mineru-markdown') {
-        mineruDocumentText = await loadMineruMarkdownForSummary().catch(() => '');
+        // 有手动编辑时必须以结构块重建，缓存 full.md 不包含编辑结果。
+        mineruDocumentText = blockReparse.editCount > 0
+          ? buildMineruMarkdownDocument(blockReparse.effectiveBlocks)
+          : await loadMineruMarkdownForSummary().catch(() => '');
       }
 
-      if (!mineruDocumentText.trim() && flatBlocks.length > 0) {
+      if (!mineruDocumentText.trim() && blockReparse.effectiveBlocks.length > 0) {
         // Markdown 缓存缺失时用结构块重建，避免已有 MinerU JSON 却无法参与 RAG。
-        mineruDocumentText = buildMineruMarkdownDocument(flatBlocks);
+        mineruDocumentText = buildMineruMarkdownDocument(blockReparse.effectiveBlocks);
       }
 
       if (!scopedQa && settings.qaSourceMode === 'mineru-markdown' && !mineruDocumentText.trim() && summaryBlockInputs.length === 0) {
@@ -205,7 +208,7 @@ export function useReaderQa(state: ReaderTabState, documentApi: ReaderDocumentAp
         const currentScopedDocument: ScopedRagDocument | undefined = currentDocument
           ? {
               item: currentDocument,
-              mineruBlocks: flatBlocks,
+              mineruBlocks: blockReparse.effectiveBlocks,
               mineruDocumentText,
               pdfDocumentText,
             }
@@ -286,7 +289,7 @@ export function useReaderQa(state: ReaderTabState, documentApi: ReaderDocumentAp
           embedding,
           question,
           excerptText: selectedExcerpt?.text,
-          mineruBlocks: flatBlocks,
+          mineruBlocks: blockReparse.effectiveBlocks,
           mineruDocumentText,
           pdfDocumentText,
           tokenBudget: options?.tokenBudget,
@@ -347,7 +350,8 @@ export function useReaderQa(state: ReaderTabState, documentApi: ReaderDocumentAp
       loadCachedPdfDocumentText,
       currentDocument,
       embeddingApiKey,
-      flatBlocks,
+      blockReparse.editCount,
+      blockReparse.effectiveBlocks,
       libraryStorageDir,
       loadLibraryPreviewBlocks,
       notePaperCandidates,

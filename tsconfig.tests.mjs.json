@@ -32,6 +32,7 @@
     "tests/libraryRagStatusFilter.test.mjs",
     "tests/literatureToolbarRefresh.test.mjs",
     "tests/packagingDependencies.test.mjs",
+    "tests/parseEditsStore.test.mjs",
     "tests/readerChatInputOverride.test.mjs",
     "tests/readerSettingsHydration.test.mjs",
     "tests/rendererDeadModules.test.mjs",

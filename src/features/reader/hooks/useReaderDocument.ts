@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import { useLibraryReadingTracking } from '../useLibraryReadingTracking';
 import {
@@ -78,6 +78,7 @@ import {
 } from '../documentReaderQaSessions';
 import { useDocumentTranslation } from '../useDocumentTranslation';
 import { useBlockReparseOverrides } from '../../blocks/useBlockReparseOverrides';
+import { applyMineruOutlineEdits } from '../../../services/parseEdits';
 import {
   buildReaderLocalPdfPathCandidates,
   restorePdfSourceHistory,
@@ -123,8 +124,31 @@ function requestDeferredReaderStartupWork(callback: () => void) {
 
 import type { ReaderTabState } from './readerTabContext';
 
+/**
+ * 解析编辑按「解析目录」归档：同一份 content_list 及其 Markdown 回退共享一份编辑。
+ * 云端伪路径（cloud:file:batch）没有真实目录，回退到当前文献的缓存目录。
+ */
+function resolveParseEditPath(
+  mineruPath: string,
+  document: WorkspaceItem | null | undefined,
+  mineruCacheDir: string,
+): string {
+  const trimmed = mineruPath.trim();
+
+  if (trimmed && !trimmed.startsWith('cloud:')) {
+    const separatorIndex = Math.max(trimmed.lastIndexOf('/'), trimmed.lastIndexOf('\\'));
+    return separatorIndex > 0 ? trimmed.slice(0, separatorIndex) : trimmed;
+  }
+
+  if (document && mineruCacheDir.trim()) {
+    return buildMineruCachePaths(mineruCacheDir.trim(), document).directory;
+  }
+
+  return trimmed;
+}
+
 export function useReaderDocument(state: ReaderTabState) {
-  const { activeBlockId, annotations, autoSummarySourceKeyRef, autoTranslatedSelectionKeyRef, cachedSummaryAttemptKeyRef, cachedSummaryRequestIdRef, currentDocument, document, documentOpenGenerationRef, flatBlocks, forceSaveCurrentPaperHistoryRef, isActive, l, lRef, lastCapturedSelectionRef, latestPaneWidthRatioRef, layoutRef, libraryOperation, mineruApiToken, mineruPath, onAttachTranslatedPdf, onDocumentResolved, onLibraryPreviewSync, onOpenPreferences, onZoteroUserIdChange, paperOpenedAtRef, paperSummary, paperSummarySourceKey, pdfData, pdfDocumentErrorSnapshot, pdfPageCountSnapshot, pdfPath, pdfReadingHeatmapsRef, pdfScrollPositionsRef, pdfSource, pdfTextCacheRef, pendingHistoryActiveBlockIdRef, projectPdfFiles, qaHistoryReadyWorkspaceRef, qaSessions, qaSessionsRef, readerLocaleText, readingViewMode, restoredHistoryRef, selectedExcerpt, selectedQaPresetId, selectedQaPresetIdRef, selectedQaSessionId, selectedQaSessionIdRef, selectionTranslationModelPreset, setActiveBlockId, setActivePdfHighlight, setAnnotations, setAttachTranslatedPdfBusy, setBlockScrollSignal, setCapturingScreenshot, setCurrentDocument, setError, setFlatBlocks, setHoveredBlockId, setIsDraggingSplitter, setLeftPaneWidthRatio, setLibraryOperation, setLoading, setMineruOutlineIndex, setMineruPages, setMineruPath, setPaperSummary, setPaperSummaryError, setPaperSummaryLoading, setPaperSummarySourceKey, setPdfData, setPdfHighlightSignal, setPdfOpenFailed, setPdfPath, setPdfSource, setProjectPdfFiles, setReadingViewMode, setRestoringDocumentBlocks, setSelectedAnnotationId, setSelectedExcerpt, setStatusMessage, setSummaryCacheLoading, setWorkspaceStage, setZoteroRelatedNotes, setZoteroRelatedNotesError, setZoteroRelatedNotesLoading, settings, startSplitResize, translationModelPreset, translationSnapshot, updateLibraryOperation, workspaceStage, zoteroApiKey, zoteroUserId } = state;
+  const { activeBlockId, annotations, autoSummarySourceKeyRef, autoTranslatedSelectionKeyRef, cachedSummaryAttemptKeyRef, cachedSummaryRequestIdRef, currentDocument, document, documentOpenGenerationRef, flatBlocks, forceSaveCurrentPaperHistoryRef, isActive, l, lRef, lastCapturedSelectionRef, latestPaneWidthRatioRef, layoutRef, libraryOperation, mineruApiToken, mineruOutlineIndex, mineruPath, onAttachTranslatedPdf, onDocumentResolved, onLibraryPreviewSync, onOpenPreferences, onZoteroUserIdChange, paperOpenedAtRef, paperSummary, paperSummarySourceKey, pdfData, pdfDocumentErrorSnapshot, pdfPageCountSnapshot, pdfPath, pdfReadingHeatmapsRef, pdfScrollPositionsRef, pdfSource, pdfTextCacheRef, pendingHistoryActiveBlockIdRef, projectPdfFiles, qaHistoryReadyWorkspaceRef, qaSessions, qaSessionsRef, readerLocaleText, readingViewMode, restoredHistoryRef, selectedExcerpt, selectedQaPresetId, selectedQaPresetIdRef, selectedQaSessionId, selectedQaSessionIdRef, selectionTranslationModelPreset, setActiveBlockId, setActivePdfHighlight, setAnnotations, setAttachTranslatedPdfBusy, setBlockScrollSignal, setCapturingScreenshot, setCurrentDocument, setError, setFlatBlocks, setHoveredBlockId, setIsDraggingSplitter, setLeftPaneWidthRatio, setLibraryOperation, setLoading, setMineruOutlineIndex, setMineruPages, setMineruPath, setPaperSummary, setPaperSummaryError, setPaperSummaryLoading, setPaperSummarySourceKey, setPdfData, setPdfHighlightSignal, setPdfOpenFailed, setPdfPath, setPdfSource, setProjectPdfFiles, setReadingViewMode, setRestoringDocumentBlocks, setSelectedAnnotationId, setSelectedExcerpt, setStatusMessage, setSummaryCacheLoading, setWorkspaceStage, setZoteroRelatedNotes, setZoteroRelatedNotesError, setZoteroRelatedNotesLoading, settings, startSplitResize, translationModelPreset, translationSnapshot, updateLibraryOperation, workspaceStage, zoteroApiKey, zoteroUserId } = state;
 
   const effect_81 = useCallback(() => {
     setCurrentDocument((current) =>
@@ -180,13 +204,26 @@ export function useReaderDocument(state: ReaderTabState) {
       [currentDocument, readerLocaleText, selectedSectionTitle],
     );
   const hasDocument = Boolean(currentDocument && pdfSource);
-  // AI 重解析覆盖与翻译共享同一份状态：BlockViewer 显示修复文本，翻译按同一
+  const parseEditPath = useMemo(
+    () => resolveParseEditPath(mineruPath, currentDocument, settings.mineruCacheDir),
+    [currentDocument, mineruPath, settings.mineruCacheDir],
+  );
+  // 解析结果编辑与翻译共享同一份状态：BlockViewer 显示编辑文本，翻译按同一
   // 文本重译并按块级指纹判断译文是否过期。
   const blockReparse = useBlockReparseOverrides({
     blocks: flatBlocks,
     mineruPath,
+    parsePath: parseEditPath,
     pdfSource,
   });
+  useEffect(() => {
+    // 当前块被隐藏后不能再作为激活块，否则 PDF 高亮和滚动目标会留在不存在的块上。
+    if (activeBlockId && blockReparse.hiddenBlockIds.has(activeBlockId)) {
+      setActiveBlockId(null);
+      setHoveredBlockId(null);
+      setActivePdfHighlight(null);
+    }
+  }, [activeBlockId, blockReparse.hiddenBlockIds, setActiveBlockId, setActivePdfHighlight, setHoveredBlockId]);
   const {
       applySelectedExcerptTranslation,
       blockTranslations,
@@ -481,12 +518,18 @@ export function useReaderDocument(state: ReaderTabState) {
       return `P${activeBlock.pageIndex + 1} · ${activeBlock.type} · ${activeBlock.blockId}`;
     }, [activeBlock, l]);
   const summaryBlockInputs = useMemo<SummaryBlockInput[]>(
-      () => buildSummaryBlockInputs(flatBlocks),
-      [flatBlocks],
+      () => buildSummaryBlockInputs(blockReparse.effectiveBlocks),
+      [blockReparse.effectiveBlocks],
     );
   const mineruContentSignature = useMemo(
-      () => computeMineruBlocksContentSignature(flatBlocks),
-      [flatBlocks],
+      () => computeMineruBlocksContentSignature(blockReparse.effectiveBlocks),
+      [blockReparse.effectiveBlocks],
+    );
+  const editedMineruOutlineIndex = useMemo(
+      () => (mineruOutlineIndex
+        ? applyMineruOutlineEdits(mineruOutlineIndex, blockReparse.edits)
+        : mineruOutlineIndex),
+      [blockReparse.edits, mineruOutlineIndex],
     );
   const resetDocumentState = useCallback(() => {
       // Allow the next opened document, including reopening the same workspace item,
@@ -1646,7 +1689,7 @@ export function useReaderDocument(state: ReaderTabState) {
       });
     };
 
-  return { activateBlock, activeBlock, activeBlockSummary, annotationSaveDirectory, applyMineruPages, applySelectedExcerptTranslation, availablePdfOptions, blockById, blockReparse, blockTranslations, canOpenOriginalPdf, clearSelection, compareOriginalPath, createHighlightTarget, createSelectionHighlightTarget, currentJsonName, currentLocalPdfPath, currentPdfName, currentPdfVariantLabel, documentSource, effect_152, effect_188, effect_246, effect_252, effect_253, effect_254, effect_255, effect_81, effectivePdfData, effectiveSourceKey, handleAttachTranslatedPdf, handleBlockClick, handleBlockReparseApplied, handleCancelDocumentTranslation, handleClearTranslations, handleCloudParse, handleForceReparse, handleGenerateTranslatedPdf, handleOpenMineruJson, handleOpenOriginalPdf, handlePdfAnnotationSaveSuccess, handlePdfBlockHover, handlePdfBlockSelect, handlePdfReadingHeatmapChange, handlePdfScrollPositionChange, handleRetranslateBlock, handleSelectProjectPdf, handleSplitResizeStart, handleTranslateDocument, handleTranslateSelectedExcerpt, hasDocument, legacyHandlePdfAnnotationSaveSuccess, loadCachedPdfDocumentText, mineruContentSignature, openDocumentItem, openWorkspaceDocument, originalPdfPath, pdfDocumentError, pdfPageCount, pdfReadingHeatmap, pdfScrollPosition, pdfScrollSourceKey, pdfTextSourceKey, persistPaneWidthRatio, recordLibraryReadingPosition, resetDocumentState, resetDocumentTranslationState, resetLayout, resetSelectedExcerptTranslationState, resolveBlockContentSource, restorePdfScrollPositionsForSource, runDocumentParse, saveCurrentPaperHistory, saveMineruParseCache, selectedExcerptError, selectedExcerptTranslating, selectedExcerptTranslation, selectedSectionTitle, summaryBlockInputs, switchCurrentPdfFile, translatedCount, translating, translationCancelling, translationProgressCompleted, translationProgressTotal, tryLoadSavedMineruPages, tryResolveSavedPdfPath };
+  return { activateBlock, activeBlock, activeBlockSummary, annotationSaveDirectory, applyMineruPages, applySelectedExcerptTranslation, availablePdfOptions, blockById, blockReparse, blockTranslations, canOpenOriginalPdf, clearSelection, compareOriginalPath, createHighlightTarget, createSelectionHighlightTarget, currentJsonName, currentLocalPdfPath, currentPdfName, currentPdfVariantLabel, documentSource, effect_152, effect_188, effect_246, effect_252, effect_253, effect_254, effect_255, effect_81, effectivePdfData, effectiveSourceKey, handleAttachTranslatedPdf, handleBlockClick, handleBlockReparseApplied, handleCancelDocumentTranslation, handleClearTranslations, handleCloudParse, handleForceReparse, handleGenerateTranslatedPdf, handleOpenMineruJson, handleOpenOriginalPdf, handlePdfAnnotationSaveSuccess, handlePdfBlockHover, handlePdfBlockSelect, handlePdfReadingHeatmapChange, handlePdfScrollPositionChange, handleRetranslateBlock, handleSelectProjectPdf, handleSplitResizeStart, handleTranslateDocument, handleTranslateSelectedExcerpt, hasDocument, legacyHandlePdfAnnotationSaveSuccess, loadCachedPdfDocumentText, mineruContentSignature, mineruOutlineIndex: editedMineruOutlineIndex, openDocumentItem, openWorkspaceDocument, originalPdfPath, pdfDocumentError, pdfPageCount, pdfReadingHeatmap, pdfScrollPosition, pdfScrollSourceKey, pdfTextSourceKey, persistPaneWidthRatio, recordLibraryReadingPosition, resetDocumentState, resetDocumentTranslationState, resetLayout, resetSelectedExcerptTranslationState, resolveBlockContentSource, restorePdfScrollPositionsForSource, runDocumentParse, saveCurrentPaperHistory, saveMineruParseCache, selectedExcerptError, selectedExcerptTranslating, selectedExcerptTranslation, selectedSectionTitle, summaryBlockInputs, switchCurrentPdfFile, translatedCount, translating, translationCancelling, translationProgressCompleted, translationProgressTotal, tryLoadSavedMineruPages, tryResolveSavedPdfPath };
 }
 
 export type ReaderDocumentApi = ReturnType<typeof useReaderDocument>;

@@ -467,6 +467,13 @@ export function extractCaptionFromMineruBlock(block: PositionedMineruBlock): str
 }
 
 function toMarkdownFragment(block: PositionedMineruBlock, plainText: string): string {
+  // 手动/AI 修正后的文本优先：用户已经确认过结构与版式，不再套用原始块类型模板。
+  const textOverride = block.textOverride?.trim();
+
+  if (textOverride) {
+    return textOverride;
+  }
+
   const structuredMarkdown = renderInlineMarkdownContent(block.content).trim();
   const safeText = plainText || `未提取到 ${block.type} 文本`;
 
@@ -1145,6 +1152,11 @@ export function resolveMineruBlockContentSource(
 }
 
 export function extractTextFromMineruBlock(block: PositionedMineruBlock): string {
+  // 用户编辑过的块以编辑文本为准；这是阅读、翻译、摘要与 RAG 分块的共同来源。
+  if (block.textOverride?.trim()) {
+    return block.textOverride;
+  }
+
   if (block.type === 'table') {
     // 图注和表格正文都要进入索引：只有图注时表格正文无法被检索到。
     const caption = extractCaptionFromMineruBlock(block);

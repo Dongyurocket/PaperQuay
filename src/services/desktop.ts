@@ -481,6 +481,44 @@ export async function repairMineruCacheImages(
   }
 }
 
+export interface MineruParseEditBlockRecord {
+  hash: string;
+  text?: string;
+  deleted?: boolean;
+}
+
+export interface MineruParseEditsPayload {
+  version: number;
+  updatedAt: string;
+  blocks: Record<string, MineruParseEditBlockRecord>;
+}
+
+/** 读取某个解析路径下的手动编辑表；文件不存在时返回空表。 */
+export async function readMineruParseEdits(
+  parsePath: string,
+): Promise<MineruParseEditsPayload> {
+  try {
+    return await invoke<MineruParseEditsPayload>('read_parse_edits', { parsePath });
+  } catch (error) {
+    throw new Error(toErrorMessage(error, '读取识别结果编辑失败'));
+  }
+}
+
+/** 保存手动编辑表；空表会删除文件。 */
+export async function writeMineruParseEdits(
+  parsePath: string,
+  blocks: Record<string, MineruParseEditBlockRecord>,
+): Promise<{ saved: boolean; count: number }> {
+  try {
+    return await invoke<{ saved: boolean; count: number }>('write_parse_edits', {
+      parsePath,
+      blocks,
+    });
+  } catch (error) {
+    throw new Error(toErrorMessage(error, '保存识别结果编辑失败'));
+  }
+}
+
 export interface MineruReparsePreparation {
   directory: string;
   removedStaleBackups: string[];

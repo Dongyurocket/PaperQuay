@@ -41,8 +41,8 @@ const harnessBundle = build({
     contents: `
       import React from 'react';
       import { useBlockReparseOverrides } from './src/features/blocks/useBlockReparseOverrides.ts';
-      export function Harness({ blocks, mineruPath, pdfSource }) {
-        const api = useBlockReparseOverrides({ blocks, mineruPath, pdfSource });
+      export function Harness({ blocks, mineruPath, parsePath, pdfSource }) {
+        const api = useBlockReparseOverrides({ blocks, mineruPath, parsePath, pdfSource });
         globalThis.__reparseApi = api;
         return null;
       }
@@ -96,11 +96,34 @@ const pdfSource = { kind: 'local-path' as const, path: 'C:/papers/paper.pdf' };
 
 interface ReparseApi {
   overrides: Record<string, string>;
+  hiddenBlockIds: Set<string>;
   storageReady: boolean;
   storageError: string;
   getOverrideMarkdown: (blockId: string) => string | undefined;
-  saveOverride: (blockId: string, markdown: string | null) => void;
+  saveOverride: (blockId: string, markdown: string) => Promise<void>;
+  deleteBlock: (blockId: string) => Promise<void>;
+  restoreBlock: (blockId: string) => Promise<void>;
+  restoreAll: () => Promise<void>;
 }
+
+// 桌面桥的内存替身：与后端 parseEditCommands 相同的读写契约。
+const parseEditFiles = new Map<string, { version: number; updatedAt: string; blocks: Record<string, unknown> }>();
+(dom.window as unknown as Record<string, unknown>).paperquay = {
+  invoke: async (command: string, args: Record<string, unknown>) => {
+    const parsePath = String(args.parsePath ?? '');
+    if (command === 'read_parse_edits') {
+      return parseEditFiles.get(parsePath) ?? { version: 1, updatedAt: '', blocks: {} };
+    }
+    if (command === 'write_parse_edits') {
+      const blocks = args.blocks as Record<string, unknown>;
+      const count = Object.keys(blocks).length;
+      if (count === 0) parseEditFiles.delete(parsePath);
+      else parseEditFiles.set(parsePath, { version: 1, updatedAt: new Date().toISOString(), blocks });
+      return { saved: true, count };
+    }
+    throw new Error(`unexpected command: ${command}`);
+  },
+};
 
 function currentApi(): ReparseApi {
   const api = (globalThis as unknown as { __reparseApi?: ReparseApi }).__reparseApi;
@@ -108,15 +131,16 @@ function currentApi(): ReparseApi {
   return api;
 }
 
-test('block reparse overrides persist per parse revision and read synchronously right after save', async () => {
+test('parse edits persist per parse path and read synchronously right after save', async () => {
   window.localStorage.clear();
+  parseEditFiles.clear();
   const { Harness } = await loadHarness();
   const container = document.createElement('div');
   document.body.appendChild(container);
   const root = createRoot(container);
 
   await act(async () => {
-    root.render(React.createElement(Harness, { blocks, mineruPath: 'C:/papers/paper.json', pdfSource }));
+    root.render(React.createElement(Harness, { blocks, mineruPath: 'C:/papers/paper.json', parsePath: 'C:/papers', pdfSource }));
   });
   await waitFor(() => currentApi().storageReady);
 
@@ -124,35 +148,44 @@ test('block reparse overrides persist per parse revision and read synchronously 
   assert.equal(currentApi().getOverrideMarkdown('page-1-block-1'), undefined);
 
   await act(async () => {
-    currentApi().saveOverride('page-1-block-1', '**Repaired** text');
+    await currentApi().saveOverride('page-1-block-1', '**Repaired** text');
   });
 
   // 同一事件内的同步读取必须拿到新值，自动重译才不会用回旧文本。
   assert.equal(currentApi().getOverrideMarkdown('page-1-block-1'), '**Repaired** text');
   assert.deepEqual(currentApi().overrides, { 'page-1-block-1': '**Repaired** text' });
+  assert.deepEqual(Object.keys(parseEditFiles.get('C:/papers')?.blocks ?? {}), ['page-1-block-1']);
 
   await act(async () => {
     root.unmount();
   });
 
-  // 重新挂载（等价于重新打开阅读页）时从 localStorage 恢复同一份修复。
+  // 重新挂载（等价于重新打开阅读页）时从持久化文件恢复同一份编辑。
   const secondContainer = document.createElement('div');
   document.body.appendChild(secondContainer);
   const secondRoot = createRoot(secondContainer);
 
   await act(async () => {
-    secondRoot.render(React.createElement(Harness, { blocks, mineruPath: 'C:/papers/paper.json', pdfSource }));
+    secondRoot.render(React.createElement(Harness, { blocks, mineruPath: 'C:/papers/paper.json', parsePath: 'C:/papers', pdfSource }));
   });
   await waitFor(() => currentApi().storageReady);
 
   assert.deepEqual(currentApi().overrides, { 'page-1-block-1': '**Repaired** text' });
 
   await act(async () => {
-    currentApi().saveOverride('page-1-block-1', null);
+    await currentApi().deleteBlock('page-1-block-1');
   });
 
   assert.equal(currentApi().getOverrideMarkdown('page-1-block-1'), undefined);
   assert.deepEqual(currentApi().overrides, {});
+  assert.deepEqual([...currentApi().hiddenBlockIds], ['page-1-block-1']);
+
+  await act(async () => {
+    await currentApi().restoreAll();
+  });
+
+  assert.deepEqual([...currentApi().hiddenBlockIds], []);
+  assert.equal(parseEditFiles.has('C:/papers'), false);
 
   await act(async () => {
     secondRoot.unmount();

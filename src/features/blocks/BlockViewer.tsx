@@ -11,9 +11,11 @@ import {
 import {
   FilePlus2,
   Info,
+  Pencil,
   RefreshCw,
   Scan,
   Sparkles,
+  Trash2,
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
@@ -21,8 +23,11 @@ import {
 import EmptyState from '../../components/EmptyState';
 import { ContextMenu, type ContextMenuEntry } from '../../components/ContextMenu';
 import { useLocaleText } from '../../i18n/uiLanguage';
+import { confirmAction } from '../../ui/confirmHost';
+import { toast } from '../../ui/toast';
 import { IconButton } from '../../ui/button';
-import { buildRenderableBlocks, extractTextFromMineruBlock, extractTableHtmlFromMineruBlock } from '../../services/mineru';
+import { buildRenderableBlocks, extractCaptionFromMineruBlock, extractTextFromMineruBlock, extractTableHtmlFromMineruBlock, renderListMarkdownContent } from '../../services/mineru';
+import { htmlTableToMarkdown } from '../../utils/markdown';
 import type { BlockReparseOverrideApi } from '../../services/blockReparseOverrides';
 import type {
   PdfSource,
@@ -42,6 +47,7 @@ import {
 } from '../../utils/virtualWindow';
 import { BlockItem } from './blockViewerContent';
 import { BlockReparseModal } from './BlockReparseModal';
+import { ParseEditsDialog } from './ParseEditsDialog';
 import {
   BLOCK_ITEM_GAP_PX,
   BLOCK_WINDOW_OVERSCAN,
@@ -210,9 +216,20 @@ function BlockViewer({
   onTextSelect,
 }: BlockViewerProps) {
   const l = useLocaleText();
+  const {
+    edits,
+    editCount,
+    staleCount,
+    hiddenBlockIds,
+    overrides: blockOverrides,
+    storageReady,
+    storageError,
+  } = blockReparse;
   const visibleBlocks = useMemo(
     () => {
-      const pageContentBlocks = blocks.filter((block) => !block.contentSourceBlockId);
+      const pageContentBlocks = blocks.filter(
+        (block) => !block.contentSourceBlockId && !hiddenBlockIds.has(block.blockId),
+      );
 
       return hidePageDecorations
         ? pageContentBlocks.filter(
@@ -223,7 +240,7 @@ function BlockViewer({
           )
         : pageContentBlocks;
     },
-    [blocks, hidePageDecorations],
+    [blocks, hiddenBlockIds, hidePageDecorations],
   );
   const [blockWindow, setBlockWindow] = useState<VirtualWindow>(() =>
     resolveVirtualWindow({
@@ -276,25 +293,114 @@ function BlockViewer({
   const [reparseTarget, setReparseTarget] = useState<{
     block: PositionedMineruBlock;
     initialText: string;
+    currentText: string;
+    mode: 'manual' | 'ai';
   } | null>(null);
-  const { overrides: blockOverrides, storageReady, storageError } = blockReparse;
+  const [editsDialogOpen, setEditsDialogOpen] = useState(false);
 
-  const handleOpenReparse = useCallback((block: PositionedMineruBlock, currentText: string) => {
-    // Always reference original OCR, including table markup; previous repairs are not evidence.
-    const originalText = [extractTextFromMineruBlock(block), block.type === 'table' ? extractTableHtmlFromMineruBlock(block) : ''].filter(Boolean).join('\n\n');
-    setReparseTarget({ block, initialText: originalText || currentText });
+  const resolveOriginalText = useCallback((block: PositionedMineruBlock) => {
+    if (block.type === 'table') {
+      // 表格以 GFM Markdown 作为编辑格式：原始 HTML 既不可直接编辑，
+      // Markdown 渲染器也不会把它当表格显示。
+      const caption = extractCaptionFromMineruBlock(block).trim();
+      const table = htmlTableToMarkdown(extractTableHtmlFromMineruBlock(block) ?? '').trim();
+
+      if (!table) {
+        return extractTextFromMineruBlock(block);
+      }
+
+      return [caption, table].filter(Boolean).join('\n\n');
+    }
+
+    if (block.type === 'list') {
+      return renderListMarkdownContent(block.content).trim() || extractTextFromMineruBlock(block);
+    }
+
+    if (block.type === 'title') {
+      const title = extractTextFromMineruBlock(block).trim();
+
+      return title ? `## ${title}` : '';
+    }
+
+    if (block.type === 'equation') {
+      const math = extractTextFromMineruBlock(block).trim();
+
+      return math && !math.startsWith('$$') ? `$$\n${math}\n$$` : math;
+    }
+
+    return extractTextFromMineruBlock(block);
   }, []);
 
-  const persistReparse = useCallback((markdown: string | null) => {
+  const handleOpenReparse = useCallback((
+    block: PositionedMineruBlock,
+    mode: 'manual' | 'ai' = 'manual',
+  ) => {
+    // AI 重析始终引用原始 OCR（含表格标记）；手动编辑则从当前生效文本开始。
+    const originalText = resolveOriginalText(block);
+    const currentText = blockOverrides[block.blockId] || originalText;
+
+    setReparseTarget({
+      block,
+      initialText: originalText || currentText,
+      currentText: currentText || originalText,
+      mode,
+    });
+  }, [blockOverrides, resolveOriginalText]);
+
+  const persistReparse = useCallback(async (markdown: string) => {
     if (!reparseTarget) {
       return;
     }
 
-    blockReparse.saveOverride(reparseTarget.block.blockId, markdown);
+    await blockReparse.saveOverride(reparseTarget.block.blockId, markdown);
     onBlockReparseApplied?.(reparseTarget.block);
   }, [blockReparse, onBlockReparseApplied, reparseTarget]);
-  const handleApplyReparse = useCallback((markdown: string) => persistReparse(markdown), [persistReparse]);
-  const handleResetReparse = useCallback(() => persistReparse(null), [persistReparse]);
+  const handleApplyReparse = useCallback(
+    (markdown: string) => persistReparse(markdown),
+    [persistReparse],
+  );
+  const handleResetReparse = useCallback(async () => {
+    if (!reparseTarget) {
+      return;
+    }
+
+    await blockReparse.restoreBlock(reparseTarget.block.blockId);
+    onBlockReparseApplied?.(reparseTarget.block);
+  }, [blockReparse, onBlockReparseApplied, reparseTarget]);
+  const handleDeleteReparse = useCallback(async () => {
+    if (!reparseTarget) {
+      return;
+    }
+
+    await blockReparse.deleteBlock(reparseTarget.block.blockId);
+  }, [blockReparse, reparseTarget]);
+
+  const handleDeleteBlock = useCallback(async (block: PositionedMineruBlock) => {
+    const confirmed = await confirmAction({
+      title: l('删除这个识别块？', 'Delete this recognized block?'),
+      description: l(
+        '该块会从阅读、翻译和重新索引中排除，原始解析文件不会被修改，可以在工具栏的「识别结果」列表里恢复。',
+        'The block will be excluded from reading, translation and re-indexing. The original parse file is not modified, and it can be restored from the "Recognition results" list in the toolbar.',
+      ),
+      confirmLabel: l('删除此块', 'Delete Block'),
+      danger: true,
+    });
+
+    if (!confirmed) return;
+
+    try {
+      await blockReparse.deleteBlock(block.blockId);
+      toast({
+        tone: 'success',
+        message: l('已从正文隐藏该识别块，可在「识别结果」中恢复。', 'Block hidden from the reading view; restore it from "Recognition results".'),
+      });
+    } catch (reason) {
+      toast({
+        tone: 'error',
+        message: l('删除识别块失败：', 'Could not delete the block: ') + (reason instanceof Error ? reason.message : String(reason)),
+      });
+    }
+  }, [blockReparse, l]);
 
   const handleToggleBlockCrop = useCallback((blockId: string) => {
     setCropBlockIds((prev) => {
@@ -538,7 +644,7 @@ function BlockViewer({
 
   const handleBlockContextMenu = useCallback(
     (block: PositionedMineruBlock, event: ReactMouseEvent<HTMLDivElement>) => {
-      if ((!onRetranslateBlock && !onAddBlockToNote) || hasActiveTextSelection()) {
+      if (hasActiveTextSelection()) {
         return;
       }
 
@@ -627,14 +733,32 @@ function BlockViewer({
       blockOverrides[contextMenu.block.blockId] || resolveContextMarkdown(contextMenu.block);
 
     entries.push({
+      id: 'edit-block',
+      label: l('编辑识别结果', 'Edit Recognized Content'),
+      icon: <Pencil className="h-4 w-4" strokeWidth={1.9} />,
+      tone: 'accent',
+      onSelect: () => {
+        handleOpenReparse(contextMenu.block, 'manual');
+      },
+    });
+
+    entries.push({
       id: 'reparse-block-ai',
       label: l('✨ AI 重新识别此块', '✨ AI Re-parse This Block'),
       icon: <Sparkles className="h-4 w-4 text-[var(--pq-accent)]" strokeWidth={1.9} />,
-      tone: 'accent',
+      tone: 'default',
       disabled: !blockTextForReparse && !(pdfSource && isValidBBox(contextMenu.block.bbox)),
       onSelect: () => {
-        handleOpenReparse(contextMenu.block, blockTextForReparse);
+        handleOpenReparse(contextMenu.block, 'ai');
       },
+    });
+
+    entries.push({
+      id: 'delete-block',
+      label: l('删除此块（隐藏）', 'Delete This Block'),
+      icon: <Trash2 className="h-4 w-4" strokeWidth={1.9} />,
+      tone: 'danger',
+      onSelect: () => handleDeleteBlock(contextMenu.block),
     });
 
     return entries;
@@ -642,12 +766,11 @@ function BlockViewer({
     blockOverrides,
     contextMenu,
     cropBlockIds,
+    handleDeleteBlock,
     handleOpenReparse,
     handleToggleBlockCrop,
     l,
     mineruPath,
-    onAddBlockToNote,
-    onRetranslateBlock,
     pdfSource,
     renderableBlocks,
     translationBusy,
@@ -887,6 +1010,22 @@ function BlockViewer({
               <Info className="h-4 w-4" strokeWidth={1.8} />
             </IconButton>
 
+            {editCount > 0 ? (
+              <button
+                type="button"
+                onClick={() => setEditsDialogOpen(true)}
+                title={l(
+                  '查看并恢复手动调整过的识别结果',
+                  'Review and restore manually adjusted recognized content',
+                )}
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-[var(--pq-radius-sm)] border border-[color-mix(in_srgb,var(--pq-accent)_28%,transparent)] bg-[var(--pq-accent-bg)] px-2 py-1 text-[11px] font-medium text-[var(--pq-accent)]"
+              >
+                <Pencil className="h-3.5 w-3.5" strokeWidth={1.9} />
+                {l(`识别结果 ${editCount}`, `Edits ${editCount}`)}
+                {staleCount > 0 ? <span className="text-[var(--pq-text-faint)]">· {staleCount} 失效</span> : null}
+              </button>
+            ) : null}
+
             <div className="flex min-w-0 items-center gap-1 rounded-[var(--pq-radius-sm)] border border-[var(--pq-border)] bg-[var(--pq-surface-1)] p-0.5 text-[11px] text-[var(--pq-text-muted)]">
               {displayModeOptions.map((option) => {
                 const selected = option.mode === activeDisplayMode;
@@ -998,16 +1137,30 @@ function BlockViewer({
 
       {reparseTarget ? (
         <BlockReparseModal
-          key={reparseTarget.block.blockId}
+          key={`${reparseTarget.block.blockId}:${reparseTarget.mode}`}
           block={reparseTarget.block}
           pdfSource={pdfSource}
           storageReady={storageReady}
           storageError={storageError}
           initialText={reparseTarget.initialText}
+          currentText={reparseTarget.currentText}
+          initialTab={reparseTarget.mode}
           hasCustomOverride={Boolean(blockOverrides[reparseTarget.block.blockId])}
           onApply={handleApplyReparse}
           onReset={handleResetReparse}
+          onDelete={handleDeleteReparse}
           onClose={() => setReparseTarget(null)}
+        />
+      ) : null}
+
+      {editsDialogOpen ? (
+        <ParseEditsDialog
+          blocks={blocks}
+          edits={edits}
+          staleCount={staleCount}
+          onRestoreBlock={blockReparse.restoreBlock}
+          onRestoreAll={blockReparse.restoreAll}
+          onClose={() => setEditsDialogOpen(false)}
         />
       ) : null}
     </div>

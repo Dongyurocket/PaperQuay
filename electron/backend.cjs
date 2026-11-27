@@ -10,6 +10,7 @@ const { createKnowledgeGraphCommands } = require('./backend/knowledgeGraphComman
 const { createLibraryCommands } = require('./backend/libraryCommands.cjs');
 const { createMcpClientConfigCommands } = require('./backend/mcpClientConfig.cjs');
 const { createMineruCacheCommands } = require('./backend/mineruCacheCommands.cjs');
+const { createParseEditCommands } = require('./backend/parseEditCommands.cjs');
 const { createNoteCommands } = require('./backend/noteCommands.cjs');
 const { createNoteStore } = require('./backend/noteStore.cjs');
 const { createNoteVault } = require('./backend/noteVault.cjs');
@@ -236,6 +237,7 @@ function createBackend({ app }) {
     ...fileCommands,
     ...createAppSettingsCommands(context),
     ...createMineruCacheCommands(context),
+    ...createParseEditCommands(context),
     ...createLibraryCommands(context),
     ...createNoteCommands(context),
     ...createPdfMetadataCommands(context),

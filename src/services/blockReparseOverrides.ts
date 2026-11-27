@@ -1,3 +1,4 @@
+import type { MineruBlockEdits } from './parseEdits';
 import type { PositionedMineruBlock } from '../types/reader';
 
 const STORAGE_PREFIX = 'paperquay:block-reparse:v1:';
@@ -5,20 +6,36 @@ export type BlockReparseOverrides = Record<string, string>;
 type OverrideStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 
 /**
- * 渲染层共享的区块修复状态。阅读器把它同时交给 BlockViewer 与翻译流程，
- * 保证「显示的修复文本」与「送去翻译的文本」只有一个来源。
+ * 渲染层共享的解析编辑状态。阅读器把它同时交给 BlockViewer 与翻译流程，
+ * 保证「显示的编辑文本」与「送去翻译的文本」只有一个来源。
  */
 export interface BlockReparseOverrideApi {
-  /** 当前解析版本下的有效覆盖；存储未就绪时为空表。 */
+  /** 当前解析版本下的文本覆盖；存储未就绪时为空表。 */
   overrides: BlockReparseOverrides;
+  /** 被用户隐藏的多余块。 */
+  hiddenBlockIds: Set<string>;
+  /** 当前生效的编辑（含文本与隐藏）。 */
+  edits: MineruBlockEdits;
+  /** 生效编辑条数。 */
+  editCount: number;
+  /** 因解析结果变化而失效的编辑条数。 */
+  staleCount: number;
+  /** 应用编辑后的块列表（已移除隐藏块、写入文本覆盖）。 */
+  effectiveBlocks: PositionedMineruBlock[];
   /** 覆盖表是否已按当前块内容加载完成；未就绪时不得保存。 */
   storageReady: boolean;
-  /** 覆盖数据读写失败时的原因。 */
+  /** 编辑数据读写失败时的原因。 */
   storageError: string;
   /** 同步读取最新覆盖文本，供同一事件内的翻译调用使用（状态尚未重渲染时也可用）。 */
   getOverrideMarkdown: (blockId: string) => string | undefined;
-  /** 保存或恢复覆盖；存储失败时抛出。 */
-  saveOverride: (blockId: string, markdown: string | null) => void;
+  /** 保存或更新文本修正；存储失败时抛出。 */
+  saveOverride: (blockId: string, markdown: string) => Promise<void>;
+  /** 隐藏一个多余的识别块。 */
+  deleteBlock: (blockId: string) => Promise<void>;
+  /** 恢复某个块的原始识别结果。 */
+  restoreBlock: (blockId: string) => Promise<void>;
+  /** 清除本文档的全部识别结果编辑。 */
+  restoreAll: () => Promise<void>;
 }
 
 /** Bind overrides to both the document and the complete, unmodified parse content.

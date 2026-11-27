@@ -4,6 +4,29 @@
 
 Windows 安装包见 [GitHub Releases](https://github.com/Dongyurocket/PaperQuay/releases)。自 0.4.24 起仅发布、维护和测试 Windows x64；其他平台由用户自行打包，作者不承担维护和测试。
 
+## [0.4.45] - 2026-11-27
+
+本版本新增识别结果手动编辑：可以修正 MinerU 的识别文本，也可以把页眉页脚、切片边界碎片、跨页重复块等多余内容从正文、翻译、摘要和检索中删除。
+
+此前 AI 重析只能整段接受或放弃，修复值存在渲染进程的 `localStorage` 里，摘要、RAG 索引和文库预览都看不到修正后的文本。本版本把编辑提升为按解析路径归档的「解析编辑」层，原始 `content_list` 与 `full.md` 不改写。
+
+### 新增
+
+- **编辑识别结果**：每个块的悬浮工具条和右键菜单新增「编辑」；对话框支持 Markdown 编辑与预览、恢复原始识别、删除此块。
+- **AI 结果可继续修改**：「AI 重析」并入同一对话框，结果自动填入编辑区，可继续删改后保存。
+- **删除多余块**：删除记录为可恢复的隐藏项，不移动原始解析文件；工具行「识别结果 N」可逐条恢复或全部恢复。
+- **统一生效范围**：编辑文本与隐藏状态应用到正文、目录、翻译、摘要、当前文献问答、文库页预览和 RAG 索引；表格块进入编辑器前转为 GFM Markdown 表格。
+- **持久化与指纹失效**：编辑按解析路径保存到应用数据目录的 `parse-edits/`，由主进程原子写入并随 `.pqbackup` 备份；每条编辑带原始内容指纹，重新解析后内容变化会自动失效，不会错贴到新段落。旧版 `localStorage` AI 修复在首次加载时一次性迁移。
+
+### 验证
+
+- `npm run lint`：0 error / 206 warning（与基线一致）。
+- `npm run typecheck`：六套 tsconfig 通过。
+- `npm run build`：通过。
+- `npm test`：1,599 项，1,589 通过、10 跳过、0 失败。
+- 新增 `tests/parseEdits.test.ts`、`tests/parseEditsStore.test.mjs`、`tests/htmlTableToMarkdown.test.ts`；更新 `tests/blockReparseOverrides.test.ts` 与 `tests/readerMarkdownComponents.test.ts`。
+- 未做安装版点选验收：当前自动化会话启动 Electron 开发实例时无窗口静默退出（最小 Electron 脚本同样无输出）。建议安装后按发布说明中的步骤确认编辑、删除、恢复与重新索引。
+
 ## [0.4.44] - 2026-11-27
 
 本版本修复 AI 重解析区块后译文不同步的问题，并让译文缓存按块记录源文本指纹。

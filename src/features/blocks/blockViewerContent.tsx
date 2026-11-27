@@ -2,6 +2,7 @@ import {
   Expand,
   ImageIcon,
   Languages,
+  Pencil,
   RefreshCw,
   Scan,
   Sparkles,
@@ -705,7 +706,7 @@ interface BlockItemProps {
   pdfSource?: PdfSource;
   showPdfCrop?: boolean;
   onTogglePdfCrop?: () => void;
-  onOpenReparse?: (block: PositionedMineruBlock, currentText: string) => void;
+  onOpenReparse?: (block: PositionedMineruBlock, mode: 'manual' | 'ai') => void;
   onClick: (block: PositionedMineruBlock) => void;
   onContextMenu?: (block: PositionedMineruBlock, event: ReactMouseEvent<HTMLDivElement>) => void;
   registerRef: (blockId: string, element: HTMLDivElement | null) => void;
@@ -844,8 +845,8 @@ function BlockItemComponent({
             </span>
             {customOverrideMarkdown ? (
               <span className="inline-flex items-center gap-0.5 rounded-full bg-[var(--pq-success-bg)] px-2 py-0.5 text-[11px] font-medium text-[var(--pq-success)] ">
-                <Sparkles className="h-2.5 w-2.5" />
-                {l('AI 已修复', 'AI Fixed')}
+                <Pencil className="h-2.5 w-2.5" />
+                {l('已编辑', 'Edited')}
               </span>
             ) : null}
           </div>
@@ -855,7 +856,21 @@ function BlockItemComponent({
                 type="button"
                 onClick={(event) => {
                   event.stopPropagation();
-                  onOpenReparse(block, customOverrideMarkdown || effectiveMarkdown || plainText);
+                  onOpenReparse(block, 'manual');
+                }}
+                className="inline-flex items-center gap-1 rounded-lg border border-[var(--pq-border)] bg-[var(--pq-surface-1)] px-2 py-0.5 text-[11px] font-medium text-[var(--pq-text-muted)] shadow-xs transition-all hover:bg-[var(--pq-hover)] hover:text-[var(--pq-text)]"
+                title={l('手动编辑或删除此块的识别结果', 'Edit or delete this recognized block')}
+              >
+                <Pencil className="h-3 w-3" />
+                <span>{l('编辑', 'Edit')}</span>
+              </button>
+            ) : null}
+            {onOpenReparse ? (
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onOpenReparse(block, 'ai');
                 }}
                 className="inline-flex items-center gap-1 rounded-lg border border-[color-mix(in_srgb,var(--pq-accent)_40%,transparent)] bg-[var(--pq-accent-bg)] px-2 py-0.5 text-[11px] font-medium text-[var(--pq-accent)] shadow-xs transition-all hover:bg-[var(--pq-accent-bg)] "
                 title={l('使用 AI 大模型重新识别和修复此区块', 'Re-parse and format this block with AI')}

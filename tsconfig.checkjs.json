@@ -21,6 +21,7 @@
     "electron/backend/noteVectors.cjs",
     "electron/backend/paperMetadataFields.cjs",
     "electron/backend/pdfAssetGovernance.cjs",
+    "electron/backend/parseEditCommands.cjs",
     "electron/backend/pdfSplitter.cjs",
     "electron/backend/ragMembership.cjs",
     "electron/backend/updateCommands.cjs",

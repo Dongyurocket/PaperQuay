@@ -52,6 +52,11 @@ export interface MineruBlockBase {
   bbox?: BBox;
   bboxCoordinateSystem?: BBoxCoordinateSystem;
   bboxPageSize?: BBoxPageSize;
+  /**
+   * 用户手动修正（或 AI 重析后确认）的 Markdown 文本。
+   * 只覆盖可读文本，不改写原始 content；解析重跑后由解析编辑层按指纹重新匹配。
+   */
+  textOverride?: string;
 }
 
 export type MineruPage = MineruBlockBase[];

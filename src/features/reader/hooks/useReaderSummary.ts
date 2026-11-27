@@ -49,7 +49,7 @@ import type { ReaderDocumentApi } from './useReaderDocument';
 
 export function useReaderSummary(state: ReaderTabState, documentApi: ReaderDocumentApi) {
   const { autoSummarySourceKeyRef, cachedSummaryAttemptKeyRef, cachedSummaryRequestIdRef, currentDocument, flatBlocks, lRef, libraryOperation, libraryPreviewSummary, mineruPath, onLibraryPreviewSync, onOpenPreferences, paperSummary, paperSummaryError, paperSummaryLoading, paperSummarySourceKey, pdfPath, pdfSource, setPaperSummary, setPaperSummaryError, setPaperSummaryLoading, setPaperSummarySourceKey, setStatusMessage, setSummaryCacheLoading, settings, statusMessage, summaryCacheWriter, summaryConfigured, summaryModelPreset, summaryRequestIdRef, updateLibraryOperation } = state;
-  const { currentJsonName, currentPdfName, loadCachedPdfDocumentText, mineruContentSignature, summaryBlockInputs } = documentApi;
+  const { blockReparse, currentJsonName, currentPdfName, loadCachedPdfDocumentText, mineruContentSignature, summaryBlockInputs } = documentApi;
 
   const paperSummaryNextSourceKey = useMemo(() => {
       return buildPaperSummarySourceKey({
@@ -182,9 +182,14 @@ export function useReaderSummary(state: ReaderTabState, documentApi: ReaderDocum
       [paperSummaryLegacySourceKeys, settings.mineruCacheDir],
     );
   const loadMineruMarkdownForSummary = useCallback(async () => {
+      // 有手动编辑时用编辑后的结构块重建，缓存 full.md 不包含编辑结果。
+      if (blockReparse.editCount > 0) {
+        return buildMineruMarkdownDocument(blockReparse.effectiveBlocks, mineruPath);
+      }
+
       return loadMineruMarkdownDocument({
         item: currentDocument,
-        flatBlocks,
+        flatBlocks: blockReparse.effectiveBlocks,
         mineruPath,
         mineruCacheDir: settings.mineruCacheDir,
         readText: readLocalTextFileIfExists,
@@ -192,8 +197,9 @@ export function useReaderSummary(state: ReaderTabState, documentApi: ReaderDocum
         l: lRef.current,
       });
     }, [
+      blockReparse.editCount,
+      blockReparse.effectiveBlocks,
       currentDocument,
-      flatBlocks,
       mineruPath,
       settings.mineruCacheDir,
     ]);

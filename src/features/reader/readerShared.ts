@@ -597,6 +597,8 @@ export interface LibraryPreviewLoadResult {
   currentJsonName: string;
   statusMessage: string;
   pdfPath?: string;
+  /** 解析产物路径；用于按解析目录读取手动编辑（不展示在界面上）。 */
+  jsonPath?: string;
   markdownText?: string;
 }
 

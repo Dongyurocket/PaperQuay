@@ -1,7 +1,7 @@
 # 统一有效块文本（C 方案）：把 AI 重解析结果接入摘要、RAG、摘录与导出
 
 - 日期：2026-11-27
-- 状态：**方案（待审阅）**。本文只做设计、源码核对与迁移评估，不包含实现改动。
+- 状态：**部分实施（0.4.45）**。0.4.45 已用解析目录 sidecar JSON（`parse-edits/`）+ `MineruBlockBase.textOverride` 覆盖正文、翻译、摘要、问答、文库预览与 RAG 索引；本文的 SQLite 跨进程存储、MCP 直读、笔记/导出统一仍待后续评估。以下正文保留 0.4.44 基线的分析。
 - 代码基线：`main` `236e17a`（0.4.44）
 - 关联：[重解析后译文同步](../changes/2026-11-27-reparse-translation-sync.md)、[长文档 RAG 与概览](2026-11-25-long-document-rag-and-overview.md)、[RAG 过期重建](2026-11-25-rag-badge-stale-rebuild-and-qa-silent-drop.md)、[阅读器重解析 OCR 状态](../changes/2026-09-17-reader-reparse-ocr-state.md)
 

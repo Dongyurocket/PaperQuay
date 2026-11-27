@@ -4,11 +4,13 @@ import type {
   WorkspaceItem,
 } from '../../types/reader';
 import type { RagEmbeddingOptions } from '../../services/rag';
-import { readLocalBinaryFile, readLocalTextFileIfExists } from '../../services/desktop';
+import { readLocalBinaryFile, readLocalTextFileIfExists, readMineruParseEdits } from '../../services/desktop';
+import { applyMineruBlockEdits, sanitizeMineruBlockEdits } from '../../services/parseEdits';
 import { ensurePreparedSourceIndexed } from '../../services/localRag';
 import { buildMineruMarkdownDocument, extractPdfTextByPdfJs } from '../../services/summarySource';
 import { loadMineruMarkdownDocument } from './documentReaderSummarySource';
 import { prepareReaderRagDocument } from './readerRag';
+import { buildMineruCachePaths } from '../../utils/mineruCache';
 
 /**
  * MinerU 解析完成后，把文献的 MinerU markdown 源纳入本地 RAG 知识库索引，
@@ -160,6 +162,28 @@ async function indexLibraryPaperPdfTextSource(input: {
   return { outcome: result.outcome === 'ready' ? 'indexed' : 'skipped' };
 }
 
+/** 解析编辑按解析目录归档，与阅读器使用同一条路径（见 useReaderDocument）。 */
+function resolveParseEditPath(
+  mineruPath: string,
+  item: WorkspaceItem,
+  mineruCacheDir: string,
+): string {
+  const trimmed = mineruPath.trim();
+
+  if (trimmed && !trimmed.startsWith('cloud:')) {
+    const separatorIndex = Math.max(trimmed.lastIndexOf('/'), trimmed.lastIndexOf('\\'));
+
+    return separatorIndex > 0 ? trimmed.slice(0, separatorIndex) : '';
+  }
+
+  // 云端解析的阅读器把编辑存放在 MinerU 缓存目录，索引必须读取同一位置。
+  if (mineruCacheDir.trim()) {
+    return buildMineruCachePaths(mineruCacheDir.trim(), item).directory;
+  }
+
+  return '';
+}
+
 export async function indexLibraryPaperMineruSource(input: {
   item: WorkspaceItem;
   settings: Pick<
@@ -194,22 +218,47 @@ export async function indexLibraryPaperMineruSource(input: {
     return { outcome: 'skipped' };
   }
 
-  const mineruDocumentText = input.markdownText?.trim()
-    ? input.markdownText
-    : await loadMineruMarkdownDocument({
-        item: input.item,
-        flatBlocks: input.blocks,
-        mineruPath: input.mineruPath,
-        mineruCacheDir: input.settings.mineruCacheDir,
-        readText: readLocalTextFileIfExists,
-        buildFallbackMarkdown: buildMineruMarkdownDocument,
-        l: input.l,
-      }).catch(() => '');
+  // 手动编辑优先于缓存 full.md：否则编辑不会改变索引签名，重新索引会被判定为已是最新。
+  let effectiveBlocks = input.blocks;
+  let hasParseEdits = false;
+  const parseEditPath = resolveParseEditPath(input.mineruPath, input.item, input.settings.mineruCacheDir);
+
+  if (parseEditPath) {
+    try {
+      const file = await readMineruParseEdits(parseEditPath);
+      const { edits } = sanitizeMineruBlockEdits(file.blocks);
+
+      if (Object.keys(edits).length > 0) {
+        const applied = applyMineruBlockEdits(input.blocks, edits);
+
+        if (applied.appliedCount > 0) {
+          effectiveBlocks = applied.blocks;
+          hasParseEdits = true;
+        }
+      }
+    } catch {
+      // 编辑读取失败时退回原始解析结果，不阻断索引。
+    }
+  }
+
+  const mineruDocumentText = hasParseEdits
+    ? buildMineruMarkdownDocument(effectiveBlocks, input.mineruPath)
+    : input.markdownText?.trim()
+      ? input.markdownText
+      : await loadMineruMarkdownDocument({
+          item: input.item,
+          flatBlocks: effectiveBlocks,
+          mineruPath: input.mineruPath,
+          mineruCacheDir: input.settings.mineruCacheDir,
+          readText: readLocalTextFileIfExists,
+          buildFallbackMarkdown: buildMineruMarkdownDocument,
+          l: input.l,
+        }).catch(() => '');
 
   const preparedDocument = prepareReaderRagDocument({
     item: input.item,
     settings: input.settings,
-    mineruBlocks: input.blocks,
+    mineruBlocks: effectiveBlocks,
     mineruDocumentText,
     pdfDocumentText: '',
   });

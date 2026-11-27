@@ -24,6 +24,7 @@ import {
   getModelRuntimeConfig,
 } from "./readerShared";
 import type { ReaderDocumentTranslationSnapshot } from "./documentReaderShared";
+
 import {
   countTranslatedBlocks,
   mergeReaderTranslations,
@@ -66,6 +67,9 @@ type LocaleTextFn = (zh: string, en: string) => string;
 function translationCacheFailureMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
+
+/** 旧测试/旧调用方可能没有传入 hiddenBlockIds；缺省视为没有隐藏块。 */
+const EMPTY_HIDDEN_BLOCK_IDS = new Set<string>();
 
 interface UseDocumentTranslationOptions {
   currentDocument: WorkspaceItem;
@@ -161,19 +165,25 @@ export function useDocumentTranslation({
     [blockTranslations],
   );
 
-  const { overrides: blockOverrides, getOverrideMarkdown } = blockReparse;
+  const {
+    overrides: blockOverrides,
+    getOverrideMarkdown,
+    hiddenBlockIds: rawHiddenBlockIds,
+  } = blockReparse;
+  const hiddenBlockIds = rawHiddenBlockIds ?? EMPTY_HIDDEN_BLOCK_IDS;
+  // 被用户判定为多余内容的块不参与翻译；已有译文在协调时一并移除。
   const customSourceBlockIds = useMemo(
-    () => new Set(Object.keys(blockOverrides)),
-    [blockOverrides],
+    () => new Set([...Object.keys(blockOverrides), ...hiddenBlockIds]),
+    [blockOverrides, hiddenBlockIds],
   );
   const knownBlockIds = useMemo(
     () =>
       new Set(
         flatBlocks
-          .filter((block) => !block.contentSourceBlockId)
+          .filter((block) => !block.contentSourceBlockId && !hiddenBlockIds.has(block.blockId))
           .map((block) => block.blockId),
       ),
-    [flatBlocks],
+    [flatBlocks, hiddenBlockIds],
   );
   const blockById = useMemo(
     () => new Map(flatBlocks.map((block) => [block.blockId, block])),
@@ -581,7 +591,12 @@ export function useDocumentTranslation({
       return;
     }
 
-    const blocksToTranslate = buildBlockTranslationInputs(flatBlocks, getOverrideMarkdown);
+    const blocksToTranslate = buildBlockTranslationInputs(
+      hiddenBlockIds.size > 0
+        ? flatBlocks.filter((block) => !hiddenBlockIds.has(block.blockId))
+        : flatBlocks,
+      getOverrideMarkdown,
+    );
     const blocksToTranslateHashes: Record<string, string> = {};
 
     for (const block of blocksToTranslate) {
@@ -877,6 +892,7 @@ export function useDocumentTranslation({
     currentDocument,
     flatBlocks,
     getOverrideMarkdown,
+    hiddenBlockIds,
     libraryOperationRunning,
     onOpenPreferences,
     reconcileWithCurrentSources,
